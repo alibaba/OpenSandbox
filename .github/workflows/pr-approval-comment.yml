@@ -1,0 +1,77 @@
+name: PR Approval Comment Trigger
+
+on:
+  pull_request_review_comment:
+    types:
+      - created
+
+jobs:
+  run-when-reviewer-approves-in-comment:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Validate reviewer trigger comment
+        id: validate
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const commentBody = (context.payload.comment.body || '').trim();
+            const login = context.payload.comment.user.login;
+            const prNumber = context.payload.pull_request.number;
+            const {owner, repo} = context.repo;
+
+            // Require the exact trigger comment
+            const triggerPattern = /^\/workflow$/i;
+            if (!triggerPattern.test(commentBody)) {
+              core.info('Comment does not match /workflow trigger. Skipping.');
+              core.setOutput('approved', 'false');
+              return;
+            }
+
+            // Fetch PR details
+            const {data: pr} = await github.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            // Fetch reviews to see who is (or was) a reviewer
+            const {data: reviews} = await github.pulls.listReviews({
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const isRequestedReviewer = pr.requested_reviewers.some(r => r.login === login);
+            const isPastReviewer = reviews.some(r => r.user?.login === login);
+
+            if (!isRequestedReviewer && !isPastReviewer) {
+              core.info(`Commenter ${login} is not a reviewer. Skipping.`);
+              core.setOutput('approved', 'false');
+              return;
+            }
+
+            if (pr.draft) {
+              core.info('PR is a draft. Skipping.');
+              core.setOutput('approved', 'false');
+              return;
+            }
+
+            core.setOutput('approved', 'true');
+            core.info(`Trigger accepted from reviewer ${login}.`);
+
+      - name: Check out repository
+        if: steps.validate.outputs.approved == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run post-approval tasks
+        if: steps.validate.outputs.approved == 'true'
+        run: |
+          echo "PR #${{ github.event.issue.number }} triggered by reviewer ${{ github.event.comment.user.login }} via /workflow comment."
+          echo "Add your post-trigger commands here (tests, builds, deployments, etc.)."
