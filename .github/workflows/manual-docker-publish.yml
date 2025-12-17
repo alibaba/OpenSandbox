@@ -1,0 +1,79 @@
+name: Manual Docker Publish
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Component to build'
+        required: true
+        type: choice
+        options:
+          - execd
+          - code-interpreter
+        default: 'execd'
+      image_tag:
+        description: 'Docker image tag'
+        required: true
+        default: 'latest'
+  push:
+    tags:
+      - 'docker/execd/**'
+      - 'docker/code-interpreter/**'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Login to ACR
+        uses: docker/login-action@v3
+        with:
+          registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Parse tag and set variables
+        id: parse_tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/docker/* ]]; then
+            TAG_PATH="${{ github.ref }}"
+            TAG_PATH="${TAG_PATH#refs/tags/}"
+          
+            COMPONENT=$(echo "$TAG_PATH" | cut -d'/' -f2)
+            IMAGE_TAG=$(echo "$TAG_PATH" | cut -d'/' -f3)
+          
+            echo "component=$COMPONENT" >> $GITHUB_OUTPUT
+            echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          else
+            echo "component=${{ inputs.component }}" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ inputs.image_tag }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push to registries
+        run: |
+          COMPONENT="${{ steps.parse_tag.outputs.component }}"
+          IMAGE_TAG="${{ steps.parse_tag.outputs.image_tag }}"
+          
+          if [ "$COMPONENT" == "execd" ]; then
+            cd components/execd
+          else
+            cd sandboxes/$COMPONENT
+          fi
+          
+          export TAG=$IMAGE_TAG
+          chmod +x build.sh
+          ./build.sh
