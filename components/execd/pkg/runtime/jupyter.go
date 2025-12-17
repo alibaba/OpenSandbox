@@ -1,0 +1,171 @@
+// Copyright 2025 Alibaba Group Holding Ltd.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package runtime
+
+import (
+	"context"
+	"errors"
+
+	"github.com/beego/beego/v2/core/logs"
+
+	"github.com/alibaba/opensandbox/execd/pkg/jupyter"
+	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
+)
+
+// runJupyter executes code through a Jupyter kernel.
+func (c *Controller) runJupyter(ctx context.Context, request *ExecuteCodeRequest) error {
+	if c.baseURL == "" || c.token == "" {
+		return errors.New("language runtime server not configured, please check your image runtime")
+	}
+	if request.Context == "" {
+		if _, exists := c.defaultLanguageJupyterSessions[request.Language]; !exists {
+			err := c.createDefaultLanguageContext(request.Language)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	var targetSessionID string
+	if request.Context == "" {
+		targetSessionID = c.defaultLanguageJupyterSessions[request.Language]
+	} else {
+		targetSessionID = request.Context
+	}
+
+	kernel := c.getJupyterKernel(targetSessionID)
+	if kernel == nil {
+		return errors.New("session not found")
+	}
+
+	request.SetDefaultHooks()
+	request.Hooks.OnExecuteInit(targetSessionID)
+
+	return c.runJupyterCode(ctx, kernel, request)
+}
+
+// runJupyterCode streams execution results for a single kernel.
+//
+//nolint:gocognit // complex due to hook handling; refactor later
+func (c *Controller) runJupyterCode(ctx context.Context, kernel *jupyterKernel, request *ExecuteCodeRequest) error {
+	if !kernel.mu.TryLock() {
+		return errors.New("session is busy")
+	}
+	defer kernel.mu.Unlock()
+
+	err := kernel.client.ConnectToKernel(kernel.kernelID)
+	if err != nil {
+		return err
+	}
+	defer kernel.client.DisconnectFromKernel(kernel.kernelID)
+
+	results := make(chan *execute.ExecutionResult, 10)
+
+	err = kernel.client.ExecuteCodeStream(kernel.kernelID, request.Code, results)
+	if err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case result := <-results:
+			if result == nil {
+				return nil
+			}
+
+			if result.ExecutionCount > 0 || len(result.ExecutionData) > 0 {
+				request.Hooks.OnExecuteResult(result.ExecutionData, result.ExecutionCount)
+			}
+
+			if result.Status != "" {
+				request.Hooks.OnExecuteStatus(result.Status)
+			}
+
+			if result.ExecutionTime > 0 {
+				request.Hooks.OnExecuteComplete(result.ExecutionTime)
+			}
+
+			if result.Error != nil {
+				request.Hooks.OnExecuteError(result.Error)
+			}
+
+			if len(result.Stream) > 0 {
+				for _, stream := range result.Stream {
+					switch stream.Name {
+					case execute.StreamStdout:
+						request.Hooks.OnExecuteStdout(stream.Text)
+					case execute.StreamStderr:
+						request.Hooks.OnExecuteStderr(stream.Text)
+					default:
+					}
+				}
+			}
+
+		case <-ctx.Done():
+			logs.Warning("context cancelled, try to interrupt kernel")
+			err = kernel.client.InterruptKernel(kernel.kernelID)
+			if err != nil {
+				logs.Error("interrupt kernel failed: %v", err)
+			}
+
+			request.Hooks.OnExecuteError(&execute.ErrorOutput{
+				EName:  "ContextCancelled",
+				EValue: "Interrupt kernel",
+			})
+			return errors.New("context cancelled, interrupt kernel")
+		}
+	}
+}
+
+// setWorkingDir configures the working directory for a kernel session.
+func (c *Controller) setWorkingDir(_ *jupyterKernel, _ *CreateContextRequest) error {
+	return nil
+}
+
+// getJupyterKernel retrieves a kernel connection from the session map.
+func (c *Controller) getJupyterKernel(sessionID string) *jupyterKernel {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.jupyterClientMap[sessionID]
+}
+
+// searchKernel finds a kernel spec name for the given language.
+func (c *Controller) searchKernel(client *jupyter.Client, language Language) (string, error) {
+	specs, err := client.GetKernelSpecs()
+	if err != nil {
+		return "", err
+	}
+
+	if len(specs.Kernelspecs) == 0 {
+		return "", errors.New("no kernel specs found")
+	}
+
+	var kernelName string
+	for name, spec := range specs.Kernelspecs {
+		if name == "python3" {
+			continue
+		}
+
+		if spec.Spec.Language == language.String() {
+			kernelName = name
+		}
+	}
+	if kernelName == "" {
+		return "", errors.New("no kernel specs found")
+	}
+
+	return kernelName, nil
+}

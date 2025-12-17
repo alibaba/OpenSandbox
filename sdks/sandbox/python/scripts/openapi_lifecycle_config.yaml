@@ -1,0 +1,12 @@
+# openapi-python-client configuration for lifecycle API
+# This generates a httpx-based async client that supports custom httpx.AsyncClient injection
+
+# Package name without hyphens (will be the module directory name)
+project_name_override: opensandbox_api_lifecycle
+package_name_override: opensandbox_api_lifecycle
+
+# Use modern Python features
+use_path_prefix_for_title_model_names: true
+
+# Generate both sync and async clients (async is default, sync is opt-in)
+# The generated client will support passing a custom httpx.AsyncClient

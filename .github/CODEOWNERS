@@ -1,0 +1,22 @@
+# CODEOWNERS for OpenSandbox
+# Rules are evaluated top-to-bottom; the last matching pattern wins.
+
+# Control plane (server)
+/server/ @Pangjiping @hellomypastor
+
+# Runtime agent (execd) and sandbox images
+/components/execd/ @Pangjiping
+/sandboxes/ @Pangjiping @hellomypastor
+
+# SDKs
+/sdks/sandbox/python/ @opensandbox/sdk-python
+/sdks/sandbox/kotlin/ @opensandbox/sdk-jvm
+/sdks/code-interpreter/python/ @opensandbox/sdk-python
+/sdks/code-interpreter/kotlin/ @opensandbox/sdk-jvm
+
+# Specs and docs
+/specs/ @opensandbox/product
+/docs/ @Pangjiping @hellomypastor
+
+# Default owners (fallback)
+* @Pangjiping

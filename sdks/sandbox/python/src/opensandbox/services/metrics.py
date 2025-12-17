@@ -1,0 +1,49 @@
+#
+# Copyright 2025 Alibaba Group Holding Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+"""
+Metrics service interface.
+
+Protocol for sandbox metrics and monitoring operations.
+"""
+
+from typing import Protocol
+from uuid import UUID
+
+from opensandbox.models.sandboxes import SandboxMetrics
+
+
+class Metrics(Protocol):
+    """
+    Metrics and monitoring service for sandbox environments.
+
+    This service provides resource usage monitoring and performance
+    metrics for sandbox instances.
+    """
+
+    async def get_metrics(self, sandbox_id: UUID) -> SandboxMetrics:
+        """
+        Retrieve real-time metrics for a sandbox.
+
+        Args:
+            sandbox_id: Unique identifier of the sandbox
+
+        Returns:
+            Current sandbox metrics including CPU, memory, and I/O statistics
+
+        Raises:
+            SandboxException: if the operation fails
+        """
+        ...

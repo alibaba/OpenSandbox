@@ -1,0 +1,113 @@
+/*
+ * Copyright 2025 Alibaba Group Holding Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.alibaba.opensandbox.sandbox.infrastructure.adapters.service
+
+import com.alibaba.opensandbox.sandbox.HttpClientProvider
+import com.alibaba.opensandbox.sandbox.api.execd.CommandApi
+import com.alibaba.opensandbox.sandbox.api.models.execd.EventNode
+import com.alibaba.opensandbox.sandbox.domain.exceptions.InvalidArgumentException
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxError
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxError.Companion.UNEXPECTED_RESPONSE
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.Execution
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommandRequest
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
+import com.alibaba.opensandbox.sandbox.domain.services.Commands
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.ExecutionConverter.toApiRunCommandRequest
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.ExecutionEventDispatcher
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.jsonParser
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.parseSandboxError
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.toSandboxException
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.slf4j.LoggerFactory
+
+/**
+ * Implementation of [Commands] that adapts OpenAPI-generated [CommandApi].
+ *
+ * This adapter handles command execution within sandboxes, providing both
+ * synchronous and streaming execution modes with proper session management.
+ */
+internal class CommandsAdapter(
+    private val httpClientProvider: HttpClientProvider,
+    private val execdEndpoint: SandboxEndpoint,
+) : Commands {
+    companion object {
+        private const val RUN_COMMAND_PATH = "/command"
+    }
+
+    private val logger = LoggerFactory.getLogger(CommandsAdapter::class.java)
+    private val api = CommandApi("${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}", httpClientProvider.httpClient)
+
+    override fun run(request: RunCommandRequest): Execution {
+        if (request.command.isEmpty()) {
+            throw InvalidArgumentException("Command cannot be empty")
+        }
+        try {
+            val httpRequest =
+                Request.Builder()
+                    .url("${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}$RUN_COMMAND_PATH")
+                    .post(
+                        jsonParser.encodeToString(request.toApiRunCommandRequest()).toRequestBody("application/json".toMediaType()),
+                    )
+                    .build()
+
+            val execution = Execution()
+
+            httpClientProvider.sseClient.newCall(httpRequest).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errorBodyString = response.body?.string()
+                    val sandboxError = parseSandboxError(errorBodyString)
+                    val message = "Failed to run commands. Status code: ${response.code}, Body: $errorBodyString"
+                    throw SandboxApiException(
+                        message = message,
+                        statusCode = response.code,
+                        error = sandboxError ?: SandboxError(UNEXPECTED_RESPONSE),
+                    )
+                }
+
+                response.body?.byteStream()?.bufferedReader(Charsets.UTF_8)?.use { reader ->
+                    val dispatcher = ExecutionEventDispatcher(execution, request.handlers)
+                    reader.lineSequence()
+                        .filter(String::isNotBlank)
+                        .forEach { line ->
+                            try {
+                                val eventNode = jsonParser.decodeFromString<EventNode>(line)
+                                dispatcher.dispatch(eventNode)
+                            } catch (e: Exception) {
+                                logger.error("Failed to parse SSE line: {}", line, e)
+                            }
+                        }
+                }
+            }
+            return execution
+        } catch (e: Exception) {
+            logger.error("Failed to run command (length: {})", request.command.length, e)
+            throw e.toSandboxException()
+        }
+    }
+
+    override fun interrupt(executionId: String) {
+        try {
+            api.interruptCommand(executionId)
+        } catch (e: Exception) {
+            logger.error("Failed to interrupt command", e)
+            throw e.toSandboxException()
+        }
+    }
+}

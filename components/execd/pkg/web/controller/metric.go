@@ -1,0 +1,104 @@
+// Copyright 2025 Alibaba Group Holding Ltd.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package controller
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"runtime"
+	"time"
+
+	"github.com/beego/beego/v2/core/logs"
+	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/mem"
+
+	"github.com/alibaba/opensandbox/execd/pkg/web/model"
+)
+
+// MetricController handles system metrics requests
+type MetricController struct {
+	basicController
+}
+
+// GetMetrics returns current system metrics
+func (c *MetricController) GetMetrics() {
+	metrics, err := c.readMetrics()
+	if err != nil {
+		c.RespondError(
+			http.StatusInternalServerError,
+			model.ErrorCodeRuntimeError,
+			fmt.Sprintf("error reading runtime metrics. %v", err),
+		)
+		return
+	}
+
+	c.RespondSuccess(metrics)
+}
+
+// WatchMetrics streams system metrics via SSE
+func (c *MetricController) WatchMetrics() {
+	c.setupSSEResponse()
+
+	for {
+		select {
+		case <-c.Ctx.Request.Context().Done():
+			return
+		case <-time.After(time.Second * 1):
+			func() {
+				defer c.Ctx.ResponseWriter.Flush()
+				metrics, err := c.readMetrics()
+				if err != nil {
+					msg, _ := json.Marshal(map[string]string{ //nolint:errchkjson
+						"error": err.Error(),
+					})
+					_, err = c.Ctx.ResponseWriter.Write(append(msg, '\n'))
+					if err != nil {
+						logs.Error("WatchMetrics write data %s error: %v", string(msg), err)
+					}
+				} else {
+					msg, _ := json.Marshal(metrics) //nolint:errchkjson
+					_, err = c.Ctx.ResponseWriter.Write(append(msg, '\n'))
+					if err != nil {
+						logs.Error("WatchMetrics write data %s error: %v", string(msg), err)
+					}
+				}
+			}()
+		}
+	}
+}
+
+// readMetrics collects current CPU and memory metrics
+func (c *MetricController) readMetrics() (*model.Metrics, error) {
+	metric := model.NewMetrics()
+
+	metric.CpuCount = float64(runtime.GOMAXPROCS(-1))
+	cpuPercent, err := cpu.Percent(time.Second, false)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get CPU percent: %w", err)
+	}
+	if len(cpuPercent) > 0 {
+		metric.CpuUsedPct = cpuPercent[0]
+	}
+
+	vmStat, err := mem.VirtualMemory()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get memory info: %w", err)
+	}
+	metric.MemTotalMiB = float64(vmStat.Total) / 1024 / 1024
+	metric.MemUsedMiB = float64(vmStat.Used) / 1024 / 1024
+
+	return metric, nil
+}

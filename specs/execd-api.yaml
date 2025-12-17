@@ -1,0 +1,970 @@
+openapi: 3.1.0
+info:
+  title: OpenSandbox Execd API
+  version: 1.0.0
+  description: |
+    OpenSandbox Execd provides a comprehensive API for managing code execution, file operations,
+    and system monitoring within a sandboxed environment. The API supports multiple programming
+    languages, real-time streaming output via Server-Sent Events (SSE), and complete file system
+    management capabilities.
+
+    ## Key Features
+    - **Code Execution**: Execute code in Python, JavaScript, and other languages with stateful contexts
+    - **Command Execution**: Run shell commands with foreground/background modes
+    - **File Operations**: Complete CRUD operations for files and directories
+    - **Real-time Streaming**: SSE-based output streaming for code and command execution
+    - **System Monitoring**: CPU and memory metrics with real-time watching
+    - **Access Control**: Token-based authentication for all API endpoints
+
+  contact:
+    name: OpenSandbox Team
+    url: https://github.com/alibaba/OpenSandbox
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server
+  - url: https://api.opensandbox.example.com
+    description: Production server
+
+security:
+  - AccessToken: []
+
+tags:
+  - name: Health
+    description: Server health check and status monitoring
+  - name: CodeInterpreting
+    description: Code execution and context management
+  - name: Command
+    description: Shell command execution and interruption
+  - name: Filesystem
+    description: File and directory operations
+  - name: Metric
+    description: System resource monitoring and metrics
+
+paths:
+  /ping:
+    get:
+      summary: Health check endpoint
+      description: |
+        Performs a simple health check to verify that the server is running and responsive.
+        Returns HTTP 200 OK status if the server is healthy. This endpoint is typically used
+        by load balancers, monitoring systems, and orchestration platforms (like Kubernetes)
+        to check service availability.
+      operationId: ping
+      tags:
+        - Health
+      responses:
+        "200":
+          description: Server is alive and healthy
+
+  /code/context:
+    post:
+      summary: Create code execution context
+      description: |
+        Creates a new code execution environment and returns a session ID that can be used
+        for subsequent code execution requests. The context maintains state across multiple
+        code executions within the same session.
+      operationId: createCodeContext
+      tags:
+        - CodeInterpreting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CodeContextRequest"
+            examples:
+              python:
+                summary: Create Python context
+                value:
+                  language: python
+              bash:
+                summary: Create Bash context
+                value:
+                  language: bash
+      responses:
+        "200":
+          description: Successfully created context with session ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeContext"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /code:
+    post:
+      summary: Execute code in context
+      description: |
+        Executes code using Jupyter kernel in a specified execution context and streams
+        the output in real-time using SSE (Server-Sent Events). Supports multiple programming
+        languages (Python, JavaScript, etc.) and maintains execution state within the session.
+        Returns execution results, output streams, execution count, and any errors.
+      operationId: runCode
+      tags:
+        - CodeInterpreting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunCodeRequest"
+            examples:
+              python:
+                summary: Execute Python code
+                value:
+                  context:
+                    id: session-123
+                    language: python
+                  code: |
+                    print("Hello, World!")
+                    result = 2 + 2
+                    result
+              stateless:
+                summary: Stateless execution
+                value:
+                  code: echo "Hello from shell"
+      responses:
+        "200":
+          description: Stream of code execution events
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ServerStreamEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      summary: Interrupt code execution
+      description: |
+        Interrupts the currently running code execution in the specified context.
+        This sends a signal to terminate the execution process and releases associated resources.
+      operationId: interruptCode
+      tags:
+        - CodeInterpreting
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: Session ID of the execution context to interrupt
+          schema:
+            type: string
+          example: session-123
+      responses:
+        "200":
+          description: Code execution successfully interrupted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /command:
+    post:
+      summary: Execute shell command
+      description: |
+        Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
+        The command can run in foreground or background mode. The response includes stdout, stderr,
+        execution status, and completion events.
+      operationId: runCommand
+      tags:
+        - Command
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunCommandRequest"
+            examples:
+              foreground:
+                summary: Foreground command
+                value:
+                  command: ls -la /workspace
+                  cwd: /workspace
+                  background: false
+              background:
+                summary: Background command
+                value:
+                  command: python server.py
+                  cwd: /app
+                  background: true
+      responses:
+        "200":
+          description: Stream of command execution events
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ServerStreamEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      summary: Interrupt command execution
+      description: |
+        Interrupts the currently running command execution in the specified context.
+        This sends a signal to terminate the execution process and releases associated resources.
+      operationId: interruptCommand
+      tags:
+        - Command
+      parameters:
+        - name: id
+          in: query
+          required: true
+          description: Session ID of the execution context to interrupt
+          schema:
+            type: string
+          example: session-456
+      responses:
+        "200":
+          description: Command execution successfully interrupted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /files/info:
+    get:
+      summary: Get file metadata
+      description: |
+        Retrieves detailed metadata for one or multiple files including permissions, owner,
+        group, size, and modification time. Returns a map of file paths to their corresponding
+        FileInfo objects.
+      operationId: getFilesInfo
+      tags:
+        - Filesystem
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: File path(s) to get info for (can be specified multiple times)
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          examples:
+            single:
+              summary: Single file
+              value: ["/workspace/file.txt"]
+            multiple:
+              summary: Multiple files
+              value: ["/workspace/file1.txt", "/workspace/file2.py"]
+      responses:
+        "200":
+          description: Map of file paths to FileInfo objects
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/FileInfo"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /files:
+    delete:
+      summary: Delete files
+      description: |
+        Deletes one or multiple files from the sandbox. Only removes files, not directories.
+        Use RemoveDirs for directory removal.
+      operationId: removeFiles
+      tags:
+        - Filesystem
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: File path(s) to delete (can be specified multiple times)
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          example: ["/workspace/temp.txt"]
+      responses:
+        "200":
+          description: Files deleted successfully
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /files/permissions:
+    post:
+      summary: Change file permissions
+      description: |
+        Changes permissions (mode), owner, and group for one or multiple files.
+        Accepts a map of file paths to permission settings including octal mode,
+        owner username, and group name.
+      operationId: chmodFiles
+      tags:
+        - Filesystem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/Permission"
+            example:
+              "/workspace/script.sh":
+                owner: admin
+                group: admin
+                mode: 755
+              "/workspace/config.json":
+                owner: admin
+                group: admin
+                mode: 755
+      responses:
+        "200":
+          description: Permissions changed successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /files/mv:
+    post:
+      summary: Rename or move files
+      description: |
+        Renames or moves one or multiple files to new paths. Can be used for both
+        renaming within the same directory and moving to different directories.
+        Target directory must exist.
+      operationId: renameFiles
+      tags:
+        - Filesystem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/RenameFileItem"
+            example:
+              - src: /workspace/old_name.txt
+                dest: /workspace/new_name.txt
+              - src: /workspace/file.py
+                dest: /archive/file.py
+      responses:
+        "200":
+          description: Files renamed/moved successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /files/search:
+    get:
+      summary: Search for files
+      description: |
+        Searches for files matching a glob pattern within a specified directory and
+        its subdirectories. Returns file metadata including path, permissions, owner,
+        and group. Supports glob patterns like **, *.txt, etc. Default pattern is ** (all files).
+      operationId: searchFiles
+      tags:
+        - Filesystem
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Root directory path to search in
+          schema:
+            type: string
+        - name: pattern
+          in: query
+          required: false
+          description: Glob pattern to match files (default is **)
+          schema:
+            type: string
+            default: "**"
+      responses:
+        "200":
+          description: Array of matching files with metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileInfo"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /files/replace:
+    post:
+      summary: Replace file content
+      description: |
+        Performs text replacement in one or multiple files. Replaces all occurrences
+        of the old string with the new string (similar to strings.ReplaceAll).
+        Preserves file permissions. Useful for batch text substitution across files.
+      operationId: replaceContent
+      tags:
+        - Filesystem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/ReplaceFileContentItem"
+            example:
+              "/workspace/config.yaml":
+                old: "localhost:8080"
+                new: "0.0.0.0:9090"
+              "/workspace/app.py":
+                old: "DEBUG = True"
+                new: "DEBUG = False"
+      responses:
+        "200":
+          description: Content replaced successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /files/upload:
+    post:
+      summary: Upload files to sandbox
+      description: |
+        Uploads one or multiple files to specified paths within the sandbox.
+        Reads metadata and file content from multipart form parts in sequence.
+        Each file upload consists of two parts: a metadata part (JSON) followed
+        by the actual file part.
+      operationId: uploadFile
+      tags:
+        - Filesystem
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                metadata:
+                  type: string
+                  description: JSON-encoded file metadata (FileMetadata object)
+                  example: '{"path":"/workspace/file.txt","owner":"admin","group":"admin","mode":755}'
+                file:
+                  type: string
+                  format: binary
+                  description: File to upload
+            encoding:
+              metadata:
+                contentType: application/json
+              file:
+                contentType: application/octet-stream
+      responses:
+        "200":
+          description: Files uploaded successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /files/download:
+    get:
+      summary: Download file from sandbox
+      description: |
+        Downloads a file from the specified path within the sandbox. Supports HTTP
+        range requests for resumable downloads and partial content retrieval.
+        Returns file as octet-stream with appropriate headers.
+      operationId: downloadFile
+      tags:
+        - Filesystem
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute or relative path of the file to download
+          schema:
+            type: string
+          example: /workspace/data.csv
+        - name: Range
+          in: header
+          required: false
+          description: HTTP Range header for partial content requests
+          schema:
+            type: string
+          example: "bytes=0-1023"
+      responses:
+        "200":
+          description: File content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: Attachment header with filename
+            Content-Length:
+              schema:
+                type: integer
+              description: File size in bytes
+        "206":
+          description: Partial file content (when Range header is provided)
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Range:
+              schema:
+                type: string
+              description: Range of bytes being returned
+            Content-Length:
+              schema:
+                type: integer
+              description: Length of the returned range
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "416":
+          description: Requested range not satisfiable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /directories:
+    post:
+      summary: Create directories
+      description: |
+        Creates one or multiple directories with specified permissions. Creates parent
+        directories as needed (similar to mkdir -p). Accepts a map of directory paths
+        to permission objects.
+      operationId: makeDirs
+      tags:
+        - Filesystem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/Permission"
+            example:
+              "/workspace/project":
+                owner: admin
+                group: admin
+                mode: 755
+              "/workspace/logs":
+                owner: admin
+                group: admin
+                mode: 755
+      responses:
+        "200":
+          description: Directories created successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      summary: Delete directories
+      description: |
+        Recursively deletes one or multiple directories and all their contents.
+        Similar to rm -rf. Use with caution as this operation cannot be undone.
+      operationId: removeDirs
+      tags:
+        - Filesystem
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Directory path(s) to delete (can be specified multiple times)
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          example: ["/workspace/temp"]
+      responses:
+        "200":
+          description: Directories deleted successfully
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /metrics:
+    get:
+      summary: Get system metrics
+      description: |
+        Retrieves current system resource metrics including CPU usage percentage,
+        CPU core count, total memory, used memory, and timestamp. Provides a snapshot
+        of system resource utilization at the time of request.
+      operationId: getMetrics
+      tags:
+        - Metric
+      responses:
+        "200":
+          description: Current system metrics including CPU and memory usage
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Metrics"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /metrics/watch:
+    get:
+      summary: Watch system metrics in real-time
+      description: |
+        Streams system resource metrics in real-time using Server-Sent Events (SSE).
+        Updates are sent every second, providing continuous monitoring of CPU usage,
+        memory usage, and other system metrics. The connection remains open until
+        the client disconnects.
+      operationId: watchMetrics
+      tags:
+        - Metric
+      responses:
+        "200":
+          description: Stream of system metrics updated every second
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/Metrics"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+components:
+  securitySchemes:
+    AccessToken:
+      type: apiKey
+      in: header
+      name: X-EXECD-ACCESS-TOKEN
+      description: |
+        Access token for API authentication. All requests must include this header
+        with a valid token. The token is configured during server initialization.
+
+  schemas:
+    CodeContextRequest:
+      type: object
+      description: Request to create a code execution context
+      properties:
+        language:
+          type: string
+          description: Execution runtime (python, bash, java, etc.)
+          example: python
+
+    CodeContext:
+      type: object
+      description: Code execution context with session identifier
+      properties:
+        id:
+          type: string
+          description: Unique session identifier returned by CreateContext
+          example: session-abc123
+        language:
+          type: string
+          description: Execution runtime
+          example: python
+      required:
+        - language
+
+    RunCodeRequest:
+      type: object
+      required:
+        - code
+      description: Request to execute code in a context
+      properties:
+        context:
+          $ref: "#/components/schemas/CodeContext"
+        code:
+          type: string
+          description: Source code to execute
+          example: |
+            import numpy as np
+            result = np.array([1, 2, 3])
+            print(result)
+
+    RunCommandRequest:
+      type: object
+      required:
+        - command
+      description: Request to execute a shell command
+      properties:
+        command:
+          type: string
+          description: Shell command to execute
+          example: ls -la /workspace
+        cwd:
+          type: string
+          description: Working directory for command execution
+          example: /workspace
+        background:
+          type: boolean
+          description: Whether to run command in detached mode
+          default: false
+          example: false
+
+    ServerStreamEvent:
+      type: object
+      description: Server-sent event for streaming execution output
+      properties:
+        type:
+          type: string
+          enum:
+            - init
+            - status
+            - error
+            - stdout
+            - stderr
+            - result
+            - execution_complete
+            - execution_count
+            - ping
+          description: Event type for client-side handling
+          example: stdout
+        text:
+          type: string
+          description: Textual data for status, init, and stream events
+          example: "Hello, World!\n"
+        execution_count:
+          type: integer
+          description: Cell execution number in the session
+          example: 1
+        execution_time:
+          type: integer
+          format: int64
+          description: Execution duration in milliseconds
+          example: 150
+        timestamp:
+          type: integer
+          format: int64
+          description: When the event was generated (Unix milliseconds)
+          example: 1700000000000
+        results:
+          type: object
+          additionalProperties: true
+          description: Execution output in various MIME types (e.g., "text/plain", "text/html")
+          example:
+            text/plain: "4"
+        error:
+          type: object
+          description: Execution error details if an error occurred
+          properties:
+            ename:
+              type: string
+              description: Error name/type
+              example: "NameError"
+            evalue:
+              type: string
+              description: Error value/message
+              example: "name 'undefined_var' is not defined"
+            traceback:
+              type: array
+              items:
+                type: string
+              description: Stack trace lines
+              example:
+                - "Traceback (most recent call last):"
+                - '  File "<stdin>", line 1, in <module>'
+                - "NameError: name 'undefined_var' is not defined"
+
+    FileInfo:
+      type: object
+      description: File metadata including path and permissions
+      properties:
+        path:
+          type: string
+          description: Absolute file path
+          example: /workspace/file.txt
+        size:
+          type: integer
+          format: int64
+          description: File size in bytes
+          example: 2048
+        modified_at:
+          type: string
+          format: date-time
+          description: Last modification time
+          example: 2025-11-16T14:30:45Z
+        created_at:
+          type: string
+          format: date-time
+          description: File creation time
+          example: 2025-11-16T14:30:45Z
+        owner:
+          type: string
+          description: File owner username
+          example: admin
+        group:
+          type: string
+          description: File group name
+          example: admin
+        mode:
+          type: integer
+          description: File permissions in octal format
+          example: 755
+      required: [path, size, modified_at, created_at, owner, group, mode]
+
+    Permission:
+      type: object
+      description: File ownership and mode settings
+      properties:
+        owner:
+          type: string
+          description: Owner username
+          example: root
+        group:
+          type: string
+          description: Group name
+          example: root
+        mode:
+          type: integer
+          description: Permission mode in octal format (e.g., 644, 755)
+          default: 755
+          example: 755
+      required: [mode]
+
+    FileMetadata:
+      type: object
+      description: File metadata for upload operations
+      properties:
+        path:
+          type: string
+          description: Target file path
+          example: /workspace/upload.txt
+        owner:
+          type: string
+          description: File owner
+          example: admin
+        group:
+          type: string
+          description: File group
+          example: admin
+        mode:
+          type: integer
+          description: File permissions in octal
+          example: 755
+
+    RenameFileItem:
+      type: object
+      description: File rename/move operation
+      properties:
+        src:
+          type: string
+          description: Source file path
+          example: /workspace/old.txt
+        dest:
+          type: string
+          description: Destination file path
+          example: /workspace/new.txt
+      required: [src, dest]
+
+    ReplaceFileContentItem:
+      type: object
+      description: Content replacement operation
+      properties:
+        old:
+          type: string
+          description: String to be replaced
+          example: "localhost"
+        new:
+          type: string
+          description: Replacement string
+          example: "0.0.0.0"
+      required: [old, new]
+
+    Metrics:
+      type: object
+      description: System resource usage metrics
+      properties:
+        cpu_count:
+          type: number
+          format: float
+          description: Number of CPU cores
+          example: 4.0
+        cpu_used_pct:
+          type: number
+          format: float
+          description: CPU usage percentage
+          example: 45.5
+        mem_total_mib:
+          type: number
+          format: float
+          description: Total memory in MiB
+          example: 8192.0
+        mem_used_mib:
+          type: number
+          format: float
+          description: Used memory in MiB
+          example: 4096.0
+        timestamp:
+          type: integer
+          format: int64
+          description: Timestamp when metrics were collected (Unix milliseconds)
+          example: 1700000000000
+      required:
+        [cpu_count, cpu_used_pct, mem_total_mib, mem_used_mib, timestamp]
+
+    ErrorResponse:
+      type: object
+      description: Standard error response format
+      properties:
+        code:
+          type: string
+          description: Error code for programmatic handling
+          example: INVALID_REQUEST_BODY
+        message:
+          type: string
+          description: Human-readable error message
+          example: "error parsing request, MAYBE invalid body format"
+      required: [code, message]
+
+  responses:
+    BadRequest:
+      description: Invalid request body format or missing required fields
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: INVALID_REQUEST_BODY
+            message: "error parsing request, MAYBE invalid body format"
+
+    NotFound:
+      description: File or resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: FILE_NOT_FOUND
+            message: "file not found"
+
+    InternalServerError:
+      description: Runtime server error during operation
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            code: RUNTIME_ERROR
+            message: "error running code execution"

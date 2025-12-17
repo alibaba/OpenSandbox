@@ -1,0 +1,119 @@
+# Copyright 2025 Alibaba Group Holding Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import pytest
+from unittest.mock import MagicMock, patch
+
+from src.services.docker import DockerSandboxService
+from src.config import AppConfig, RuntimeConfig, DockerConfig, ServerConfig
+
+@pytest.fixture
+def mock_docker_service():
+    """Create a DockerSandboxService with mocked docker client."""
+    # Setup base config
+    config = AppConfig(
+        server=ServerConfig(port=8080, host="0.0.0.0"),
+        runtime=RuntimeConfig(type="docker", execd_image="test/execd:latest"),
+        router=None,
+        docker=DockerConfig(network_mode="bridge"),
+    )
+
+    with patch("docker.from_env") as mock_docker:
+        mock_client = MagicMock()
+        mock_docker.return_value = mock_client
+
+        # Initialize service
+        service = DockerSandboxService(config=config)
+        # Inject the mock client directly to ensure we control it
+        service.docker_client = mock_client
+
+        yield service, mock_client
+
+def test_get_endpoint_host_mode(mock_docker_service):
+    service, mock_client = mock_docker_service
+    service.app_config.docker.network_mode = "host"
+    service.network_mode = "host"
+
+    mock_container = MagicMock()
+    mock_container.attrs = {"State": {"Running": True}}
+    mock_client.containers.list.return_value = [mock_container]
+
+    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="10.0.0.1"):
+        endpoint = service.get_endpoint("sbx-123", 8080, resolve_internal=False)
+        assert endpoint.endpoint == "10.0.0.1:8080"
+
+    endpoint_internal = service.get_endpoint("sbx-123", 8080, resolve_internal=True)
+    assert endpoint_internal.endpoint == "127.0.0.1:8080"
+
+
+def test_get_endpoint_bridge_http_port(mock_docker_service):
+    service, mock_client = mock_docker_service
+    service.app_config.docker.network_mode = "bridge"
+    service.network_mode = "bridge"
+
+    labels = {
+        "sandbox.dev/embeddingProxyPort": "50002",
+        "sandbox.dev/httpPort": "50001",
+    }
+    mock_container = MagicMock()
+    mock_container.attrs = {
+        "State": {"Running": True},
+        "Config": {"Labels": labels},
+        "NetworkSettings": {"IPAddress": "172.17.0.5"},
+    }
+    mock_client.containers.list.return_value = [mock_container]
+
+    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
+        endpoint = service.get_endpoint("sbx-123", 8080, resolve_internal=False)
+
+    assert endpoint.endpoint == "192.168.1.100:50001"
+
+
+def test_get_endpoint_bridge_other_port_via_execd(mock_docker_service):
+    service, mock_client = mock_docker_service
+    service.app_config.docker.network_mode = "bridge"
+    service.network_mode = "bridge"
+
+    labels = {
+        "sandbox.dev/embeddingProxyPort": "50002",
+        "sandbox.dev/httpPort": "50001",
+    }
+    mock_container = MagicMock()
+    mock_container.attrs = {
+        "State": {"Running": True},
+        "Config": {"Labels": labels},
+        "NetworkSettings": {"IPAddress": "172.17.0.5"},
+    }
+    mock_client.containers.list.return_value = [mock_container]
+
+    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
+        endpoint = service.get_endpoint("sbx-123", 6000, resolve_internal=False)
+
+    assert endpoint.endpoint == "192.168.1.100:50002/proxy/6000"
+
+
+def test_get_endpoint_bridge_internal_resolution(mock_docker_service):
+    service, mock_client = mock_docker_service
+    service.app_config.docker.network_mode = "bridge"
+    service.network_mode = "bridge"
+
+    mock_container = MagicMock()
+    mock_container.attrs = {
+        "State": {"Running": True},
+        "NetworkSettings": {"IPAddress": "10.0.0.5"},
+    }
+    mock_client.containers.list.return_value = [mock_container]
+
+    endpoint = service.get_endpoint("sbx-123", 8080, resolve_internal=True)
+    assert endpoint.endpoint == "10.0.0.5:8080"

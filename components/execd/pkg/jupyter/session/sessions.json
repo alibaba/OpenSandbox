@@ -1,0 +1,97 @@
+[ {
+  "id" : "cb1baca9-a60e-4937-a1d0-18bc1fc45e60",
+  "path" : "my_notebook.ipynb",
+  "name" : "my_session",
+  "type" : "notebook",
+  "kernel" : {
+    "id" : "d7052326-5c98-4575-bb18-a7902ef5f623",
+    "name" : "python3",
+    "last_activity" : "2025-06-05T09:09:54.420827Z",
+    "execution_state" : "idle",
+    "connections" : 0
+  },
+  "notebook" : {
+    "path" : "my_notebook.ipynb",
+    "name" : "my_session"
+  }
+}, {
+  "id" : "a3378ca1-ba62-4341-9db5-3bc612fb3517",
+  "path" : "Untitled.ipynb",
+  "name" : "Untitled.ipynb",
+  "type" : "notebook",
+  "kernel" : {
+    "id" : "d7052326-5c98-4575-bb18-a7902ef5f623",
+    "name" : "python3",
+    "last_activity" : "2025-06-05T09:09:54.420827Z",
+    "execution_state" : "idle",
+    "connections" : 0
+  },
+  "notebook" : {
+    "path" : "Untitled.ipynb",
+    "name" : "Untitled.ipynb"
+  }
+}, {
+  "id" : "c4829f29-8430-4dce-b1f5-9d2ac6c4f570",
+  "path" : "/tmp/example_notebook.ipynb",
+  "name" : "example_session",
+  "type" : "notebook",
+  "kernel" : {
+    "id" : "00349e07-3877-4eb0-a676-0df5b886d770",
+    "name" : "python3",
+    "last_activity" : "2025-06-05T11:51:22.194821Z",
+    "execution_state" : "starting",
+    "connections" : 0
+  },
+  "notebook" : {
+    "path" : "/tmp/example_notebook.ipynb",
+  "name" : "example_session"
+  }
+}, {
+  "id" : "9a8e1857-b737-41a6-8f81-6039f6ae0ac1",
+  "path" : "e0ebd37c-578a-443c-8f58-236984aea7ff",
+  "name" : "session_5c4e8183-9e8a-4879-93b2-5622518193d7",
+  "type" : "notebook",
+  "kernel" : {
+    "id" : "e8792c3e-3190-4b11-92e8-b7ec9ef44da9",
+    "name" : "python3",
+    "last_activity" : "2025-06-05T12:26:01.610210Z",
+    "execution_state" : "starting",
+    "connections" : 0
+  },
+  "notebook" : {
+    "path" : "e0ebd37c-578a-443c-8f58-236984aea7ff",
+    "name" : "session_5c4e8183-9e8a-4879-93b2-5622518193d7"
+  }
+}, {
+  "id" : "cc06c06d-4f6b-45a5-a546-11a5b5f246f8",
+  "path" : "notebook.ipynb",
+  "name" : null,
+  "type" : "notebook",
+  "kernel" : {
+    "id" : "62e7fd9e-ea50-4045-861b-3a5a7073ee22",
+    "name" : "python3",
+    "last_activity" : "2025-06-05T12:26:51.714871Z",
+    "execution_state" : "starting",
+    "connections" : 0
+  },
+  "notebook" : {
+    "path" : "notebook.ipynb",
+    "name" : null
+  }
+}, {
+  "id" : "db123df4-ec13-4fe0-b3c3-ef85464b8a42",
+  "path" : "/tmp/test.ipynb",
+  "name" : "",
+  "type" : "notebook",
+  "kernel" : {
+    "id" : "7d3091af-8b0a-474a-be04-f64191a43d0f",
+    "name" : "python3",
+    "last_activity" : "2025-06-06T01:29:16.712732Z",
+    "execution_state" : "starting",
+    "connections" : 0
+  },
+  "notebook" : {
+    "path" : "/tmp/test.ipynb",
+    "name" : ""
+  }
+} ]
