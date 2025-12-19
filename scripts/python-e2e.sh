@@ -21,8 +21,8 @@ set -euxo pipefail
 
 # prepare required images
 TAG=${TAG:-latest}
-docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:${TAG}
-docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:${TAG}
+docker pull opensandbox/execd:${TAG}
+docker pull opensandbox/code-interpreter:${TAG}
 
 # setup server
 cd server
