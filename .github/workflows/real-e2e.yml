@@ -32,8 +32,6 @@ jobs:
       - name: Run tests
         run: |
           set -e
-          cd server
-          uv sync --all-groups
 
           # Create config file
           cat <<EOF > ~/.sandbox.toml
