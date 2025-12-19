@@ -1,0 +1,57 @@
+name: Real E2E Tests
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'server/**'
+      - 'components/execd/**'
+      - 'sandboxes/**'
+      - 'sdks/code-interpreter/**'
+      - 'sdks/sandbox/**'
+      - 'tests/**'
+  push:
+    branches: [ main ]
+
+jobs:
+  docker-bridge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        run: |
+          pip install uv
+
+      - name: Run tests
+        run: |
+          set -e
+          cd server
+          uv sync --all-groups
+
+          # Create config file
+          cat <<EOF > ~/.sandbox.toml
+          [server]
+          host = "127.0.0.1"
+          port = 32888
+          log_level = "INFO"
+          api_key = ""
+          [runtime]
+          type = "docker"
+          execd_image = "opensandbox/execd:latest"
+          [docker]
+          network_mode = "bridge"
+          EOF
+          
+          ./scripts/python-e2e.sh
+
+      - name: Eval logs
+        if: ${{ always() }}
+        run: |
+          cat server/server.log
