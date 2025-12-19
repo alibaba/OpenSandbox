@@ -97,6 +97,21 @@ execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd
 network_mode = "bridge"  # 容器隔离网络
 ```
 
+**安全加固（适用于所有 Docker 模式）**
+```toml
+[docker]
+# 默认关闭危险能力、防止提权
+drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+no_new_privileges = true
+# 当宿主机启用了 AppArmor 时，可指定策略名称（如 "docker-default"）；否则留空
+apparmor_profile = ""
+# 限制进程数量，可选的 seccomp/只读根文件系统
+pids_limit = 512             # 设为 null 可关闭
+seccomp_profile = ""        # 配置文件路径或名称；为空使用 Docker 默认
+read_only_rootfs = false     # 如果镜像允许写 /，可开启以进一步隔离
+```
+更多 Docker 安全参考：https://docs.docker.com/engine/security/
+
 ### 启动服务
 
 使用 `uv` 启动服务：

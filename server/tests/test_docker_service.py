@@ -89,6 +89,37 @@ def test_env_allows_empty_string_and_skips_none():
 
 
 @patch("src.services.docker.docker")
+def test_create_sandbox_applies_security_defaults(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_client.api.create_host_config.return_value = {"host": "cfg"}
+    mock_client.api.create_container.return_value = {"Id": "cid"}
+    mock_client.containers.get.return_value = MagicMock()
+    mock_docker.from_env.return_value = mock_client
+
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+    )
+
+    with patch.object(service, "_ensure_image_available"), patch.object(
+        service, "_prepare_sandbox_runtime"
+    ):
+        service.create_sandbox(request)
+
+    host_kwargs = mock_client.api.create_host_config.call_args.kwargs
+    assert "no-new-privileges:true" in host_kwargs["security_opt"]
+    assert host_kwargs["cap_drop"] == service.app_config.docker.drop_capabilities
+    assert host_kwargs["pids_limit"] == service.app_config.docker.pids_limit
+    assert mock_client.api.create_container.call_args.kwargs["host_config"] == {"host": "cfg"}
+
+
+@patch("src.services.docker.docker")
 def test_create_sandbox_rejects_invalid_metadata(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []

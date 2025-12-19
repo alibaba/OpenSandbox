@@ -37,8 +37,19 @@ execd_image = "opensandbox/execd:latest"
 [docker]
 # Docker-specific knobs
 # -----------------------------------------------------------------
-# Supported values for network_mode: "host", "bridge"
+# Use bridge for network isolation
 network_mode = "bridge"
+# Drop dangerous capabilities and block privilege escalation
+drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+no_new_privileges = true
+# Optional: set an AppArmor profile name (e.g., "docker-default") when AppArmor is enabled
+apparmor_profile = ""
+# Limit process count to reduce host impact from fork bombs; set to null to disable
+pids_limit = 512
+# Seccomp profile: empty string uses Docker default; set to an absolute path for a custom profile
+seccomp_profile = ""
+# Make root filesystem read-only to avoid host writes via mounted volumes; disable if your image needs write access to /
+read_only_rootfs = true
 
 
 # -----------------------------------------------------------------

@@ -785,6 +785,22 @@ class DockerSandboxService(SandboxService):
         nano_cpus = parse_nano_cpus(resource_limits.get("cpu"))
 
         host_config_kwargs: Dict[str, Any] = {"network_mode": self.network_mode}
+        security_opts: list[str] = []
+        docker_cfg = self.app_config.docker
+        if docker_cfg.no_new_privileges:
+            security_opts.append("no-new-privileges:true")
+        if docker_cfg.apparmor_profile:
+            security_opts.append(f"apparmor={docker_cfg.apparmor_profile}")
+        if docker_cfg.seccomp_profile:
+            security_opts.append(f"seccomp={docker_cfg.seccomp_profile}")
+        if security_opts:
+            host_config_kwargs["security_opt"] = security_opts
+        if docker_cfg.drop_capabilities:
+            host_config_kwargs["cap_drop"] = docker_cfg.drop_capabilities
+        if docker_cfg.pids_limit is not None:
+            host_config_kwargs["pids_limit"] = docker_cfg.pids_limit
+        if docker_cfg.read_only_rootfs:
+            host_config_kwargs["read_only"] = True
         if mem_limit:
             host_config_kwargs["mem_limit"] = mem_limit
         if nano_cpus:

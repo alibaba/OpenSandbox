@@ -93,6 +93,20 @@ cp example.config.toml ~/.sandbox.toml
    network_mode = "bridge"  # Isolated container networking
    ```
 
+**Security hardening (applies to all Docker modes)**
+   ```toml
+   [docker]
+   # Drop dangerous capabilities and block privilege escalation by default
+   drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+   no_new_privileges = true
+   apparmor_profile = ""        # e.g. "docker-default" when AppArmor is available
+   # Limit fork bombs and optionally enforce seccomp / read-only rootfs
+   pids_limit = 512             # set to null to disable
+   seccomp_profile = ""        # path or profile name; empty uses Docker default
+   read_only_rootfs = false     # enable for stricter isolation if your image allows it
+   ```
+   Further reading on Docker container security: https://docs.docker.com/engine/security/
+
 ### Run the server
 
 Start the server using `uv`:
@@ -120,6 +134,8 @@ Once the server is running, interactive API documentation is available:
 
 - **Swagger UI**: [http://localhost:8080/docs](http://localhost:8080/docs)
 - **ReDoc**: [http://localhost:8080/redoc](http://localhost:8080/redoc)
+
+Further reading on Docker container security: https://docs.docker.com/engine/security/
 
 ### API authentication
 

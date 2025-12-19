@@ -127,6 +127,47 @@ class DockerConfig(BaseModel):
         default="host",
         description="Docker network mode for sandbox containers (host, bridge, ...).",
     )
+    drop_capabilities: list[str] = Field(
+        default_factory=lambda: [
+            "AUDIT_WRITE",
+            "MKNOD",
+            "NET_ADMIN",
+            "NET_RAW",
+            "SYS_ADMIN",
+            "SYS_MODULE",
+            "SYS_PTRACE",
+            "SYS_TIME",
+            "SYS_TTY_CONFIG",
+        ],
+        description=(
+            "Linux capabilities to drop from sandbox containers. Defaults to a conservative set to reduce host impact."
+        ),
+    )
+    apparmor_profile: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional AppArmor profile name applied to sandbox containers. Leave unset to let Docker choose the default."
+        ),
+    )
+    no_new_privileges: bool = Field(
+        default=True,
+        description="Enable the kernel no_new_privileges flag to block privilege escalation inside the container.",
+    )
+    seccomp_profile: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional seccomp profile name or path applied to sandbox containers. Leave unset to use Docker's default profile."
+        ),
+    )
+    pids_limit: Optional[int] = Field(
+        default=512,
+        ge=1,
+        description="Maximum number of processes allowed per sandbox container. Set to null to disable the limit.",
+    )
+    read_only_rootfs: bool = Field(
+        default=False,
+        description="Mount the container root filesystem as read-only. Disable if images need write access to /.",
+    )
 
 
 class AppConfig(BaseModel):
