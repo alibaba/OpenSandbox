@@ -7,7 +7,7 @@
   [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/alibaba/OpenSandbox)
   [![license](https://img.shields.io/github/license/alibaba/OpenSandbox.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
   [![PyPI version](https://badge.fury.io/py/opensandbox.svg)](https://badge.fury.io/py/opensandbox)
-  [![E2E Status](https://github.com/alibaba/OpenSandbox/actions/workflows/real-e2e.yaml/badge.svg?branch=main)](https://github.com/alibaba/OpenSandbox/actions)
+  [![E2E Status](https://github.com/alibaba/OpenSandbox/actions/workflows/real-e2e.yml/badge.svg?branch=main)](https://github.com/alibaba/OpenSandbox/actions)
 
 
   <hr />
