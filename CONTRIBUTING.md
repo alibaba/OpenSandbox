@@ -36,7 +36,7 @@ There are many ways to contribute to OpenSandbox:
 
 1. **Search Existing Issues**: Check if your bug report or feature request already exists
 2. **Check Roadmap**: Review the project roadmap to see if your idea aligns with project goals
-3. **Discuss Major Changes**: For significant changes, open an issue first to discuss your approach
+3. **Discuss Major Changes**: For significant changes, open an issue first or submit an [OSEP](oseps/README.md) to discuss your approach
 4. **Review Architecture**: Read [docs/architecture.md](architecture.md) to understand the system design
 
 ## Development Environment Setup
@@ -140,6 +140,12 @@ OpenSandbox/
 ```
 
 ## Development Workflow
+
+### Enhancement Proposals (OSEP)
+
+For major features, architectural changes, or modifications to the core API/security model, we follow the **OSEP (OpenSandbox Enhancement Proposals)** process.
+
+Please read the [OSEP README](oseps/README.md) to understand when an OSEP is required and how to submit one. Small bug fixes and minor improvements do not require an OSEP.
 
 ### Branching Strategy
 
