@@ -238,9 +238,30 @@ func (c *Controller) readFromPos(filepath string, startPos int64, onExecute func
 
 	_, _ = file.Seek(startPos, 0) //nolint:errcheck
 
-	reader := bufio.NewScanner(file)
-	for reader.Scan() {
-		onExecute(reader.Text())
+	scanner := bufio.NewScanner(file)
+	// Support long lines and treat both \n and \r as delimiters to keep progress output.
+	scanner.Buffer(make([]byte, 0, 64*1024), 5*1024*1024) // 5MB max token
+	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		for i, b := range data {
+			if b == '\n' || b == '\r' {
+				// Treat \r\n as a single delimiter to avoid empty tokens.
+				if b == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+					return i + 2, data[:i], nil
+				}
+				return i + 1, data[:i], nil
+			}
+		}
+		if atEOF && len(data) > 0 {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	})
+
+	for scanner.Scan() {
+		onExecute(scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return startPos
 	}
 
 	endPos, _ := file.Seek(0, 1)
