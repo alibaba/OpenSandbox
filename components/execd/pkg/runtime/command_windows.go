@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !windows
-// +build !windows
+//go:build windows
+// +build windows
 
 package runtime
 
@@ -23,9 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/signal"
 	"strconv"
-	"syscall"
 	"time"
 
 	"github.com/beego/beego/v2/core/logs"
@@ -34,15 +32,10 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/util/safego"
 )
 
-// runCommand executes shell commands and streams their output.
+// runCommand executes shell commands and streams their output on Windows.
 func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest) error {
 	session := c.newContextID()
 	request.Hooks.OnExecuteInit(session)
-
-	signals := make(chan os.Signal, 1)
-	defer close(signals)
-	signal.Notify(signals)
-	defer signal.Reset()
 
 	stdout, stderr, err := c.stdLogDescriptor(session)
 	if err != nil {
@@ -51,10 +44,12 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 
 	startAt := time.Now()
 	logs.Info("received command: %v", request.Code)
-	cmd := exec.CommandContext(ctx, "bash", "-c", request.Code)
+	cmd := exec.CommandContext(ctx, "cmd", "/C", request.Code)
 
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.Dir = request.Cwd
+	cmd.Env = os.Environ()
 
 	done := make(chan struct{}, 1)
 	safego.Go(func() {
@@ -63,11 +58,6 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	safego.Go(func() {
 		c.tailStdPipe(c.stderrFileName(session), request.Hooks.OnExecuteStderr, done)
 	})
-
-	cmd.Dir = request.Cwd
-	cmd.Env = os.Environ()
-	// use a dedicated process group so signals propagate to children.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	err = cmd.Start()
 	if err != nil {
@@ -80,23 +70,6 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		pid: cmd.Process.Pid,
 	}
 	c.storeCommandKernel(session, kernel)
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case sig := <-signals:
-				if sig == nil {
-					continue
-				}
-				// DO NOT forward syscall.SIGURG to children processes.
-				if sig != syscall.SIGCHLD && sig != syscall.SIGURG {
-					_ = syscall.Kill(-cmd.Process.Pid, sig.(syscall.Signal))
-				}
-			}
-		}
-	}()
 
 	err = cmd.Wait()
 	close(done)
@@ -128,30 +101,25 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	return nil
 }
 
-// runBackgroundCommand executes shell commands in detached mode.
+// runBackgroundCommand executes shell commands in detached mode on Windows.
 func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCodeRequest) error {
 	session := c.newContextID()
 	request.Hooks.OnExecuteInit(session)
 
-	signals := make(chan os.Signal, 1)
-	defer close(signals)
-	signal.Notify(signals)
-	defer signal.Reset()
-
 	startAt := time.Now()
 	logs.Info("received command: %v", request.Code)
-	cmd := exec.CommandContext(context.Background(), "bash", "-c", request.Code)
+	cmd := exec.CommandContext(context.Background(), "cmd", "/C", request.Code)
 
 	cmd.Dir = request.Cwd
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	// use DevNull as stdin so interactive programs exit immediately.
-	cmd.Stdin = os.NewFile(uintptr(syscall.Stdin), os.DevNull)
+	devNull, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0) // best-effort, ignore error
+	cmd.Stdin = devNull
 
 	safego.Go(func() {
 		err := cmd.Start()
 		if err != nil {
 			logs.Error("CommandExecError: error starting commands: %v", err)
+			return
 		}
 
 		kernel := &commandKernel{

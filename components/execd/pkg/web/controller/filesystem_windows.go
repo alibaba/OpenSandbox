@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !windows
-// +build !windows
+//go:build windows
+// +build windows
 
 package controller
 
@@ -22,11 +22,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/alibaba/opensandbox/execd/pkg/util/glob"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
@@ -230,26 +228,14 @@ func (c *FilesystemController) SearchFiles() {
 		}
 
 		if match {
-			sys := info.Sys().(*syscall.Stat_t)
-
-			owner, err := user.LookupId(strconv.FormatUint(uint64(sys.Uid), 10))
-			if err != nil {
-				return fmt.Errorf("error lookup owner for file %s: %w", filePath, err)
-			}
-
-			group, err := user.LookupGroupId(strconv.FormatUint(uint64(sys.Gid), 10))
-			if err != nil {
-				return fmt.Errorf("error lookup group for file %s: %w", filePath, err)
-			}
-
 			files = append(files, model.FileInfo{
 				Path:       filePath,
 				Size:       info.Size(),
 				ModifiedAt: info.ModTime(),
 				CreatedAt:  getFileCreateTime(info),
 				Permission: model.Permission{
-					Owner: owner.Username,
-					Group: group.Name,
+					Owner: "",
+					Group: "",
 					Mode: func() int {
 						mode := strconv.FormatInt(int64(info.Mode().Perm()), 8)
 						i, _ := strconv.Atoi(mode)

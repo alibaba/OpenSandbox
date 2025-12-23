@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !windows
-// +build !windows
+//go:build windows
+// +build windows
 
 package runtime
 
@@ -21,8 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
-	"syscall"
 	"time"
 
 	"github.com/beego/beego/v2/core/logs"
@@ -43,7 +41,7 @@ func (c *Controller) Interrupt(sessionID string) error {
 	}
 }
 
-// killPid sends SIGTERM followed by SIGKILL if needed.
+// killPid terminates a process on Windows.
 func (c *Controller) killPid(pid int) error {
 	process, err := os.FindProcess(pid)
 	if err != nil {
@@ -51,46 +49,22 @@ func (c *Controller) killPid(pid int) error {
 	}
 	logs.Warning("Attempting to terminate process %d", pid)
 
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		if strings.Contains(err.Error(), "already finished") {
-			return nil
-		}
-		logs.Warning("SIGTERM failed for pid %d: %v, trying SIGKILL", pid, err)
-	} else {
-		done := make(chan error, 1)
-		go func() {
-			_, err := process.Wait()
-			done <- err
-		}()
-
-		select {
-		case err := <-done:
-			if err == nil {
-				logs.Info("Process %d terminated gracefully", pid)
-				return nil
-			}
-		case <-time.After(3 * time.Second):
-			logs.Warning("Process %d did not terminate after SIGTERM, using SIGKILL", pid)
-		}
-	}
-
-	if err := process.Signal(syscall.SIGKILL); err != nil {
-		if strings.Contains(err.Error(), "already finished") {
-			return nil
-		}
+	if err := process.Kill(); err != nil {
 		return fmt.Errorf("failed to kill process %d: %w", pid, err)
 	}
 
-	for range 3 {
-		if err := process.Signal(syscall.Signal(0)); err != nil {
-			if strings.Contains(err.Error(), "already finished") ||
-				strings.Contains(err.Error(), "no such process") {
-				logs.Info("Process %d confirmed terminated", pid)
-				return nil
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
+	// Best-effort wait to reduce zombies; os.Process.Wait only works for child processes.
+	done := make(chan error, 1)
+	go func() {
+		_, err := process.Wait()
+		done <- err
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		logs.Warning("Process %d kill wait timed out", pid)
 	}
 
-	return fmt.Errorf("process %d might still be running", pid)
+	return nil
 }

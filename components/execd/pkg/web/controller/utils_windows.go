@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build !windows
-// +build !windows
+//go:build windows
+// +build windows
 
 package controller
 
@@ -21,13 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
-
-	"github.com/beego/beego/v2/core/logs"
+	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 )
@@ -76,44 +74,9 @@ func ChmodFile(file string, perms model.Permission) error {
 	return SetFileOwnership(abs, perms.Owner, perms.Group)
 }
 
-func SetFileOwnership(absPath string, owner string, group string) error {
-	uid := -1
-	if owner != "" {
-		userInfo, err := user.Lookup(owner)
-		if err != nil {
-			logs.Warning("Failed to lookup user %s: %v", owner, err)
-		} else {
-			uid, err = strconv.Atoi(userInfo.Uid)
-			if err != nil {
-				logs.Warning("Failed to convert uid for user %s: %v", owner, err)
-				uid = -1
-			}
-		}
-	}
-
-	gid := -1
-	if group != "" {
-		groupInfo, err := user.LookupGroup(group)
-		if err != nil {
-			logs.Warning("Failed to lookup group %s: %v", group, err)
-		} else {
-			gid, err = strconv.Atoi(groupInfo.Gid)
-			if err != nil {
-				logs.Warning("Failed to convert gid for group %s: %v", group, err)
-				gid = -1
-			}
-		}
-	}
-
-	if uid == -1 && gid == -1 {
-		uid = os.Getuid()
-		gid = os.Getgid()
-	}
-
-	if err := os.Chown(absPath, uid, gid); err != nil {
-		return fmt.Errorf("failed to set owner/group for %s: %w", absPath, err)
-	}
-
+// SetFileOwnership is a placeholder on Windows where POSIX ownership is not supported.
+func SetFileOwnership(_ string, _ string, _ string) error {
+	// TODO: add Windows ACL support if needed.
 	return nil
 }
 
@@ -176,16 +139,9 @@ func GetFileInfo(filePath string) (model.FileInfo, error) {
 		return model.FileInfo{}, fmt.Errorf("error accessing file %s: %w", filePath, err)
 	}
 
-	stat := fileInfo.Sys().(*syscall.Stat_t)
-
-	owner := strconv.FormatUint(uint64(stat.Uid), 10)
-	if ownerUser, err := user.LookupId(owner); err == nil {
-		owner = ownerUser.Username
-	}
-
-	group := strconv.FormatUint(uint64(stat.Gid), 10)
-	if groupInfo, err := user.LookupGroupId(group); err == nil {
-		group = groupInfo.Name
+	createdAt := getFileCreateTime(fileInfo)
+	if data, ok := fileInfo.Sys().(*syscall.Win32FileAttributeData); ok && data != nil {
+		createdAt = time.Unix(0, data.CreationTime.Nanoseconds())
 	}
 
 	mode := strconv.FormatInt(int64(fileInfo.Mode().Perm()), 8)
@@ -194,11 +150,14 @@ func GetFileInfo(filePath string) (model.FileInfo, error) {
 		Path:       absPath,
 		Size:       fileInfo.Size(),
 		ModifiedAt: fileInfo.ModTime(),
-		CreatedAt:  getFileCreateTime(fileInfo),
+		CreatedAt:  createdAt,
 		Permission: model.Permission{
-			Owner: owner,
-			Group: group,
-			Mode:  func() int { i, _ := strconv.Atoi(mode); return i }(),
+			Owner: "",
+			Group: "",
+			Mode: func() int {
+				i, _ := strconv.Atoi(mode)
+				return i
+			}(),
 		},
 	}, nil
 }

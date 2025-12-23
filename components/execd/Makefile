@@ -29,3 +29,15 @@ golint: fmt install-golint
 .PHONY: build
 build: vet ## Build the binary.
 	go build -o bin/execd main.go
+
+.PHONY: multi-build
+multi-build: vet ## Cross-compile for linux/windows/darwin amd64/arm64.
+	@mkdir -p bin
+	@for os in linux windows darwin; do \
+		for arch in amd64 arm64; do \
+			out=bin/execd-$${os}-$${arch}; \
+			[ "$${os}" = "windows" ] && out="$${out}.exe"; \
+			echo ">> building $${os}/$${arch} -> $${out}"; \
+			GOOS=$${os} GOARCH=$${arch} CGO_ENABLED=0 go build -o "$${out}" main.go || exit $$?; \
+		done; \
+	done

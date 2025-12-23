@@ -23,10 +23,11 @@ jobs:
           cd components/execd
           make golint
 
-      - name: Build
+      - name: Build (Multi platform compile)
         run: |
           cd components/execd
-          make build
+          # 
+          make multi-build
 
       - name: Run tests
         run: |
@@ -34,7 +35,14 @@ jobs:
           make test
 
   smoke:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -48,6 +56,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+      - name: Install make (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: choco install make -y
 
       - name: Build
         run: |
