@@ -134,6 +134,10 @@ class CreateSandboxRequest(BaseModel):
         description="The command to execute as the sandbox's entry process",
         example=["python", "/app/main.py"],
     )
+    extensions: Optional[Dict[str, str]] = Field(
+        None,
+        description="Opaque container for provider-specific or transient parameters not covered by the core API",
+    )
 
     class Config:
         populate_by_name = True
