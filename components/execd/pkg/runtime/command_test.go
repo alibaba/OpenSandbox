@@ -15,10 +15,17 @@
 package runtime
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	goruntime "runtime"
+
+	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 )
 
 func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
@@ -88,5 +95,133 @@ func TestReadFromPos_LongLine(t *testing.T) {
 	}
 	if got[0] != strings.TrimSuffix(longLine, "\n") {
 		t.Fatalf("long line mismatch: got %d chars want %d chars", len(got[0]), len(longLine)-1)
+	}
+}
+
+func TestRunCommand_Echo(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("bash not available on windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found in PATH")
+	}
+
+	c := NewController("", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		sessionID   string
+		stdoutLines []string
+		stderrLines []string
+		completeCh  = make(chan struct{}, 1)
+	)
+
+	req := &ExecuteCodeRequest{
+		Code:    `echo "hello"; echo "errline" 1>&2`,
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+		Hooks: ExecuteResultHook{
+			OnExecuteInit: func(s string) { sessionID = s },
+			OnExecuteStdout: func(s string) {
+				stdoutLines = append(stdoutLines, s)
+			},
+			OnExecuteStderr: func(s string) {
+				stderrLines = append(stderrLines, s)
+			},
+			OnExecuteError: func(err *execute.ErrorOutput) {
+				t.Fatalf("unexpected error hook: %+v", err)
+			},
+			OnExecuteComplete: func(_ time.Duration) {
+				completeCh <- struct{}{}
+			},
+		},
+	}
+
+	if err := c.runCommand(ctx, req); err != nil {
+		t.Fatalf("runCommand returned error: %v", err)
+	}
+
+	select {
+	case <-completeCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for completion hook")
+	}
+
+	if sessionID == "" {
+		t.Fatalf("expected session id to be set")
+	}
+	if len(stdoutLines) != 1 || stdoutLines[0] != "hello" {
+		t.Fatalf("unexpected stdout: %#v", stdoutLines)
+	}
+	if len(stderrLines) != 1 || stderrLines[0] != "errline" {
+		t.Fatalf("unexpected stderr: %#v", stderrLines)
+	}
+}
+
+func TestRunCommand_Error(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("bash not available on windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found in PATH")
+	}
+
+	c := NewController("", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		sessionID   string
+		gotErr      *execute.ErrorOutput
+		completeCh  = make(chan struct{}, 2)
+		stdoutLines []string
+		stderrLines []string
+	)
+
+	req := &ExecuteCodeRequest{
+		Code:    `echo "before"; exit 3`,
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+		Hooks: ExecuteResultHook{
+			OnExecuteInit:   func(s string) { sessionID = s },
+			OnExecuteStdout: func(s string) { stdoutLines = append(stdoutLines, s) },
+			OnExecuteStderr: func(s string) { stderrLines = append(stderrLines, s) },
+			OnExecuteError: func(err *execute.ErrorOutput) {
+				gotErr = err
+				completeCh <- struct{}{}
+			},
+			OnExecuteComplete: func(_ time.Duration) {
+				completeCh <- struct{}{}
+			},
+		},
+	}
+
+	if err := c.runCommand(ctx, req); err != nil {
+		t.Fatalf("runCommand returned error: %v", err)
+	}
+
+	select {
+	case <-completeCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timeout waiting for completion hook")
+	}
+
+	if sessionID == "" {
+		t.Fatalf("expected session id to be set")
+	}
+	if len(stdoutLines) == 0 || stdoutLines[0] != "before" {
+		t.Fatalf("unexpected stdout: %#v", stdoutLines)
+	}
+	if len(stderrLines) != 0 {
+		t.Fatalf("expected no stderr, got %#v", stderrLines)
+	}
+	if gotErr == nil {
+		t.Fatalf("expected error hook to be called")
+	}
+	if gotErr.EName != "CommandExecError" || gotErr.EValue != "3" {
+		t.Fatalf("unexpected error payload: %+v", gotErr)
 	}
 }
