@@ -58,6 +58,12 @@ The server uses a TOML configuration file to select and configure the underlying
 ```bash
 cp example.config.toml ~/.sandbox.toml
 ```
+**[optional] Create K8S configuration file：
+The K8S version of the Sandbox Operator needs to be deployed in the cluster, refer to the Kubernetes directory.
+```bash
+cp example.config.k8s.toml ~/.sandbox.toml
+cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
+```
 
 **[optional] Edit `~/.sandbox.toml`** for your environment:
 

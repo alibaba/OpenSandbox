@@ -25,6 +25,7 @@ dependencies = [
     "docker",
     "fastapi",
     "httpx",
+    "kubernetes",
     "pydantic",
     "pydantic-settings",
     "pyyaml",

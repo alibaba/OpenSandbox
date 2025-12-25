@@ -48,16 +48,3 @@ apparmor_profile = ""
 pids_limit = 512
 # Seccomp profile: empty string uses Docker default; set to an absolute path for a custom profile
 seccomp_profile = ""
-
-
-# -----------------------------------------------------------------
-# Kubernetes runtime example (uncomment when runtime.type = "kubernetes")
-# Exactly one runtime.* block should remain active at any time.
-#
-# [kubernetes]
-# # Path to kubeconfig for authenticating with the target cluster
-# kubeconfig_path = "~/.kube/config"
-# # Namespace that will host sandbox pods
-# namespace = "sandbox-system"
-# # Service account bound to sandbox workloads
-# service_account = "sandbox-runner"

@@ -104,6 +104,14 @@ class KubernetesRuntimeConfig(BaseModel):
         default=None,
         description="Service account bound to sandbox workloads.",
     )
+    workload_provider: Optional[str] = Field(
+        default=None,
+        description="Workload provider type. If not specified, uses the first registered provider.",
+    )
+    batchsandbox_template_file: Optional[str] = Field(
+        default=None,
+        description="Path to BatchSandbox CR YAML template file. Used when workload_provider is 'batchsandbox'.",
+    )
 
 
 class RuntimeConfig(BaseModel):

@@ -1,0 +1,22 @@
+# Example BatchSandbox CR template for OpenSandbox Kubernetes runtime
+# This is a complete BatchSandbox CR template that will be merged with runtime values
+#
+# Usage in config.toml:
+#   [kubernetes]
+#   batchsandbox_template_file = "/path/to/this/file.yaml"
+
+# Metadata template (will be merged with runtime-generated metadata)
+metadata:
+  annotations:
+    template-source: "batchsandbox-template.yaml"
+    managed-by: "opensandbox"
+
+# Spec template
+spec:
+  replicas: 1
+  # Pod template specification
+  template:
+    spec:
+      restartPolicy: Never
+      tolerations:
+        - operator: "Exists"

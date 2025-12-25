@@ -61,6 +61,12 @@ uv sync
 ```bash
 cp example.config.zh.toml ~/.sandbox.toml
 ```
+**[可选] 复制K8S版本配置文件：
+需要在集群中部署 K8S版本的Sandbox Operator，参考Kubernetes目录。
+```bash
+cp example.config.k8s.zh.toml ~/.sandbox.toml
+cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
+```
 
 **[可选] 编辑 `~/.sandbox.toml`** 适配您的环境：
 
