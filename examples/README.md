@@ -6,6 +6,7 @@ Examples for common OpenSandbox use cases. Each subdirectory contains runnable c
 - [**echo**](echo): Minimal example using Ubuntu image to execute a simple echo command
 - [**aio-sandbox**](aio-sandbox): Basic example for agent_sandbox
 - [**code-interpreter**](code-interpreter): Code Interpreter SDK singleton example
+- [**rl-training**](rl-training): Reinforcement learning training loop inside a sandbox
 - [**claude-code**](claude-code): Call Claude (Anthropic) API/CLI within the sandbox
 - [**iflow-cli**](iflow-cli): CLI invocation template for iFlow/custom HTTP LLM services
 - [**gemini-cli**](gemini-cli): Call Google Gemini within the sandbox
