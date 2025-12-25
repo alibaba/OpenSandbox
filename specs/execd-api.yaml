@@ -60,6 +60,96 @@ paths:
         "200":
           description: Server is alive and healthy
 
+  /code/contexts:
+    get:
+      summary: List active code execution contexts
+      description: |
+        Lists all active/available code execution contexts.
+        If `language` is provided, only contexts under that language/runtime are returned.
+      operationId: listContexts
+      tags:
+        - CodeInterpreting
+      parameters:
+        - name: language
+          in: query
+          required: false
+          description: Filter contexts by execution runtime (python, bash, java, etc.)
+          schema:
+            type: string
+          example: python
+      responses:
+        "200":
+          description: Array of active contexts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CodeContext"
+              examples:
+                python_only:
+                  summary: Context list filtered by language
+                  value:
+                    - id: session-abc123
+                      language: python
+                    - id: session-def456
+                      language: python
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      summary: Delete all contexts under a language
+      description: |
+        Deletes all existing code execution contexts under the specified `language`/runtime.
+        This is a bulk operation intended for code-interpreter context cleanup.
+      operationId: deleteContextsByLanguage
+      tags:
+        - CodeInterpreting
+      parameters:
+        - name: language
+          in: query
+          required: true
+          description: Target execution runtime whose contexts should be deleted
+          schema:
+            type: string
+          example: python
+      responses:
+        "200":
+          description: Contexts deleted successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /code/contexts/{context_id}:
+    delete:
+      summary: Delete a code execution context by id
+      description: |
+        Deletes an existing code execution context (session) by id.
+        This should terminate the underlying context thread/process and release resources.
+      operationId: deleteContext
+      tags:
+        - CodeInterpreting
+      parameters:
+        - name: context_id
+          in: path
+          required: true
+          description: Session/context id to delete
+          schema:
+            type: string
+          example: session-abc123
+      responses:
+        "200":
+          description: Context deleted successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /code/context:
     post:
       summary: Create code execution context
