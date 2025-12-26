@@ -1,22 +1,18 @@
 # CODEOWNERS for OpenSandbox
 # Rules are evaluated top-to-bottom; the last matching pattern wins.
 
+# Default owners (fallback for files not matched by specific rules)
+* @jwx0925 @hittyt @hellomypastor @Pangjiping @ninan-nn
+
 # Control plane (server)
-/server/ @Pangjiping @ninan-nn @jwx0925
+/server/ @Pangjiping @ninan-nn @jwx0925 @Generalwin
 
 # Runtime agent (execd) and sandbox images
 /components/execd/ @Pangjiping @hittyt
 /sandboxes/ @Pangjiping @ninan-nn @jwx0925 @hittyt @hellomypastor
 
 # SDKs
-/sdks/sandbox/python/ @ninan-nn @jwx0925 @hittyt
-/sdks/sandbox/kotlin/ @ninan-nn @jwx0925 @hittyt
-/sdks/code-interpreter/python/ @ninan-nn @jwx0925
-/sdks/code-interpreter/kotlin/ @ninan-nn @jwx0925
+/sdks/ @ninan-nn @jwx0925 @hittyt @hellomypastor
 
 # Specs and docs
-/specs/ @jwx0925 @hittyt
-/docs/ @jwx0925 @hittyt @hellomypastor @Pangjiping @ninan-nn
-
-# Default owners (fallback)
-* @jwx0925 @hittyt @hellomypastor @Pangjiping @ninan-nn
+/specs/ @jwx0925 @hittyt @ninan-nn
