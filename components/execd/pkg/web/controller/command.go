@@ -74,6 +74,70 @@ func (c *CodeInterpretingController) InterruptCommand() {
 	c.interrupt()
 }
 
+// GetCommandStatus returns command status by session id.
+func (c *CodeInterpretingController) GetCommandStatus() {
+	session := c.Ctx.Input.Param(":session")
+	if session == "" {
+		c.RespondError(http.StatusBadRequest, model.ErrorCodeInvalidRequest, "missing session")
+		return
+	}
+
+	status, err := codeRunner.GetCommandStatus(session)
+	if err != nil {
+		c.RespondError(http.StatusNotFound, model.ErrorCodeInvalidRequest, err.Error())
+		return
+	}
+
+	resp := model.CommandStatusResponse{
+		Session:  status.Session,
+		Running:  status.Running,
+		ExitCode: status.ExitCode,
+		Error:    status.Error,
+	}
+	if !status.StartedAt.IsZero() {
+		resp.StartedAt = status.StartedAt
+	}
+	if status.FinishedAt != nil {
+		resp.FinishedAt = status.FinishedAt
+	}
+
+	c.RespondSuccess(resp)
+}
+
+// GetCommandOutput returns accumulated stdout/stderr for a command session.
+func (c *CodeInterpretingController) GetCommandOutput() {
+	session := c.Ctx.Input.Param(":session")
+	if session == "" {
+		c.RespondError(http.StatusBadRequest, model.ErrorCodeInvalidRequest, "missing session")
+		return
+	}
+
+	output, err := codeRunner.GetCommandOutput(session)
+	if err != nil {
+		c.RespondError(http.StatusNotFound, model.ErrorCodeInvalidRequest, err.Error())
+		return
+	}
+
+	resp := model.CommandOutputResponse{
+		CommandStatusResponse: model.CommandStatusResponse{
+			Session:  output.Session,
+			Running:  output.Running,
+			ExitCode: output.ExitCode,
+			Error:    output.Error,
+		},
+		Stdout: output.Stdout,
+		Stderr: output.Stderr,
+	}
+	if !output.StartedAt.IsZero() {
+		resp.StartedAt = output.StartedAt
+	}
+	if output.FinishedAt != nil {
+		resp.FinishedAt = output.FinishedAt
+	}
+
+	c.RespondSuccess(resp)
+}
+
 func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.RunCommandRequest) *runtime.ExecuteCodeRequest {
 	if request.Background {
 		return &runtime.ExecuteCodeRequest{

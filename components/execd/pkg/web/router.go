@@ -77,6 +77,8 @@ func init() {
 
 	command := web.NewNamespace("/command",
 		web.NSRouter("", &controller.CodeInterpretingController{}, "post:RunCommand;delete:InterruptCommand"),
+		web.NSRouter("/status/:session", &controller.CodeInterpretingController{}, "get:GetCommandStatus"),
+		web.NSRouter("/output/:session", &controller.CodeInterpretingController{}, "get:GetCommandOutput"),
 	)
 
 	metric := web.NewNamespace("metrics",
