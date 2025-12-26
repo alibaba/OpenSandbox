@@ -49,7 +49,7 @@ class ConnectionConfig private constructor(
         private const val ENV_API_KEY = "OPEN_SANDBOX_API_KEY"
         private const val ENV_DOMAIN = "OPEN_SANDBOX_DOMAIN"
 
-        private const val DEFAULT_USER_AGENT = "OpenSandbox-Kotlin-SDK/1.0.0"
+        private const val DEFAULT_USER_AGENT = "OpenSandbox-Kotlin-SDK/1.0.1"
 
         @JvmStatic
         fun builder(): Builder = Builder()
