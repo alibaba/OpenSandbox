@@ -147,15 +147,6 @@ class CodeInterpreterTest {
     }
 
     @Test
-    fun `resume should delegate to sandbox`() {
-        every { sandbox.resume() } just Runs
-
-        codeInterpreter.resume()
-
-        verify { sandbox.resume() }
-    }
-
-    @Test
     fun `kill should delegate to sandbox`() {
         every { sandbox.kill() } just Runs
 

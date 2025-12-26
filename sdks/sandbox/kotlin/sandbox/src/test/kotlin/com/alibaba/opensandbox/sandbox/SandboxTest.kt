@@ -154,15 +154,6 @@ class SandboxTest {
     }
 
     @Test
-    fun `resume should delegate to sandboxService`() {
-        every { sandboxService.resumeSandbox(sandboxId) } just Runs
-
-        sandbox.resume()
-
-        verify { sandboxService.resumeSandbox(sandboxId) }
-    }
-
-    @Test
     fun `kill should delegate to sandboxService`() {
         every { sandboxService.killSandbox(sandboxId) } just Runs
 

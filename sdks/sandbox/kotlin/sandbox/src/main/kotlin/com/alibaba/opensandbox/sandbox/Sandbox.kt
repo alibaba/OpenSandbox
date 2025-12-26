@@ -140,6 +140,9 @@ class Sandbox internal constructor(
         @JvmStatic
         fun connector(): Connector = Connector()
 
+        @JvmStatic
+        fun resumer(): Resumer = Resumer()
+
         /**
          * Creates a sandbox instance with the provided configuration.
          *
@@ -255,7 +258,7 @@ class Sandbox internal constructor(
             connectionConfig: ConnectionConfig,
             healthCheck: ((Sandbox) -> Boolean)? = null,
         ): Sandbox {
-            logger.info("Connecting to existing sandbox: {}", sandboxId)
+            logger.info("Connecting to running sandbox: {}", sandboxId)
             val httpClientProvider = HttpClientProvider(connectionConfig)
             val factory = AdapterFactory(httpClientProvider)
 
@@ -297,6 +300,76 @@ class Sandbox internal constructor(
                         logger.error("Unexpected exception during sandbox connection", e)
                         throw SandboxInternalException(
                             message = "Failed to connect to sandbox: ${e.message}",
+                            cause = e,
+                        )
+                    }
+                }
+            }
+        }
+
+        /**
+         * Resumes a paused sandbox and waits until it becomes healthy.
+         *
+         * This method performs the following steps:
+         * 1. Calls the server-side resume operation to transition the sandbox back to RUNNING.
+         * 2. Re-resolves the execd endpoint (it may change across pause/resume on some backends).
+         * 3. Rebuilds service adapters bound to the endpoint.
+         * 4. Waits for readiness/health with polling until [resumeTimeout] elapses.
+         *
+         * @param sandboxId Sandbox ID to resume
+         * @param connectionConfig Connection configuration
+         * @param healthCheck Optional custom health check; falls back to [Sandbox.ping]
+         * @param resumeTimeout Max time to wait for the sandbox to become ready after resuming
+         * @param healthPollingInterval Polling interval for readiness/health check
+         * @return Resumed and ready Sandbox instance
+         * @throws SandboxException if resume or readiness check fails
+         */
+        private fun resume(
+            sandboxId: UUID,
+            connectionConfig: ConnectionConfig,
+            healthCheck: ((Sandbox) -> Boolean)? = null,
+            resumeTimeout: Duration,
+            healthPollingInterval: Duration,
+        ): Sandbox {
+            logger.info("Resume sandbox: {}", sandboxId)
+            val httpClientProvider = HttpClientProvider(connectionConfig)
+            val factory = AdapterFactory(httpClientProvider)
+
+            try {
+                val sandboxService = factory.createSandboxes()
+                sandboxService.resumeSandbox(sandboxId)
+
+                val execdEndpoint = sandboxService.getSandboxEndpoint(sandboxId, DEFAULT_EXECD_PORT)
+                val fileSystemService = factory.createFilesystem(execdEndpoint)
+                val commandService = factory.createCommands(execdEndpoint)
+                val metricsService = factory.createMetrics(execdEndpoint)
+                val healthService = factory.createHealth(execdEndpoint)
+
+                val sandbox =
+                    Sandbox(
+                        id = sandboxId,
+                        sandboxService = sandboxService,
+                        fileSystemService = fileSystemService,
+                        commandService = commandService,
+                        metricsService = metricsService,
+                        healthService = healthService,
+                        customHealthCheck = healthCheck,
+                        httpClientProvider = httpClientProvider,
+                    )
+
+                sandbox.checkReady(resumeTimeout, healthPollingInterval)
+
+                logger.info("Sandbox {} resumed", sandbox.id)
+
+                return sandbox
+            } catch (e: Exception) {
+                httpClientProvider.close()
+                when (e) {
+                    is SandboxException -> throw e
+                    else -> {
+                        logger.error("Unexpected exception during sandbox resume", e)
+                        throw SandboxInternalException(
+                            message = "Failed to resume sandbox: ${e.message}",
                             cause = e,
                         )
                     }
@@ -358,19 +431,6 @@ class Sandbox internal constructor(
     fun pause() {
         logger.info("Pausing sandbox: {}", id)
         sandboxService.pauseSandbox(id)
-    }
-
-    /**
-     * Resumes a previously paused sandbox.
-     *
-     * The sandbox will transition from PAUSED to RUNNING state and all
-     * suspended processes will be resumed.
-     *
-     * @throws SandboxException if resume operation fails
-     */
-    fun resume() {
-        logger.info("Resuming sandbox: {}", id)
-        sandboxService.resumeSandbox(id)
     }
 
     /**
@@ -473,11 +533,11 @@ class Sandbox internal constructor(
     }
 
     /**
-     * Checks if the sandbox is alive.
+     * Ping execd
      *
-     * @return `true` if the sandbox is healthy.
+     * @return `true` if execd is reachable and healthy.
      */
-    private fun ping(): Boolean {
+    fun ping(): Boolean {
         return healthService.ping(id)
     }
 
@@ -954,6 +1014,129 @@ class Sandbox internal constructor(
                 connectionConfig = connectionConfig ?: ConnectionConfig.builder().build(),
                 healthCheckPollingInterval = healthCheckPollingInterval,
                 healthCheck = healthCheck,
+            )
+        }
+    }
+
+    /**
+     * Fluent resumer for resuming paused sandbox instances.
+     *
+     * This class provides a type-safe, fluent interface for configuring connection parameters
+     * and readiness behavior when resuming an existing sandbox.
+     *
+     * ## Basic Usage
+     *
+     * ```kotlin
+     * val sandbox = Sandbox.resumer()
+     *     .sandboxId(existingSandboxId)
+     *     .resume()
+     * ```
+     *
+     * ## Advanced Configuration
+     *
+     * ```kotlin
+     * val sandbox = Sandbox.resumer()
+     *     .sandboxId(existingSandboxId)
+     *     .connectionConfig(ConnectionConfig.builder().apiKey("...").build())
+     *     .resumeTimeout(Duration.ofSeconds(60))
+     *     .healthCheckPollingInterval(Duration.ofMillis(200))
+     *     .healthCheck { it.isHealthy() }
+     *     .resume()
+     * ```
+     */
+    class Resumer internal constructor() {
+        /**
+         * Sandbox ID to resume
+         */
+        private var sandboxId: UUID? = null
+
+        /**
+         * Connection config
+         */
+        private var connectionConfig: ConnectionConfig? = null
+
+        /**
+         * Health check logic
+         */
+        private var healthCheck: ((Sandbox) -> Boolean)? = null
+
+        /**
+         * Max time to wait for the sandbox to become ready after resuming
+         */
+        private var resumeTimeout: Duration = Duration.ofSeconds(30)
+
+        /**
+         * Polling interval for readiness/health check while waiting for resume
+         */
+        private var healthCheckPollingInterval: Duration = Duration.ofMillis(200)
+
+        /**
+         * Sets the sandbox ID to resume.
+         *
+         * @param sandboxId UUID of the paused sandbox
+         * @return This resumer for method chaining
+         */
+        fun sandboxId(sandboxId: UUID): Resumer {
+            this.sandboxId = sandboxId
+            return this
+        }
+
+        /**
+         * Sets a custom health check used by [Sandbox.checkReady] after resuming.
+         *
+         * If not set, [Sandbox.ping] will be used.
+         */
+        fun healthCheck(healthCheck: (Sandbox) -> Boolean): Resumer {
+            this.healthCheck = healthCheck
+            return this
+        }
+
+        /**
+         * Sets the connection configuration used to talk to the Open Sandbox API.
+         */
+        fun connectionConfig(connectionConfig: ConnectionConfig): Resumer {
+            this.connectionConfig = connectionConfig
+            return this
+        }
+
+        /**
+         * Sets the max time to wait for readiness after the resume operation.
+         */
+        fun resumeTimeout(timeout: Duration): Resumer {
+            this.resumeTimeout = timeout
+            return this
+        }
+
+        /**
+         * Sets the polling interval used while waiting for readiness after resuming.
+         */
+        fun healthCheckPollingInterval(pollingInterval: Duration): Resumer {
+            this.healthCheckPollingInterval = pollingInterval
+            return this
+        }
+
+        /**
+         * Resumes the sandbox with the configured parameters.
+         *
+         * This method validates required configuration, performs the server-side resume,
+         * rebuilds service adapters, and waits for readiness.
+         *
+         * @return Resumed and ready Sandbox instance
+         * @throws InvalidArgumentException if sandboxId is missing
+         * @throws SandboxException if resume or readiness check fails
+         */
+        fun resume(): Sandbox {
+            val id =
+                sandboxId ?: throw InvalidArgumentException(
+                    message = "Sandbox ID must be specified",
+                )
+
+            return resume(
+                sandboxId = id,
+                connectionConfig = connectionConfig ?: ConnectionConfig.builder().build(),
+                healthCheck = healthCheck,
+                resumeTimeout = resumeTimeout,
+                healthPollingInterval = healthCheckPollingInterval,
             )
         }
     }

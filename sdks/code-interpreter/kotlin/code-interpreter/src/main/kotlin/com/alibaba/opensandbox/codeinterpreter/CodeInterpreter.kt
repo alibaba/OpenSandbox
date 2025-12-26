@@ -249,19 +249,6 @@ class CodeInterpreter internal constructor(
     }
 
     /**
-     * Resumes a previously paused code interpreter.
-     *
-     * The sandbox will transition from PAUSED to RUNNING state and all
-     * suspended processes will be resumed.
-     *
-     * @throws SandboxException if resume operation fails
-     */
-    fun resume() {
-        logger.info("Resuming code interpreter: {}", id)
-        sandbox.resume()
-    }
-
-    /**
      * This method sends a termination signal to the remote sandbox instance, causing it to stop immediately.
      * This is an irreversible operation.
      *
