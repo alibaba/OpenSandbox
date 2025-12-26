@@ -671,23 +671,19 @@ public class SandboxE2ETest extends BaseE2ETest {
     void testSandboxResume() throws InterruptedException {
         assertNotNull(sandbox);
 
-        sandbox.resume();
+        Sandbox resumedSandbox =
+                Sandbox.resumer()
+                        .sandboxId(sandbox.getId())
+                        .connectionConfig(sharedConnectionConfig)
+                        .resumeTimeout(Duration.ofMinutes(1))
+                        .healthCheckPollingInterval(Duration.ofSeconds(1))
+                        .resume();
 
         int pollCount = 0;
-        SandboxStatus finalStatus = null;
-        while (pollCount < 60) {
-            Thread.sleep(1000);
-            pollCount++;
-            SandboxInfo info = sandbox.getInfo();
-            SandboxStatus currentStatus = info.getStatus();
-            if ("Running".equals(currentStatus.getState())) {
-                finalStatus = currentStatus;
-                break;
-            }
-        }
+        SandboxStatus status = resumedSandbox.getInfo().getStatus();
 
-        assertNotNull(finalStatus, "Failed to get final status after resume operation");
-        assertEquals("Running", finalStatus.getState());
+        assertNotNull(status, "Failed to get final status after resume operation");
+        assertEquals("Running", status.getState());
 
         boolean healthy = false;
         for (int i = 0; i < 30; i++) {
