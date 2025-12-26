@@ -10,6 +10,7 @@ on:
         options:
           - execd
           - code-interpreter
+          - router
         default: 'execd'
       image_tag:
         description: 'Docker image tag'
@@ -19,6 +20,7 @@ on:
     tags:
       - 'docker/execd/**'
       - 'docker/code-interpreter/**'
+      - 'docker/router/**'
 
 jobs:
   publish:
@@ -77,6 +79,8 @@ jobs:
           
           if [ "$COMPONENT" == "execd" ]; then
             cd components/execd
+          elif [ "$COMPONENT" == "router" ]; then
+            cd components/router
           else
             cd sandboxes/$COMPONENT
           fi
