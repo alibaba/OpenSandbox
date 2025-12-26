@@ -73,6 +73,8 @@ func init() {
 	codeInterpreting := web.NewNamespace("/code",
 		web.NSRouter("", &controller.CodeInterpretingController{}, "post:RunCode;delete:InterruptCode"),
 		web.NSRouter("/context", &controller.CodeInterpretingController{}, "post:CreateContext"),
+		web.NSRouter("/contexts", &controller.CodeInterpretingController{}, "get:ListContexts;delete:DeleteContextsByLanguage"),
+		web.NSRouter("/contexts/:contextId", &controller.CodeInterpretingController{}, "delete:DeleteContext"),
 	)
 
 	command := web.NewNamespace("/command",

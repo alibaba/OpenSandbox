@@ -52,6 +52,7 @@ func (c *Controller) CreateContext(req *CreateContextRequest) (string, error) {
 	kernel := &jupyterKernel{
 		kernelID: session.Kernel.ID,
 		client:   client,
+		language: req.Language,
 	}
 	c.storeJupyterKernel(session.ID, kernel)
 
@@ -61,6 +62,45 @@ func (c *Controller) CreateContext(req *CreateContextRequest) (string, error) {
 	}
 
 	return session.ID, nil
+}
+
+func (c *Controller) DeleteContext(session string) error {
+	kernel := c.getJupyterKernel(session)
+	if kernel == nil {
+		return ErrContextNotFound
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.jupyterClient().DeleteSession(session)
+}
+
+func (c *Controller) ListContext(language string) ([]CodeContext, error) {
+	switch language {
+	case Command.String(), BackgroundCommand.String(), SQL.String():
+		return nil, fmt.Errorf("unsupported language context operation: %s", language)
+	case "":
+		return c.listAllContexts()
+	default:
+		return c.listLanguageContexts(Language(language))
+	}
+}
+
+func (c *Controller) DeleteLanguageContext(language Language) error {
+	contexts, err := c.listLanguageContexts(language)
+	if err != nil {
+		return err
+	}
+
+	client := c.jupyterClient()
+	for _, context := range contexts {
+		err := client.DeleteSession(context.ID)
+		if err != nil {
+			return fmt.Errorf("error deleting context %s: %w", context.ID, err)
+		}
+	}
+	return nil
 }
 
 func (c *Controller) newContextID() string {
@@ -112,16 +152,7 @@ func (c *Controller) createDefaultLanguageContext(language Language) error {
 
 // createContext performs the actual context creation workflow.
 func (c *Controller) createContext(request CreateContextRequest) (*jupyter.Client, *jupytersession.Session, error) {
-	httpClient := &http.Client{
-		Transport: &jupyter.AuthTransport{
-			Token: c.token,
-			Base:  http.DefaultTransport,
-		},
-	}
-
-	client := jupyter.NewClient(c.baseURL,
-		jupyter.WithToken(c.token),
-		jupyter.WithHTTPClient(httpClient))
+	client := c.jupyterClient()
 
 	kernel, err := c.searchKernel(client, request.Language)
 	if err != nil {
@@ -164,4 +195,65 @@ func (c *Controller) storeJupyterKernel(sessionID string, kernel *jupyterKernel)
 	defer c.mu.Unlock()
 
 	c.jupyterClientMap[sessionID] = kernel
+}
+
+func (c *Controller) jupyterClient() *jupyter.Client {
+	httpClient := &http.Client{
+		Transport: &jupyter.AuthTransport{
+			Token: c.token,
+			Base:  http.DefaultTransport,
+		},
+	}
+
+	return jupyter.NewClient(c.baseURL,
+		jupyter.WithToken(c.token),
+		jupyter.WithHTTPClient(httpClient))
+}
+
+func (c *Controller) listAllContexts() ([]CodeContext, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var contexts []CodeContext
+	for session, kernel := range c.jupyterClientMap {
+		if kernel != nil {
+			contexts = append(contexts, CodeContext{
+				ID:       session,
+				Language: kernel.language,
+			})
+		}
+	}
+
+	for language, defaultContext := range c.defaultLanguageJupyterSessions {
+		contexts = append(contexts, CodeContext{
+			ID:       defaultContext,
+			Language: language,
+		})
+	}
+
+	return contexts, nil
+}
+
+func (c *Controller) listLanguageContexts(language Language) ([]CodeContext, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var contexts []CodeContext
+	for session, kernel := range c.jupyterClientMap {
+		if kernel != nil && kernel.language == language {
+			contexts = append(contexts, CodeContext{
+				ID:       session,
+				Language: language,
+			})
+		}
+	}
+
+	if defaultContext := c.defaultLanguageJupyterSessions[language]; defaultContext != "" {
+		contexts = append(contexts, CodeContext{
+			ID:       defaultContext,
+			Language: language,
+		})
+	}
+
+	return contexts, nil
 }
