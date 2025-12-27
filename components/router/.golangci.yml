@@ -1,0 +1,320 @@
+run:
+  skip-dirs:
+    - vendor
+    - tests
+    - scripts
+  skip-files:
+    - .*/zz_generated.deepcopy.go
+    - .*/mock/*.go
+  tests: false
+  timeout: 10m
+linters-settings:
+  funlen:
+    lines: 500
+    statements: 200
+  gocyclo:
+    min-complexity: 40
+  gosimple:
+    checks: ["S1019", "S1002"]
+  staticcheck:
+    checks: ["SA4006"]
+  govet:
+    enable:
+      - asmdecl
+      - assign
+      - atomic
+      - atomicalign
+      - bools
+      - buildtag
+      - cgocall
+      - copylocks
+      - deepequalerrors
+      - errorsas
+      - findcall
+      - framepointer
+      - httpresponse
+      - ifaceassert
+      - lostcancel
+      - nilfunc
+      - nilness
+      - reflectvaluecompare
+      - shift
+      - sigchanyzer
+      - sortslice
+      - stdmethods
+      - stringintconv
+      - testinggoroutine
+      - tests
+      - unmarshal
+      - unreachable
+      - unsafeptr
+      - unusedresult
+      - printf
+    disable:
+      - composites
+      - loopclosure
+      - fieldalignment
+      - shadow
+      - structtag
+      - unusedwrite
+  errcheck:
+    exclude-functions:
+    - flag.Set
+    - os.Setenv
+    - os.Unsetenv
+    - logger.Sync
+    - fmt.Fprintf
+    - fmt.Fprintln
+    - (io.Closer).Close
+    - (io.ReadCloser).Close
+    - (k8s.io/client-go/tools/cache.SharedInformer).AddEventHandler
+  nestif:
+    # 复杂度大于32的认为阻塞
+    min-complexity: 32
+  goconst:
+    # Minimal length of string constant.
+    # Default: 3
+    min-len: 3
+    # Minimum occurrences of constant string count to trigger issue.
+    # Default: 3
+    min-occurrences: 3
+    # Ignore test files.
+    # Default: false
+    ignore-tests: true
+    match-constant: false
+    numbers: true
+    min: 2
+    max: 10
+    ignore-calls: true
+  gosec:
+    includes:
+      - G101 # Look for hard coded credentials
+      - G102 # Bind to all interfaces
+      - G103 # Audit the use of unsafe block
+      - G104 # Audit errors not checked
+      - G106 # Audit the use of ssh.InsecureIgnoreHostKey
+      - G107 # Url provided to HTTP request as taint input
+      - G108 # Profiling endpoint automatically exposed on /debug/pprof
+      - G109 # Potential Integer overflow made by strconv.Atoi result conversion to int16/32
+      - G110 # Potential DoS vulnerability via decompression bomb
+      - G111 # Potential directory traversal
+      - G112 # Potential slowloris attack
+      - G113 # Usage of Rat.SetString in math/big with an overflow (CVE-2022-23772)
+      # - G114 # Use of net/http serve function that has no support for setting timeouts
+      - G201 # SQL query construction using format string
+      - G202 # SQL query construction using string concatenation
+      - G203 # Use of unescaped data in HTML templates
+      #- G204 # Audit use of command execution
+      - G301 # Poor file permissions used when creating a directory
+      - G302 # Poor file permissions used with chmod
+      - G303 # Creating tempfile using a predictable path
+      - G304 # File path provided as taint input
+      - G305 # File traversal when extracting zip/tar archive
+      - G306 # Poor file permissions used when writing to a new file
+      - G307 # Deferring a method which returns an error
+      #- G401 # Detect the usage of DES, RC4, MD5 or SHA1
+      - G402 # Look for bad TLS connection settings
+      - G403 # Ensure minimum RSA key length of 2048 bits
+      - G404 # Insecure random number source (rand)
+      #- G501 # Import blocklist: crypto/md5
+      - G502 # Import blocklist: crypto/des
+      - G503 # Import blocklist: crypto/rc4
+      - G504 # Import blocklist: net/http/cgi
+      - G505 # Import blocklist: crypto/sha1
+      - G601 # Implicit memory aliasing of items from a range statement
+    # Exclude generated files
+    # Default: false
+    exclude-generated: true
+    # Filter out the issues with a lower severity than the given value.
+    # Valid options are: low, medium, high.
+    # Default: low
+    severity: medium
+    # Filter out the issues with a lower confidence than the given value.
+    # Valid options are: low, medium, high.
+    # Default: low
+    confidence: medium
+    # Concurrency value.
+    # Default: the number of logical CPUs usable by the current process.
+    concurrency: 12
+    # To specify the configuration of rules.
+    config:
+      # Globals are applicable to all rules.
+      global:
+        nosec: true
+        show-ignored: true
+        audit: true
+      G101:
+        # Regexp pattern for variables and constants to find.
+        # Default: "(?i)passwd|pass|password|pwd|secret|token|pw|apiKey|bearer|cred"
+        pattern: "(?i)example"
+        # If true, complain about all cases (even with low entropy).
+        # Default: false
+        ignore_entropy: false
+        # Maximum allowed entropy of the string.
+        # Default: "80.0"
+        entropy_threshold: "80.0"
+        per_char_threshold: "3.0"
+        truncate: "32"
+      G104:
+        fmt:
+          - Fscanf
+      G111:
+        # Regexp pattern to find potential directory traversal.
+        # Default: "http\\.Dir\\(\"\\/\"\\)|http\\.Dir\\('\\/'\\)"
+        pattern: "custom\\.Dir\\(\\)"
+      # Maximum allowed permissions mode for os.Mkdir and os.MkdirAll
+      # Default: "0750"
+      G301: "0750"
+      # Maximum allowed permissions mode for os.OpenFile and os.Chmod
+      # Default: "0600"
+      G302: "0600"
+      # Maximum allowed permissions mode for os.WriteFile and ioutil.WriteFile
+      # Default: "0600"
+      G306: "0600"
+  nilnil:
+    checked-types:
+      - ptr
+      - map
+      - chan
+  depguard:
+    rules:
+      prevent_unmaintained_packages:
+        list-mode: lax # allow unless explicitely denied
+        files:
+          - $all
+          - "!$test"
+        allow:
+          - $gostd
+          - path/filepath
+        deny:
+          - pkg: io/ioutil
+            desc: "replaced by io and os packages since Go 1.16: https://tip.golang.org/doc/go1.16#ioutil"
+          - pkg: path
+            desc: "replaced by cross-platform package path/filepath"
+  gci:
+    # Section configuration to compare against.
+    # Section names are case-insensitive and may contain parameters in ().
+    # The default order of sections is `standard > default > custom > blank > dot > alias > localmodule`,
+    # If `custom-order` is `true`, it follows the order of `sections` option.
+    # Default: ["standard", "default"]
+    sections:
+      - standard # Standard section: captures all standard packages.
+      - default # Default section: contains all imports that could not be matched to another section type.:
+      - prefix(github.com/org/project) # Custom section: groups all imports with the specified Prefix.
+      - blank # Blank section: contains all blank imports. This section is not present unless explicitly enabled.
+      - dot # Dot section: contains all dot imports. This section is not present unless explicitly enabled.
+      - localmodule # Local module section: contains all local packages. This section is not present unless explicitly enabled.
+    # Skip generated files.
+    # Default: true
+    skip-generated: true
+    # Enable custom order of sections.
+    # If `true`, make the section order the same as the order of `sections`.
+    # Default: false
+    custom-order: true
+    # Drops lexical ordering for custom sections.
+    # Default: false
+    no-lex-order: true
+  forbidigo:
+    forbid:
+      # Forbid spew Dump, whether it is called as function or method.
+      # Depends on analyze-types below.
+      - ^spew\.(ConfigState\.)?Dump$
+      # The package name might be ambiguous.
+      # The full import path can be used as additional criteria.
+      # Depends on analyze-types below.
+      - p: ^v1.Dump$
+        pkg: ^example.com/pkg/api/v1$
+
+linters:
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    # - cyclop
+    - decorder
+    - depguard
+    - errcheck
+    # - errchkjson
+    - errorlint
+    - forbidigo
+    # - forcetypeassert
+    - funlen
+    - ineffassign
+    - gocognit
+    - gocyclo
+    - goheader
+    - gomodguard
+    - goprintffuncname
+    - gosimple
+    - gosec
+    - grouper
+    - importas
+    - maintidx
+    - misspell
+    - nakedret
+    - nilerr
+    - nilnil
+    # - noctx
+    - nosprintfhostport
+    - paralleltest
+    - predeclared
+    # - promlinter
+    - reassign
+    - sqlclosecheck
+    - staticcheck
+    - tenv
+    - testpackage
+    - tparallel
+    # del
+    # - typecheck
+    - usestdlibvars
+    - nestif
+    - unused
+    - makezero
+    - govet
+    - goconst
+    - gci
+    # - rowserrcheck
+    # 1.59 version no new lints
+    # 1.58 version new lints
+    # - fatcontext
+    - canonicalheader
+    # 1.57 version new lints
+    - copyloopvar
+    - intrange
+    # 1.56 version new lints
+    - spancheck
+    # 1.55 version new lints
+    - gochecksumtype
+    - perfsprint
+    - sloglint
+    - testifylint
+    - mirror
+    - zerologlint
+    # 1.51 version new lints
+    - gocheckcompilerdirectives
+    # 1.50 version new lints
+    - testableexamples
+
+issues:
+  # Note: path identifiers are regular expressions, hence the \.go suffixes.
+  exclude-rules:
+    - path: main\.go
+      linters:
+        - forbidigo
+    - path: _test\.go
+      linters:
+        - dogsled
+        - errcheck
+        - goconst
+        - gosec
+        - ineffassign
+        - maintidx
+        - typecheck
+    - path: \.go$
+      text: "should have a package comment"
+    - path: \.go$
+      text: 'exported (.+) should have comment( \(or a comment on this block\))? or be unexported'
+    - path: \.go$
+      text: "fmt.Sprintf can be replaced with string concatenation"
