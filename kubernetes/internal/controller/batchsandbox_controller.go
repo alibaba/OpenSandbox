@@ -174,7 +174,7 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				},
 			})
 			obj := &sandboxv1alpha1.BatchSandbox{ObjectMeta: metav1.ObjectMeta{Namespace: batchSbx.Namespace, Name: batchSbx.Name}}
-			if err := r.Patch(ctx, obj, client.RawPatch(types.MergePatchType, []byte(patchData))); err != nil {
+			if err := r.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patchData)); err != nil {
 				klog.Errorf("failed to patch annotation %s, %s, body %s", AnnotationSandboxEndpoints, klog.KObj(batchSbx), patchData)
 				aggErrors = append(aggErrors, err)
 			}

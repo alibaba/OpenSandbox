@@ -22,12 +22,13 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/klog/v2"
+
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/config"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/manager"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/runtime"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/server"
 	store "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/storage"
-	"k8s.io/klog/v2"
 )
 
 func main() {

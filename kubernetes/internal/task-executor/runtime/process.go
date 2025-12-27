@@ -99,7 +99,7 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 	} else {
 		// Host Logic: Direct execution
 		// Use exec.Command instead of CommandContext to ensure the process survives
-		// after the HTTP request context is cancelled.
+		// after the HTTP request context is canceled.
 		cmd = exec.Command("/bin/sh", "-c", shimScript)
 		klog.InfoS("Starting host task", "name", task.Name, "cmd", safeCmdStr, "exitPath", exitPath)
 	}

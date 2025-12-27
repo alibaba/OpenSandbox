@@ -15,8 +15,9 @@
 package task_executor
 
 import (
-	"github.com/alibaba/OpenSandbox/sandbox-k8s/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/alibaba/OpenSandbox/sandbox-k8s/api/v1alpha1"
 )
 
 // Task represents the internal local task resource (LocalTask)

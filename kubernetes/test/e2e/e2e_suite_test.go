@@ -61,7 +61,7 @@ var _ = BeforeSuite(func() {
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager(Operator) image")
 
 	By("building the task-executor image")
-	makeArgs = []string{"docker-build-task-executor", fmt.Sprintf("IMG=%s", taskExecutorImage)}
+	makeArgs = []string{"docker-build-task-executor", fmt.Sprintf("TASK_EXECUTOR_IMG=%s", taskExecutorImage)}
 	if dockerBuildArgs != "" {
 		makeArgs = append(makeArgs, fmt.Sprintf("DOCKER_BUILD_ARGS=%s", dockerBuildArgs))
 	}

@@ -424,7 +424,7 @@ func (m *taskManager) reconcileLoop(ctx context.Context) {
 			klog.InfoS("reconcile loop stopped")
 			return
 		case <-ctx.Done():
-			klog.InfoS("reconcile loop context cancelled")
+			klog.InfoS("reconcile loop context canceled")
 			return
 		}
 	}

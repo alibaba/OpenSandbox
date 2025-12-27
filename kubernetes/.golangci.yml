@@ -1,0 +1,72 @@
+version: "2"
+run:
+  concurrency: 4
+  issues-exit-code: 1
+  tests: true
+
+# output configuration options
+output:
+  formats:
+    text:
+      path: stdout
+      colors: true
+linters:
+  default: none
+  enable:
+    - depguard
+    - govet
+    - ineffassign
+    - misspell
+    - unconvert
+    - unused
+  settings:
+    misspell:
+      # Correct spellings using locale preferences for US or UK.
+      # Default is to use a neutral variety of English.
+      # Setting locale to US will correct the British spelling of 'colour' to 'color'.
+      locale: US
+    depguard:
+      rules:
+        forbid-pkg-errors:
+          deny:
+          - pkg: "github.com/pkg/errors"
+            desc: Should be replaced with standard lib errors or fmt.Errorf
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - path: (.+)\.go$
+        text: 'SA1019: package github.com/golang/protobuf/proto is deprecated: Use the "google.golang.org/protobuf/proto" package instead'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - apis
+      - pkg/client
+      - vendor
+      - test
+formatters:
+  enable:
+  - gofmt
+  - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      # put imports beginning with prefix after 3rd-party packages;
+      local-prefixes: 
+      - github.com/alibaba/OpenSandbox/sandbox-k8s
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - apis
+      - pkg/client
+      - vendor
+      - test

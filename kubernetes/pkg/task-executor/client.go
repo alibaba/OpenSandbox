@@ -56,6 +56,9 @@ func (c *Client) Set(ctx context.Context, task *Task) (*Task, error) {
 	if task == nil {
 		// Delete request - send nil to clear tasks
 		req, err = http.NewRequestWithContext(ctx, "POST", c.baseURL+"/setTasks", bytes.NewReader([]byte("[]")))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
 	} else {
 		// Create/Update request
 		data, err := json.Marshal([]Task{*task})
@@ -63,10 +66,9 @@ func (c *Client) Set(ctx context.Context, task *Task) (*Task, error) {
 			return nil, fmt.Errorf("failed to marshal task: %w", err)
 		}
 		req, err = http.NewRequestWithContext(ctx, "POST", c.baseURL+"/setTasks", bytes.NewReader(data))
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
 	}
 
 	req.Header.Set("Content-Type", "application/json")
