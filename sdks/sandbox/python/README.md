@@ -107,7 +107,10 @@ await sandbox.renew(timedelta(minutes=30))
 await sandbox.pause()
 
 # Resume execution
-await sandbox.resume()
+sandbox = await Sandbox.resume(
+    sandbox_id=sandbox.id,
+    connection_config=config,
+)
 
 # Get current status
 info = await sandbox.get_info()

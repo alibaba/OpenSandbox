@@ -33,7 +33,6 @@ from opensandbox.exceptions import (
     SandboxException,
     SandboxInternalException,
     SandboxReadyTimeoutException,
-    SandboxUnhealthyException,
 )
 from opensandbox.models.sandboxes import (
     SandboxEndpoint,
@@ -228,18 +227,6 @@ class Sandbox:
         logger.info(f"Pausing sandbox: {self.id}")
         await self._sandbox_service.pause_sandbox(self.id)
 
-    async def resume(self) -> None:
-        """
-        Resume a previously paused sandbox.
-
-        The sandbox will transition from PAUSED to RUNNING state and all
-        suspended processes will be resumed.
-
-        Raises:
-            SandboxException: if resume operation fails
-        """
-        logger.info(f"Resuming sandbox: {self.id}")
-        await self._sandbox_service.resume_sandbox(self.id)
 
     async def kill(self) -> None:
         """
@@ -371,6 +358,7 @@ class Sandbox:
         connection_config: ConnectionConfig | None = None,
         health_check: Callable[["Sandbox"], Awaitable[bool]] | None = None,
         health_check_polling_interval: timedelta = timedelta(milliseconds=200),
+        skip_health_check: bool = False,
     ) -> "Sandbox":
         """
         Create a new sandbox instance with the specified configuration.
@@ -388,6 +376,7 @@ class Sandbox:
             connection_config: Connection configuration
             health_check: Custom async health check function
             health_check_polling_interval: Time between health check attempts
+            skip_health_check: If True, do NOT wait for sandbox readiness/health; returned instance may not be ready yet.
 
         Returns:
             Fully configured and ready Sandbox instance
@@ -408,10 +397,9 @@ class Sandbox:
         logger.info(
             f"Creating sandbox with image: {image.image} (timeout: {timeout.total_seconds()}s)"
         )
-
         factory = AdapterFactory(config)
-        sandbox_id = None
-        sandbox_service = None
+        sandbox_id: UUID | None = None
+        sandbox_service: Sandboxes | None = None
 
         try:
             sandbox_service = factory.create_sandbox_service()
@@ -441,26 +429,32 @@ class Sandbox:
                 custom_health_check=health_check,
             )
 
-            await sandbox.check_ready(ready_timeout, health_check_polling_interval)
+            if not skip_health_check:
+                await sandbox.check_ready(ready_timeout, health_check_polling_interval)
+                logger.info("Sandbox %s is ready", sandbox.id)
+            else:
+                logger.info(
+                    "Sandbox %s created (skip_health_check=true, sandbox may not be ready yet)",
+                    sandbox.id,
+                )
 
-            logger.info(f"Sandbox {sandbox.id} is ready")
             return sandbox
-
         except Exception as e:
-            # Cleanup on failure
             if sandbox_id and sandbox_service:
                 try:
                     logger.warning(
-                        f"Creation failed, cleaning up sandbox: {sandbox_id}"
+                        "Sandbox creation failed during initialization. Attempting to terminate zombie sandbox: %s",
+                        sandbox_id,
                     )
                     await sandbox_service.kill_sandbox(sandbox_id)
                 except Exception as cleanup_ex:
                     logger.error(
-                        f"Failed to cleanup sandbox {sandbox_id}", exc_info=cleanup_ex
+                        "Failed to clean up sandbox %s after creation failure",
+                        sandbox_id,
+                        exc_info=cleanup_ex,
                     )
 
             await config.close_transport_if_owned()
-
             if isinstance(e, SandboxException):
                 raise
             logger.error("Unexpected exception during sandbox creation", exc_info=e)
@@ -474,6 +468,9 @@ class Sandbox:
         sandbox_id: str | UUID,
         connection_config: ConnectionConfig | None = None,
         health_check: Callable[["Sandbox"], Awaitable[bool]] | None = None,
+        connect_timeout: timedelta = timedelta(seconds=30),
+        health_check_polling_interval: timedelta = timedelta(milliseconds=200),
+        skip_health_check: bool = False,
     ) -> "Sandbox":
         """
         Connect to an existing sandbox instance by ID.
@@ -482,6 +479,9 @@ class Sandbox:
             sandbox_id: ID of the existing sandbox
             connection_config: Connection configuration
             health_check: Custom async health check function
+            connect_timeout: Max time to wait for sandbox readiness/health after connecting.
+            health_check_polling_interval: Polling interval used while waiting for readiness/health.
+            skip_health_check: If True, do NOT wait for readiness/health; returned instance may not be ready yet.
 
         Returns:
             Connected Sandbox instance
@@ -499,7 +499,6 @@ class Sandbox:
         config = connection_config or ConnectionConfig()
 
         logger.info(f"Connecting to sandbox: {sandbox_id}")
-
         factory = AdapterFactory(config)
 
         try:
@@ -519,21 +518,93 @@ class Sandbox:
                 custom_health_check=health_check,
             )
 
-            if not await sandbox.is_healthy():
-                raise SandboxUnhealthyException(
-                    f"Failed to connect: sandbox {sandbox_id} is unhealthy"
+            if not skip_health_check:
+                await sandbox.check_ready(connect_timeout, health_check_polling_interval)
+            else:
+                logger.info(
+                    "Connected to sandbox %s (skip_health_check=true, sandbox may not be ready yet)",
+                    sandbox_id,
                 )
 
-            logger.info(f"Connected to sandbox {sandbox_id}")
+            logger.info("Connected to sandbox %s", sandbox_id)
             return sandbox
-
         except Exception as e:
             await config.close_transport_if_owned()
-
             if isinstance(e, SandboxException):
                 raise
             logger.error("Unexpected exception during sandbox connection", exc_info=e)
             raise SandboxInternalException(f"Failed to connect to sandbox: {e}") from e
+
+    @classmethod
+    async def resume(
+            cls,
+            sandbox_id: str | UUID,
+            connection_config: ConnectionConfig | None = None,
+            health_check: Callable[["Sandbox"], Awaitable[bool]] | None = None,
+            resume_timeout: timedelta = timedelta(seconds=30),
+            health_check_polling_interval: timedelta = timedelta(milliseconds=200),
+            skip_health_check: bool = False,
+    ) -> "Sandbox":
+        """
+        Resume a paused sandbox by ID and return a new, usable Sandbox instance.
+
+        This method performs the server-side resume operation, then re-resolves the execd endpoint
+        (which may change across pause/resume on some backends), rebuilds service adapters, and
+        optionally waits for readiness/health.
+
+        Args:
+            sandbox_id: ID of the paused sandbox to resume.
+            connection_config: Connection configuration (shared transport, headers, timeouts).
+            health_check: Optional custom async health check function (falls back to ping).
+            resume_timeout: Max time to wait for sandbox readiness/health after resuming.
+            health_check_polling_interval: Polling interval used while waiting for readiness/health.
+            skip_health_check: If True, do NOT wait for readiness/health; returned instance may not be ready yet.
+        """
+        if not sandbox_id:
+            raise InvalidArgumentException("Sandbox ID must be specified")
+
+        if isinstance(sandbox_id, str):
+            sandbox_id = UUID(sandbox_id)
+
+        config = connection_config or ConnectionConfig()
+
+        logger.info("Resuming sandbox: %s", sandbox_id)
+        factory = AdapterFactory(config)
+
+        try:
+            sandbox_service = factory.create_sandbox_service()
+            await sandbox_service.resume_sandbox(sandbox_id)
+
+            execd_endpoint = await sandbox_service.get_sandbox_endpoint(
+                sandbox_id, DEFAULT_EXECD_PORT
+            )
+
+            sandbox = cls(
+                sandbox_id=sandbox_id,
+                sandbox_service=sandbox_service,
+                filesystem_service=factory.create_filesystem_service(execd_endpoint),
+                command_service=factory.create_command_service(execd_endpoint),
+                health_service=factory.create_health_service(execd_endpoint),
+                metrics_service=factory.create_metrics_service(execd_endpoint),
+                connection_config=config,
+                custom_health_check=health_check,
+            )
+
+            if not skip_health_check:
+                await sandbox.check_ready(resume_timeout, health_check_polling_interval)
+            else:
+                logger.info(
+                    "Resumed sandbox %s (skip_health_check=true, sandbox may not be ready yet)",
+                    sandbox_id,
+                )
+
+            return sandbox
+        except Exception as e:
+            await config.close_transport_if_owned()
+            if isinstance(e, SandboxException):
+                raise
+            logger.error("Unexpected exception during sandbox resume", exc_info=e)
+            raise SandboxInternalException(f"Failed to resume sandbox: {e}") from e
 
     async def __aenter__(self) -> "Sandbox":
         """Async context manager entry."""
