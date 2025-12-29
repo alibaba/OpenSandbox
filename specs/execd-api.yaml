@@ -72,7 +72,7 @@ paths:
       parameters:
         - name: language
           in: query
-          required: false
+          required: true
           description: Filter contexts by execution runtime (python, bash, java, etc.)
           schema:
             type: string
@@ -124,6 +124,33 @@ paths:
           $ref: "#/components/responses/InternalServerError"
 
   /code/contexts/{context_id}:
+    get:
+      summary: Get a code execution context by id
+      description: |
+        Retrieves the details of an existing code execution context (session) by id.
+        Returns the context ID, language, and any associated metadata.
+      operationId: getContext
+      tags:
+        - CodeInterpreting
+      parameters:
+        - name: context_id
+          in: path
+          required: true
+          description: Session/context id to get
+          schema:
+            type: string
+          example: session-abc123
+      responses:
+        "200":
+          description: Context details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeContext"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
     delete:
       summary: Delete a code execution context by id
       description: |
