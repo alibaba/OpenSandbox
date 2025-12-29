@@ -139,7 +139,7 @@ wheels = [
 
 [[package]]
 name = "opensandbox"
-source = { editable = "../../../sdks/sandbox/python" }
+source = { editable = "../../sdks/sandbox/python" }
 dependencies = [
     { name = "attrs" },
     { name = "httpx" },
@@ -167,7 +167,7 @@ dev = [
 
 [[package]]
 name = "opensandbox-code-interpreter"
-source = { editable = "../../../sdks/code-interpreter/python" }
+source = { editable = "../../sdks/code-interpreter/python" }
 dependencies = [
     { name = "opensandbox" },
     { name = "pydantic" },
@@ -175,7 +175,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "opensandbox", editable = "../../../sdks/sandbox/python" },
+    { name = "opensandbox", editable = "../../sdks/sandbox/python" },
     { name = "pydantic", specifier = ">=2.0.0,<3.0" },
 ]
 
@@ -210,8 +210,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "opensandbox", editable = "../../../sdks/sandbox/python" },
-    { name = "opensandbox-code-interpreter", editable = "../../../sdks/code-interpreter/python" },
+    { name = "opensandbox", editable = "../../sdks/sandbox/python" },
+    { name = "opensandbox-code-interpreter", editable = "../../sdks/code-interpreter/python" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },

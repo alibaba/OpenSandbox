@@ -34,7 +34,6 @@ from datetime import timedelta
 from uuid import UUID
 
 import pytest
-from tests.base_e2e_test import create_connection_config, get_sandbox_image
 from code_interpreter import CodeInterpreter
 from code_interpreter.models.code import SupportedLanguage
 from opensandbox import Sandbox
@@ -50,6 +49,8 @@ from opensandbox.models.execd import (
     OutputMessage,
 )
 from opensandbox.models.sandboxes import SandboxImageSpec
+
+from tests.base_e2e_test import create_connection_config, get_sandbox_image
 
 logger = logging.getLogger(__name__)
 
@@ -189,10 +190,10 @@ class TestCodeInterpreterE2E:
         assert code_interpreter.metrics is not None
         logger.info("✓ All service components are accessible")
 
-        assert await code_interpreter.is_healthy() is True
+        assert await code_interpreter.sandbox.is_healthy() is True
         logger.info("✓ CodeInterpreter is healthy")
 
-        info = await code_interpreter.get_info()
+        info = await code_interpreter.sandbox.get_info()
         assert str(code_interpreter.id) == str(info.id)
         assert info.status.state == "Running"
         logger.info(
@@ -201,13 +202,13 @@ class TestCodeInterpreterE2E:
             info.created_at,
         )
 
-        endpoint = await code_interpreter.get_endpoint(DEFAULT_EXECD_PORT)
+        endpoint = await code_interpreter.sandbox.get_endpoint(DEFAULT_EXECD_PORT)
         assert endpoint is not None
         assert endpoint.endpoint is not None
         _assert_endpoint_has_port(endpoint.endpoint, DEFAULT_EXECD_PORT)
         logger.info("✓ CodeInterpreter endpoint: %s", endpoint.endpoint)
 
-        metrics = await code_interpreter.get_metrics()
+        metrics = await code_interpreter.sandbox.get_metrics()
         assert metrics is not None
         assert metrics.cpu_count > 0
         assert 0.0 <= metrics.cpu_used_percentage <= 100.0
@@ -226,10 +227,10 @@ class TestCodeInterpreterE2E:
         )
 
         # Renewal through CodeInterpreter (extend expiration time)
-        await code_interpreter.renew(timedelta(minutes=5))
+        await code_interpreter.sandbox.renew(timedelta(minutes=5))
         logger.info("✓ CodeInterpreter expiration renewed")
 
-        renewed_info = await code_interpreter.get_info()
+        renewed_info = await code_interpreter.sandbox.get_info()
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
         remaining = renewed_info.expires_at - now
         assert remaining > timedelta(minutes=3)

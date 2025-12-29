@@ -25,7 +25,6 @@ from io import BytesIO
 from uuid import UUID
 
 import pytest
-from tests.base_e2e_test import create_connection_config, get_sandbox_image
 from opensandbox import Sandbox
 from opensandbox.models.execd import (
     ExecutionComplete,
@@ -44,6 +43,8 @@ from opensandbox.models.filesystem import (
     WriteEntry,
 )
 from opensandbox.models.sandboxes import SandboxImageSpec
+
+from tests.base_e2e_test import create_connection_config, get_sandbox_image
 
 logger = logging.getLogger(__name__)
 
@@ -788,7 +789,13 @@ class TestSandboxE2E:
         logger.info("=" * 80)
 
         logger.info("Requesting sandbox resume...")
-        await sandbox.resume()
+        resumed = await Sandbox.resume(
+            sandbox_id=sandbox.id,
+            connection_config=TestSandboxE2E.connection_config,
+        )
+        # Replace the class-held instance so subsequent operations/teardown use the resumed instance.
+        TestSandboxE2E.sandbox = resumed
+        sandbox = resumed
 
         start_time = time.time()
         poll_count = 0
@@ -818,6 +825,13 @@ class TestSandboxE2E:
                 break
             await asyncio.sleep(1)
         assert healthy is True, "Sandbox should be healthy after resume"
+
+        # Minimal smoke check: after resume, the existing Sandbox instance should still be usable.
+        # This helps validate that SDK re-bound its execd adapters (endpoint may change across resume).
+        echo = await sandbox.commands.run("echo resume-ok")
+        assert echo.error is None
+        assert len(echo.logs.stdout) == 1
+        assert echo.logs.stdout[0].text == "resume-ok"
 
         elapsed_time = (time.time() - start_time) * 1000
         logger.info(f"✓ Sandbox resume completed in {elapsed_time:.2f} ms")
