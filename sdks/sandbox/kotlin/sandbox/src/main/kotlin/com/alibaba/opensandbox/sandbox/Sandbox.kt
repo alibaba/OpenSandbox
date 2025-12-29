@@ -171,6 +171,7 @@ class Sandbox internal constructor(
             healthCheck: ((Sandbox) -> Boolean)?,
             timeout: Duration,
             healthCheckPollingInterval: Duration,
+            skipHealthCheck: Boolean,
             initAction: (Sandboxes) -> InitializationResult,
         ): Sandbox {
             logger.info("Starting {} operation", operationName)
@@ -204,8 +205,16 @@ class Sandbox internal constructor(
                         httpClientProvider = httpClientProvider,
                     )
 
-                sandbox.checkReady(timeout, healthCheckPollingInterval)
-                logger.info("{} operation completed for sandbox {}", operationName, sandboxId)
+                if (!skipHealthCheck) {
+                    sandbox.checkReady(timeout, healthCheckPollingInterval)
+                    logger.info("{} operation completed for sandbox {}", operationName, sandboxId)
+                } else {
+                    logger.info(
+                        "{} operation completed for sandbox {} (skipHealthCheck=true, sandbox may not be ready yet)",
+                        operationName,
+                        sandboxId,
+                    )
+                }
 
                 return sandbox
             } catch (e: Exception) {
@@ -265,6 +274,7 @@ class Sandbox internal constructor(
             healthCheck: ((Sandbox) -> Boolean)? = null,
             healthCheckPollingInterval: Duration,
             extensions: Map<String, String>,
+            skipHealthCheck: Boolean,
         ): Sandbox {
             return initializeSandbox(
                 operationName = "create sandbox with image ${imageSpec.image} (timeout: ${timeout.seconds}s)",
@@ -272,6 +282,7 @@ class Sandbox internal constructor(
                 healthCheck = healthCheck,
                 timeout = readyTimeout,
                 healthCheckPollingInterval = healthCheckPollingInterval,
+                skipHealthCheck = skipHealthCheck,
             ) { sandboxService ->
                 val response =
                     sandboxService.createSandbox(
@@ -303,6 +314,7 @@ class Sandbox internal constructor(
             healthCheck: ((Sandbox) -> Boolean)? = null,
             connectTimeout: Duration,
             healthCheckPollingInterval: Duration,
+            skipHealthCheck: Boolean,
         ): Sandbox {
             return initializeSandbox(
                 operationName = "connect to sandbox $sandboxId",
@@ -310,6 +322,7 @@ class Sandbox internal constructor(
                 healthCheck = healthCheck,
                 timeout = connectTimeout,
                 healthCheckPollingInterval = healthCheckPollingInterval,
+                skipHealthCheck = skipHealthCheck,
             ) { _ ->
                 InitializationResult.ExistingSandbox(sandboxId)
             }
@@ -338,6 +351,7 @@ class Sandbox internal constructor(
             healthCheck: ((Sandbox) -> Boolean)? = null,
             resumeTimeout: Duration,
             healthCheckPollingInterval: Duration,
+            skipHealthCheck: Boolean,
         ): Sandbox {
             return initializeSandbox(
                 operationName = "resume sandbox $sandboxId",
@@ -345,6 +359,7 @@ class Sandbox internal constructor(
                 healthCheck = healthCheck,
                 timeout = resumeTimeout,
                 healthCheckPollingInterval = healthCheckPollingInterval,
+                skipHealthCheck = skipHealthCheck,
             ) { sandboxService ->
                 sandboxService.resumeSandbox(sandboxId)
                 InitializationResult.ExistingSandbox(sandboxId)
@@ -568,6 +583,13 @@ class Sandbox internal constructor(
         private var healthCheckPollingInterval: Duration = Duration.ofMillis(200)
 
         /**
+         * When true, do NOT wait for sandbox readiness/health during [connect].
+         *
+         * Default is false (wait until ready).
+         */
+        private var skipHealthCheck: Boolean = false
+
+        /**
          * Sets the sandbox ID to connect to.
          *
          * @param sandboxId UUID string of the existing sandbox
@@ -606,6 +628,14 @@ class Sandbox internal constructor(
         }
 
         /**
+         * Skip readiness/health check during [connect]. The returned sandbox may not be ready yet.
+         */
+        fun skipHealthCheck(skip: Boolean = true): Connector {
+            this.skipHealthCheck = skip
+            return this
+        }
+
+        /**
          * Connects to the existing sandbox with the configured parameters.
          *
          * This method performs the following steps:
@@ -629,6 +659,7 @@ class Sandbox internal constructor(
                 healthCheck = healthCheck,
                 connectTimeout = connectTimeout,
                 healthCheckPollingInterval = healthCheckPollingInterval,
+                skipHealthCheck = skipHealthCheck,
             )
         }
     }
@@ -712,6 +743,13 @@ class Sandbox internal constructor(
         private var readyTimeout: Duration = Duration.ofSeconds(30)
         private var healthCheckPollingInterval: Duration = Duration.ofMillis(200)
         private var healthCheck: ((Sandbox) -> Boolean)? = null
+
+        /**
+         * When true, do NOT wait for sandbox readiness/health during [build].
+         *
+         * Default is false (wait until ready).
+         */
+        private var skipHealthCheck: Boolean = false
 
         /**
          * Connection config
@@ -975,6 +1013,14 @@ class Sandbox internal constructor(
             return this
         }
 
+        /**
+         * Skip readiness/health check during [build]. The returned sandbox may not be ready yet.
+         */
+        fun skipHealthCheck(skip: Boolean = true): Builder {
+            this.skipHealthCheck = skip
+            return this
+        }
+
         fun connectionConfig(connectionConfig: ConnectionConfig): Builder {
             this.connectionConfig = connectionConfig
             return this
@@ -1016,6 +1062,7 @@ class Sandbox internal constructor(
                 connectionConfig = connectionConfig ?: ConnectionConfig.builder().build(),
                 healthCheckPollingInterval = healthCheckPollingInterval,
                 healthCheck = healthCheck,
+                skipHealthCheck = skipHealthCheck,
             )
         }
     }
@@ -1073,6 +1120,13 @@ class Sandbox internal constructor(
         private var healthCheckPollingInterval: Duration = Duration.ofMillis(200)
 
         /**
+         * When true, do NOT wait for sandbox readiness/health during [resume].
+         *
+         * Default is false (wait until ready).
+         */
+        private var skipHealthCheck: Boolean = false
+
+        /**
          * Sets the sandbox ID to resume.
          *
          * @param sandboxId UUID of the paused sandbox
@@ -1118,6 +1172,14 @@ class Sandbox internal constructor(
         }
 
         /**
+         * Skip readiness/health check during [resume]. The returned sandbox may not be ready yet.
+         */
+        fun skipHealthCheck(skip: Boolean = true): Resumer {
+            this.skipHealthCheck = skip
+            return this
+        }
+
+        /**
          * Resumes the sandbox with the configured parameters.
          *
          * This method validates required configuration, performs the server-side resume,
@@ -1139,6 +1201,7 @@ class Sandbox internal constructor(
                 healthCheck = healthCheck,
                 resumeTimeout = resumeTimeout,
                 healthCheckPollingInterval = healthCheckPollingInterval,
+                skipHealthCheck = skipHealthCheck,
             )
         }
     }
