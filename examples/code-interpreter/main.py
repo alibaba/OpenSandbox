@@ -110,7 +110,7 @@ async def main() -> None:
         if ts_exec.error:
             print(f"[TypeScript error] {ts_exec.error.name}: {ts_exec.error.value}")
 
-        await interpreter.kill()
+        await sandbox.kill()
 
 
 if __name__ == "__main__":
