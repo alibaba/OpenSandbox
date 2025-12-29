@@ -18,7 +18,6 @@ Synchronous Code Interpreter SDK.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from opensandbox.constants import DEFAULT_EXECD_PORT
@@ -26,11 +25,6 @@ from opensandbox.exceptions import (
     InvalidArgumentException,
     SandboxException,
     SandboxInternalException,
-)
-from opensandbox.models.sandboxes import (
-    SandboxEndpoint,
-    SandboxInfo,
-    SandboxMetrics,
 )
 from opensandbox.sync.sandbox import SandboxSync
 
@@ -54,8 +48,8 @@ class CodeInterpreterSync:
 
     - **Blocking**: Do not call these methods directly from an asyncio event loop thread.
       If you need non-blocking behavior, prefer the async :class:`~code_interpreter.code_interpreter.CodeInterpreter`.
-    - **Lifecycle**: Remote lifecycle is owned by the underlying sandbox. This class delegates
-      pause/resume/kill/renew/metrics to the sandbox.
+    - **Lifecycle**: Remote lifecycle is owned by the underlying sandbox; call methods on
+      ``interpreter.sandbox`` for pause/resume/kill/renew/metrics/info/endpoints.
 
     Usage Example:
 
@@ -152,107 +146,6 @@ class CodeInterpreterSync:
             Service for advanced code execution with session support
         """
         return self._code_service
-
-    def get_endpoint(self, port: int) -> SandboxEndpoint:
-        """
-        Gets a specific network endpoint for the underlying sandbox.
-
-        Args:
-            port: The port number to get the endpoint for
-
-        Returns:
-            Endpoint information including host, port, and connection details
-
-        Raises:
-            SandboxException: If endpoint cannot be retrieved
-        """
-        return self._sandbox.get_endpoint(port)
-
-    def get_info(self) -> SandboxInfo:
-        """
-        Gets the current status of this sandbox.
-
-        Returns:
-            Current sandbox status including state and metadata
-
-        Raises:
-            SandboxException: If status cannot be retrieved
-        """
-        return self._sandbox.get_info()
-
-    def get_metrics(self) -> SandboxMetrics:
-        """
-        Gets the current resource usage metrics for the underlying sandbox.
-
-        Returns:
-            Current sandbox metrics including CPU, memory, and I/O statistics
-
-        Raises:
-            SandboxException: If metrics cannot be retrieved
-        """
-        return self._sandbox.get_metrics()
-
-    def renew(self, timeout: timedelta | int) -> None:
-        """
-        Renew the sandbox expiration time to delay automatic termination.
-
-        Args:
-            timeout: Duration to add to the current time to set the new expiration.
-                Can be timedelta or seconds as int.
-
-        Raises:
-            SandboxException: If the operation fails
-        """
-        if isinstance(timeout, int):
-            timeout = timedelta(seconds=timeout)
-        logger.info(
-            "Renew code interpreter %s timeout, estimated expiration to %s",
-            self.id,
-            datetime.now(timezone.utc) + timeout,
-        )
-        self._sandbox.renew(timeout)
-
-    def pause(self) -> None:
-        """
-        Pauses the sandbox while preserving its state.
-
-        Raises:
-            SandboxException: If pause operation fails
-        """
-        logger.info("Pausing code interpreter: %s", self.id)
-        self._sandbox.pause()
-
-    def resume(self) -> None:
-        """
-        Resumes a previously paused sandbox.
-
-        Raises:
-            SandboxException: If resume operation fails
-        """
-        logger.info("Resuming code interpreter: %s", self.id)
-        self._sandbox.resume()
-
-    def kill(self) -> None:
-        """
-        Terminate the remote sandbox instance (irreversible).
-
-        Note: This method does NOT close the local `SandboxSync` object resources (like connection pools).
-        You should call `sandbox().close()` or use the sync context manager on the sandbox to clean up.
-
-        Raises:
-            SandboxException: If termination fails
-        """
-        logger.info("Killing code interpreter: %s", self.id)
-        self._sandbox.kill()
-
-    def is_healthy(self) -> bool:
-        """
-        Checks if the code interpreter and its underlying sandbox are healthy and responsive.
-
-        Returns:
-            True if sandbox is healthy, False otherwise
-        """
-        return self._sandbox.is_healthy()
 
     @classmethod
     def create(cls, sandbox: SandboxSync) -> "CodeInterpreterSync":
