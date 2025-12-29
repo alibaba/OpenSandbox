@@ -73,6 +73,22 @@ class CodesSync(Protocol):
         """
         ...
 
+    def get_context(self, context_id: str) -> CodeContextSync:
+        """Get an existing execution context by id (blocking)."""
+        ...
+
+    def list_contexts(self, language: str) -> list[CodeContextSync]:
+        """List active contexts under a given language/runtime (blocking)."""
+        ...
+
+    def delete_context(self, context_id: str) -> None:
+        """Delete an execution context by id (blocking)."""
+        ...
+
+    def delete_contexts(self, language: str) -> None:
+        """Delete all contexts under a language/runtime (blocking)."""
+        ...
+
     def run(
         self,
         code: str,

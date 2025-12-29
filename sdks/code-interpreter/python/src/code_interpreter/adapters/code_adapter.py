@@ -167,6 +167,71 @@ class CodesAdapter(Codes):
             logger.error("Failed to create context", exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
+    async def get_context(self, context_id: str) -> CodeContext:
+        try:
+            from opensandbox.api.execd.api.code_interpreting import get_context
+            from opensandbox.api.execd.models.code_context import (
+                CodeContext as ApiCodeContext,
+            )
+
+            client = await self._get_client()
+            response_obj = await get_context.asyncio_detailed(
+                client=client,
+                context_id=context_id,
+            )
+            handle_api_error(response_obj, "Get code context")
+            parsed = require_parsed(response_obj, ApiCodeContext, "Get code context")
+            return CodeExecutionConverter.from_api_code_context(parsed)
+        except Exception as e:
+            logger.error("Failed to get context", exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
+    async def list_contexts(self, language: str) -> list[CodeContext]:
+        try:
+            from opensandbox.api.execd.api.code_interpreting import list_contexts
+
+            client = await self._get_client()
+            response_obj = await list_contexts.asyncio_detailed(
+                client=client,
+                language=language,
+            )
+            handle_api_error(response_obj, "List code contexts")
+            parsed_list = require_parsed(response_obj, list, "List code contexts")
+            return [CodeExecutionConverter.from_api_code_context(c) for c in parsed_list]
+        except Exception as e:
+            logger.error("Failed to list contexts", exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
+    async def delete_context(self, context_id: str) -> None:
+        try:
+            from opensandbox.api.execd.api.code_interpreting import delete_context
+
+            client = await self._get_client()
+            response_obj = await delete_context.asyncio_detailed(
+                client=client,
+                context_id=context_id,
+            )
+            handle_api_error(response_obj, "Delete code context")
+        except Exception as e:
+            logger.error("Failed to delete context", exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
+    async def delete_contexts(self, language: str) -> None:
+        try:
+            from opensandbox.api.execd.api.code_interpreting import (
+                delete_contexts_by_language,
+            )
+
+            client = await self._get_client()
+            response_obj = await delete_contexts_by_language.asyncio_detailed(
+                client=client,
+                language=language,
+            )
+            handle_api_error(response_obj, "Delete code contexts by language")
+        except Exception as e:
+            logger.error("Failed to delete contexts", exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
     async def run(
         self,
         code: str,
