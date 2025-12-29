@@ -52,6 +52,26 @@ class CodesAdapter(
     private val api =
         CodeInterpretingApi("${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}", httpClientProvider.httpClient)
 
+    override fun getContext(id: String): CodeContext {
+        try {
+            val result = api.getContext(id)
+            return result.toCodeContext()
+        } catch (e: Exception) {
+            logger.error("Failed to get context", e)
+            throw e.toSandboxException()
+        }
+    }
+
+    override fun listContexts(language: String): List<CodeContext> {
+        try {
+            val list = api.listContexts(language)
+            return list.map { it.toCodeContext() }
+        } catch (e: Exception) {
+            logger.error("Failed to list contexts", e)
+            throw e.toSandboxException()
+        }
+    }
+
     override fun createContext(language: String): CodeContext {
         try {
             val request = ApiCodeContextRequest(language = language)
@@ -59,6 +79,24 @@ class CodesAdapter(
             return result.toCodeContext()
         } catch (e: Exception) {
             logger.error("Failed to create context", e)
+            throw e.toSandboxException()
+        }
+    }
+
+    override fun deleteContext(id: String) {
+        try {
+            api.deleteContext(id)
+        } catch (e: Exception) {
+            logger.error("Failed to delete context", e)
+            throw e.toSandboxException()
+        }
+    }
+
+    override fun deleteContexts(language: String) {
+        try {
+            deleteContexts(language)
+        } catch (e: Exception) {
+            logger.error("Failed to delete contexts", e)
             throw e.toSandboxException()
         }
     }
