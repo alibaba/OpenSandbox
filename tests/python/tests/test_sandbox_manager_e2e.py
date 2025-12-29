@@ -30,14 +30,14 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from opensandbox.config import ConnectionConfig
-
-from tests.base_e2e_test import create_connection_config, get_sandbox_image
 from opensandbox import Sandbox, SandboxManager
+from opensandbox.config import ConnectionConfig
 from opensandbox.models.sandboxes import (
     SandboxFilter,
     SandboxImageSpec,
 )
+
+from tests.base_e2e_test import create_connection_config, get_sandbox_image
 
 logger = logging.getLogger(__name__)
 

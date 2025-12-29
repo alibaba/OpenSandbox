@@ -27,7 +27,6 @@ from io import BytesIO
 from uuid import UUID
 
 import pytest
-from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 from opensandbox import SandboxSync
 from opensandbox.models.execd import (
     ExecutionComplete,
@@ -45,6 +44,8 @@ from opensandbox.models.filesystem import (
     WriteEntry,
 )
 from opensandbox.models.sandboxes import SandboxImageSpec
+
+from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 
 logger = logging.getLogger(__name__)
 
@@ -670,7 +671,12 @@ class TestSandboxE2ESync:
         logger.info("TEST 6: Testing sandbox resume operation (sync)")
         logger.info("=" * 80)
 
-        sandbox.resume()
+        resumed = SandboxSync.resume(
+            sandbox_id=sandbox.id,
+            connection_config=TestSandboxE2ESync.connection_config,
+        )
+        TestSandboxE2ESync.sandbox = resumed
+        sandbox = resumed
 
         poll_count = 0
         final_status = None
@@ -693,3 +699,9 @@ class TestSandboxE2ESync:
                 break
             time.sleep(1)
         assert healthy is True, "Sandbox should be healthy after resume"
+
+        # Minimal smoke check: after resume, the existing SandboxSync instance should still be usable.
+        echo = sandbox.commands.run("echo resume-ok")
+        assert echo.error is None
+        assert len(echo.logs.stdout) == 1
+        assert echo.logs.stdout[0].text == "resume-ok"

@@ -28,9 +28,10 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
-from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 from opensandbox import SandboxManagerSync, SandboxSync
 from opensandbox.models.sandboxes import SandboxFilter, SandboxImageSpec
+
+from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 
 
 class TestSandboxManagerE2ESync:

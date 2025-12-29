@@ -26,7 +26,6 @@ from datetime import timedelta
 from uuid import UUID
 
 import pytest
-from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 from code_interpreter import CodeInterpreterSync
 from code_interpreter.models.code import SupportedLanguage
 from opensandbox import SandboxSync
@@ -42,6 +41,8 @@ from opensandbox.models.execd import (
 )
 from opensandbox.models.execd_sync import ExecutionHandlersSync
 from opensandbox.models.sandboxes import SandboxImageSpec
+
+from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 
 logger = logging.getLogger(__name__)
 
@@ -171,18 +172,18 @@ class TestCodeInterpreterE2ESync:
         assert code_interpreter.commands is not None
         assert code_interpreter.metrics is not None
 
-        assert code_interpreter.is_healthy() is True
+        assert code_interpreter.sandbox.is_healthy() is True
 
-        info = code_interpreter.get_info()
+        info = code_interpreter.sandbox.get_info()
         assert str(code_interpreter.id) == str(info.id)
         assert info.status.state == "Running"
 
-        endpoint = code_interpreter.get_endpoint(DEFAULT_EXECD_PORT)
+        endpoint = code_interpreter.sandbox.get_endpoint(DEFAULT_EXECD_PORT)
         assert endpoint is not None
         assert endpoint.endpoint is not None
         _assert_endpoint_has_port(endpoint.endpoint, DEFAULT_EXECD_PORT)
 
-        metrics = code_interpreter.get_metrics()
+        metrics = code_interpreter.sandbox.get_metrics()
         assert metrics is not None
         assert metrics.cpu_count > 0
         assert 0.0 <= metrics.cpu_used_percentage <= 100.0
@@ -190,8 +191,8 @@ class TestCodeInterpreterE2ESync:
         assert 0.0 <= metrics.memory_used_in_mib <= metrics.memory_total_in_mib
         _assert_recent_timestamp_ms(metrics.timestamp)
 
-        code_interpreter.renew(timedelta(minutes=5))
-        renewed_info = code_interpreter.get_info()
+        code_interpreter.sandbox.renew(timedelta(minutes=5))
+        renewed_info = code_interpreter.sandbox.get_info()
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
         remaining = renewed_info.expires_at - now
         assert remaining > timedelta(minutes=3)
@@ -686,16 +687,6 @@ class TestCodeInterpreterE2ESync:
                     + "    time.sleep(0.1)\n"
                     + "print('Python1 completed')",
             context=python_c1,
-        )
-
-        def run_python2():
-            return code_interpreter.codes.run(
-            "import time\n"
-                    + "for i in range(3):\n"
-                    + "    print(f'Python2 iteration {i}')\n"
-                    + "    time.sleep(0.1)\n"
-                    + "print('Python2 completed')",
-            context=python_c2,
         )
 
         def run_java_concurrent():
