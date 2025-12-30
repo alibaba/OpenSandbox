@@ -230,13 +230,18 @@ class TestSandboxE2E:
         )
 
         logger.info("Step 5: Test sandbox renewal (extend expiration time)")
-        await sandbox.renew(timedelta(minutes=5))
-        logger.info("✓ Sandbox expiration renewed")
+        renew_response = await sandbox.renew(timedelta(minutes=5))
+        assert renew_response is not None
+        assert renew_response.expires_at > info.expires_at
+        logger.info("✓ Sandbox expiration renewed to %s", renew_response.expires_at)
 
         renewed_info = await sandbox.get_info()
         assert renewed_info.expires_at > info.expires_at
         assert renewed_info.id == sandbox.id
         assert renewed_info.status.state == "Running"
+
+        # The renew API should return the new expiration time. Allow small backend-side skew.
+        assert abs((renewed_info.expires_at - renew_response.expires_at).total_seconds()) < 10
 
         # Renewal is "now + timeout" (SDK behavior). Validate remaining TTL is close to 5 minutes.
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)

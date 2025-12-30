@@ -227,10 +227,12 @@ class TestCodeInterpreterE2E:
         )
 
         # Renewal through CodeInterpreter (extend expiration time)
-        await code_interpreter.sandbox.renew(timedelta(minutes=5))
-        logger.info("✓ CodeInterpreter expiration renewed")
+        renew_response = await code_interpreter.sandbox.renew(timedelta(minutes=5))
+        assert renew_response is not None
+        logger.info("✓ CodeInterpreter expiration renewed to %s", renew_response.expires_at)
 
         renewed_info = await code_interpreter.sandbox.get_info()
+        assert abs((renewed_info.expires_at - renew_response.expires_at).total_seconds()) < 10
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
         remaining = renewed_info.expires_at - now
         assert remaining > timedelta(minutes=3)

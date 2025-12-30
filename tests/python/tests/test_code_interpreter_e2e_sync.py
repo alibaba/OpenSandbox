@@ -191,8 +191,10 @@ class TestCodeInterpreterE2ESync:
         assert 0.0 <= metrics.memory_used_in_mib <= metrics.memory_total_in_mib
         _assert_recent_timestamp_ms(metrics.timestamp)
 
-        code_interpreter.sandbox.renew(timedelta(minutes=5))
+        renew_response = code_interpreter.sandbox.renew(timedelta(minutes=5))
+        assert renew_response is not None
         renewed_info = code_interpreter.sandbox.get_info()
+        assert abs((renewed_info.expires_at - renew_response.expires_at).total_seconds()) < 10
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
         remaining = renewed_info.expires_at - now
         assert remaining > timedelta(minutes=3)

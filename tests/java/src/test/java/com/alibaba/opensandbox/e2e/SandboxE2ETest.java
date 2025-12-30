@@ -167,9 +167,19 @@ public class SandboxE2ETest extends BaseE2ETest {
         assertRecentTimestampMs(metrics.getTimestamp(), 120_000);
 
         // Renew: validate remaining TTL is close to requested duration.
-        sandbox.renew(Duration.ofMinutes(5));
+        SandboxRenewResponse renewResp = sandbox.renew(Duration.ofMinutes(5));
+        assertNotNull(renewResp, "renew() should return a response");
+        assertNotNull(renewResp.getExpiresAt(), "renew().expiresAt should not be null");
         SandboxInfo renewedInfo = sandbox.getInfo();
         assertTrue(renewedInfo.getExpiresAt().isAfter(info.getExpiresAt()));
+        assertTrue(
+                renewResp.getExpiresAt().isAfter(info.getExpiresAt()),
+                "renew().expiresAt should be after previous expiresAt");
+        // Allow small skew between renew response and subsequent getInfo() (backend timing).
+        assertTrue(
+                Math.abs(Duration.between(renewResp.getExpiresAt(), renewedInfo.getExpiresAt()).toSeconds())
+                        < 10,
+                "renew response expiresAt should be close to getInfo().expiresAt");
         Duration remaining = Duration.between(OffsetDateTime.now(), renewedInfo.getExpiresAt());
         assertTrue(
                 remaining.compareTo(Duration.ofMinutes(3)) > 0,

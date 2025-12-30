@@ -46,6 +46,7 @@ from opensandbox.models.sandboxes import (
     SandboxFilter,
     SandboxImageSpec,
     SandboxInfo,
+    SandboxRenewResponse,
 )
 from opensandbox.services.sandbox import Sandboxes
 
@@ -294,13 +295,16 @@ class SandboxesAdapter(Sandboxes):
 
     async def renew_sandbox_expiration(
         self, sandbox_id: UUID, new_expiration_time: datetime
-    ) -> None:
+    ) -> SandboxRenewResponse:
         """Extend the expiration time of a sandbox."""
         logger.info(f"Renew sandbox {sandbox_id} expiration to {new_expiration_time}")
 
         try:
             from opensandbox.api.lifecycle.api.sandboxes import (
                 post_sandboxes_sandbox_id_renew_expiration,
+            )
+            from opensandbox.api.lifecycle.models.renew_sandbox_expiration_response import (
+                RenewSandboxExpirationResponse,
             )
 
             renew_request = SandboxModelConverter.to_api_renew_request(
@@ -318,7 +322,18 @@ class SandboxesAdapter(Sandboxes):
 
             handle_api_error(response_obj, f"Renew sandbox {sandbox_id} expiration")
 
-            logger.info(f"Successfully renewed sandbox {sandbox_id} expiration")
+            parsed = require_parsed(
+                response_obj,
+                RenewSandboxExpirationResponse,
+                f"Renew sandbox {sandbox_id} expiration",
+            )
+            renew_response = SandboxModelConverter.to_sandbox_renew_response(parsed)
+            logger.info(
+                "Successfully renewed sandbox %s expiration to %s",
+                sandbox_id,
+                renew_response.expires_at,
+            )
+            return renew_response
 
         except Exception as e:
             logger.error(f"Failed to renew sandbox {sandbox_id} expiration", exc_info=e)

@@ -39,6 +39,7 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
     SandboxInfo,
     SandboxMetrics,
+    SandboxRenewResponse,
 )
 from opensandbox.services import (
     Commands,
@@ -195,7 +196,7 @@ class Sandbox:
         """
         return await self._metrics_service.get_metrics(self.id)
 
-    async def renew(self, timeout: timedelta) -> None:
+    async def renew(self, timeout: timedelta) -> SandboxRenewResponse:
         """
         Renew the sandbox expiration time to delay automatic termination.
 
@@ -203,6 +204,9 @@ class Sandbox:
 
         Args:
             timeout: Duration to add to the current time to set the new expiration
+
+        Returns:
+            Renew response including the new expiration time.
 
         Raises:
             SandboxException: if the operation fails
@@ -212,7 +216,7 @@ class Sandbox:
         logger.info(
             f"Renewing sandbox {self.id} timeout, estimated expiration: {new_expiration}"
         )
-        await self._sandbox_service.renew_sandbox_expiration(self.id, new_expiration)
+        return await self._sandbox_service.renew_sandbox_expiration(self.id, new_expiration)
 
     async def pause(self) -> None:
         """

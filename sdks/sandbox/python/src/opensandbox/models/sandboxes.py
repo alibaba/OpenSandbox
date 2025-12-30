@@ -147,6 +147,19 @@ class SandboxCreateResponse(BaseModel):
     id: UUID = Field(description="Unique identifier of the newly created sandbox")
 
 
+class SandboxRenewResponse(BaseModel):
+    """
+    Response returned when renewing a sandbox expiration time.
+    """
+
+    expires_at: datetime = Field(
+        description="The new absolute expiration time in UTC (RFC 3339 format).",
+        alias="expires_at",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class SandboxEndpoint(BaseModel):
     """
     Connection endpoint information for a sandbox.

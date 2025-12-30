@@ -27,6 +27,7 @@ from opensandbox.models.sandboxes import (
     PagedSandboxInfos,
     SandboxFilter,
     SandboxInfo,
+    SandboxRenewResponse,
 )
 from opensandbox.sync.adapters.factory import AdapterFactorySync
 from opensandbox.sync.services.sandbox import SandboxesSync
@@ -139,7 +140,7 @@ class SandboxManagerSync:
         self._sandbox_service.kill_sandbox(sandbox_id)
         logger.info("Successfully terminated sandbox: %s", sandbox_id)
 
-    def renew_sandbox(self, sandbox_id: UUID, timeout: timedelta) -> None:
+    def renew_sandbox(self, sandbox_id: UUID, timeout: timedelta) -> SandboxRenewResponse:
         """
         Renew expiration time for a single sandbox.
 
@@ -155,7 +156,7 @@ class SandboxManagerSync:
         # Use timezone-aware UTC datetime to avoid cross-timezone ambiguity.
         new_expiration = datetime.now(timezone.utc) + timeout
         logger.info("Renew expiration for sandbox %s to %s", sandbox_id, new_expiration)
-        self._sandbox_service.renew_sandbox_expiration(sandbox_id, new_expiration)
+        return self._sandbox_service.renew_sandbox_expiration(sandbox_id, new_expiration)
 
     def pause_sandbox(self, sandbox_id: UUID) -> None:
         """

@@ -22,6 +22,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
 import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -102,11 +103,13 @@ interface Sandboxes {
      *
      * @param sandboxId Unique identifier of the sandbox
      * @param newExpirationTime New expiration timestamp
+     *
+     * @return Sandbox renew response with new expire info
      */
     fun renewSandboxExpiration(
         sandboxId: UUID,
         newExpirationTime: OffsetDateTime,
-    )
+    ): SandboxRenewResponse
 
     /**
      * Terminates a sandbox and releases all associated resources.

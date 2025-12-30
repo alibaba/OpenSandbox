@@ -24,6 +24,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
 import com.alibaba.opensandbox.sandbox.domain.services.Sandboxes
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toApiRenewRequest
@@ -31,6 +32,7 @@ import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.Sandbox
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSandboxCreateResponse
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSandboxEndpoint
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSandboxInfo
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSandboxRenewResponse
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.toSandboxException
 import org.slf4j.LoggerFactory
 import java.time.Duration
@@ -144,15 +146,19 @@ internal class SandboxesAdapter(
     override fun renewSandboxExpiration(
         sandboxId: UUID,
         newExpirationTime: OffsetDateTime,
-    ) {
+    ): SandboxRenewResponse {
         logger.info("Renew sandbox {} expiration to {}", sandboxId, newExpirationTime)
 
-        try {
-            api.sandboxesSandboxIdRenewExpirationPost(
-                sandboxId,
-                newExpirationTime.toApiRenewRequest(),
-            )
+        return try {
+            val response =
+                api.sandboxesSandboxIdRenewExpirationPost(
+                    sandboxId,
+                    newExpirationTime.toApiRenewRequest(),
+                ).toSandboxRenewResponse()
+
             logger.info("Successfully renewed sandbox {} expiration", sandboxId)
+
+            response
         } catch (e: Exception) {
             logger.error("Failed to renew sandbox {} expiration", sandboxId, e)
             throw e.toSandboxException()

@@ -22,7 +22,6 @@ similar to the Kotlin SDK SandboxModelConverter.
 This converter is designed to work with openapi-python-client generated models,
 which use attrs for model definitions.
 """
-
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -31,6 +30,7 @@ from opensandbox.api.lifecycle.models import (
     Endpoint,
     ListSandboxesResponse,
     RenewSandboxExpirationRequest,
+    RenewSandboxExpirationResponse,
     Sandbox,
 )
 from opensandbox.api.lifecycle.models import (
@@ -48,6 +48,7 @@ from opensandbox.models.sandboxes import (
     SandboxEndpoint,
     SandboxImageSpec,
     SandboxInfo,
+    SandboxRenewResponse,
     SandboxStatus,
 )
 
@@ -152,6 +153,24 @@ class SandboxModelConverter:
         return RenewSandboxExpirationRequest(
             expires_at=new_expiration_time,
         )
+
+    @staticmethod
+    def to_sandbox_renew_response(
+        api_response: RenewSandboxExpirationResponse,
+    ) -> SandboxRenewResponse:
+        """
+        Convert API RenewSandboxExpirationResponse to domain SandboxRenewResponse.
+
+        Note: We intentionally keep the public SDK surface using domain models instead of the
+        generated OpenAPI client models.
+        """
+
+        if not isinstance(api_response, RenewSandboxExpirationResponse):
+            raise TypeError(
+                f"Expected RenewSandboxExpirationResponse, got {type(api_response).__name__}"
+            )
+
+        return SandboxRenewResponse(expires_at=api_response.expires_at)
 
     @staticmethod
     def to_sandbox_create_response(

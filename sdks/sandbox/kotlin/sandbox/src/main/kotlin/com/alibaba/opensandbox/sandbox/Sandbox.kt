@@ -26,6 +26,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxMetrics
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
 import com.alibaba.opensandbox.sandbox.domain.services.Commands
 import com.alibaba.opensandbox.sandbox.domain.services.Filesystem
 import com.alibaba.opensandbox.sandbox.domain.services.Health
@@ -404,9 +405,9 @@ class Sandbox internal constructor(
      * @param timeout Duration to add to the current time to set the new expiration
      * @throws SandboxException if the operation fails
      */
-    fun renew(timeout: Duration) {
+    fun renew(timeout: Duration): SandboxRenewResponse {
         logger.info("Renew sandbox {} timeout, estimated expiration to {}", id, OffsetDateTime.now().plus(timeout))
-        sandboxService.renewSandboxExpiration(id, OffsetDateTime.now().plus(timeout))
+        return sandboxService.renewSandboxExpiration(id, OffsetDateTime.now().plus(timeout))
     }
 
     /**

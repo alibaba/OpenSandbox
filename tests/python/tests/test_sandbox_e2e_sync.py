@@ -210,10 +210,13 @@ class TestSandboxE2ESync:
         _assert_recent_timestamp_ms(metrics.timestamp, tolerance_ms=120_000)
 
         await_renew = timedelta(minutes=5)
-        sandbox.renew(await_renew)
+        renew_response = sandbox.renew(await_renew)
+        assert renew_response is not None
+        assert renew_response.expires_at > info.expires_at
 
         renewed_info = sandbox.get_info()
         assert renewed_info.expires_at > info.expires_at
+        assert abs((renewed_info.expires_at - renew_response.expires_at).total_seconds()) < 10
 
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
         remaining = renewed_info.expires_at - now

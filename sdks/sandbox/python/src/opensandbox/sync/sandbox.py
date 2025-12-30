@@ -37,6 +37,7 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
     SandboxInfo,
     SandboxMetrics,
+    SandboxRenewResponse,
 )
 from opensandbox.sync.adapters.factory import AdapterFactorySync
 from opensandbox.sync.services import (
@@ -201,7 +202,7 @@ class SandboxSync:
         """
         return self._metrics_service.get_metrics(self.id)
 
-    def renew(self, timeout: timedelta) -> None:
+    def renew(self, timeout: timedelta) -> SandboxRenewResponse:
         """
         Renew the sandbox expiration time to delay automatic termination.
 
@@ -209,6 +210,9 @@ class SandboxSync:
 
         Args:
             timeout: Duration to add to the current time to set the new expiration
+
+        Returns:
+            Renew response including the new expiration time.
 
         Raises:
             SandboxException: if the operation fails
@@ -220,7 +224,7 @@ class SandboxSync:
             self.id,
             new_expiration,
         )
-        self._sandbox_service.renew_sandbox_expiration(self.id, new_expiration)
+        return self._sandbox_service.renew_sandbox_expiration(self.id, new_expiration)
 
     def pause(self) -> None:
         """
