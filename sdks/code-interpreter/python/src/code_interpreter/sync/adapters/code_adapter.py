@@ -114,7 +114,7 @@ class CodesAdapterSync(CodesSync):
             from opensandbox.api.execd.models.code_context_request import (
                 CodeContextRequest,
             )
-            from opensandbox.api.execd.types import UNSET
+            from opensandbox.api.execd.types import Unset
 
             response_obj = create_code_context.sync_detailed(
                 client=self._client,
@@ -122,7 +122,7 @@ class CodesAdapterSync(CodesSync):
             )
             handle_api_error(response_obj, "Create code context")
             parsed = require_parsed(response_obj, ApiCodeContext, "Create code context")
-            context_id = parsed.id if parsed.id is not UNSET else None
+            context_id = None if isinstance(parsed.id, Unset) else parsed.id
             return CodeContextSync(id=context_id, language=parsed.language)
         except Exception as e:
             logger.error("Failed to create context", exc_info=e)
@@ -134,7 +134,7 @@ class CodesAdapterSync(CodesSync):
             from opensandbox.api.execd.models.code_context import (
                 CodeContext as ApiCodeContext,
             )
-            from opensandbox.api.execd.types import UNSET
+            from opensandbox.api.execd.types import Unset
 
             response_obj = get_context.sync_detailed(
                 client=self._client,
@@ -142,7 +142,7 @@ class CodesAdapterSync(CodesSync):
             )
             handle_api_error(response_obj, "Get code context")
             parsed = require_parsed(response_obj, ApiCodeContext, "Get code context")
-            context_id_val = parsed.id if parsed.id is not UNSET else None
+            context_id_val = None if isinstance(parsed.id, Unset) else parsed.id
             return CodeContextSync(id=context_id_val, language=parsed.language)
         except Exception as e:
             logger.error("Failed to get context", exc_info=e)

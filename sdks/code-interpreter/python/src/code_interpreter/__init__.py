@@ -21,6 +21,9 @@ of the OpenSandbox infrastructure. It supports multiple programming languages,
 session management, and variable persistence across executions.
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 from code_interpreter.code_interpreter import CodeInterpreter
 from code_interpreter.models.code import (
     CodeContext,
@@ -36,9 +39,6 @@ __all__ = [
 ]
 
 try:
-    from importlib.metadata import PackageNotFoundError
-    from importlib.metadata import version as _pkg_version
-
     __version__ = _pkg_version("opensandbox-code-interpreter")
 except PackageNotFoundError:  # pragma: no cover
     # Fallback for editable/uninstalled source checkouts.

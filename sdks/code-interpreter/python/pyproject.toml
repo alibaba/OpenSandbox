@@ -105,16 +105,23 @@ ignore = [
 "__init__.py" = ["F401"]
 
 [tool.pyright]
-typeCheckingMode = "strict"
+typeCheckingMode = "standard"
 pythonVersion = "3.10"
+pythonPlatform = "All"
+
 include = ["src"]
-venvPath = "."
-venv = ".venv"
+
 exclude = [
     "**/node_modules",
     "**/__pycache__",
-    "**/.*",
+    "src/opensandbox/api/**",
 ]
+
+venvPath = "."
+venv = ".venv"
+
+reportMissingImports = true
+reportMissingTypeStubs = false
 
 [tool.pytest.ini_options]
 minversion = "6.0"

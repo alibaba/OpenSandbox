@@ -21,6 +21,7 @@ import json
 import logging
 from collections.abc import Iterator
 from io import IOBase, TextIOBase
+from typing import TypedDict
 
 import httpx
 
@@ -45,6 +46,11 @@ from opensandbox.models.sandboxes import SandboxEndpoint
 from opensandbox.sync.services.filesystem import FilesystemSync
 
 logger = logging.getLogger(__name__)
+
+class _DownloadRequest(TypedDict):
+    url: str
+    params: dict[str, str]
+    headers: dict[str, str]
 
 
 class FilesystemAdapterSync(FilesystemSync):
@@ -76,7 +82,7 @@ class FilesystemAdapterSync(FilesystemSync):
     def _get_execd_url(self, path: str) -> str:
         return f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}{path}"
 
-    def _build_download_request(self, path: str, range_header: str | None = None) -> dict:
+    def _build_download_request(self, path: str, range_header: str | None = None) -> _DownloadRequest:
         url = self._get_execd_url(self.FILESYSTEM_DOWNLOAD_PATH)
         params = {"path": path}
         headers: dict[str, str] = {}
@@ -101,7 +107,7 @@ class FilesystemAdapterSync(FilesystemSync):
             response = self._httpx_client.get(
                 request_data["url"],
                 params=request_data["params"],
-                headers=request_data.get("headers"),
+                headers=request_data["headers"],
             )
             response.raise_for_status()
             return response.content
@@ -116,7 +122,7 @@ class FilesystemAdapterSync(FilesystemSync):
         request_data = self._build_download_request(path, range_header)
         url = request_data["url"]
         params = request_data["params"]
-        headers = request_data.get("headers", {})
+        headers = request_data["headers"]
 
         request = self._httpx_client.build_request("GET", url, params=params, headers=headers)
         response = self._httpx_client.send(request, stream=True)
@@ -190,8 +196,8 @@ class FilesystemAdapterSync(FilesystemSync):
     def write_file(
         self,
         path: str,
-        *,
         data: str | bytes | IOBase,
+        *,
         encoding: str = "utf-8",
         mode: int = 755,
         owner: str | None = None,
@@ -273,6 +279,7 @@ class FilesystemAdapterSync(FilesystemSync):
     def search(self, entry: SearchEntry) -> list[EntryInfo]:
         try:
             from opensandbox.api.execd.api.filesystem import search_files
+            from opensandbox.api.execd.models import FileInfo
 
             response_obj = search_files.sync_detailed(
                 client=self._client,
@@ -280,9 +287,12 @@ class FilesystemAdapterSync(FilesystemSync):
                 pattern=entry.pattern,
             )
             handle_api_error(response_obj, "Search files")
-            if not response_obj.parsed:
+            parsed = response_obj.parsed
+            if not parsed:
                 return []
-            return FilesystemModelConverter.to_entry_info_list(response_obj.parsed)
+            if isinstance(parsed, list) and all(isinstance(x, FileInfo) for x in parsed):
+                return FilesystemModelConverter.to_entry_info_list(parsed)
+            raise SandboxApiException(message="Search files failed: unexpected response type")
         except Exception as e:
             logger.error("Failed to search files", exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e
