@@ -46,6 +46,7 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
     SandboxInfo,
     SandboxMetrics,
+    SandboxState,
     SandboxStatus,
 )
 
@@ -68,6 +69,7 @@ __all__ = [
     # Sandbox models
     "SandboxInfo",
     "SandboxStatus",
+    "SandboxState",
     "SandboxCreateResponse",
     "SandboxEndpoint",
     "SandboxImageSpec",
