@@ -1,0 +1,532 @@
+openapi: 3.1.0
+info:
+  title: OpenSandbox Batch Sandbox API
+  version: 0.1.0
+  description: |
+    Batch Sandbox API enables high-volume sandbox provisioning based on pre-created
+    pool templates. A batch request accepts a desired replica count plus
+    per-instance overrides so that large groups of sandboxes can be created with
+    minimal API traffic.
+
+    ## Key Concepts
+    - **Pool reference (`poolRef`)**: Identifier of the sandbox pool template used
+      as the base spec for all replicas.
+    - **Instance overrides (`instanceOverrides`)**: Optional array of overrides that
+      patch the pool template for specific replicas. Each array element maps to the
+      replica at the same index; replicas without an override inherit the pool spec.
+    - **Batch tracking**: Creation is asynchronous; a `batchSandboxId` is returned
+      to poll status and retrieve the set of generated `sandboxId`s.
+
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development
+
+security:
+  - apiKeyAuth: []
+
+tags:
+  - name: BatchSandboxes
+    description: Provision and track large sets of sandboxes derived from pool templates
+
+paths:
+  /batch-sandboxes:
+    post:
+      tags: [BatchSandboxes]
+      summary: Create sandboxes in batch from a pool template
+      description: |
+        Creates a batch sandbox request using an existing pool template. The service
+        provisions the requested number of sandboxes asynchronously. Optional
+        per-replica overrides allow customizing image, env, and entry command on top
+        of the pool defaults.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBatchSandboxRequest'
+      responses:
+        '202':
+          description: Batch sandbox accepted for provisioning
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateBatchSandboxResponse'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /batch-sandboxes/{batchSandboxId}:
+    parameters:
+      - $ref: '#/components/parameters/BatchSandboxId'
+    get:
+      tags: [BatchSandboxes]
+      summary: Get batch sandbox status
+      description: |
+        Returns the current status of a batch sandbox request, including per-replica
+        sandbox identifiers and their lifecycle states. Supports pagination for the
+        `sandboxes` collection to keep responses lightweight for large batches.
+      parameters:
+        - name: state
+          in: query
+          description: |
+            Filter sandboxes by lifecycle state. Multiple values use OR semantics.
+            If omitted, all sandboxes are returned.
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/SandboxState'
+          style: form
+          explode: true
+        - name: page
+          in: query
+          description: Page number for pagination (1-based)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          description: Number of items per page (max 500)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        '200':
+          description: Batch sandbox current state and member sandboxes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchSandbox'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: OPEN-SANDBOX-API-KEY
+      description: |
+        API Key for authentication. Can be provided via:
+        1. HTTP Header: OPEN-SANDBOX-API-KEY: your-api-key
+        2. Environment variable: OPEN_SANDBOX_API_KEY (for SDK clients)
+
+  parameters:
+    BatchSandboxId:
+      name: batchSandboxId
+      in: path
+      required: true
+      description: Unique batch sandbox identifier
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    XRequestId:
+      description: Unique request identifier for tracing
+      schema:
+        type: string
+        format: uuid
+    Location:
+      description: URI of the newly created or related resource
+      schema:
+        type: string
+        format: uri
+    RetryAfter:
+      description: Suggested delay in seconds before retrying
+      schema:
+        type: integer
+        minimum: 1
+
+  responses:
+    Error:
+      description: Error response envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BadRequest:
+      description: The request was invalid or malformed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Unauthorized:
+      description: Authentication credentials are missing or invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Forbidden:
+      description: The authenticated user lacks permission for this operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    NotFound:
+      description: The requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Conflict:
+      description: The operation conflicts with the current state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    InternalServerError:
+      description: An unexpected server error occurred
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+
+  schemas:
+    CreateBatchSandboxRequest:
+      type: object
+      required: [poolRef, replica]
+      description: |
+        Request to provision multiple sandboxes from a pool template. Overrides are
+        applied per replica by index; unspecified replicas inherit the pool defaults.
+      properties:
+        poolRef:
+          type: string
+          description: Identifier of the pool template to clone from
+          example: pool-prod-general
+        replica:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: Number of sandboxes to create in the batch
+          example: 1000
+        instanceOverrides:
+          type: array
+          description: |
+            Optional per-replica overrides applied on top of the pool template.
+            Each element corresponds to the replica at the same index (0-based).
+            If the array is shorter than `replica`, remaining replicas use the pool
+            template without overrides.
+          items:
+            $ref: '#/components/schemas/SandboxOverride'
+          maxItems: 10000
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Optional metadata tags for the batch request
+          example:
+            name: "batch-for-load-test"
+            project: "demo"
+        extensions:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Opaque container for provider-specific or experimental parameters.
+            Clients should pass through keys transparently.
+
+    SandboxOverride:
+      type: object
+      description: Per-replica override to patch the pool template for this sandbox
+      properties:
+        image:
+          type: string
+          description: Container image URI to override the pool template
+          example: "registry.example.com/team/app:canary"
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          description: Environment variables appended to the pool template environment
+          example:
+            FEATURE_FLAG: "true"
+            LOG_LEVEL: "debug"
+        command:
+          type: array
+          items:
+            type: string
+          description: |
+            Override entry command for the sandbox in exec form. Provide the binary
+            followed by its arguments. To use shell form, wrap it explicitly, e.g.
+            ["/bin/sh", "-c", "echo enable > /etc/xxx.host; /myserver startup"].
+            When provided together with `args`, the args are appended after this
+            array.
+          example: ["/bin/sh", "-c", "echo enable > /etc/xxx.host; /myserver startup"]
+        args:
+          type: array
+          items:
+            type: string
+          description: Optional arguments appended to the command/entrypoint
+          example:
+            - "--port=8080"
+
+      additionalProperties: false
+
+    CreateBatchSandboxResponse:
+      type: object
+      description: Response returned after accepting a batch sandbox creation request
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique batch sandbox identifier
+        status:
+          $ref: '#/components/schemas/BatchSandboxStatus'
+        replica:
+          type: integer
+          description: Number of sandboxes requested for this batch
+        poolRef:
+          type: string
+          description: Pool template reference used for the batch
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Metadata associated with the batch
+        createdAt:
+          type: string
+          format: date-time
+          description: Batch creation timestamp
+      required: [id, status, replica, poolRef, createdAt]
+
+    BatchSandbox:
+      type: object
+      description: Batch sandbox request and its member sandboxes
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique batch sandbox identifier
+        poolRef:
+          type: string
+          description: Pool template reference used for the batch
+        replica:
+          type: integer
+          description: Number of sandboxes requested for this batch
+        status:
+          $ref: '#/components/schemas/BatchSandboxStatus'
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Metadata associated with the batch
+        sandboxes:
+          type: array
+          description: Paginated collection of sandboxes created for this batch
+          items:
+            $ref: '#/components/schemas/BatchSandboxMember'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+        createdAt:
+          type: string
+          format: date-time
+          description: Batch creation timestamp
+        updatedAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last status update
+      required:
+        - id
+        - poolRef
+        - replica
+        - status
+        - sandboxes
+        - pagination
+        - createdAt
+
+    BatchSandboxStatus:
+      type: object
+      description: Aggregate status for a batch sandbox request
+      properties:
+        state:
+          $ref: '#/components/schemas/BatchSandboxState'
+        reason:
+          type: string
+          description: Short machine-readable reason for the current state
+          example: "partial_failure"
+        message:
+          type: string
+          description: Human-readable description of the current state or failure
+        stats:
+          $ref: '#/components/schemas/BatchSandboxStats'
+        lastTransitionAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last state transition
+      required: [state]
+
+    BatchSandboxState:
+      type: string
+      description: |
+        High-level lifecycle state for a batch sandbox request.
+
+        State transitions:
+        - Pending → Provisioning (scheduling begins)
+        - Provisioning → Running (all sandboxes created)
+        - Provisioning/Running → PartialFailed (some sandboxes failed)
+        - PartialFailed → Running (retries succeed) or Failed (no further progress)
+        - Running → Terminating → Terminated (batch deleted)
+        - Any → Failed (irrecoverable error)
+      enum:
+        - Pending
+        - Provisioning
+        - Running
+        - PartialFailed
+        - Failed
+        - Terminating
+        - Terminated
+
+    BatchSandboxStats:
+      type: object
+      description: Aggregate counts for member sandboxes
+      properties:
+        requested:
+          type: integer
+          description: Total sandboxes requested
+        provisioning:
+          type: integer
+          description: Sandboxes currently provisioning
+        running:
+          type: integer
+          description: Sandboxes that are running
+        failed:
+          type: integer
+          description: Sandboxes that failed to create or start
+        terminated:
+          type: integer
+          description: Sandboxes that were terminated
+      required: [requested]
+
+    PaginationInfo:
+      type: object
+      description: Pagination metadata for list responses
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: Current page number
+        pageSize:
+          type: integer
+          minimum: 1
+          description: Number of items per page
+        totalItems:
+          type: integer
+          minimum: 0
+          description: Total number of items matching the filter
+        totalPages:
+          type: integer
+          minimum: 0
+          description: Total number of pages
+        hasNextPage:
+          type: boolean
+          description: Whether there are more pages after the current one
+      required: [page, pageSize, totalItems, totalPages, hasNextPage]
+
+    BatchSandboxMember:
+      type: object
+      description: Individual sandbox created as part of a batch
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          description: Replica index within the batch
+        sandboxId:
+          type: string
+          format: uuid
+          description: Identifier of the sandbox instance
+        state:
+          $ref: '#/components/schemas/SandboxState'
+        reason:
+          type: string
+          description: Short reason code for the current sandbox state
+        message:
+          type: string
+          description: Human-readable message describing the current sandbox state
+      required: [index, sandboxId, state]
+
+    SandboxState:
+      type: string
+      description: |
+        Lifecycle state of an individual sandbox.
+
+        Common state values:
+        - Pending: Sandbox is being provisioned
+        - Running: Sandbox is running and ready to accept requests
+        - Pausing: Sandbox is in the process of pausing
+        - Paused: Sandbox has been paused while retaining its state
+        - Stopping: Sandbox is being terminated
+        - Terminated: Sandbox has been successfully terminated
+        - Failed: Sandbox encountered a critical error
+
+        Note: New state values may be added in future versions. Clients should
+        handle unknown state values gracefully.
+      enum:
+        - Pending
+        - Running
+        - Pausing
+        - Paused
+        - Stopping
+        - Terminated
+        - Failed
+
+    ErrorResponse:
+      type: object
+      description: |
+        Standard error response for all non-2xx HTTP responses.
+        HTTP status code indicates the error category; code and message provide details.
+      properties:
+        code:
+          type: string
+          description: |
+            Machine-readable error code (e.g., INVALID_REQUEST, NOT_FOUND, INTERNAL_ERROR).
+            Use this for programmatic error handling.
+        message:
+          type: string
+          description: Human-readable error message describing what went wrong and how to fix it.
+      required: [code, message]
+      additionalProperties: false
+
