@@ -16,6 +16,7 @@ package runtime
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"time"
 )
@@ -28,6 +29,7 @@ type CommandStatus struct {
 	Error      string     `json:"error,omitempty"`
 	StartedAt  time.Time  `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Content    string     `json:"content,omitempty"`
 }
 
 // CommandOutput contains non-streamed stdout/stderr plus status.
@@ -64,36 +66,47 @@ func (c *Controller) GetCommandStatus(session string) (*CommandStatus, error) {
 		Error:      kernel.errMsg,
 		StartedAt:  kernel.startedAt,
 		FinishedAt: kernel.finishedAt,
+		Content:    kernel.content,
 	}
 	return status, nil
 }
 
-// GetCommandOutput returns accumulated stdout/stderr and status for a session.
-func (c *Controller) GetCommandOutput(session string) (*CommandOutput, error) {
+// SeekBackgroundCommandOutput returns accumulated stdout/stderr and status for a session.
+func (c *Controller) SeekBackgroundCommandOutput(session string, cursor int64) ([]byte, int64, error) {
 	kernel := c.commandSnapshot(session)
 	if kernel == nil {
-		return nil, fmt.Errorf("command not found: %s", session)
+		return nil, -1, fmt.Errorf("command not found: %s", session)
 	}
 
-	status, err := c.GetCommandStatus(session)
+	if !kernel.isBackground {
+		return nil, -1, fmt.Errorf("command %s is not running in background", session)
+	}
+
+	file, err := os.Open(kernel.stdoutPath)
 	if err != nil {
-		return nil, err
+		return nil, -1, fmt.Errorf("error open combined output file for command %s: %w", session, err)
+	}
+	defer file.Close()
+
+	// Seek to the cursor position
+	_, err = file.Seek(cursor, 0)
+	if err != nil {
+		return nil, -1, fmt.Errorf("error seek file: %w", err)
 	}
 
-	stdout, err := os.ReadFile(kernel.stdoutPath)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("read stdout: %w", err)
-	}
-	stderr, err := os.ReadFile(kernel.stderrPath)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("read stderr: %w", err)
+	// Read all content from cursor to end
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, -1, fmt.Errorf("error read file: %w", err)
 	}
 
-	return &CommandOutput{
-		CommandStatus: *status,
-		Stdout:        string(stdout),
-		Stderr:        string(stderr),
-	}, nil
+	// Get current file position (end of file)
+	currentPos, err := file.Seek(0, 1)
+	if err != nil {
+		return nil, -1, fmt.Errorf("error get current position: %w", err)
+	}
+
+	return data, currentPos, nil
 }
 
 // markCommandFinished updates bookkeeping when a command exits.

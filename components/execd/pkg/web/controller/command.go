@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/flag"
@@ -74,25 +75,26 @@ func (c *CodeInterpretingController) InterruptCommand() {
 	c.interrupt()
 }
 
-// GetCommandStatus returns command status by session id.
+// GetCommandStatus returns command status by id.
 func (c *CodeInterpretingController) GetCommandStatus() {
-	session := c.Ctx.Input.Param(":session")
-	if session == "" {
-		c.RespondError(http.StatusBadRequest, model.ErrorCodeInvalidRequest, "missing session")
+	commandID := c.Ctx.Input.Param(":id")
+	if commandID == "" {
+		c.RespondError(http.StatusBadRequest, model.ErrorCodeInvalidRequest, "missing command execution id")
 		return
 	}
 
-	status, err := codeRunner.GetCommandStatus(session)
+	status, err := codeRunner.GetCommandStatus(commandID)
 	if err != nil {
 		c.RespondError(http.StatusNotFound, model.ErrorCodeInvalidRequest, err.Error())
 		return
 	}
 
 	resp := model.CommandStatusResponse{
-		Session:  status.Session,
+		ID:       status.Session,
 		Running:  status.Running,
 		ExitCode: status.ExitCode,
 		Error:    status.Error,
+		Content:  status.Content,
 	}
 	if !status.StartedAt.IsZero() {
 		resp.StartedAt = status.StartedAt
@@ -104,38 +106,25 @@ func (c *CodeInterpretingController) GetCommandStatus() {
 	c.RespondSuccess(resp)
 }
 
-// GetCommandOutput returns accumulated stdout/stderr for a command session.
-func (c *CodeInterpretingController) GetCommandOutput() {
-	session := c.Ctx.Input.Param(":session")
-	if session == "" {
-		c.RespondError(http.StatusBadRequest, model.ErrorCodeInvalidRequest, "missing session")
+// GetBackgroundCommandOutput returns accumulated stdout/stderr for a command session as plain text.
+func (c *CodeInterpretingController) GetBackgroundCommandOutput() {
+	id := c.Ctx.Input.Param(":id")
+	if id == "" {
+		c.RespondError(http.StatusBadRequest, model.ErrorCodeMissingQuery, "missing command execution id")
 		return
 	}
 
-	output, err := codeRunner.GetCommandOutput(session)
+	cursor := c.QueryInt64(c.Ctx.Input.Query("cursor"), 0)
+	output, lastCursor, err := codeRunner.SeekBackgroundCommandOutput(id, cursor)
 	if err != nil {
-		c.RespondError(http.StatusNotFound, model.ErrorCodeInvalidRequest, err.Error())
+		c.RespondError(http.StatusBadRequest, model.ErrorCodeInvalidRequest, err.Error())
 		return
 	}
 
-	resp := model.CommandOutputResponse{
-		CommandStatusResponse: model.CommandStatusResponse{
-			Session:  output.Session,
-			Running:  output.Running,
-			ExitCode: output.ExitCode,
-			Error:    output.Error,
-		},
-		Stdout: output.Stdout,
-		Stderr: output.Stderr,
-	}
-	if !output.StartedAt.IsZero() {
-		resp.StartedAt = output.StartedAt
-	}
-	if output.FinishedAt != nil {
-		resp.FinishedAt = output.FinishedAt
-	}
-
-	c.RespondSuccess(resp)
+	c.Ctx.Output.Header("EXECD-COMMANDS-TAIL-CURSOR", strconv.FormatInt(lastCursor, 10))
+	c.Ctx.Output.Header("Content-Type", "text/plain; charset=utf-8")
+	c.Ctx.Output.SetStatus(http.StatusOK)
+	_ = c.Ctx.Output.Body(output)
 }
 
 func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.RunCommandRequest) *runtime.ExecuteCodeRequest {

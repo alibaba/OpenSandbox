@@ -16,6 +16,7 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/beego/beego/v2/server/web"
 
@@ -46,4 +47,12 @@ func (c *basicController) RespondSuccess(data any) {
 		c.Data["json"] = data
 	}
 	_ = c.ServeJSON()
+}
+
+func (c *basicController) QueryInt64(query string, defaultValue int64) int64 {
+	val, err := strconv.ParseInt(query, 10, 64)
+	if err != nil {
+		return defaultValue
+	}
+	return val
 }

@@ -78,6 +78,7 @@ jobs:
           ./tests/smoke.sh
 
           sleep 5
-          cat execd.log
-          cat /tmp/jupyter.log
-          curl -v localhost:44772/ping
+          python3 tests/smoke_api.py
+      - name: Show logs
+        if: always()
+        run: cat components/execd/execd.log

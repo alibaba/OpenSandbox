@@ -25,6 +25,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -58,10 +59,14 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	cmd.Stderr = stderr
 
 	done := make(chan struct{}, 1)
+	var wg sync.WaitGroup
+	wg.Add(2)
 	safego.Go(func() {
+		defer wg.Done()
 		c.tailStdPipe(stdoutPath, request.Hooks.OnExecuteStdout, done)
 	})
 	safego.Go(func() {
+		defer wg.Done()
 		c.tailStdPipe(stderrPath, request.Hooks.OnExecuteStderr, done)
 	})
 
@@ -79,11 +84,13 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	}
 
 	kernel := &commandKernel{
-		pid:        cmd.Process.Pid,
-		stdoutPath: stdoutPath,
-		stderrPath: stderrPath,
-		startedAt:  startAt,
-		running:    true,
+		pid:          cmd.Process.Pid,
+		stdoutPath:   stdoutPath,
+		stderrPath:   stderrPath,
+		startedAt:    startAt,
+		running:      true,
+		content:      request.Code,
+		isBackground: false,
 	}
 	c.storeCommandKernel(session, kernel)
 	request.Hooks.OnExecuteInit(session)
@@ -107,6 +114,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 
 	err = cmd.Wait()
 	close(done)
+	wg.Wait()
 	if err != nil {
 		var eName, eValue string
 		var eCode int
@@ -146,12 +154,12 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 	session := c.newContextID()
 	request.Hooks.OnExecuteInit(session)
 
-	stdout, stderr, err := c.stdLogDescriptor(session)
+	pipe, err := c.combinedOutputDescriptor(session)
 	if err != nil {
-		return fmt.Errorf("failed to get stdlog descriptor: %w", err)
+		return fmt.Errorf("failed to get combined output descriptor: %w", err)
 	}
-	stdoutPath := c.stdoutFileName(session)
-	stderrPath := c.stderrFileName(session)
+	stdoutPath := c.combinedOutputFileName(session)
+	stderrPath := c.combinedOutputFileName(session)
 
 	signals := make(chan os.Signal, 1)
 	defer close(signals)
@@ -164,8 +172,8 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 
 	cmd.Dir = request.Cwd
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	cmd.Stdout = pipe
+	cmd.Stderr = pipe
 
 	// use DevNull as stdin so interactive programs exit immediately.
 	cmd.Stdin = os.NewFile(uintptr(syscall.Stdin), os.DevNull)
@@ -173,11 +181,13 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 	safego.Go(func() {
 		err := cmd.Start()
 		kernel := &commandKernel{
-			pid:        -1,
-			stdoutPath: stdoutPath,
-			stderrPath: stderrPath,
-			startedAt:  startAt,
-			running:    true,
+			pid:          -1,
+			stdoutPath:   stdoutPath,
+			stderrPath:   stderrPath,
+			startedAt:    startAt,
+			running:      true,
+			content:      request.Code,
+			isBackground: true,
 		}
 
 		if err != nil {

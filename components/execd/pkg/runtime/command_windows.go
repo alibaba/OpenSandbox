@@ -67,7 +67,9 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	}
 
 	kernel := &commandKernel{
-		pid: cmd.Process.Pid,
+		pid:          cmd.Process.Pid,
+		content:      request.Code,
+		isBackground: false,
 	}
 	c.storeCommandKernel(session, kernel)
 
@@ -106,11 +108,20 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 	session := c.newContextID()
 	request.Hooks.OnExecuteInit(session)
 
+	pipe, err := c.combinedOutputDescriptor(session)
+	if err != nil {
+		return fmt.Errorf("failed to get combined output descriptor: %w", err)
+	}
+	stdoutPath := c.combinedOutputFileName(session)
+	stderrPath := c.combinedOutputFileName(session)
+
 	startAt := time.Now()
 	logs.Info("received command: %v", request.Code)
 	cmd := exec.CommandContext(context.Background(), "cmd", "/C", request.Code)
 
 	cmd.Dir = request.Cwd
+	cmd.Stdout = pipe
+	cmd.Stderr = pipe
 
 	devNull, _ := os.OpenFile(os.DevNull, os.O_RDWR, 0) // best-effort, ignore error
 	cmd.Stdin = devNull
@@ -119,18 +130,36 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 		err := cmd.Start()
 		if err != nil {
 			logs.Error("CommandExecError: error starting commands: %v", err)
+			pipe.Close() // best-effort
 			return
 		}
 
 		kernel := &commandKernel{
-			pid: cmd.Process.Pid,
+			pid:          cmd.Process.Pid,
+			content:      request.Code,
+			stdoutPath:   stdoutPath,
+			stderrPath:   stderrPath,
+			startedAt:    startAt,
+			running:      true,
+			isBackground: true,
 		}
 		c.storeCommandKernel(session, kernel)
 
 		err = cmd.Wait()
+		pipe.Close()    // best-effort
+		devNull.Close() // best-effort
+
 		if err != nil {
 			logs.Error("CommandExecError: error running commands: %v", err)
+			exitCode := 1
+			var exitError *exec.ExitError
+			if errors.As(err, &exitError) {
+				exitCode = exitError.ExitCode()
+			}
+			c.markCommandFinished(session, exitCode, err.Error())
+			return
 		}
+		c.markCommandFinished(session, 0, "")
 	})
 
 	request.Hooks.OnExecuteComplete(time.Since(startAt))

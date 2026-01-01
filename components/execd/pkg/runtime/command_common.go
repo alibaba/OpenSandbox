@@ -70,6 +70,10 @@ func (c *Controller) stdLogDescriptor(session string) (io.WriteCloser, io.WriteC
 	return stdout, stderr, nil
 }
 
+func (c *Controller) combinedOutputDescriptor(session string) (io.WriteCloser, error) {
+	return os.OpenFile(c.combinedOutputFileName(session), os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+}
+
 // stdoutFileName constructs the stdout log path.
 func (c *Controller) stdoutFileName(session string) string {
 	return filepath.Join(os.TempDir(), session+".stdout")
@@ -78,6 +82,10 @@ func (c *Controller) stdoutFileName(session string) string {
 // stderrFileName constructs the stderr log path.
 func (c *Controller) stderrFileName(session string) string {
 	return filepath.Join(os.TempDir(), session+".stderr")
+}
+
+func (c *Controller) combinedOutputFileName(session string) string {
+	return filepath.Join(os.TempDir(), session+".output")
 }
 
 // readFromPos streams new content from a file starting at startPos.

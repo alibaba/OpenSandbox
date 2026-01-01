@@ -120,3 +120,28 @@ func TestRespondErrorAddsCodeAndMessage(t *testing.T) {
 		t.Fatalf("unexpected message: %s", got.Message)
 	}
 }
+
+func TestQueryInt64(t *testing.T) {
+	ctrl := &basicController{}
+
+	tests := []struct {
+		name     string
+		query    string
+		def      int64
+		expected int64
+	}{
+		{name: "valid number", query: "42", def: 0, expected: 42},
+		{name: "empty uses default", query: "", def: 5, expected: 5},
+		{name: "invalid uses default", query: "not-a-number", def: -1, expected: -1},
+		{name: "negative number", query: "-10", def: 0, expected: -10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ctrl.QueryInt64(tt.query, tt.def)
+			if got != tt.expected {
+				t.Fatalf("QueryInt64(%q, %d) = %d, want %d", tt.query, tt.def, got, tt.expected)
+			}
+		})
+	}
+}

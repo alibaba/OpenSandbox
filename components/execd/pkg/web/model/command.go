@@ -18,17 +18,11 @@ import "time"
 
 // CommandStatusResponse represents command status for REST APIs.
 type CommandStatusResponse struct {
-	Session    string     `json:"session"`
+	ID         string     `json:"id"`
+	Content    string     `json:"content,omitempty"`
 	Running    bool       `json:"running"`
 	ExitCode   *int       `json:"exit_code,omitempty"`
 	Error      string     `json:"error,omitempty"`
 	StartedAt  time.Time  `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
-}
-
-// CommandOutputResponse returns non-streamed stdout/stderr plus status.
-type CommandOutputResponse struct {
-	CommandStatusResponse
-	Stdout string `json:"stdout"`
-	Stderr string `json:"stderr"`
 }
