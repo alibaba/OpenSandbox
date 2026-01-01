@@ -168,24 +168,20 @@ For more details, please refer to [examples](examples/README.md) and the README 
 
 ## Project Structure
 
-```bash
-OpenSandbox/
-├── sdks/                     # Multi-language SDKs
-│   ├── code-interpreter/     # Code Interpreter SDK
-│   └── sandbox/              # Sandbox base SDK
-├── specs/                    # OpenAPI specifications
-│   ├── execd-api.yaml        # Command execution and file operations API specification
-│   └── sandbox-lifecycle.yml # Sandbox lifecycle API specification
-├── server/                   # Sandbox server
-├── components/               # Core components
-│   └── execd/                # Command execution and file operations component (Go)
-├── docs/                     # Documentation
-├── examples/                 # Example integrations and use cases
-├── sandboxes/                # Sandbox implementations
-│   └── code-interpreter/     # Code Interpreter sandbox implementation
-├── scripts/                  # Build and utility scripts
-└── tests                     # End-to-end tests
-```
+| Directory | Description |
+|-----------|-------------|
+| [`server/`](server/README.md) | Python FastAPI sandbox lifecycle server |
+| [`components/execd/`](components/execd/README.md) | Go execution daemon for commands and file operations |
+| [`sdks/`](sdks/) | Multi-language SDKs (Python, Kotlin) |
+| [`sandboxes/`](sandboxes/) | Sandbox runtime images (e.g., code-interpreter) |
+| [`kubernetes/`](kubernetes/README.md) | Kubernetes operator and batch sandbox support |
+| [`specs/`](specs/README.md) | OpenAPI specifications |
+| [`examples/`](examples/README.md) | Integration examples and use cases |
+| [`oseps/`](oseps/README.md) | OpenSandbox Enhancement Proposals |
+| [`docs/`](docs/) | Architecture and design documentation |
+| [`tests/`](tests/) | Cross-component E2E tests |
+
+For detailed architecture, see [docs/architecture.md](docs/architecture.md).
 
 ## Documentation
 
@@ -206,14 +202,14 @@ You can use OpenSandbox for personal or commercial projects in compliance with t
 
 ### SDK
 
-- [ ] **TypeScript SDK** - TypeScript/JavaScript client SDK for sandbox lifecycle management and command execution、file operations.
-- [ ] **Go SDK** - Go client SDK for sandbox lifecycle management and command execution、file operations.
+- [ ] **TypeScript SDK** - TypeScript/JavaScript client SDK for sandbox lifecycle management and command execution, file operations.
+- [ ] **Go SDK** - Go client SDK for sandbox lifecycle management and command execution, file operations.
 
 ### Server Runtime
 
-- [ ] **OpenSandbox Kubernetes Runtime** - High-performance sandbox scheduling implementation
+- [x] **OpenSandbox Kubernetes Runtime** - High-performance sandbox scheduling implementation (see [`kubernetes/`](kubernetes/README.md))
 - [ ] **kubernetes-sigs/agent-sandbox Support** - Integration with [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
-- [ ] **Declarative Network Isolation** - Network egress control with allow/deny rules for specific domains
+- [ ] **Declarative Network Isolation** - Network egress control with allow/deny rules for specific domains (see [OSEP-0001](oseps/0001-fqdn-based-egress-control.md))
 
 ## Contact and Discussion
 

@@ -168,24 +168,20 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 ## 项目结构
 
-```bash
-OpenSandbox/
-├── sdks/                     # 多语言 SDK
-│   ├── code-interpreter/     # Code Interpreter SDK
-│   └── sandbox/              # Sandbox 基础 SDK
-├── specs/                    # OpenAPI 规范
-│   ├── execd-api.yaml        # 命令执行和文件操作 API 规范
-│   └── sandbox-lifecycle.yml # 沙箱生命周期 API 规范
-├── server/                   # 沙箱服务端
-├── components/               # 核心组件
-│   └── execd/                # 命令执行和文件操作组件(Go)
-├── docs/                     # 文档
-├── examples/                 # 示例集成和使用案例
-├── sandboxes/                # 沙箱实现
-│   └── code-interpreter/     # Code Interpreter 沙箱实现
-├── scripts/                  # 构建和工具脚本
-└── e2e/                      # 端到端测试
-```
+| 目录 | 说明 |
+|------|------|
+| [`server/`](../server/README_zh.md) | Python FastAPI 沙箱生命周期服务 |
+| [`components/execd/`](../components/execd/README_zh.md) | Go 执行守护进程，负责命令和文件操作 |
+| [`sdks/`](../sdks/) | 多语言 SDK（Python、Kotlin） |
+| [`sandboxes/`](../sandboxes/) | 沙箱运行时镜像（如 code-interpreter） |
+| [`kubernetes/`](../kubernetes/README-ZH.md) | Kubernetes Operator 和批量沙箱支持 |
+| [`specs/`](../specs/README_zh.md) | OpenAPI 规范 |
+| [`examples/`](../examples/README.md) | 集成示例和使用案例 |
+| [`oseps/`](../oseps/README.md) | OpenSandbox Enhancement Proposals |
+| [`docs/`](../docs/) | 架构和设计文档 |
+| [`tests/`](../tests/) | 跨组件端到端测试 |
+
+详细架构请参阅 [docs/architecture.md](architecture.md)。
 
 ## 文档
 
@@ -211,10 +207,9 @@ OpenSandbox/
 
 ### Server Runtime
 
-- [ ] **自研 Kubernetes 沙箱调度器** - 高性能沙箱调度实现
+- [x] **自研 Kubernetes 沙箱调度器** - 高性能沙箱调度实现（见 [`kubernetes/`](../kubernetes/README-ZH.md)）
 - [ ] **kubernetes-sigs/agent-sandbox 支持** - 集成 [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) 沙箱调度能力
-- [ ] **声明式网络隔离** - 支持允许/禁止特定域名规则的网络 egress 访问控制
-- [ ] **沙箱路由器 Ingress** - Kubernetes 版本中的专用 ingress 组件（sandbox-router），用于将流量路由到沙箱
+- [ ] **声明式网络隔离** - 支持允许/禁止特定域名规则的网络 egress 访问控制（见 [OSEP-0001](../oseps/0001-fqdn-based-egress-control.md)）
 
 ## 联系与讨论
 
