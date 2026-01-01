@@ -15,7 +15,7 @@
 # limitations under the License.
 
 """
-Simple smoke tests for execd command and filesystem APIs.
+Simple smoke tests for execd APIs.
 
 Prerequisites:
 - execd server running locally (default http://localhost:44772)
@@ -28,6 +28,8 @@ import os
 import sys
 import time
 import uuid
+import tempfile
+import pathlib
 
 import requests
 
@@ -106,10 +108,10 @@ def upload_and_download():
 
 
 def filesystem_smoke():
-    base_dir = f"/tmp/execd-smoke-{uuid.uuid4().hex}"
-    sub_dir = f"{base_dir}/sub"
-    file_path = f"{sub_dir}/hello.txt"
-    renamed_path = f"{sub_dir}/hello_renamed.txt"
+    base_dir = os.path.join(tempfile.gettempdir(), f"execd-smoke-{uuid.uuid4().hex}")
+    sub_dir = os.path.join(base_dir, "sub")
+    file_path = os.path.join(sub_dir, "hello.txt")
+    renamed_path = os.path.join(sub_dir, "hello_renamed.txt")
 
     # create dirs
     mk = session.post(f"{BASE_URL}/directories", json={sub_dir: {"mode": 0}}, timeout=10)
@@ -131,7 +133,15 @@ def filesystem_smoke():
     # search
     search = session.get(f"{BASE_URL}/files/search", params={"path": base_dir, "pattern": "*.txt"}, timeout=10)
     expect(search.status_code == 200, f"search failed: {search.status_code} {search.text}")
-    expect(any(f.get("path") == file_path for f in search.json()), "search did not find file")
+    found = False
+    for f in search.json():
+        p = f.get("path")
+        if not p:
+            continue
+        if pathlib.Path(p).resolve() == pathlib.Path(file_path).resolve():
+            found = True
+            break
+    expect(found, "search did not find file")
 
     # replace content
     rep = session.post(
