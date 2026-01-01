@@ -21,6 +21,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CURRENT_YEAR="$(date +%Y)"
+MIN_YEAR="2025"
 LICENSE_OWNER="Alibaba Group Holding Ltd."
 LICENSE_REGEX="Copyright [0-9]{4} ${LICENSE_OWNER// / }"
 
@@ -131,7 +132,7 @@ while IFS= read -r file; do
     continue
   fi
   found_year="$(echo "$header" | grep -Eo "$LICENSE_REGEX" | head -n1 | grep -Eo '[0-9]{4}')"
-  if [[ -z "$found_year" || "$found_year" -lt "$CURRENT_YEAR" ]]; then
+  if [[ -z "$found_year" || "$found_year" -gt "$CURRENT_YEAR" || "$found_year" -lt "$MIN_YEAR" ]]; then
     missing+=("$file")
   fi
 done < <(git -C "$REPO_ROOT" ls-files)
