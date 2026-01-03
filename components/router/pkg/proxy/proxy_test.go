@@ -1,0 +1,158 @@
+// Copyright 2025 Alibaba Group Holding Ltd.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package proxy
+
+import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/alibaba/opensandbox/router/pkg/flag"
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+	kubeclient "knative.dev/pkg/client/injection/kube/client"
+)
+
+func Test_WatchPods(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(realBackendHTTPHandler))
+	defer server.Close()
+
+	multiSession := uuid.New().String()
+	pod1 := MakePod().
+		Name("session-pod-1").
+		Namespace(flag.Namespace).
+		IP("127.0.0.1").
+		Phase(corev1.PodRunning).
+		Label(flag.IngressLabelKey, multiSession).
+		Obj()
+	pod2 := MakePod().
+		Name("session-pod-2").
+		Namespace(flag.Namespace).
+		IP(""). // pod ip is empty
+		Phase(corev1.PodPending).
+		Label(flag.IngressLabelKey, uuid.New().String()).
+		Obj()
+	pod3 := MakePod().
+		Name("other-pods").
+		Namespace(flag.Namespace).
+		Phase(corev1.PodRunning).
+		Obj()
+	pod4 := MakePod().
+		Name("session-pod-4").
+		Namespace(flag.Namespace).
+		IP("127.0.0.1"). // pod ip is empty
+		Phase(corev1.PodFailed).
+		Label(flag.IngressLabelKey, multiSession).
+		Obj()
+
+	clientset := fake.NewSimpleClientset(pod1, pod2, pod3, pod4)
+
+	ctx := context.WithValue(context.Background(), kubeclient.Key{}, clientset)
+	proxy := NewProxy(ctx)
+
+	time.Sleep(100 * time.Millisecond)
+	_, err := proxy.lister.Pods(flag.Namespace).Get(pod1.Name)
+	assert.Nil(t, err)
+	_, err = proxy.lister.Pods(flag.Namespace).Get(pod2.Name)
+	assert.Nil(t, err)
+	err = clientset.CoreV1().Pods(flag.Namespace).Delete(ctx, pod2.Name, metav1.DeleteOptions{})
+	assert.Nil(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	_, err = proxy.lister.Pods(flag.IngressLabelKey).Get(pod2.Name)
+	assert.True(t, errors.IsNotFound(err))
+	err = clientset.CoreV1().Pods(flag.Namespace).Delete(ctx, pod1.Name, metav1.DeleteOptions{})
+	assert.Nil(t, err)
+
+	time.Sleep(100 * time.Millisecond)
+	_, err = proxy.lister.Pods(flag.Namespace).Get(pod1.Name)
+	assert.True(t, errors.IsNotFound(err))
+}
+
+func TestIsWebSocketRequest(t *testing.T) {
+	proxy := &Proxy{}
+
+	// Valid websocket request
+	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	assert.True(t, proxy.isWebSocketRequest(req))
+
+	// Missing upgrade headers
+	req = httptest.NewRequest(http.MethodGet, "/ws", nil)
+	assert.False(t, proxy.isWebSocketRequest(req))
+
+	// Wrong method
+	req = httptest.NewRequest(http.MethodPost, "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	assert.False(t, proxy.isWebSocketRequest(req))
+}
+
+func TestParseSandboxHost(t *testing.T) {
+	proxy := &Proxy{}
+
+	host, err := proxy.parseSandboxHost("sandbox-1234.example.com")
+	assert.NoError(t, err)
+	assert.Equal(t, "sandbox", host.ingressKey)
+	assert.Equal(t, "1234", host.port)
+
+	host, err = proxy.parseSandboxHost("https://alpha-beta-8080.sandbox.test")
+	assert.NoError(t, err)
+	assert.Equal(t, "alpha-beta", host.ingressKey)
+	assert.Equal(t, "8080", host.port)
+
+	_, err = proxy.parseSandboxHost("invalidhost")
+	assert.Error(t, err)
+
+	_, err = proxy.parseSandboxHost("-1234.example.com")
+	assert.Error(t, err)
+}
+
+func TestGetClientIP(t *testing.T) {
+	proxy := &Proxy{}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.1:12345"
+	assert.Equal(t, "192.0.2.1", proxy.getClientIP(req))
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.1:12345"
+	req.Header.Set(XRealIP, "203.0.113.5")
+	assert.Equal(t, "203.0.113.5", proxy.getClientIP(req))
+
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.1:12345"
+	req.Header.Set(XForwardedFor, "10.0.0.1, 198.51.100.2")
+	assert.Equal(t, "10.0.0.1", proxy.getClientIP(req))
+}
+
+func findAvailablePort() (int, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer listener.Close()
+
+	port := listener.Addr().(*net.TCPAddr).Port
+	return port, nil
+}

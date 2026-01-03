@@ -1,0 +1,38 @@
+name: Router Tests
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'components/router/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.0'
+
+      - name: Run golint
+        run: |
+          cd components/router
+          make golint
+
+      - name: Run Build
+        run: |
+          cd components/router
+          make build
+
+      - name: Run tests
+        run: |
+          cd components/router
+          make test
