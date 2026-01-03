@@ -25,6 +25,7 @@ This eliminates the need to repeat response handling logic in each adapter metho
 """
 
 import logging
+from http import HTTPStatus
 from typing import Any, TypeVar
 
 from opensandbox.exceptions import SandboxApiException
@@ -33,6 +34,24 @@ logger = logging.getLogger(__name__)
 
 
 T = TypeVar("T")
+
+def _status_code_to_int(status_code: Any) -> int:
+    """
+    Normalize status_code from openapi-python-client responses to a plain int.
+
+    openapi-python-client may use http.HTTPStatus; some callers may already provide an int.
+    """
+    if isinstance(status_code, HTTPStatus):
+        return int(status_code)
+    if isinstance(status_code, int):
+        return status_code
+    value = getattr(status_code, "value", None)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(status_code)
+    except Exception:
+        return 0
 
 
 def require_parsed(response_obj: Any, expected_type: type[T], operation_name: str) -> T:
@@ -43,9 +62,7 @@ def require_parsed(response_obj: Any, expected_type: type[T], operation_name: st
     - parsed payload must exist
     - parsed payload must match the expected type
     """
-    status_code = getattr(response_obj, "status_code", 0)
-    if hasattr(status_code, "value"):
-        status_code = status_code.value
+    status_code = _status_code_to_int(getattr(response_obj, "status_code", 0))
 
     parsed = getattr(response_obj, "parsed", None)
     if parsed is None:
@@ -74,9 +91,7 @@ def handle_api_error(response_obj: Any, operation_name: str = "API call") -> Non
     Raises:
         SandboxApiException: If the response indicates an error
     """
-    status_code = response_obj.status_code
-    if hasattr(status_code, "value"):
-        status_code = status_code.value
+    status_code = _status_code_to_int(getattr(response_obj, "status_code", 0))
 
     logger.debug(f"{operation_name} response: status={status_code}")
 

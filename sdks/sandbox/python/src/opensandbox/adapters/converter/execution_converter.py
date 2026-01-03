@@ -22,6 +22,8 @@ similar to the Kotlin SDK ExecutionConverter.
 This converter is designed to work with openapi-python-client generated models.
 """
 
+from typing import Any
+
 from opensandbox.api.execd.models.run_command_request import (
     RunCommandRequest as ApiRunCommandRequest,
 )
@@ -48,9 +50,9 @@ class ExecutionConverter:
         if opts.working_directory:
             cwd = opts.working_directory
 
-        # Convert background, handling None
+        # Convert background. Domain uses bool (default False). When false, omit it from the API request.
         background = UNSET
-        if opts.background is not None:
+        if opts.background:
             background = opts.background
 
         return ApiRunCommandRequest(
@@ -61,7 +63,7 @@ class ExecutionConverter:
         )
 
     @staticmethod
-    def to_api_run_command_json(command: str, opts: RunCommandOpts) -> dict:
+    def to_api_run_command_json(command: str, opts: RunCommandOpts) -> dict[str, Any]:
         """
         Convert command + options to a plain JSON-serializable dict for httpx requests.
         Centralizes the attrs/pydantic differences behind one callsite.
@@ -69,6 +71,5 @@ class ExecutionConverter:
         api_request = ExecutionConverter.to_api_run_command_request(command, opts)
         if hasattr(api_request, "to_dict"):
             return api_request.to_dict()
-        if hasattr(api_request, "model_dump"):
-            return api_request.model_dump(by_alias=True, exclude_none=True)
+        # Fallback (shouldn't normally happen for openapi-python-client models).
         return dict(getattr(api_request, "__dict__", {}))

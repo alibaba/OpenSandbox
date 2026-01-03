@@ -24,6 +24,7 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from io import IOBase, TextIOBase
+from typing import TypedDict
 
 import httpx
 
@@ -48,6 +49,11 @@ from opensandbox.models.sandboxes import SandboxEndpoint
 from opensandbox.services.filesystem import Filesystem
 
 logger = logging.getLogger(__name__)
+
+class _DownloadRequest(TypedDict):
+    url: str
+    params: dict[str, str]
+    headers: dict[str, str]
 
 
 class FilesystemAdapter(Filesystem):
@@ -118,19 +124,21 @@ class FilesystemAdapter(Filesystem):
         return f"{protocol}://{self.execd_endpoint.endpoint}{path}"
 
     async def read_file(
-            self,
-            path: str,
-            encoding: str = "utf-8",
-            range_header: str | None = None,
+        self,
+        path: str,
+        *,
+        encoding: str = "utf-8",
+        range_header: str | None = None,
     ) -> str:
         """Read file content as string via HTTP API."""
-        content = await self.read_bytes(path, range_header)
+        content = await self.read_bytes(path, range_header=range_header)
         return content.decode(encoding)
 
     async def read_bytes(
-            self,
-            path: str,
-            range_header: str | None = None,
+        self,
+        path: str,
+        *,
+        range_header: str | None = None,
     ) -> bytes:
         """Read file content as bytes with support for range requests.
 
@@ -152,7 +160,7 @@ class FilesystemAdapter(Filesystem):
             response = await client.get(
                 request_data["url"],
                 params=request_data["params"],
-                headers=request_data.get("headers"),
+                headers=request_data["headers"],
             )
             response.raise_for_status()
             return response.content
@@ -175,7 +183,7 @@ class FilesystemAdapter(Filesystem):
 
             url = request_data["url"]
             params = request_data["params"]
-            headers = request_data.get("headers", {})
+            headers = request_data["headers"]
 
             request = client.build_request(
                 "GET",
@@ -269,7 +277,8 @@ class FilesystemAdapter(Filesystem):
     async def write_file(
         self,
         path: str,
-        content: str | bytes | IOBase,
+        data: str | bytes | IOBase,
+        *,
         encoding: str = "utf-8",
         mode: int = 755,
         owner: str | None = None,
@@ -278,7 +287,7 @@ class FilesystemAdapter(Filesystem):
         """Write single file (convenience method)."""
         entry = WriteEntry(
             path=path,
-            data=content,
+            data=data,
             mode=mode,
             owner=owner,
             group=group,
@@ -407,6 +416,7 @@ class FilesystemAdapter(Filesystem):
         """Search files using auto-generated API."""
         try:
             from opensandbox.api.execd.api.filesystem import search_files
+            from opensandbox.api.execd.models import FileInfo
 
             client = await self._get_client()
             response_obj = await search_files.asyncio_detailed(
@@ -417,10 +427,15 @@ class FilesystemAdapter(Filesystem):
 
             handle_api_error(response_obj, "Search files")
 
-            if not response_obj.parsed:
+            parsed = response_obj.parsed
+            if not parsed:
                 return []
 
-            return FilesystemModelConverter.to_entry_info_list(response_obj.parsed)
+            if isinstance(parsed, list) and all(isinstance(x, FileInfo) for x in parsed):
+                return FilesystemModelConverter.to_entry_info_list(parsed)
+            raise SandboxApiException(
+                message="Search files failed: unexpected response type",
+            )
 
         except Exception as e:
             logger.error("Failed to search files", exc_info=e)
@@ -450,7 +465,7 @@ class FilesystemAdapter(Filesystem):
 
     def _build_download_request(
             self, path: str, range_header: str | None = None
-    ) -> dict[str, str | dict[str, str]]:
+    ) -> _DownloadRequest:
         """Build HTTP request for file download operations.
 
         Args:
@@ -462,7 +477,7 @@ class FilesystemAdapter(Filesystem):
         """
         url = self._get_execd_url(self.FILESYSTEM_DOWNLOAD_PATH)
         params = {"path": path}
-        headers = {}
+        headers: dict[str, str] = {}
 
         if range_header:
             headers["Range"] = range_header

@@ -29,12 +29,51 @@ import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.ExecutionH
  */
 interface Codes {
     /**
+     * Gets an existing execution context by id.
+     *
+     * A [CodeContext] represents a persistent execution session (kernel/runtime) that can be reused
+     * across multiple executions to preserve state (variables, imports, working directory, etc.).
+     *
+     * @param id Execution context id
+     * @return The existing [CodeContext]
+     */
+    fun getContext(id: String): CodeContext
+
+    /**
+     * Lists active execution contexts for a given language/runtime.
+     *
+     * This is useful for debugging, monitoring, or cleaning up leaked contexts.
+     *
+     * @param language Execution runtime (e.g., "python", "bash", "java")
+     * @return List of [CodeContext] currently available for the given language
+     */
+    fun listContexts(language: String): List<CodeContext>
+
+    /**
      * Creates a new execution context for code interpretation.
      *
      * @param language The programming language for this context (e.g., "python", "javascript")
      * @return A new [CodeContext] with the specified configuration
      */
     fun createContext(language: String): CodeContext
+
+    /**
+     * Deletes an execution context (session) by id.
+     *
+     * This should terminate the underlying context thread/process and release resources.
+     *
+     * @param id Execution context id to delete
+     */
+    fun deleteContext(id: String)
+
+    /**
+     * Deletes all execution contexts under a specific language/runtime.
+     *
+     * This is a bulk cleanup operation intended for context management.
+     *
+     * @param language Target execution runtime whose contexts should be deleted
+     */
+    fun deleteContexts(language: String)
 
     /**
      * Executes code within the specified context.

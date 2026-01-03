@@ -23,12 +23,7 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.InvalidArgumentExceptio
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxInternalException
 import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EXECD_PORT
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxMetrics
 import org.slf4j.LoggerFactory
-import java.time.Duration
-import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -184,105 +179,6 @@ class CodeInterpreter internal constructor(
             }
         }
     }
-
-    /**
-     * Gets a specific network endpoint for the underlying sandbox.
-     *
-     * This allows access to specific ports exposed by the sandbox, which can be
-     * useful for connecting to additional services or debugging interfaces.
-     *
-     * @param port The port number to get the endpoint for
-     * @return Endpoint information including host, port, and connection details
-     * @throws SandboxException if endpoint cannot be retrieved
-     */
-    fun getEndpoint(port: Int): SandboxEndpoint {
-        return sandbox.getEndpoint(port)
-    }
-
-    /**
-     * Gets the current status of this sandbox.
-     *
-     * @return Current sandbox status including state and metadata
-     * @throws SandboxException if status cannot be retrieved
-     */
-    fun getInfo(): SandboxInfo {
-        return sandbox.getInfo()
-    }
-
-    /**
-     * Gets the current resource usage metrics for the underlying sandbox.
-     *
-     * Provides real-time information about CPU usage, memory consumption,
-     * disk I/O, and other performance metrics.
-     *
-     * @return Current sandbox metrics including CPU, memory, and I/O statistics
-     * @throws SandboxException if metrics cannot be retrieved
-     */
-    fun getMetrics(): SandboxMetrics {
-        return sandbox.getMetrics()
-    }
-
-    /**
-     * Renew the sandbox expiration time to delay automatic termination.
-     *
-     * The new expiration time will be set to the current time plus the provided duration.
-     *
-     * @param timeout Duration to add to the current time to set the new expiration
-     * @throws SandboxException if the operation fails
-     */
-    fun renew(timeout: Duration) {
-        logger.info("Renew code interpreter {} timeout, estimated expiration to {}", id, OffsetDateTime.now().plus(timeout))
-        sandbox.renew(timeout)
-    }
-
-    /**
-     * Pauses the sandbox while preserving its state.
-     *
-     * The sandbox will transition to PAUSED state and can be resumed later.
-     * All running processes will be suspended.
-     *
-     * @throws SandboxException if pause operation fails
-     */
-    fun pause() {
-        logger.info("Pausing code interpreter: {}", id)
-        sandbox.pause()
-    }
-
-    /**
-     * Resumes a previously paused code interpreter.
-     *
-     * The sandbox will transition from PAUSED to RUNNING state and all
-     * suspended processes will be resumed.
-     *
-     * @throws SandboxException if resume operation fails
-     */
-    fun resume() {
-        logger.info("Resuming code interpreter: {}", id)
-        sandbox.resume()
-    }
-
-    /**
-     * This method sends a termination signal to the remote sandbox instance, causing it to stop immediately.
-     * This is an irreversible operation.
-     *
-     * Note: This method does NOT close the local `Sandbox` object resources (like connection pools).
-     * You should call `close()` or use a try-with-resources block to clean up local resources.
-     *
-     * @throws SandboxException if termination fails
-     */
-    fun kill() {
-        logger.info("Killing code interpreter: {}", id)
-        sandbox.kill()
-    }
-
-    /**
-     * Checks if the code interpreter and its underlying sandbox are healthy and responsive.
-     *
-     * This performs health checks on both the sandbox infrastructure and code execution services.
-     *
-     * @return true if both sandbox and code execution services are healthy, false otherwise
-     */
-    fun isHealthy(): Boolean = sandbox.isHealthy()
 
     /**
      * Builder for creating CodeInterpreter instances from existing Sandbox instances.

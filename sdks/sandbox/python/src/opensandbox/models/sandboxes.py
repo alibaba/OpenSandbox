@@ -147,6 +147,19 @@ class SandboxCreateResponse(BaseModel):
     id: UUID = Field(description="Unique identifier of the newly created sandbox")
 
 
+class SandboxRenewResponse(BaseModel):
+    """
+    Response returned when renewing a sandbox expiration time.
+    """
+
+    expires_at: datetime = Field(
+        description="The new absolute expiration time in UTC (RFC 3339 format).",
+        alias="expires_at",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class SandboxEndpoint(BaseModel):
     """
     Connection endpoint information for a sandbox.
@@ -242,3 +255,48 @@ class SandboxMetrics(BaseModel):
     )
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class SandboxState:
+    """High-level lifecycle state of the sandbox.
+
+    This class provides constant string values for sandbox states.
+    Note that the sandbox service may introduce new states in future
+    versions; clients should handle unknown string values gracefully.
+
+    Common States:
+        PENDING (str): Sandbox is being provisioned.
+        RUNNING (str): Sandbox is running and ready to accept requests.
+        PAUSING (str): Sandbox is in the process of pausing.
+        PAUSED (str): Sandbox has been paused while retaining its state.
+        STOPPING (str): Sandbox is being terminated.
+        TERMINATED (str): Sandbox has been successfully terminated.
+        FAILED (str): Sandbox encountered a critical error.
+        UNKNOWN (str): State is unknown or unsupported by the current version.
+
+    State Transitions:
+        - Pending -> Running: After creation completes.
+        - Running -> Pausing: When pause is requested.
+        - Pausing -> Paused: After pause operation completes.
+        - Paused -> Running: When resume is requested.
+        - Running/Paused -> Stopping: When kill is requested or TTL expires.
+        - Stopping -> Terminated: After kill/timeout operation completes.
+        - Pending/Running/Paused -> Failed: On critical error.
+    """
+
+    PENDING = "Pending"
+    RUNNING = "Running"
+    PAUSING = "Pausing"
+    PAUSED = "Paused"
+    STOPPING = "Stopping"
+    TERMINATED = "Terminated"
+    FAILED = "Failed"
+    UNKNOWN = "Unknown"
+
+    @classmethod
+    def values(cls) -> set[str]:
+        """Returns a set of all known state values."""
+        return {
+            v for k, v in cls.__dict__.items()
+            if k.isupper() and not k.startswith("_")
+        }

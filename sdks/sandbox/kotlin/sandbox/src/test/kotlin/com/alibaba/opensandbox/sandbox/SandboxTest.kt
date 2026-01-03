@@ -20,6 +20,7 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxReadyTimeoutExce
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxMetrics
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
 import com.alibaba.opensandbox.sandbox.domain.services.Commands
 import com.alibaba.opensandbox.sandbox.domain.services.Filesystem
 import com.alibaba.opensandbox.sandbox.domain.services.Health
@@ -137,11 +138,12 @@ class SandboxTest {
     @Test
     fun `renew should delegate to sandboxService`() {
         val timeout = Duration.ofMinutes(10)
-        every { sandboxService.renewSandboxExpiration(sandboxId, any()) } just Runs
+        val expectedRenew = mockk<SandboxRenewResponse>()
+        every { sandboxService.renewSandboxExpiration(sandboxId, any()) } returns expectedRenew
 
-        sandbox.renew(timeout)
+        val actualRenew = sandbox.renew(timeout)
 
-        verify { sandboxService.renewSandboxExpiration(sandboxId, any()) }
+        assertSame(expectedRenew, actualRenew)
     }
 
     @Test
@@ -151,15 +153,6 @@ class SandboxTest {
         sandbox.pause()
 
         verify { sandboxService.pauseSandbox(sandboxId) }
-    }
-
-    @Test
-    fun `resume should delegate to sandboxService`() {
-        every { sandboxService.resumeSandbox(sandboxId) } just Runs
-
-        sandbox.resume()
-
-        verify { sandboxService.resumeSandbox(sandboxId) }
     }
 
     @Test

@@ -82,9 +82,9 @@ class CodeExecutionConverter:
         Returns:
             Domain model code context
         """
-        from opensandbox.api.execd.types import UNSET
+        from opensandbox.api.execd.types import Unset
 
-        context_id = api_context.id if api_context.id is not UNSET else None
+        context_id = None if isinstance(api_context.id, Unset) else api_context.id
 
         return CodeContext(
             id=context_id,

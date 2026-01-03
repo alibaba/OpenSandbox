@@ -22,18 +22,12 @@ support, session management, and variable persistence.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from opensandbox.exceptions import (
     InvalidArgumentException,
     SandboxException,
     SandboxInternalException,
-)
-from opensandbox.models.sandboxes import (
-    SandboxEndpoint,
-    SandboxInfo,
-    SandboxMetrics,
 )
 from opensandbox.sandbox import Sandbox
 
@@ -87,8 +81,8 @@ class CodeInterpreter:
     )
 
     # Always clean up resources
-    await interpreter.kill()
-    await interpreter.sandbox.close()
+    await sandbox.kill()
+    await sandbox.close()
     ```
     """
 
@@ -175,125 +169,6 @@ class CodeInterpreter:
             Service for advanced code execution with session support
         """
         return self._code_service
-
-    async def get_endpoint(self, port: int) -> SandboxEndpoint:
-        """
-        Gets a specific network endpoint for the underlying sandbox.
-
-        This allows access to specific ports exposed by the sandbox, which can be
-        useful for connecting to additional services or debugging interfaces.
-
-        Args:
-            port: The port number to get the endpoint for
-
-        Returns:
-            Endpoint information including host, port, and connection details
-
-        Raises:
-            SandboxException: If endpoint cannot be retrieved
-        """
-        return await self._sandbox.get_endpoint(port)
-
-    async def get_info(self) -> SandboxInfo:
-        """
-        Gets the current status of this sandbox.
-
-        Returns:
-            Current sandbox status including state and metadata
-
-        Raises:
-            SandboxException: If status cannot be retrieved
-        """
-        return await self._sandbox.get_info()
-
-    async def get_metrics(self) -> SandboxMetrics:
-        """
-        Gets the current resource usage metrics for the underlying sandbox.
-
-        Provides real-time information about CPU usage, memory consumption,
-        disk I/O, and other performance metrics.
-
-        Returns:
-            Current sandbox metrics including CPU, memory, and I/O statistics
-
-        Raises:
-            SandboxException: If metrics cannot be retrieved
-        """
-        return await self._sandbox.get_metrics()
-
-    async def renew(self, timeout: timedelta | int) -> None:
-        """
-        Renew the sandbox expiration time to delay automatic termination.
-
-        The new expiration time will be set to the current time plus the provided duration.
-
-        Args:
-            timeout: Duration to add to the current time to set the new expiration.
-                    Can be timedelta or seconds as int.
-
-        Raises:
-            SandboxException: If the operation fails
-        """
-        if isinstance(timeout, int):
-            timeout = timedelta(seconds=timeout)
-
-        logger.info(
-            "Renew code interpreter %s timeout, estimated expiration to %s",
-            self.id,
-            datetime.now(timezone.utc) + timeout,
-        )
-        await self._sandbox.renew(timeout)
-
-    async def pause(self) -> None:
-        """
-        Pauses the sandbox while preserving its state.
-
-        The sandbox will transition to PAUSED state and can be resumed later.
-        All running processes will be suspended.
-
-        Raises:
-            SandboxException: If pause operation fails
-        """
-        logger.info("Pausing code interpreter: %s", self.id)
-        await self._sandbox.pause()
-
-    async def resume(self) -> None:
-        """
-        Resumes a previously paused code interpreter.
-
-        The sandbox will transition from PAUSED to RUNNING state and all
-        suspended processes will be resumed.
-
-        Raises:
-            SandboxException: If resume operation fails
-        """
-        logger.info("Resuming code interpreter: %s", self.id)
-        await self._sandbox.resume()
-
-    async def kill(self) -> None:
-        """
-        This method sends a termination signal to the remote sandbox instance, causing it to stop immediately.
-        This is an irreversible operation.
-
-        Note: This method does NOT close the local `Sandbox` object resources (like connection pools).
-        You should call `close()` or use async context manager to clean up local resources.
-
-        Raises:
-            SandboxException: If termination fails
-        """
-        logger.info("Killing code interpreter: %s", self.id)
-        await self._sandbox.kill()
-
-    async def is_healthy(self) -> bool:
-        """
-        Checks if the code interpreter and its underlying sandbox are healthy and responsive.
-
-        This performs health checks on both the sandbox infrastructure and code execution services.
-
-        Returns:
-            True if both sandbox and code execution services are healthy, False otherwise
-        """
-        return await self._sandbox.is_healthy()
 
     @classmethod
     async def create(cls, sandbox: Sandbox) -> "CodeInterpreter":

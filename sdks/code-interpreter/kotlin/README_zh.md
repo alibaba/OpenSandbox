@@ -83,7 +83,7 @@ public class QuickStart {
 
             // 7. 清理资源
             // 注意: kill() 会立即终止远程沙箱实例；try-with-resources 会自动调用 close() 清理本地资源
-            interpreter.kill();
+            sandbox.kill();
         } catch (SandboxException e) {
             // 处理 Sandbox 特定异常
             System.err.println("沙箱错误: [" + e.getError().getCode() + "] " + e.getError().getMessage());

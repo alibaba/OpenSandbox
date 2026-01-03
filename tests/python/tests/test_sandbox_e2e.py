@@ -25,7 +25,6 @@ from io import BytesIO
 from uuid import UUID
 
 import pytest
-from tests.base_e2e_test import create_connection_config, get_sandbox_image
 from opensandbox import Sandbox
 from opensandbox.models.execd import (
     ExecutionComplete,
@@ -44,6 +43,8 @@ from opensandbox.models.filesystem import (
     WriteEntry,
 )
 from opensandbox.models.sandboxes import SandboxImageSpec
+
+from tests.base_e2e_test import create_connection_config, get_sandbox_image
 
 logger = logging.getLogger(__name__)
 
@@ -229,13 +230,18 @@ class TestSandboxE2E:
         )
 
         logger.info("Step 5: Test sandbox renewal (extend expiration time)")
-        await sandbox.renew(timedelta(minutes=5))
-        logger.info("✓ Sandbox expiration renewed")
+        renew_response = await sandbox.renew(timedelta(minutes=5))
+        assert renew_response is not None
+        assert renew_response.expires_at > info.expires_at
+        logger.info("✓ Sandbox expiration renewed to %s", renew_response.expires_at)
 
         renewed_info = await sandbox.get_info()
         assert renewed_info.expires_at > info.expires_at
         assert renewed_info.id == sandbox.id
         assert renewed_info.status.state == "Running"
+
+        # The renew API should return the new expiration time. Allow small backend-side skew.
+        assert abs((renewed_info.expires_at - renew_response.expires_at).total_seconds()) < 10
 
         # Renewal is "now + timeout" (SDK behavior). Validate remaining TTL is close to 5 minutes.
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
@@ -788,7 +794,13 @@ class TestSandboxE2E:
         logger.info("=" * 80)
 
         logger.info("Requesting sandbox resume...")
-        await sandbox.resume()
+        resumed = await Sandbox.resume(
+            sandbox_id=sandbox.id,
+            connection_config=TestSandboxE2E.connection_config,
+        )
+        # Replace the class-held instance so subsequent operations/teardown use the resumed instance.
+        TestSandboxE2E.sandbox = resumed
+        sandbox = resumed
 
         start_time = time.time()
         poll_count = 0
@@ -818,6 +830,13 @@ class TestSandboxE2E:
                 break
             await asyncio.sleep(1)
         assert healthy is True, "Sandbox should be healthy after resume"
+
+        # Minimal smoke check: after resume, the existing Sandbox instance should still be usable.
+        # This helps validate that SDK re-bound its execd adapters (endpoint may change across resume).
+        echo = await sandbox.commands.run("echo resume-ok")
+        assert echo.error is None
+        assert len(echo.logs.stdout) == 1
+        assert echo.logs.stdout[0].text == "resume-ok"
 
         elapsed_time = (time.time() - start_time) * 1000
         logger.info(f"✓ Sandbox resume completed in {elapsed_time:.2f} ms")

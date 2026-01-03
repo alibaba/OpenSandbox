@@ -96,14 +96,14 @@ For advanced code execution with persistent contexts, see the separate
 `opensandbox-code-interpreter` package.
 """
 
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
+
 from opensandbox.manager import SandboxManager
 from opensandbox.sandbox import Sandbox
 from opensandbox.sync import SandboxManagerSync, SandboxSync
 
 try:
-    from importlib.metadata import PackageNotFoundError
-    from importlib.metadata import version as _pkg_version
-
     __version__ = _pkg_version("opensandbox")
 except PackageNotFoundError:  # pragma: no cover
     # Fallback for editable/uninstalled source checkouts.

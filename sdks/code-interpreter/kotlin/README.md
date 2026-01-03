@@ -83,7 +83,7 @@ public class QuickStart {
 
             // 7. Cleanup
             // Note: kill() terminates the remote instance; close() (auto-called) cleans up local resources
-            interpreter.kill();
+            sandbox.kill();
         } catch (SandboxException e) {
             // Handle Sandbox specific exceptions
             System.err.println("Sandbox Error: [" + e.getError().getCode() + "] " + e.getError().getMessage());

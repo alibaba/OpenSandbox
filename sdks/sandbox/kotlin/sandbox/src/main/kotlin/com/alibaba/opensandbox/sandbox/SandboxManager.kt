@@ -22,6 +22,7 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxException
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
 import com.alibaba.opensandbox.sandbox.domain.services.Sandboxes
 import com.alibaba.opensandbox.sandbox.infrastructure.factory.AdapterFactory
 import org.slf4j.LoggerFactory
@@ -133,9 +134,9 @@ class SandboxManager internal constructor(
     fun renewSandbox(
         sandboxId: UUID,
         timeout: Duration,
-    ) {
+    ): SandboxRenewResponse {
         logger.info("Renew expiration for sandbox {} to {}", sandboxId, OffsetDateTime.now().plus(timeout))
-        sandboxService.renewSandboxExpiration(sandboxId, OffsetDateTime.now().plus(timeout))
+        return sandboxService.renewSandboxExpiration(sandboxId, OffsetDateTime.now().plus(timeout))
     }
 
     /**

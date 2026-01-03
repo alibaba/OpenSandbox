@@ -24,6 +24,7 @@ import com.alibaba.opensandbox.sandbox.api.models.ImageSpec
 import com.alibaba.opensandbox.sandbox.api.models.ImageSpecAuth
 import com.alibaba.opensandbox.sandbox.api.models.ListSandboxesResponse
 import com.alibaba.opensandbox.sandbox.api.models.RenewSandboxExpirationRequest
+import com.alibaba.opensandbox.sandbox.api.models.RenewSandboxExpirationResponse
 import com.alibaba.opensandbox.sandbox.api.models.execd.Metrics
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PaginationInfo
@@ -33,6 +34,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageAuth
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxMetrics
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
 import java.time.Duration
 import java.time.OffsetDateTime
 import com.alibaba.opensandbox.sandbox.api.models.PaginationInfo as ApiPaginationInfo
@@ -176,6 +178,12 @@ internal object SandboxModelConverter {
             memoryTotalInMiB = memTotalMib,
             memoryUsedInMiB = memUsedMib,
             timestamp = this.timestamp,
+        )
+    }
+
+    fun RenewSandboxExpirationResponse.toSandboxRenewResponse(): SandboxRenewResponse {
+        return SandboxRenewResponse(
+            expiresAt = this.expiresAt,
         )
     }
 }

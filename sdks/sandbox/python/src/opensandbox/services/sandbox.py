@@ -30,6 +30,7 @@ from opensandbox.models.sandboxes import (
     SandboxFilter,
     SandboxImageSpec,
     SandboxInfo,
+    SandboxRenewResponse,
 )
 
 
@@ -146,13 +147,16 @@ class Sandboxes(Protocol):
 
     async def renew_sandbox_expiration(
         self, sandbox_id: UUID, new_expiration_time: datetime
-    ) -> None:
+    ) -> SandboxRenewResponse:
         """
         Renew the expiration time of a sandbox.
 
         Args:
             sandbox_id: Unique identifier of the sandbox
             new_expiration_time: New expiration timestamp
+
+        Returns:
+            Renew response including the new expiration time.
 
         Raises:
             SandboxException: if the operation fails

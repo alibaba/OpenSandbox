@@ -25,11 +25,7 @@ import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.Su
 import com.alibaba.opensandbox.sandbox.Sandbox;
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException;
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.*;
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint;
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo;
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxMetrics;
 import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -139,38 +135,6 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         assertNotNull(codeInterpreter.files());
         assertNotNull(codeInterpreter.commands());
         assertNotNull(codeInterpreter.metrics());
-
-        // 3. Verify health check
-        assertTrue(codeInterpreter.isHealthy());
-
-        // 4. Test sandbox management operations through CodeInterpreter
-        SandboxInfo info = codeInterpreter.getInfo();
-        assertEquals(codeInterpreter.getId(), info.getId());
-        assertEquals("Running", info.getStatus().getState());
-
-        // 5. Get endpoint and metrics
-        SandboxEndpoint endpoint = codeInterpreter.getEndpoint(44772);
-        assertNotNull(endpoint);
-        assertNotNull(endpoint.getEndpoint());
-        assertEndpointHasPort(endpoint.getEndpoint(), 44772);
-
-        SandboxMetrics metrics = codeInterpreter.getMetrics();
-        assertNotNull(metrics);
-        assertTrue(metrics.getCpuCount() > 0);
-        assertTrue(
-                metrics.getCpuUsedPercentage() >= 0.0 && metrics.getCpuUsedPercentage() <= 100.0);
-        assertTrue(metrics.getMemoryTotalInMiB() > 0);
-        assertTrue(
-                metrics.getMemoryUsedInMiB() >= 0.0
-                        && metrics.getMemoryUsedInMiB() <= metrics.getMemoryTotalInMiB());
-        assertRecentTimestampMs(metrics.getTimestamp(), 180_000);
-
-        // 7. Renew and validate TTL range.
-        codeInterpreter.renew(Duration.ofMinutes(5));
-        SandboxInfo renewedInfo = codeInterpreter.getInfo();
-        Duration remaining = Duration.between(OffsetDateTime.now(), renewedInfo.getExpiresAt());
-        assertTrue(remaining.compareTo(Duration.ofMinutes(3)) > 0);
-        assertTrue(remaining.compareTo(Duration.ofMinutes(7)) < 0);
     }
 
     @Test

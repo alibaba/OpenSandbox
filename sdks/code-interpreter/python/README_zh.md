@@ -78,7 +78,7 @@ async def main() -> None:
             print(result.result[0].text)
 
         # 8. 清理远程实例（可选，但推荐）
-        await interpreter.kill()
+        await sandbox.kill()
 
 
 if __name__ == "__main__":
@@ -115,7 +115,7 @@ with sandbox:
     result = interpreter.codes.run("result = 2 + 2\nresult")
     if result.result:
         print(result.result[0].text)
-    interpreter.kill()
+    sandbox.kill()
 ```
 
 ## 运行时配置

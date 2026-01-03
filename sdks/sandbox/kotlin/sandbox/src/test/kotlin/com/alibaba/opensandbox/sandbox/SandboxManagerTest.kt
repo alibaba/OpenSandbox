@@ -21,6 +21,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PaginationInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxState
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxStatus
 import com.alibaba.opensandbox.sandbox.domain.services.Sandboxes
@@ -32,6 +33,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -123,12 +125,13 @@ class SandboxManagerTest {
     fun `renewSandbox should call service`() {
         val sandboxId = UUID.randomUUID()
         val timeout = Duration.ofMinutes(30)
+        val expectedRenew = mockk<SandboxRenewResponse>()
 
-        every { sandboxService.renewSandboxExpiration(sandboxId, any()) } just Runs
+        every { sandboxService.renewSandboxExpiration(sandboxId, any()) } returns expectedRenew
 
-        sandboxManager.renewSandbox(sandboxId, timeout)
+        val actualRenew = sandboxManager.renewSandbox(sandboxId, timeout)
 
-        verify { sandboxService.renewSandboxExpiration(sandboxId, any()) }
+        assertSame(expectedRenew, actualRenew)
     }
 
     @Test

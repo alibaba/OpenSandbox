@@ -22,7 +22,6 @@ similar to the Kotlin SDK SandboxModelConverter.
 This converter is designed to work with openapi-python-client generated models,
 which use attrs for model definitions.
 """
-
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -31,6 +30,7 @@ from opensandbox.api.lifecycle.models import (
     Endpoint,
     ListSandboxesResponse,
     RenewSandboxExpirationRequest,
+    RenewSandboxExpirationResponse,
     Sandbox,
 )
 from opensandbox.api.lifecycle.models import (
@@ -48,6 +48,7 @@ from opensandbox.models.sandboxes import (
     SandboxEndpoint,
     SandboxImageSpec,
     SandboxInfo,
+    SandboxRenewResponse,
     SandboxStatus,
 )
 
@@ -154,6 +155,24 @@ class SandboxModelConverter:
         )
 
     @staticmethod
+    def to_sandbox_renew_response(
+        api_response: RenewSandboxExpirationResponse,
+    ) -> SandboxRenewResponse:
+        """
+        Convert API RenewSandboxExpirationResponse to domain SandboxRenewResponse.
+
+        Note: We intentionally keep the public SDK surface using domain models instead of the
+        generated OpenAPI client models.
+        """
+
+        if not isinstance(api_response, RenewSandboxExpirationResponse):
+            raise TypeError(
+                f"Expected RenewSandboxExpirationResponse, got {type(api_response).__name__}"
+            )
+
+        return SandboxRenewResponse(expires_at=api_response.expires_at)
+
+    @staticmethod
     def to_sandbox_create_response(
         api_response: CreateSandboxResponse,
     ) -> SandboxCreateResponse:
@@ -169,7 +188,7 @@ class SandboxModelConverter:
     @staticmethod
     def to_sandbox_info(api_sandbox: Sandbox) -> SandboxInfo:
         """Convert API Sandbox to domain SandboxInfo."""
-        from opensandbox.api.lifecycle.types import UNSET
+        from opensandbox.api.lifecycle.types import Unset
         from opensandbox.models.sandboxes import (
             SandboxImageAuth,
             SandboxImageSpec,
@@ -177,34 +196,32 @@ class SandboxModelConverter:
         )
 
         domain_image_spec = None
-        if hasattr(api_sandbox, "image") and api_sandbox.image is not UNSET:
+        if hasattr(api_sandbox, "image") and not isinstance(api_sandbox.image, Unset):
             auth = None
-            if (
-                hasattr(api_sandbox.image, "auth")
-                and api_sandbox.image.auth is not UNSET
-                and hasattr(api_sandbox.image.auth, "username")
-                and hasattr(api_sandbox.image.auth, "password")
+            if hasattr(api_sandbox.image, "auth") and not isinstance(
+                api_sandbox.image.auth, Unset
             ):
-                username_val = api_sandbox.image.auth.username
-                password_val = api_sandbox.image.auth.password
-                if not isinstance(username_val, type(UNSET)) and not isinstance(password_val, type(UNSET)):
-                    auth = SandboxImageAuth(
-                        username=username_val,
-                        password=password_val,
-                    )
+                auth_obj = api_sandbox.image.auth
+                username_val = getattr(auth_obj, "username", None)
+                password_val = getattr(auth_obj, "password", None)
+                if isinstance(username_val, str) and isinstance(password_val, str):
+                    auth = SandboxImageAuth(username=username_val, password=password_val)
             domain_image_spec = SandboxImageSpec(
                 image=api_sandbox.image.uri,
                 auth=auth,
             )
 
         metadata: dict[str, str] = {}
-        if hasattr(api_sandbox, "metadata") and api_sandbox.metadata is not UNSET:
-            if hasattr(api_sandbox.metadata, "additional_properties"):
-                props = api_sandbox.metadata.additional_properties
+        if hasattr(api_sandbox, "metadata") and not isinstance(api_sandbox.metadata, Unset):
+            metadata_obj = api_sandbox.metadata
+            if hasattr(metadata_obj, "additional_properties") and not isinstance(
+                getattr(metadata_obj, "additional_properties", None), Unset
+            ):
+                props = metadata_obj.additional_properties
                 if isinstance(props, dict):
                     metadata = dict(props)
-            elif isinstance(api_sandbox.metadata, dict):
-                metadata = api_sandbox.metadata
+            elif isinstance(metadata_obj, dict):
+                metadata = metadata_obj
 
         return SandboxInfo(
             id=api_sandbox.id,
@@ -246,7 +263,9 @@ class SandboxModelConverter:
         api_status: ApiSandboxStatus | None,
     ) -> SandboxStatus:
         """Convert API SandboxStatus to domain SandboxStatus."""
-        from opensandbox.api.lifecycle.types import UNSET
+        from datetime import datetime
+
+        from opensandbox.api.lifecycle.types import Unset
         from opensandbox.models.sandboxes import SandboxStatus
 
         if api_status is None:
@@ -258,16 +277,24 @@ class SandboxModelConverter:
             )
 
         reason: str | None = None
-        if hasattr(api_status, "reason") and api_status.reason is not UNSET:
-            reason = api_status.reason if api_status.reason is not None else None
+        if hasattr(api_status, "reason"):
+            reason_val = api_status.reason
+            if isinstance(reason_val, str):
+                reason = reason_val
 
         message: str | None = None
-        if hasattr(api_status, "message") and api_status.message is not UNSET:
-            message = api_status.message if api_status.message is not None else None
+        if hasattr(api_status, "message"):
+            message_val = api_status.message
+            if isinstance(message_val, str):
+                message = message_val
 
-        last_transition_at = None
-        if hasattr(api_status, "last_transition_at") and api_status.last_transition_at is not UNSET:
-            last_transition_at = api_status.last_transition_at if api_status.last_transition_at is not None else None
+        last_transition_at: datetime | None = None
+        if hasattr(api_status, "last_transition_at"):
+            lta_val = api_status.last_transition_at
+            if isinstance(lta_val, datetime):
+                last_transition_at = lta_val
+            elif isinstance(lta_val, Unset) or lta_val is None:
+                last_transition_at = None
 
         return SandboxStatus(
             state=api_status.state,

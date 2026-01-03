@@ -264,6 +264,15 @@ class SandboxCreateResponse(
 )
 
 /**
+ * Response returned when a sandbox is renewed
+ *
+ * @property expiresAt new expire time after renewal
+ */
+class SandboxRenewResponse(
+    val expiresAt: java.time.OffsetDateTime,
+)
+
+/**
  * Connection endpoint information for a sandbox.
  *
  * @property endpoint Sandbox endpoint

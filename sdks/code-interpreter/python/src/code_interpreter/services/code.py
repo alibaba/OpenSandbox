@@ -91,6 +91,48 @@ class Codes(Protocol):
         """
         ...
 
+    async def get_context(self, context_id: str) -> CodeContext:
+        """
+        Get an existing execution context by id.
+
+        Args:
+            context_id: Context/session id
+
+        Returns:
+            The existing CodeContext
+        """
+        ...
+
+    async def list_contexts(self, language: str) -> list[CodeContext]:
+        """
+        List active contexts under a given language/runtime.
+
+        Args:
+            language: Execution runtime (e.g. "python", "bash")
+
+        Returns:
+            List of contexts
+        """
+        ...
+
+    async def delete_context(self, context_id: str) -> None:
+        """
+        Delete an execution context by id.
+
+        Args:
+            context_id: Context/session id to delete
+        """
+        ...
+
+    async def delete_contexts(self, language: str) -> None:
+        """
+        Delete all execution contexts under a given language/runtime.
+
+        Args:
+            language: Execution runtime (e.g. "python", "bash")
+        """
+        ...
+
     async def run(
         self,
         code: str,

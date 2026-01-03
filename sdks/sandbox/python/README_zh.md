@@ -107,7 +107,10 @@ await sandbox.renew(timedelta(minutes=30))
 await sandbox.pause()
 
 # 恢复执行
-await sandbox.resume()
+sandbox = await Sandbox.resume(
+    sandbox_id=sandbox.id,
+    connection_config=config,
+)
 
 # 获取当前状态
 info = await sandbox.get_info()
