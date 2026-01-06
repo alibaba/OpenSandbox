@@ -228,7 +228,7 @@ components:
   schemas:
     CreateBatchSandboxRequest:
       type: object
-      required: [poolRef, replica]
+      required: [poolRef, replicas]
       description: |
         Request to provision multiple sandboxes from a pool template. Overrides are
         applied per replica by index; unspecified replicas inherit the pool defaults.
@@ -237,7 +237,7 @@ components:
           type: string
           description: Identifier of the pool template to clone from
           example: pool-prod-general
-        replica:
+        replicas:
           type: integer
           minimum: 1
           maximum: 10000
@@ -248,7 +248,7 @@ components:
           description: |
             Optional per-replica overrides applied on top of the pool template.
             Each element corresponds to the replica at the same index (0-based).
-            If the array is shorter than `replica`, remaining replicas use the pool
+            If the array is shorter than `replicas`, remaining replicas use the pool
             template without overrides.
           items:
             $ref: '#/components/schemas/SandboxOverride'
@@ -316,7 +316,7 @@ components:
           description: Unique batch sandbox identifier
         status:
           $ref: '#/components/schemas/BatchSandboxStatus'
-        replica:
+        replicas:
           type: integer
           description: Number of sandboxes requested for this batch
         poolRef:
@@ -331,7 +331,7 @@ components:
           type: string
           format: date-time
           description: Batch creation timestamp
-      required: [id, status, replica, poolRef, createdAt]
+      required: [id, status, replicas, poolRef, createdAt]
 
     BatchSandbox:
       type: object
@@ -344,7 +344,7 @@ components:
         poolRef:
           type: string
           description: Pool template reference used for the batch
-        replica:
+        replicas:
           type: integer
           description: Number of sandboxes requested for this batch
         status:
@@ -372,7 +372,7 @@ components:
       required:
         - id
         - poolRef
-        - replica
+        - replicas
         - status
         - sandboxes
         - pagination
