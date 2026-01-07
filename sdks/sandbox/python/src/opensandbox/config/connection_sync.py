@@ -68,6 +68,7 @@ class ConnectionConfigSync(BaseModel):
     _ENV_API_KEY = "OPEN_SANDBOX_API_KEY"
     _ENV_DOMAIN = "OPEN_SANDBOX_DOMAIN"
     _DEFAULT_DOMAIN = "localhost:8080"
+    _API_VERSION = "v1"
 
     def model_post_init(self, __context: object) -> None:
         self._owns_transport = "transport" not in self.model_fields_set
@@ -105,5 +106,5 @@ class ConnectionConfigSync(BaseModel):
     def get_base_url(self) -> str:
         domain = self.get_domain()
         if domain.startswith("http://") or domain.startswith("https://"):
-            return domain
-        return f"{self.protocol}://{domain}"
+            return f"{domain}/{self._API_VERSION}"
+        return f"{self.protocol}://{domain}/{self._API_VERSION}"

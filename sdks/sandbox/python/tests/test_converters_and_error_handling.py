@@ -102,7 +102,8 @@ def test_execution_converter_to_api_run_command_request() -> None:
     )
     d2 = api2.to_dict()
     assert d2["cwd"] == "/tmp"
-    assert d2.get("background", UNSET) is not UNSET
+    # background defaults to False in domain opts; when False we omit it from the API request.
+    assert d2.get("background", UNSET) is UNSET
 
 
 def test_filesystem_and_metrics_converters() -> None:

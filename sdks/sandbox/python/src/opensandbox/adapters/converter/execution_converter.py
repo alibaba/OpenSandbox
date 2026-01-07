@@ -50,7 +50,6 @@ class ExecutionConverter:
         if opts.working_directory:
             cwd = opts.working_directory
 
-        # Convert background. Domain uses bool (default False). When false, omit it from the API request.
         background = UNSET
         if opts.background:
             background = opts.background

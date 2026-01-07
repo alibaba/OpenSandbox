@@ -29,12 +29,12 @@ def test_protocol_validation() -> None:
 
 def test_get_base_url_with_domain_and_protocol() -> None:
     cfg = ConnectionConfig(domain="example.com:1234", protocol="https")
-    assert cfg.get_base_url() == "https://example.com:1234"
+    assert cfg.get_base_url() == "https://example.com:1234/v1"
 
 
 def test_get_base_url_domain_can_include_scheme() -> None:
     cfg = ConnectionConfig(domain="https://example.com:9999", protocol="http")
-    assert cfg.get_base_url() == "https://example.com:9999"
+    assert cfg.get_base_url() == "https://example.com:9999/v1"
 
 
 @pytest.mark.asyncio

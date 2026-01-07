@@ -197,8 +197,15 @@ async def test_renew_sandbox_expiration_sends_timezone_aware(monkeypatch: pytest
     captured = {}
 
     async def _fake_asyncio_detailed(*, client, sandbox_id, body):
+        from opensandbox.api.lifecycle.models.renew_sandbox_expiration_response import (
+            RenewSandboxExpirationResponse,
+        )
+
         captured["expires_at"] = body.expires_at
-        return _Resp(status_code=204, parsed=None)
+        return _Resp(
+            status_code=200,
+            parsed=RenewSandboxExpirationResponse(expires_at=body.expires_at),
+        )
 
     monkeypatch.setattr(
         "opensandbox.api.lifecycle.api.sandboxes.post_sandboxes_sandbox_id_renew_expiration.asyncio_detailed",

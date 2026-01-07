@@ -82,6 +82,7 @@ class ConnectionConfig(BaseModel):
     _ENV_API_KEY = "OPEN_SANDBOX_API_KEY"
     _ENV_DOMAIN = "OPEN_SANDBOX_DOMAIN"
     _DEFAULT_DOMAIN = "localhost:8080"
+    _API_VERSION = "v1"
 
     def model_post_init(self, __context: object) -> None:
         # If the user explicitly provided `transport`, the SDK must not close it.
@@ -128,10 +129,10 @@ class ConnectionConfig(BaseModel):
 
     def get_base_url(self) -> str:
         """Get the full base URL for API requests."""
-        current_domain = self.get_domain()
+        domain = self.get_domain()
         # Allow domain to override protocol if it explicitly starts with a scheme
-        if current_domain.startswith("http://") or current_domain.startswith(
+        if domain.startswith("http://") or domain.startswith(
             "https://"
         ):
-            return current_domain
-        return f"{self.protocol}://{current_domain}"
+            return f"{domain}/{self._API_VERSION}"
+        return f"{self.protocol}://{domain}/{self._API_VERSION}"

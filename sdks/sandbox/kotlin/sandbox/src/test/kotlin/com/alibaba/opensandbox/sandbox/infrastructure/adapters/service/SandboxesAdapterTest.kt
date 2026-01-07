@@ -94,7 +94,7 @@ class SandboxesAdapterTest {
         // Verify request
         val request = mockWebServer.takeRequest()
         assertEquals("POST", request.method)
-        assertEquals("/sandboxes", request.path)
+        assertEquals("/v1/sandboxes", request.path)
         val requestBody = request.body.readUtf8()
         assertTrue(requestBody.isNotBlank(), "request body should not be blank")
 
@@ -140,7 +140,7 @@ class SandboxesAdapterTest {
         assertEquals("ubuntu:latest", result.image.image)
 
         val request = mockWebServer.takeRequest()
-        assertEquals("/sandboxes/$sandboxId", request.path)
+        assertEquals("/v1/sandboxes/$sandboxId", request.path)
     }
 
     @Test
