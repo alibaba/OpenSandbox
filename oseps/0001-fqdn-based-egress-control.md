@@ -3,8 +3,8 @@ title: FQDN-based Egress Control
 authors:
   - "@hittyt"
 creation-date: 2025-12-27
-last-updated: 2025-12-30
-status: provisional
+last-updated: 2026-01-07
+status: implementing
 ---
 
 # OSEP-0001: FQDN-based Egress Control
