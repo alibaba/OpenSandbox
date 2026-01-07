@@ -10,6 +10,7 @@ on:
         options:
           - execd
           - code-interpreter
+          - egress
         default: 'execd'
       image_tag:
         description: 'Docker image tag'
@@ -19,6 +20,7 @@ on:
     tags:
       - 'docker/execd/**'
       - 'docker/code-interpreter/**'
+      - 'docker/egress/**'
 
 jobs:
   publish:
@@ -77,6 +79,8 @@ jobs:
 
           if [ "$COMPONENT" == "execd" ]; then
             cd components/execd
+          elif [ "$COMPONENT" == "egress" ]; then
+            cd components/egress
           else
             cd sandboxes/$COMPONENT
           fi
