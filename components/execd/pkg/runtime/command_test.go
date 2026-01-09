@@ -20,6 +20,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,8 @@ func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
 	tmp := t.TempDir()
 	logFile := filepath.Join(tmp, "stdout.log")
 
+	mutex := &sync.Mutex{}
+
 	initial := "line1\nprog 10%\rprog 20%\rprog 30%\nlast\n"
 	if err := os.WriteFile(logFile, []byte(initial), 0o644); err != nil {
 		t.Fatalf("write initial file: %v", err)
@@ -39,7 +42,7 @@ func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
 
 	var got []string
 	c := &Controller{}
-	nextPos := c.readFromPos(logFile, 0, func(s string) { got = append(got, s) })
+	nextPos := c.readFromPos(mutex, logFile, 0, func(s string) { got = append(got, s) })
 
 	want := []string{"line1", "prog 10%", "prog 20%", "prog 30%", "last"}
 	if len(got) != len(want) {
@@ -64,7 +67,7 @@ func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
 	_ = f.Close()
 
 	got = got[:0]
-	c.readFromPos(logFile, nextPos, func(s string) { got = append(got, s) })
+	c.readFromPos(mutex, logFile, nextPos, func(s string) { got = append(got, s) })
 	want = []string{"tail1", "tail2"}
 	if len(got) != len(want) {
 		t.Fatalf("incremental token count: got %d want %d", len(got), len(want))
@@ -88,7 +91,7 @@ func TestReadFromPos_LongLine(t *testing.T) {
 
 	var got []string
 	c := &Controller{}
-	c.readFromPos(logFile, 0, func(s string) { got = append(got, s) })
+	c.readFromPos(&sync.Mutex{}, logFile, 0, func(s string) { got = append(got, s) })
 
 	if len(got) != 1 {
 		t.Fatalf("expected one token, got %d", len(got))
