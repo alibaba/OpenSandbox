@@ -43,6 +43,7 @@ class WorkloadProvider(ABC):
         labels: Dict[str, str],
         expires_at: datetime,
         execd_image: str,
+        extensions: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Create a new workload resource.
@@ -57,6 +58,8 @@ class WorkloadProvider(ABC):
             labels: Labels to apply to the workload
             expires_at: Expiration time
             execd_image: execd daemon image
+            extensions: General extension field for passing additional configuration.
+                This is a flexible field for various use cases (e.g., ``poolRef`` for pool-based creation).
             
         Returns:
             Dict containing workload metadata (name, uid, etc.)

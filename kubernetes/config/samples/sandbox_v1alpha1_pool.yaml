@@ -5,58 +5,60 @@ metadata:
     app.kubernetes.io/name: sandbox-k8s
     app.kubernetes.io/managed-by: kustomize
   name: pool-sample
-  namespace: sandbox-k8s
+  namespace: opensandbox
 spec:
   template:
     metadata:
       labels:
         app: example
     spec:
-      shareProcessNamespace: true
       volumes:
         - name: sandbox-storage
           emptyDir: { }
         - name: opensandbox-bin
           emptyDir: { }
       initContainers:
+        - name: task-executor-installer
+          image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/task-executor:latest
+          command: [ "/bin/sh", "-c" ]
+          args:
+            - |
+              cp /workspace/server /opt/opensandbox/execd/task-executor && 
+              chmod +x /opt/opensandbox/execd/task-executor
+          volumeMounts:
+            - name: opensandbox-bin
+              mountPath: /opt/opensandbox/execd
         - name: execd-installer
           image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:latest
           command: [ "/bin/sh", "-c" ]
           args:
             - |
+              mkdir -p /opt/opensandbox/execd &&
               cp ./execd /opt/opensandbox/execd/execd && 
-              chmod +x /opt/opensandbox/execd/execd
+              chmod +x /opt/opensandbox/execd/execd &&
+              cat > /opt/opensandbox/execd/bootstrap.sh << 'BOOTSTRAP_EOF'
+              #!/bin/sh
+              set -e
+              /opt/opensandbox/execd/execd >/tmp/execd.log 2>&1 &
+              exec "$@"
+              BOOTSTRAP_EOF
+              chmod +x /opt/opensandbox/execd/bootstrap.sh
           volumeMounts:
             - name: opensandbox-bin
               mountPath: /opt/opensandbox/execd
       containers:
-        - name: main
+        - name: sandbox
           image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest
           command:
           - "/bin/sh"
           - "-c"
-          args:
-            - "/opt/opensandbox/execd/execd > /tmp/execd.log 2>&1"
+          - |
+            /opt/opensandbox/execd/task-executor -listen-addr=0.0.0.0:5758 >/tmp/task-executor.log 2>&1
           env:
           - name: SANDBOX_MAIN_CONTAINER
             value: main
-          volumeMounts:
-            - name: sandbox-storage
-              mountPath: /var/lib/sandbox
-            - name: opensandbox-bin
-              mountPath: /opt/opensandbox/execd
-        - command:
-          - /workspace/server
-          - -listen-addr=0.0.0.0:5758
-          - -enable-sidecar-mode=true
-          image: task-executor:dev
-          name: task-executor
-          securityContext:
-            capabilities:
-              add:
-                - SYS_PTRACE
-                - SYS_ADMIN
-                - NET_ADMIN
+          - name: EXECD_ENVS
+            value: /opt/opensandbox/.env
           volumeMounts:
             - name: sandbox-storage
               mountPath: /var/lib/sandbox

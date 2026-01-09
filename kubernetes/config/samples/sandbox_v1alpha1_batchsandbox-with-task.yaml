@@ -5,7 +5,7 @@ metadata:
     app.kubernetes.io/name: sandbox-k8s
     app.kubernetes.io/managed-by: kustomize
   name: batchsandbox-sample
-  namespace: sandbox-k8s
+  namespace: opensandbox
 spec:
   replicas: 2
   template:

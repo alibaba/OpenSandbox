@@ -7,10 +7,8 @@
 
 # Metadata template (will be merged with runtime-generated metadata)
 metadata:
-  annotations:
-    template-source: "batchsandbox-template.yaml"
-    managed-by: "opensandbox"
-
+  labels:
+    sandbox.opensandbox.io/resource-speedup: default
 # Spec template
 spec:
   replicas: 1

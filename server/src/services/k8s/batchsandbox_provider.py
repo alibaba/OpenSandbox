@@ -75,9 +75,47 @@ class BatchSandboxProvider(WorkloadProvider):
         labels: Dict[str, str],
         expires_at: datetime,
         execd_image: str,
+        extensions: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
-        """Create a BatchSandbox workload."""
+        """
+        Create a BatchSandbox workload.
+        
+        Supports both template-based and pool-based creation:
+        - Template mode (default): Creates workload with user-specified image, resources, and env
+        - Pool mode (when extensions contains 'poolRef'): Creates workload from pre-warmed pool,
+          only entrypoint and env can be customized
+        
+        Args:
+            sandbox_id: Unique sandbox identifier
+            namespace: Kubernetes namespace
+            image_spec: Container image specification (not used in pool mode)
+            entrypoint: Container entrypoint command
+            env: Environment variables
+            resource_limits: Resource limits (not used in pool mode)
+            labels: Labels to apply
+            expires_at: Expiration time
+            execd_image: execd daemon image (not used in pool mode)
+            extensions: General extension field for additional configuration.
+                When contains 'poolRef', enables pool-based creation.
+        
+        Returns:
+            Dict with 'name' and 'uid' of created BatchSandbox
+        """
         batchsandbox_name = f"sandbox-{sandbox_id}"
+        extensions = extensions or {}
+        
+        # If poolRef is provided and not empty, create workload from pool
+        if extensions.get("poolRef"):
+            # When using pool, only entrypoint and env can be customized
+            return self._create_workload_from_pool(
+                batchsandbox_name=batchsandbox_name,
+                namespace=namespace,
+                labels=labels,
+                pool_ref=extensions["poolRef"],
+                expires_at=expires_at,
+                entrypoint=entrypoint,
+                env=env,
+            )
         
         # Build init container for execd installation
         init_container = self._build_execd_init_container(execd_image)
@@ -138,9 +176,144 @@ class BatchSandboxProvider(WorkloadProvider):
             "uid": created["metadata"]["uid"],
         }
     
+    def _create_workload_from_pool(
+        self,
+        batchsandbox_name: str,
+        namespace: str,
+        labels: Dict[str, str],
+        pool_ref: str,
+        expires_at: datetime,
+        entrypoint: List[str],
+        env: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """
+        Create BatchSandbox workload from a pre-warmed resource pool.
+        
+        Pool-based creation uses poolRef to reference an existing pool.
+        The pool already defines the pod template, so no additional template is needed.
+        Only entrypoint and env can be customized.
+        
+        Args:
+            batchsandbox_name: Name of the BatchSandbox resource
+            namespace: Kubernetes namespace
+            labels: Labels to apply
+            pool_ref: Reference to the resource pool
+            expires_at: Expiration time
+            entrypoint: Container entrypoint command (can be customized)
+            env: Environment variables (can be customized)
+            
+        Returns:
+            Dict with 'name' and 'uid' of created BatchSandbox
+            
+        Raises:
+            SandboxError: If required parameters are invalid
+        """
+        runtime_manifest = {
+            "apiVersion": f"{self.group}/{self.version}",
+            "kind": "BatchSandbox",
+            "metadata": {
+                "name": batchsandbox_name,
+                "namespace": namespace,
+                "labels": labels,
+            },
+            "spec": {
+                "replicas": 1,
+                "poolRef": pool_ref,
+                "expireTime": expires_at.isoformat(),
+                "taskTemplate": self._build_task_template(entrypoint, env),
+            },
+        }
+        
+        # Pool-based creation does not need template merging
+        # Create BatchSandbox directly
+        created = self.custom_api.create_namespaced_custom_object(
+            group=self.group,
+            version=self.version,
+            namespace=namespace,
+            plural=self.plural,
+            body=runtime_manifest,
+        )
+        
+        return {
+            "name": created["metadata"]["name"],
+            "uid": created["metadata"]["uid"],
+        }
+    
+    def _build_task_template(
+        self,
+        entrypoint: List[str],
+        env: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """
+        Build taskTemplate for pool-based BatchSandbox.
+        
+        In pool mode, task should:
+        1. Inject environment variables to .env file
+        2. Use bootstrap.sh to start execd and business process (same as non-pool)
+        
+        Generated command example with env:
+            /bin/sh -c "printf '%s=%s\\n' 'KEY1' 'value1' >> ${EXECD_ENVS:-/opt/opensandbox/.env} && 
+                        printf '%s=%s\\n' 'KEY2' 'value2' >> ${EXECD_ENVS:-/opt/opensandbox/.env} && 
+                        /opt/opensandbox/execd/bootstrap.sh /usr/bin/python app.py"
+        
+        Generated command example without env:
+            /bin/sh -c "/opt/opensandbox/execd/bootstrap.sh /usr/bin/python app.py"
+        
+        Args:
+            entrypoint: Container entrypoint command
+            env: Environment variables
+            
+        Returns:
+            Dict: taskTemplate specification with TaskSpec structure
+        """
+        # Build shell command to write env to .env file and then execute bootstrap.sh
+        # Get env file path from EXECD_ENVS, default to /opt/opensandbox/.env
+        env_file_expr = "${EXECD_ENVS:-/opt/opensandbox/.env}"
+        
+        # Generate env file write commands (append mode)
+        env_commands = []
+        if env:
+            for key, value in env.items():
+                if value is None:
+                    continue  # Skip None values
+                env_commands.append(f"printf '%s=%s\\n' '{key}' '{value}' >> {env_file_expr}")
+        
+        # Build final command: append env vars to .env file, then execute bootstrap.sh with entrypoint
+        # Commands are joined with && to ensure sequential execution
+        commands = env_commands + [
+            f"/opt/opensandbox/execd/bootstrap.sh {' '.join(entrypoint)}"
+        ]
+        
+        wrapped_command = ["/bin/sh", "-c", " && ".join(commands)]
+        
+        # Convert env dict to k8s EnvVar format
+        env_list = [{"name": k, "value": v} for k, v in env.items()] if env else []
+        
+        # Return TaskTemplateSpec structure
+        return {
+            "spec": {
+                "process": {
+                    "command": wrapped_command,
+                    "env": env_list,
+                }
+            }
+        }
+    
     def _build_execd_init_container(self, execd_image: str) -> V1Container:
         """
         Build init container for execd installation.
+        
+        This init container:
+        1. Copies execd binary to shared volume
+        2. Generates bootstrap.sh script with following content:
+           - Start execd in background (redirects logs to /tmp/execd.log)
+           - Use exec to replace current process with user's command
+        
+        Generated bootstrap.sh:
+            #!/bin/sh
+            set -e
+            /opt/opensandbox/execd/execd >/tmp/execd.log 2>&1 &
+            exec "$@"
         
         Args:
             execd_image: execd container image
