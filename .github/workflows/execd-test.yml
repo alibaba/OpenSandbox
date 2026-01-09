@@ -33,10 +33,28 @@ jobs:
           #
           make multi-build
 
-      - name: Run tests
+      - name: Run tests with coverage
         run: |
           cd components/execd
-          make test
+          go test -v -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./pkg/...
+
+      - name: Calculate coverage and generate summary
+        id: coverage
+        run: |
+          cd components/execd
+          # Extract total coverage percentage
+          TOTAL_COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+          echo "total_coverage=$TOTAL_COVERAGE" >> $GITHUB_OUTPUT
+          
+          # Generate GitHub Actions job summary
+          echo "## 📊 execd Test Coverage Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Total Line Coverage:** $TOTAL_COVERAGE" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Coverage report generated for commit \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*Coverage targets: Core packages >80%, API layer >70%*" >> $GITHUB_STEP_SUMMARY
 
   smoke:
     strategy:

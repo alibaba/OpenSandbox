@@ -17,6 +17,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -118,6 +119,97 @@ func (c *CodeInterpretingController) RunCode() {
 	}
 
 	time.Sleep(flag.ApiGracefulShutdownTimeout)
+}
+
+// GetContext returns a specific code context by id.
+func (c *CodeInterpretingController) GetContext() {
+	contextID := c.Ctx.Input.Param(":contextId")
+	if contextID == "" {
+		c.RespondError(
+			http.StatusBadRequest,
+			model.ErrorCodeMissingQuery,
+			"missing path parameter 'contextId'",
+		)
+	}
+
+	codeContext := codeRunner.GetContext(contextID)
+	c.RespondSuccess(codeContext)
+}
+
+// ListContexts returns active code contexts, optionally filtered by language.
+func (c *CodeInterpretingController) ListContexts() {
+	language := c.GetString("language")
+
+	contexts, err := codeRunner.ListContext(language)
+	if err != nil {
+		c.RespondError(
+			http.StatusInternalServerError,
+			model.ErrorCodeRuntimeError,
+			err.Error(),
+		)
+		return
+	}
+
+	c.RespondSuccess(contexts)
+}
+
+// DeleteContextsByLanguage deletes all contexts for a given language.
+func (c *CodeInterpretingController) DeleteContextsByLanguage() {
+	language := c.GetString("language")
+	if language == "" {
+		c.RespondError(
+			http.StatusBadRequest,
+			model.ErrorCodeMissingQuery,
+			"missing query parameter 'language'",
+		)
+		return
+	}
+
+	err := codeRunner.DeleteLanguageContext(runtime.Language(language))
+	if err != nil {
+		c.RespondError(
+			http.StatusInternalServerError,
+			model.ErrorCodeRuntimeError,
+			fmt.Sprintf("error deleting code context %s. %v", language, err),
+		)
+		return
+	}
+
+	c.RespondSuccess(nil)
+}
+
+// DeleteContext deletes a specific code context by id.
+func (c *CodeInterpretingController) DeleteContext() {
+	contextID := c.Ctx.Input.Param(":contextId")
+	if contextID == "" {
+		c.RespondError(
+			http.StatusBadRequest,
+			model.ErrorCodeMissingQuery,
+			"missing path parameter 'contextId'",
+		)
+		return
+	}
+
+	err := codeRunner.DeleteContext(contextID)
+	if err != nil {
+		if errors.Is(err, runtime.ErrContextNotFound) {
+			c.RespondError(
+				http.StatusNotFound,
+				model.ErrorCodeContextNotFound,
+				fmt.Sprintf("context %s not found", contextID),
+			)
+			return
+		} else {
+			c.RespondError(
+				http.StatusInternalServerError,
+				model.ErrorCodeRuntimeError,
+				fmt.Sprintf("error deleting code context %s. %v", contextID, err),
+			)
+			return
+		}
+	}
+
+	c.RespondSuccess(nil)
 }
 
 // buildExecuteCodeRequest converts a RunCodeRequest to runtime format.
