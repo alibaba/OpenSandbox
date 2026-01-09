@@ -33,7 +33,7 @@ const (
 	TargetContainer   = "task-e2e-target"
 	ExecutorContainer = "task-e2e-executor"
 	VolumeName        = "task-e2e-vol"
-	HostPort          = "38080"
+	HostPort          = "5758"
 )
 
 var _ = Describe("Task Executor E2E", Ordered, func() {
@@ -63,6 +63,7 @@ var _ = Describe("Task Executor E2E", Ordered, func() {
 		targetCmd := exec.Command("docker", "run", "-d", "--name", TargetContainer,
 			"-v", fmt.Sprintf("%s:/tmp/tasks", VolumeName),
 			"-e", "SANDBOX_MAIN_CONTAINER=main",
+			"-e", "TARGET_VAR=hello-from-target",
 			"golang:1.24", "sleep", "infinity")
 		targetCmd.Stdout = os.Stdout
 		targetCmd.Stderr = os.Stderr
@@ -74,7 +75,7 @@ var _ = Describe("Task Executor E2E", Ordered, func() {
 			"--privileged",
 			"-u", "0",
 			"--pid=container:"+TargetContainer,
-			"-p", HostPort+":8080",
+			"-p", HostPort+":5758",
 			ImageName,
 			"-enable-sidecar-mode=true",
 			"-main-container-name=main",
@@ -134,6 +135,54 @@ var _ = Describe("Task Executor E2E", Ordered, func() {
 					g.Expect(got.Status.State.Terminated).NotTo(BeNil(), "Task status: %v", got.Status.State)
 				}
 			}, 10*time.Second, 1*time.Second).Should(Succeed())
+		})
+
+		It("should be deletable", func() {
+			By("Deleting task")
+			_, err := client.Set(context.Background(), nil)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Verifying deletion")
+			Eventually(func() *api.Task {
+				got, _ := client.Get(context.Background())
+				return got
+			}, 5*time.Second, 500*time.Millisecond).Should(BeNil())
+		})
+	})
+
+	Context("When creating a task checking environment variables", func() {
+		taskName := "e2e-env-test"
+
+		It("should inherit environment variables from target container", func() {
+			By("Creating task running 'env'")
+			task := &api.Task{
+				Name: taskName,
+				Spec: v1alpha1.TaskSpec{
+					Process: &v1alpha1.ProcessTask{
+						Command: []string{"env"},
+					},
+				},
+			}
+			_, err := client.Set(context.Background(), task)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("Waiting for task to succeed")
+			Eventually(func(g Gomega) {
+				got, err := client.Get(context.Background())
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(got).NotTo(BeNil())
+				g.Expect(got.Name).To(Equal(taskName))
+				g.Expect(got.Status.State.Terminated).NotTo(BeNil())
+				g.Expect(got.Status.State.Terminated.ExitCode).To(BeZero())
+			}, 10*time.Second, 1*time.Second).Should(Succeed())
+
+			By("Verifying stdout contains target container env")
+			// Read stdout.log from the executor container (which shares the volume)
+			out, err := exec.Command("docker", "exec", ExecutorContainer, "cat", fmt.Sprintf("/tmp/tasks/%s/stdout.log", taskName)).CombinedOutput()
+			Expect(err).NotTo(HaveOccurred(), "Failed to read stdout.log: %s", string(out))
+
+			outputStr := string(out)
+			Expect(outputStr).To(ContainSubstring("TARGET_VAR=hello-from-target"), "Task environment should inherit from target container")
 		})
 
 		It("should be deletable", func() {

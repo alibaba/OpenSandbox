@@ -87,6 +87,12 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 			return fmt.Errorf("failed to resolve target PID: %w", err)
 		}
 
+		// Inherit environment variables from the target process (Main Container)
+		targetEnv, err := getProcEnviron(targetPID)
+		if err != nil {
+			return fmt.Errorf("failed to read target process environment: %w", err)
+		}
+
 		nsenterArgs := []string{
 			"-t", strconv.Itoa(targetPID),
 			"--mount", "--uts", "--ipc", "--net", "--pid",
@@ -94,6 +100,7 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 			"/bin/sh", "-c", shimScript,
 		}
 		cmd = exec.Command("nsenter", nsenterArgs...)
+		cmd.Env = targetEnv
 		klog.InfoS("Starting sidecar task", "id", task.Name, "targetPID", targetPID)
 
 	} else {
@@ -101,6 +108,7 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 		// Use exec.Command instead of CommandContext to ensure the process survives
 		// after the HTTP request context is canceled.
 		cmd = exec.Command("/bin/sh", "-c", shimScript)
+		cmd.Env = os.Environ()
 		klog.InfoS("Starting host task", "name", task.Name, "cmd", safeCmdStr, "exitPath", exitPath)
 	}
 
@@ -145,8 +153,6 @@ func (e *processExecutor) executeCommand(task *types.Task, cmd *exec.Cmd, pidPat
 
 	// Apply environment variables from ProcessTask spec
 	if task.Spec.Process != nil {
-		// Start with current environment
-		cmd.Env = os.Environ()
 		// Add task-specific environment variables
 		for _, env := range task.Spec.Process.Env {
 			if env.Name != "" {
@@ -453,4 +459,23 @@ func (e *processExecutor) findPidByEnvVar(envName, expectedValue string) (int, e
 	}
 
 	return 0, fmt.Errorf("no process found with environment variable %s=%s", envName, expectedValue)
+}
+
+// getProcEnviron reads the environment variables of a process from /proc/<pid>/environ.
+// It returns a list of "KEY=VALUE" strings.
+func getProcEnviron(pid int) ([]string, error) {
+	envPath := filepath.Join("/proc", strconv.Itoa(pid), "environ")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Environment variables in /proc/<pid>/environ are separated by null bytes
+	var envs []string
+	for _, env := range strings.Split(string(data), "\x00") {
+		if len(env) > 0 {
+			envs = append(envs, env)
+		}
+	}
+	return envs, nil
 }
