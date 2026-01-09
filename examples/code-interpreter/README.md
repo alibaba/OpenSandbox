@@ -68,3 +68,68 @@ The script creates a Sandbox + CodeInterpreter, runs a Python code snippet and p
 
 [TypeScript stdout] sum = 6
 ```
+
+# Code Interpreter Sandbox from pool
+
+## Start OpenSandbox server [k8s]
+
+Install the k8s OpenSandbox operator, and [create pool](../../kubernetes/config/samples/sandbox_v1alpha1_pool.yaml):
+
+
+Start the k8s OpenSandbox server:
+
+```shell
+git clone git@github.com:alibaba/OpenSandbox.git
+cd OpenSandbox/server
+
+# replace with your k8s cluster config, kubeconfig etc.
+cp example.config.k8s.toml ~/.sandbox.toml
+cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
+
+uv sync
+uv run python -m src.main
+```
+
+## Create and access the Code Interpreter Sandbox
+
+```shell
+# Install OpenSandbox packages
+uv pip install opensandbox opensandbox-code-interpreter
+
+# Run the example (requires SANDBOX_DOMAIN / SANDBOX_API_KEY)
+uv run python examples/code-interpreter/main_use_pool.py
+```
+
+The script creates a Sandbox + CodeInterpreter, runs a Python code snippet and prints stdout/result, then terminates the remote instance.
+
+## Environment variables
+
+- `SANDBOX_DOMAIN`: Sandbox service address (default: `localhost:8080`)
+- `SANDBOX_API_KEY`: API key if your server requires authentication
+- `SANDBOX_IMAGE`: Sandbox image to use (default: `sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest`)
+
+## Example output
+
+```text
+=== Verify Environment Variable ===
+[ENV Check] TEST_ENV value: test
+
+[ENV Result] 'test'
+
+=== Java example ===
+[Java stdout] Hello from Java!
+
+[Java stdout] 2 + 3 = 5
+
+[Java result] 5
+
+=== Go example ===
+[Go stdout] Hello from Go!
+3 + 4 = 7
+
+
+=== TypeScript example ===
+[TypeScript stdout] Hello from TypeScript!
+
+[TypeScript stdout] sum = 6
+```

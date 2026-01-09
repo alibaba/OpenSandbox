@@ -226,13 +226,13 @@ class KubernetesSandboxService(SandboxService):
         Wait for the Pod to be Running and have an IP address before returning.
         
         Args:
-            request: Sandbox creation request
+            request: Sandbox creation request.
             
         Returns:
             CreateSandboxResponse: Created sandbox information with Running state
             
         Raises:
-            HTTPException: If creation fails or timeout
+            HTTPException: If creation fails, timeout, or invalid parameters
         """
         # Validate request
         ensure_entrypoint(request.entrypoint)
@@ -271,6 +271,7 @@ class KubernetesSandboxService(SandboxService):
                 labels=labels,
                 expires_at=expires_at,
                 execd_image=self.execd_image,
+                extensions=request.extensions,
             )
             
             logger.info(
@@ -317,6 +318,16 @@ class KubernetesSandboxService(SandboxService):
             
         except HTTPException:
             raise
+        except ValueError as e:
+            # Handle parameter validation errors from provider
+            logger.error(f"Invalid parameters for sandbox creation: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": str(e),
+                },
+            ) from e
         except Exception as e:
             logger.error(f"Error creating sandbox: {e}")
             raise HTTPException(
