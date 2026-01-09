@@ -22,6 +22,7 @@ This mirrors `test_code_interpreter_e2e.py` but uses the synchronous SDK.
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
 from datetime import timedelta
 
 import pytest
@@ -97,6 +98,30 @@ def _assert_terminal_event_contract(
         assert errors[0].name
         assert errors[0].value is not None
         _assert_recent_timestamp_ms(errors[0].timestamp)
+
+
+@contextmanager
+def managed_ctx_sync(code_interpreter: CodeInterpreterSync, language: str):
+    ctx = code_interpreter.codes.create_context(language)
+    try:
+        yield ctx
+    finally:
+        try:
+            if ctx.id:
+                code_interpreter.codes.delete_context(ctx.id)
+        except Exception as e:
+            logger.warning(
+                "Cleanup: failed to delete context %s (%s)", ctx.id, language, exc_info=True
+            )
+
+
+@contextmanager
+def managed_ctx_stack_sync(code_interpreter: CodeInterpreterSync, languages: list[str]):
+    with ExitStack() as stack:
+        contexts = []
+        for lang in languages:
+            contexts.append(stack.enter_context(managed_ctx_sync(code_interpreter, lang)))
+        yield contexts
 
 
 class TestCodeInterpreterE2ESync:
@@ -206,111 +231,110 @@ class TestCodeInterpreterE2ESync:
         code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
         assert code_interpreter is not None
 
-        java_context = code_interpreter.codes.create_context(SupportedLanguage.JAVA)
-        assert java_context is not None
-        assert java_context.id is not None and str(java_context.id).strip()
-        assert java_context.language == "java"
+        with managed_ctx_sync(code_interpreter, SupportedLanguage.JAVA) as java_context:
+            assert java_context.id is not None and str(java_context.id).strip()
+            assert java_context.language == "java"
 
-        stdout_messages: list[OutputMessage] = []
-        stderr_messages: list[OutputMessage] = []
-        results: list[ExecutionResult] = []
-        errors: list[ExecutionError] = []
-        completed_events: list[ExecutionComplete] = []
-        init_events: list[ExecutionInit] = []
+            stdout_messages: list[OutputMessage] = []
+            stderr_messages: list[OutputMessage] = []
+            results: list[ExecutionResult] = []
+            errors: list[ExecutionError] = []
+            completed_events: list[ExecutionComplete] = []
+            init_events: list[ExecutionInit] = []
 
-        def on_stdout(msg):
-            stdout_messages.append(msg)
+            def on_stdout(msg):
+                stdout_messages.append(msg)
 
-        def on_stderr(msg):
-            stderr_messages.append(msg)
+            def on_stderr(msg):
+                stderr_messages.append(msg)
 
-        def on_result(result):
-            results.append(result)
+            def on_result(result):
+                results.append(result)
 
-        def on_complete(complete):
-            completed_events.append(complete)
+            def on_complete(complete):
+                completed_events.append(complete)
 
-        def on_error(error):
-            errors.append(error)
+            def on_error(error):
+                errors.append(error)
 
-        def on_init(init):
-            init_events.append(init)
+            def on_init(init):
+                init_events.append(init)
 
-        handlers = ExecutionHandlersSync(
-            on_stdout=on_stdout,
-            on_stderr=on_stderr,
-            on_result=on_result,
-            on_execution_complete=on_complete,
-            on_error=on_error,
-            on_init=on_init,
-        )
+            handlers = ExecutionHandlersSync(
+                on_stdout=on_stdout,
+                on_stderr=on_stderr,
+                on_result=on_result,
+                on_execution_complete=on_complete,
+                on_error=on_error,
+                on_init=on_init,
+            )
 
-        simple_result = code_interpreter.codes.run(
-            "System.out.println(\"Hello from Java!\");\n"
-            + "int result = 2 + 2;\n"
-            + "System.out.println(\"2 + 2 = \" + result);\n"
-            + "result",
-            context=java_context,
-            handlers=handlers,
-        )
-        assert simple_result is not None
-        assert simple_result.id is not None and simple_result.id.strip()
-        assert simple_result.error is None
-        assert len(simple_result.result) > 0
-        assert simple_result.result[0].text == "4"
+            simple_result = code_interpreter.codes.run(
+                "System.out.println(\"Hello from Java!\");\n"
+                + "int result = 2 + 2;\n"
+                + "System.out.println(\"2 + 2 = \" + result);\n"
+                + "result",
+                context=java_context,
+                handlers=handlers,
+                )
+            assert simple_result is not None
+            assert simple_result.id is not None and simple_result.id.strip()
+            assert simple_result.error is None
+            assert len(simple_result.result) > 0
+            assert simple_result.result[0].text == "4"
 
-        _assert_terminal_event_contract(
-            init_events=init_events,
-            completed_events=completed_events,
-            errors=errors,
-            execution_id=simple_result.id,
-        )
-        assert len(errors) == 0
-        assert len(completed_events) == 1
-        assert len(stdout_messages) > 0
-        assert any("Hello from Java!" in m.text for m in stdout_messages)
-        assert any("2+2=4" in m.text.replace(" ", "") for m in stdout_messages)
-        assert all(m.is_error is False for m in stdout_messages)
-        for m in stdout_messages[:3]:
-            _assert_recent_timestamp_ms(m.timestamp)
+            _assert_terminal_event_contract(
+                init_events=init_events,
+                completed_events=completed_events,
+                errors=errors,
+                execution_id=simple_result.id,
+            )
+            assert len(errors) == 0
+            assert len(completed_events) == 1
+            assert len(stdout_messages) > 0
+            assert any("Hello from Java!" in m.text for m in stdout_messages)
+            assert any("2+2=4" in m.text.replace(" ", "") for m in stdout_messages)
+            assert all(m.is_error is False for m in stdout_messages)
+            for m in stdout_messages[:3]:
+                _assert_recent_timestamp_ms(m.timestamp)
 
-        var_result = code_interpreter.codes.run(
-            "import java.util.*;\n"
-            + "List<Integer> numbers = Arrays.asList(1, 2, 3, 4, 5);\n"
-            + "int sum = numbers.stream().mapToInt(Integer::intValue).sum();\n"
-            + "System.out.println(\"Numbers: \" + numbers);\n"
-            + "System.out.println(\"Sum: \" + sum);\n"
-            + "result",
-            context=java_context,
-        )
-        assert var_result is not None
-        assert var_result.id is not None
-        assert len(var_result.result) > 0
-        assert var_result.result[0].text == "4"
+            var_result = code_interpreter.codes.run(
+                "import java.util.*;\n"
+                + "List<Integer> numbers = Arrays.asList(1, 2, 3, 4, 5);\n"
+                + "int sum = numbers.stream().mapToInt(Integer::intValue).sum();\n"
+                + "System.out.println(\"Numbers: \" + numbers);\n"
+                + "System.out.println(\"Sum: \" + sum);\n"
+                + "result",
+                context=java_context,
+                )
+            assert var_result is not None
+            assert var_result.id is not None
+            assert len(var_result.result) > 0
+            assert var_result.result[0].text == "4"
 
-        stdout_messages.clear()
-        stderr_messages.clear()
-        errors.clear()
-        completed_events.clear()
-        init_events.clear()
+            stdout_messages.clear()
+            stderr_messages.clear()
+            errors.clear()
+            completed_events.clear()
+            init_events.clear()
 
-        error_result = code_interpreter.codes.run(
-            "int x = 10 / 0; // This will cause ArithmeticException",
-            context=java_context,
-            handlers=handlers,
-        )
-        assert error_result is not None
-        assert error_result.id is not None and error_result.id.strip()
-        assert error_result.error is not None
-        assert error_result.error.name == "EvalException"
-        _assert_terminal_event_contract(
-            init_events=init_events,
-            completed_events=completed_events,
-            errors=errors,
-            execution_id=error_result.id,
-        )
-        assert len(errors) > 0
-        assert errors[0].name == "EvalException"
+            error_result = code_interpreter.codes.run(
+                "int x = 10 / 0; // This will cause ArithmeticException",
+                context=java_context,
+                handlers=handlers,
+            )
+            assert error_result is not None
+            assert error_result.id is not None and error_result.id.strip()
+            assert error_result.error is not None
+            assert error_result.error.name == "EvalException"
+            _assert_terminal_event_contract(
+                init_events=init_events,
+                completed_events=completed_events,
+                errors=errors,
+                execution_id=error_result.id,
+            )
+            assert len(errors) > 0
+            assert errors[0].name == "EvalException"
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(3)
@@ -360,73 +384,72 @@ class TestCodeInterpreterE2ESync:
             on_init=on_init,
         )
 
-        python_context = code_interpreter.codes.create_context(SupportedLanguage.PYTHON)
-        assert python_context is not None
-        assert python_context.id is not None and str(python_context.id).strip()
+        with managed_ctx_sync(code_interpreter, SupportedLanguage.PYTHON) as python_context:
+            assert python_context.id is not None and str(python_context.id).strip()
 
-        simple_result_py = code_interpreter.codes.run(
-            "print('Hello from Python!')\n"
-            + "result = 2 + 2\n"
-            + "print(f'2 + 2 = {result}')",
-            context=python_context,
-            handlers=handlers_py,
-        )
-        assert simple_result_py is not None
-        assert simple_result_py.id is not None and simple_result_py.id.strip()
-        _assert_terminal_event_contract(
-            init_events=init_events,
-            completed_events=completed_events,
-            errors=errors,
-            execution_id=simple_result_py.id,
-        )
-        assert len(errors) == 0
-        assert len(completed_events) == 1
-        assert any("Hello from Python!" in m.text for m in stdout_messages)
-        assert any("2 + 2 = 4" in m.text for m in stdout_messages)
+            simple_result_py = code_interpreter.codes.run(
+                "print('Hello from Python!')\n"
+                + "result = 2 + 2\n"
+                + "print(f'2 + 2 = {result}')",
+                context=python_context,
+                handlers=handlers_py,
+                )
+            assert simple_result_py is not None
+            assert simple_result_py.id is not None and simple_result_py.id.strip()
+            _assert_terminal_event_contract(
+                init_events=init_events,
+                completed_events=completed_events,
+                errors=errors,
+                execution_id=simple_result_py.id,
+            )
+            assert len(errors) == 0
+            assert len(completed_events) == 1
+            assert any("Hello from Python!" in m.text for m in stdout_messages)
+            assert any("2 + 2 = 4" in m.text for m in stdout_messages)
 
-        var_result_py = code_interpreter.codes.run(
-            "x = 42\n"
-            + "y = 'persistent variable'\n"
-            + "my_list = [1, 2, 3, 4, 5]\n"
-            + "print(f'x={x}, y=\"{y}\", list={my_list}')\n"
-            + "result",
-            context=python_context,
-        )
-        assert var_result_py is not None
-        assert var_result_py.id is not None
-        assert len(var_result_py.result) > 0
-        assert var_result_py.result[0].text == "4"
+            var_result_py = code_interpreter.codes.run(
+                "x = 42\n"
+                + "y = 'persistent variable'\n"
+                + "my_list = [1, 2, 3, 4, 5]\n"
+                + "print(f'x={x}, y=\"{y}\", list={my_list}')\n"
+                + "result",
+                context=python_context,
+                )
+            assert var_result_py is not None
+            assert var_result_py.id is not None
+            assert len(var_result_py.result) > 0
+            assert var_result_py.result[0].text == "4"
 
-        persist_result = code_interpreter.codes.run(
-            "print(f'Previously set variables: x={x}, y={y}')\n"
-            + "z = sum(my_list)\n"
-            + "print(f'Sum of list: {z}')",
-            context=python_context,
-        )
-        assert persist_result is not None
-        assert persist_result.id is not None
+            persist_result = code_interpreter.codes.run(
+                "print(f'Previously set variables: x={x}, y={y}')\n"
+                + "z = sum(my_list)\n"
+                + "print(f'Sum of list: {z}')",
+                context=python_context,
+                )
+            assert persist_result is not None
+            assert persist_result.id is not None
 
-        stdout_messages.clear()
-        stderr_messages.clear()
-        errors.clear()
-        completed_events.clear()
-        init_events.clear()
+            stdout_messages.clear()
+            stderr_messages.clear()
+            errors.clear()
+            completed_events.clear()
+            init_events.clear()
 
-        error_result_py = code_interpreter.codes.run(
-            "print(undefined_variable)  # This will cause NameError",
-            context=python_context,
-            handlers=handlers_py,
-        )
-        assert error_result_py is not None
-        assert error_result_py.id is not None and error_result_py.id.strip()
-        assert error_result_py.error is not None or len(error_result_py.logs.stderr) > 0
-        _assert_terminal_event_contract(
-            init_events=init_events,
-            completed_events=completed_events,
-            errors=errors,
-            execution_id=error_result_py.id,
-        )
-        assert len(errors) > 0
+            error_result_py = code_interpreter.codes.run(
+                "print(undefined_variable)  # This will cause NameError",
+                context=python_context,
+                handlers=handlers_py,
+            )
+            assert error_result_py is not None
+            assert error_result_py.id is not None and error_result_py.id.strip()
+            assert error_result_py.error is not None or len(error_result_py.logs.stderr) > 0
+            _assert_terminal_event_contract(
+                init_events=init_events,
+                completed_events=completed_events,
+                errors=errors,
+                execution_id=error_result_py.id,
+            )
+            assert len(errors) > 0
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(4)
@@ -435,100 +458,99 @@ class TestCodeInterpreterE2ESync:
         code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
         assert code_interpreter is not None
 
-        go_context = code_interpreter.codes.create_context(SupportedLanguage.GO)
-        assert go_context is not None
-        assert go_context.id is not None and str(go_context.id).strip()
-        assert go_context.language == "go"
+        with managed_ctx_sync(code_interpreter, SupportedLanguage.GO) as go_context:
+            assert go_context.id is not None and str(go_context.id).strip()
+            assert go_context.language == "go"
 
-        stdout_messages: list[OutputMessage] = []
-        errors: list[ExecutionError] = []
-        completed_events: list[ExecutionComplete] = []
-        init_events: list[ExecutionInit] = []
+            stdout_messages: list[OutputMessage] = []
+            errors: list[ExecutionError] = []
+            completed_events: list[ExecutionComplete] = []
+            init_events: list[ExecutionInit] = []
 
-        def on_stdout(msg):
-            stdout_messages.append(msg)
+            def on_stdout(msg):
+                stdout_messages.append(msg)
 
-        def on_complete(complete):
-            completed_events.append(complete)
+            def on_complete(complete):
+                completed_events.append(complete)
 
-        def on_error(error):
-            errors.append(error)
+            def on_error(error):
+                errors.append(error)
 
-        def on_init(init):
-            init_events.append(init)
+            def on_init(init):
+                init_events.append(init)
 
-        handlers_go = ExecutionHandlersSync(
-            on_stdout=on_stdout,
-            on_execution_complete=on_complete,
-            on_error=on_error,
-            on_init=on_init,
-        )
+            handlers_go = ExecutionHandlersSync(
+                on_stdout=on_stdout,
+                on_execution_complete=on_complete,
+                on_error=on_error,
+                on_init=on_init,
+            )
 
-        simple_result_go = code_interpreter.codes.run(
-            "package main\n"
-            + "import \"fmt\"\n"
-            + "func main() {\n"
-            + "    fmt.Print(\"Hello from Go!\")\n"
-            + "    result := 2 + 2\n"
-            + "    fmt.Print(\"2 + 2 =\", result)\n"
-            + "}",
-            context=go_context,
-            handlers=handlers_go,
-        )
-        assert simple_result_go is not None
-        assert simple_result_go.id is not None and simple_result_go.id.strip()
-        _assert_terminal_event_contract(
-            init_events=init_events,
-            completed_events=completed_events,
-            errors=errors,
-            execution_id=simple_result_go.id,
-        )
-        assert len(errors) == 0
-        assert len(stdout_messages) > 0
+            simple_result_go = code_interpreter.codes.run(
+                "package main\n"
+                + "import \"fmt\"\n"
+                + "func main() {\n"
+                + "    fmt.Print(\"Hello from Go!\")\n"
+                + "    result := 2 + 2\n"
+                + "    fmt.Print(\"2 + 2 =\", result)\n"
+                + "}",
+                context=go_context,
+                handlers=handlers_go,
+                )
+            assert simple_result_go is not None
+            assert simple_result_go.id is not None and simple_result_go.id.strip()
+            _assert_terminal_event_contract(
+                init_events=init_events,
+                completed_events=completed_events,
+                errors=errors,
+                execution_id=simple_result_go.id,
+            )
+            assert len(errors) == 0
+            assert len(stdout_messages) > 0
 
-        data_result_go = code_interpreter.codes.run(
-            "package main\n"
-            + "import \"fmt\"\n"
-            + "func calculate(numbers []int) int {\n"
-            + "    sum := 0\n"
-            + "    for _, num := range numbers {\n"
-            + "        sum += num\n"
-            + "    }\n"
-            + "    return sum\n"
-            + "}\n"
-            + "func main() {\n"
-            + "    numbers := []int{1, 2, 3, 4, 5}\n"
-            + "    sum := calculate(numbers)\n"
-            + "    fmt.Print(\"Numbers:\", numbers)\n"
-            + "    fmt.Print(\"Sum:\", sum)\n"
-            + "}",
-            context=go_context,
-        )
-        assert data_result_go is not None
-        assert data_result_go.id is not None
+            data_result_go = code_interpreter.codes.run(
+                "package main\n"
+                + "import \"fmt\"\n"
+                + "func calculate(numbers []int) int {\n"
+                + "    sum := 0\n"
+                + "    for _, num := range numbers {\n"
+                + "        sum += num\n"
+                + "    }\n"
+                + "    return sum\n"
+                + "}\n"
+                + "func main() {\n"
+                + "    numbers := []int{1, 2, 3, 4, 5}\n"
+                + "    sum := calculate(numbers)\n"
+                + "    fmt.Print(\"Numbers:\", numbers)\n"
+                + "    fmt.Print(\"Sum:\", sum)\n"
+                + "}",
+                context=go_context,
+                )
+            assert data_result_go is not None
+            assert data_result_go.id is not None
 
-        stdout_messages.clear()
-        errors.clear()
-        completed_events.clear()
-        init_events.clear()
+            stdout_messages.clear()
+            errors.clear()
+            completed_events.clear()
+            init_events.clear()
 
-        error_result_go = code_interpreter.codes.run(
-            "package main\n"
-            + "func main() {\n"
-            + "    undeclaredVariable++  // This will cause compilation error\n"
-            + "}",
-            context=go_context,
-            handlers=handlers_go,
-        )
-        assert error_result_go is not None
-        assert error_result_go.id is not None and error_result_go.id.strip()
-        assert error_result_go.error is not None or len(error_result_go.logs.stderr) > 0
-        _assert_terminal_event_contract(
-            init_events=init_events,
-            completed_events=completed_events,
-            errors=errors,
-            execution_id=error_result_go.id,
-        )
+            error_result_go = code_interpreter.codes.run(
+                "package main\n"
+                + "func main() {\n"
+                + "    undeclaredVariable++  // This will cause compilation error\n"
+                + "}",
+                context=go_context,
+                handlers=handlers_go,
+                )
+            assert error_result_go is not None
+            assert error_result_go.id is not None and error_result_go.id.strip()
+            assert error_result_go.error is not None or len(error_result_go.logs.stderr) > 0
+            _assert_terminal_event_contract(
+                init_events=init_events,
+                completed_events=completed_events,
+                errors=errors,
+                execution_id=error_result_go.id,
+            )
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(5)
@@ -537,90 +559,89 @@ class TestCodeInterpreterE2ESync:
         code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
         assert code_interpreter is not None
 
-        ts_context = code_interpreter.codes.create_context(SupportedLanguage.TYPESCRIPT)
-        assert ts_context is not None
-        assert ts_context.id is not None and str(ts_context.id).strip()
-        assert ts_context.language == "typescript"
+        with managed_ctx_sync(code_interpreter, SupportedLanguage.TYPESCRIPT) as ts_context:
+            assert ts_context.id is not None and str(ts_context.id).strip()
+            assert ts_context.language == "typescript"
 
-        stdout_messages: list[OutputMessage] = []
-        errors: list[ExecutionError] = []
-        completed_events: list[ExecutionComplete] = []
-        init_events: list[ExecutionInit] = []
+            stdout_messages: list[OutputMessage] = []
+            errors: list[ExecutionError] = []
+            completed_events: list[ExecutionComplete] = []
+            init_events: list[ExecutionInit] = []
 
-        def on_stdout(msg):
-            stdout_messages.append(msg)
+            def on_stdout(msg):
+                stdout_messages.append(msg)
 
-        def on_complete(complete):
-            completed_events.append(complete)
+            def on_complete(complete):
+                completed_events.append(complete)
 
-        def on_error(error):
-            errors.append(error)
+            def on_error(error):
+                errors.append(error)
 
-        def on_init(init):
-            init_events.append(init)
+            def on_init(init):
+                init_events.append(init)
 
-        handlers_ts = ExecutionHandlersSync(
-            on_stdout=on_stdout,
-            on_execution_complete=on_complete,
-            on_error=on_error,
-            on_init=on_init,
-        )
+            handlers_ts = ExecutionHandlersSync(
+                on_stdout=on_stdout,
+                on_execution_complete=on_complete,
+                on_error=on_error,
+                on_init=on_init,
+            )
 
-        simple_result_ts = code_interpreter.codes.run(
-            "console.log('Hello from TypeScript!');\n"
-            + "const result: number = 2 + 2;\n"
-            + "console.log(`2 + 2 = ${result}`);",
-            context=ts_context,
-            handlers=handlers_ts,
-        )
-        assert simple_result_ts is not None
-        assert simple_result_ts.id is not None and simple_result_ts.id.strip()
-        _assert_terminal_event_contract(
-            init_events=init_events,
-            completed_events=completed_events,
-            errors=errors,
-            execution_id=simple_result_ts.id,
-        )
-        assert len(errors) == 0
-        assert len(completed_events) == 1
-        assert any("Hello from TypeScript!" in m.text for m in stdout_messages)
+            simple_result_ts = code_interpreter.codes.run(
+                "console.log('Hello from TypeScript!');\n"
+                + "const result: number = 2 + 2;\n"
+                + "console.log(`2 + 2 = ${result}`);",
+                context=ts_context,
+                handlers=handlers_ts,
+                )
+            assert simple_result_ts is not None
+            assert simple_result_ts.id is not None and simple_result_ts.id.strip()
+            _assert_terminal_event_contract(
+                init_events=init_events,
+                completed_events=completed_events,
+                errors=errors,
+                execution_id=simple_result_ts.id,
+            )
+            assert len(errors) == 0
+            assert len(completed_events) == 1
+            assert any("Hello from TypeScript!" in m.text for m in stdout_messages)
 
-        types_result_ts = code_interpreter.codes.run(
-            "interface Person {\n"
-            + "  name: string;\n"
-            + "  age: number;\n"
-            + "}\n"
-            + "const person: Person = { name: 'John', age: 30 };\n"
-            + "const numbers: number[] = [1, 2, 3, 4, 5];\n"
-            + "const sum: number = numbers.reduce((a, b) => a + b, 0);\n"
-            + "console.log(`Person: ${person.name}, Age: ${person.age}`);\n"
-            + "console.log(`Numbers: ${numbers}`);\n"
-            + "console.log(`Sum: ${sum}`);",
-            context=ts_context,
-        )
-        assert types_result_ts is not None
-        assert types_result_ts.id is not None
+            types_result_ts = code_interpreter.codes.run(
+                "interface Person {\n"
+                + "  name: string;\n"
+                + "  age: number;\n"
+                + "}\n"
+                + "const person: Person = { name: 'John', age: 30 };\n"
+                + "const numbers: number[] = [1, 2, 3, 4, 5];\n"
+                + "const sum: number = numbers.reduce((a, b) => a + b, 0);\n"
+                + "console.log(`Person: ${person.name}, Age: ${person.age}`);\n"
+                + "console.log(`Numbers: ${numbers}`);\n"
+                + "console.log(`Sum: ${sum}`);",
+                context=ts_context,
+                )
+            assert types_result_ts is not None
+            assert types_result_ts.id is not None
 
-        stdout_messages.clear()
-        errors.clear()
-        completed_events.clear()
-        init_events.clear()
+            stdout_messages.clear()
+            errors.clear()
+            completed_events.clear()
+            init_events.clear()
 
-        # Use a deterministic runtime error (TypeScript compile/type-checking may be configured permissively).
-        error_result_ts = code_interpreter.codes.run(
-            "throw new Error('ts-runtime-error');",
-            context=ts_context,
-            handlers=handlers_ts,
-        )
-        assert error_result_ts is not None
-        assert error_result_ts.id is not None and error_result_ts.id.strip()
-        assert error_result_ts.error is not None or len(error_result_ts.logs.stderr) > 0
-        _assert_terminal_event_contract(
-            init_events=init_events,
-            completed_events=completed_events,
-            errors=errors,
-            execution_id=error_result_ts.id,
-        )
+            # Use a deterministic runtime error (TypeScript compile/type-checking may be configured permissively).
+            error_result_ts = code_interpreter.codes.run(
+                "throw new Error('ts-runtime-error');",
+                context=ts_context,
+                handlers=handlers_ts,
+            )
+            assert error_result_ts is not None
+            assert error_result_ts.id is not None and error_result_ts.id.strip()
+            assert error_result_ts.error is not None or len(error_result_ts.logs.stderr) > 0
+            _assert_terminal_event_contract(
+                init_events=init_events,
+                completed_events=completed_events,
+                errors=errors,
+                execution_id=error_result_ts.id,
+            )
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(6)
@@ -629,55 +650,60 @@ class TestCodeInterpreterE2ESync:
         code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
         assert code_interpreter is not None
 
-        python1 = code_interpreter.codes.create_context(SupportedLanguage.PYTHON)
-        python2 = code_interpreter.codes.create_context(SupportedLanguage.PYTHON)
-        java1 = code_interpreter.codes.create_context(SupportedLanguage.JAVA)
-        go1 = code_interpreter.codes.create_context(SupportedLanguage.GO)
-        assert python1 is not None and python1.id is not None and str(python1.id).strip()
-        assert python2 is not None and python2.id is not None and str(python2.id).strip()
-        assert java1 is not None and java1.id is not None and str(java1.id).strip()
-        assert go1 is not None and go1.id is not None and str(go1.id).strip()
+        with managed_ctx_stack_sync(
+            code_interpreter,
+            [
+                SupportedLanguage.PYTHON,
+                SupportedLanguage.PYTHON,
+                SupportedLanguage.JAVA,
+                SupportedLanguage.GO,
+            ],
+        ) as (python1, python2, java1, go1):
+            assert python1.id is not None and str(python1.id).strip()
+            assert python2.id is not None and str(python2.id).strip()
+            assert java1.id is not None and str(java1.id).strip()
+            assert go1.id is not None and str(go1.id).strip()
 
-        result1 = code_interpreter.codes.run(
-            "secret_value1 = 'python1_secret'\nprint(f'Python1 secret: {secret_value1}')",
-            context=python1,
-        )
-        result2 = code_interpreter.codes.run(
-            "secret_value2 = 'python2_secret'\nprint(f'Python2 secret: {secret_value2}')",
-            context=python2,
-        )
-        assert result1 is not None and result1.id is not None
-        assert result2 is not None and result2.id is not None
+            result1 = code_interpreter.codes.run(
+                "secret_value1 = 'python1_secret'\nprint(f'Python1 secret: {secret_value1}')",
+                context=python1,
+            )
+            result2 = code_interpreter.codes.run(
+                "secret_value2 = 'python2_secret'\nprint(f'Python2 secret: {secret_value2}')",
+                context=python2,
+            )
+            assert result1 is not None and result1.id is not None
+            assert result2 is not None and result2.id is not None
 
-        check1 = code_interpreter.codes.run(
-            "print(f'Python1 still has: {secret_value1}')",
-            context=python1,
-        )
-        check2 = code_interpreter.codes.run(
-            "print(f'Python2 has no: {secret_value1}')",
-            context=python2,
-        )
-        assert check1 is not None
-        assert check2 is not None
-        assert check2.error is not None
-        assert check2.error.name == "NameError"
+            check1 = code_interpreter.codes.run(
+                "print(f'Python1 still has: {secret_value1}')",
+                context=python1,
+            )
+            check2 = code_interpreter.codes.run(
+                "print(f'Python2 has no: {secret_value1}')",
+                context=python2,
+            )
+            assert check1 is not None
+            assert check2 is not None
+            assert check2.error is not None
+            assert check2.error.name == "NameError"
 
-        java_result = code_interpreter.codes.run(
-            "String javaSecret = \"java_secret\";\n"
-                + "System.out.println(\"Java secret: \" + javaSecret);",
-            context=java1,
-        )
-        go_result = code_interpreter.codes.run(
-            "package main\n"
-                + "import \"fmt\"\n"
-                + "func main() {\n"
-                + "    goSecret := \"go_secret\"\n"
-                + "    fmt.Print(\"Go secret:\", goSecret)\n"
-                + "}",
-            context=go1,
-        )
-        assert java_result is not None and java_result.id is not None
-        assert go_result is not None and go_result.id is not None
+            java_result = code_interpreter.codes.run(
+                "String javaSecret = \"java_secret\";\n"
+                    + "System.out.println(\"Java secret: \" + javaSecret);",
+                context=java1,
+            )
+            go_result = code_interpreter.codes.run(
+                "package main\n"
+                    + "import \"fmt\"\n"
+                    + "func main() {\n"
+                    + "    goSecret := \"go_secret\"\n"
+                    + "    fmt.Print(\"Go secret:\", goSecret)\n"
+                    + "}",
+                context=go1,
+            )
+            assert java_result is not None and java_result.id is not None
+            assert go_result is not None and go_result.id is not None
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(7)
@@ -686,35 +712,39 @@ class TestCodeInterpreterE2ESync:
         code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
         assert code_interpreter is not None
 
-        python_c1 = code_interpreter.codes.create_context(SupportedLanguage.PYTHON)
-        java_c1 = code_interpreter.codes.create_context(SupportedLanguage.JAVA)
-        go_c1 = code_interpreter.codes.create_context(SupportedLanguage.GO)
+        with managed_ctx_stack_sync(
+            code_interpreter,
+            [
+                SupportedLanguage.PYTHON,
+                SupportedLanguage.JAVA,
+                SupportedLanguage.GO,
+            ],
+        ) as (python_c1, java_c1, go_c1):
+            from concurrent.futures import ThreadPoolExecutor
 
-        from concurrent.futures import ThreadPoolExecutor
-
-        def run_python1():
-            return code_interpreter.codes.run(
-            "import time\n"
+            def run_python1():
+                return code_interpreter.codes.run(
+                    "import time\n"
                     + "for i in range(3):\n"
                     + "    print(f'Python1 iteration {i}')\n"
                     + "    time.sleep(0.1)\n"
                     + "print('Python1 completed')",
-            context=python_c1,
-        )
+                    context=python_c1,
+                    )
 
-        def run_java_concurrent():
-            return code_interpreter.codes.run(
-            "for (int i = 0; i < 3; i++) {\n"
+            def run_java_concurrent():
+                return code_interpreter.codes.run(
+                    "for (int i = 0; i < 3; i++) {\n"
                     + "    System.out.println(\"Java iteration \" + i);\n"
                     + "    try { Thread.sleep(100); } catch (Exception e) {}\n"
                     + "}\n"
                     + "System.out.println(\"Java completed\");",
-            context=java_c1,
-        )
+                    context=java_c1,
+                    )
 
-        def run_go_concurrent():
-            return code_interpreter.codes.run(
-            "package main\n"
+            def run_go_concurrent():
+                return code_interpreter.codes.run(
+                    "package main\n"
                     + "import \"fmt\"\n"
                     + "func main() {\n"
                     + "    for i := 0; i < 3; i++ {\n"
@@ -722,20 +752,20 @@ class TestCodeInterpreterE2ESync:
                     + "    }\n"
                     + "    fmt.Print(\"Go completed\")\n"
                     + "}",
-            context=go_c1,
-        )
+                    context=go_c1,
+                    )
 
-        with ThreadPoolExecutor(max_workers=4) as ex:
-            futures = [
-                ex.submit(run_python1),
-                ex.submit(run_java_concurrent),
-                ex.submit(run_go_concurrent),
-            ]
-            results = [f.result() for f in futures]
+            with ThreadPoolExecutor(max_workers=4) as ex:
+                futures = [
+                    ex.submit(run_python1),
+                    ex.submit(run_java_concurrent),
+                    ex.submit(run_go_concurrent),
+                ]
+                results = [f.result() for f in futures]
 
-        for result in results:
-            assert result is not None
-            assert result.id is not None
+            for result in results:
+                assert result is not None
+                assert result.id is not None
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(8)
@@ -744,75 +774,122 @@ class TestCodeInterpreterE2ESync:
         code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
         assert code_interpreter is not None
 
-        python_int_context = code_interpreter.codes.create_context(SupportedLanguage.PYTHON)
-        assert python_int_context is not None and python_int_context.id is not None and str(python_int_context.id).strip()
+        with managed_ctx_sync(code_interpreter, SupportedLanguage.PYTHON) as python_int_context:
+            assert python_int_context is not None and python_int_context.id is not None and str(python_int_context.id).strip()
 
-        init_events_int: list[ExecutionInit] = []
-        completed_events: list[ExecutionComplete] = []
-        errors: list[ExecutionError] = []
+            init_events_int: list[ExecutionInit] = []
+            completed_events: list[ExecutionComplete] = []
+            errors: list[ExecutionError] = []
 
-        def on_init(init: ExecutionInit):
-            init_events_int.append(init)
+            def on_init(init: ExecutionInit):
+                init_events_int.append(init)
 
-        def on_complete(complete: ExecutionComplete):
-            completed_events.append(complete)
+            def on_complete(complete: ExecutionComplete):
+                completed_events.append(complete)
 
-        def on_error(error: ExecutionError):
-            errors.append(error)
+            def on_error(error: ExecutionError):
+                errors.append(error)
 
-        handlers_int = ExecutionHandlersSync(
-            on_init=on_init,
-            on_execution_complete=on_complete,
-            on_error=on_error,
-        )
+            handlers_int = ExecutionHandlersSync(
+                on_init=on_init,
+                on_execution_complete=on_complete,
+                on_error=on_error,
+            )
 
-        with ThreadPoolExecutor(max_workers=1) as ex:
-            start = time.time()
-            future = ex.submit(
-                code_interpreter.codes.run,
-                "import time\n"
-                + "print('Starting long-running Python execution')\n"
-                + "for i in range(100):\n"
-                + "    print(f'Python iteration {i}')\n"
-                + "    time.sleep(0.2)\n",
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                start = time.time()
+                future = ex.submit(
+                    code_interpreter.codes.run,
+                    "import time\n"
+                    + "print('Starting long-running Python execution')\n"
+                    + "for i in range(50):\n"
+                    + "    print(f'Python iteration {i}')\n"
+                    + "    time.sleep(0.2)\n",
+                    context=python_int_context,
+                    handlers=handlers_int,
+                    )
+
+                deadline = time.time() + 15
+                while len(init_events_int) == 0 and time.time() < deadline:
+                    time.sleep(0.1)
+
+                assert len(init_events_int) == 1, "Execution should have been initialized exactly once"
+                execution_id = init_events_int[-1].id
+                assert execution_id is not None and execution_id.strip()
+                _assert_recent_timestamp_ms(init_events_int[-1].timestamp)
+
+                code_interpreter.codes.interrupt(execution_id)
+
+                result_int = future.result()
+                assert result_int is not None
+                assert result_int.id is not None
+                assert result_int.id == execution_id
+                assert (len(completed_events) > 0) or (len(errors) > 0)
+                elapsed = time.time() - start
+                assert elapsed < 30
+
+            quick_result = code_interpreter.codes.run(
+                "print('Quick Python execution')\n"
+                + "result = 2 + 2\n"
+                + "print(f'Result: {result}')",
                 context=python_int_context,
                 handlers=handlers_int,
             )
+            assert quick_result is not None
+            assert quick_result.id is not None
 
-            deadline = time.time() + 15
-            while len(init_events_int) == 0 and time.time() < deadline:
-                time.sleep(0.1)
+            try:
+                code_interpreter.codes.interrupt(quick_result.id)
+            except Exception:
+                pass
 
-            assert len(init_events_int) == 1, "Execution should have been initialized exactly once"
-            execution_id = init_events_int[-1].id
-            assert execution_id is not None and execution_id.strip()
-            _assert_recent_timestamp_ms(init_events_int[-1].timestamp)
+    @pytest.mark.timeout(600)
+    @pytest.mark.order(9)
+    def test_09_context_management_endpoints(self):
+        """Validate list/get/delete context APIs map to execd /code/contexts endpoints (sync)."""
+        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
+        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
+        assert code_interpreter is not None
 
-            code_interpreter.codes.interrupt(execution_id)
+        language = SupportedLanguage.PYTHON
+        logger.info("=" * 80)
+        logger.info("TEST 9: Context management endpoints (%s)", language)
+        logger.info("=" * 80)
 
-            result_int = future.result()
-            assert result_int is not None
-            assert result_int.id is not None
-            assert result_int.id == execution_id
-            assert (len(completed_events) > 0) or (len(errors) > 0)
-            elapsed = time.time() - start
-            assert elapsed < 30
+        # Ensure clean slate for bash contexts to avoid interference with other tests.
+        code_interpreter.codes.delete_contexts(language)
 
-        fake_id = f"fake-execution-{time.time()}"
-        with pytest.raises(SandboxApiException):
-            code_interpreter.codes.interrupt(fake_id)
+        ctx1 = code_interpreter.codes.create_context(language)
+        ctx2 = code_interpreter.codes.create_context(language)
+        assert ctx1.id is not None and str(ctx1.id).strip()
+        assert ctx2.id is not None and str(ctx2.id).strip()
+        assert ctx1.language == language
+        assert ctx2.language == language
+        logger.info("✓ Created two bash contexts: %s, %s", ctx1.id, ctx2.id)
 
-        quick_result = code_interpreter.codes.run(
-            "print('Quick Python execution')\n"
-            + "result = 2 + 2\n"
-            + "print(f'Result: {result}')",
-            context=python_int_context,
-            handlers=handlers_int,
-        )
-        assert quick_result is not None
-        assert quick_result.id is not None
+        listed = code_interpreter.codes.list_contexts(language)
+        bash_context_ids = {c.id for c in listed if c.id}
+        assert ctx1.id in bash_context_ids
+        assert ctx2.id in bash_context_ids
+        assert all(c.language == language for c in listed)
+        logger.info("✓ list_contexts returned expected bash contexts")
 
-        try:
-            code_interpreter.codes.interrupt(quick_result.id)
-        except Exception:
-            pass
+        fetched = code_interpreter.codes.get_context(ctx1.id)
+        assert fetched.id == ctx1.id
+        assert fetched.language == language
+        logger.info("✓ get_context returned expected context %s", fetched.id)
+
+        code_interpreter.codes.delete_context(ctx1.id)
+        remaining = code_interpreter.codes.list_contexts(language)
+        remaining_ids = {c.id for c in remaining if c.id}
+        assert ctx1.id not in remaining_ids
+        assert ctx2.id in remaining_ids
+        logger.info("✓ delete_context removed %s", ctx1.id)
+
+        code_interpreter.codes.delete_contexts(language)
+        final_contexts = [
+            c for c in code_interpreter.codes.list_contexts(language) if c.id
+        ]
+        assert len(final_contexts) == 0
+        logger.info("✓ delete_contexts removed all bash contexts")
+

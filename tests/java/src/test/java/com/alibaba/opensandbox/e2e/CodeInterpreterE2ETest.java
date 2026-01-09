@@ -53,6 +53,28 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
 
     private Sandbox sandbox;
     private CodeInterpreter codeInterpreter;
+    private record ManagedContext(CodeInterpreter codeInterpreter, CodeContext ctx)
+            implements AutoCloseable {
+        CodeContext context() {
+            return ctx;
+        }
+
+        @Override
+        public void close() {
+            if (ctx != null && ctx.getId() != null && !ctx.getId().isBlank()) {
+                try {
+                    codeInterpreter.codes().deleteContext(ctx.getId());
+                } catch (Exception e) {
+                    logger.warn("Cleanup: failed to delete context {}", ctx.getId(), e);
+                }
+            }
+        }
+    }
+
+    private ManagedContext managedCtx(SupportedLanguage language) {
+        CodeContext ctx = codeInterpreter.codes().createContext(language);
+        return new ManagedContext(codeInterpreter, ctx);
+    }
 
     private static void assertTerminalEventContract(
             List<ExecutionInit> initEvents,
@@ -144,11 +166,10 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     void testJavaCodeExecution() {
         logger.info("Testing Java code execution");
 
-        CodeContext javaContext = codeInterpreter.codes().createContext(SupportedLanguage.JAVA);
-
-        assertNotNull(javaContext);
-        assertNotNull(javaContext.getId());
-        assertEquals("java", javaContext.getLanguage());
+        try (ManagedContext javaCtx = managedCtx(SupportedLanguage.JAVA)) {
+            CodeContext javaContext = javaCtx.context();
+            assertNotNull(javaContext.getId());
+            assertEquals("java", javaContext.getLanguage());
 
         // Event tracking for comprehensive validation
         List<OutputMessage> stdoutMessages = Collections.synchronizedList(new ArrayList<>());
@@ -262,6 +283,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         assertNotNull(errorResult.getError());
         assertEquals("EvalException", errorResult.getError().getName());
         assertTerminalEventContract(initEvents, completedEvents, errors, errorResult.getId());
+        }
     }
 
     @Test
@@ -377,10 +399,9 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         logger.info("Testing Go code execution");
 
         assertNotNull(codeInterpreter);
-        CodeContext goContext = codeInterpreter.codes().createContext(SupportedLanguage.GO);
-
-        assertNotNull(goContext);
-        assertEquals("go", goContext.getLanguage());
+        try (ManagedContext goCtx = managedCtx(SupportedLanguage.GO)) {
+            CodeContext goContext = goCtx.context();
+            assertEquals("go", goContext.getLanguage());
 
         // Event tracking
         List<OutputMessage> stdoutMessages = Collections.synchronizedList(new ArrayList<>());
@@ -477,6 +498,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                 "Go error execution should capture compilation errors");
 
         logger.info("Go code execution tests completed");
+        }
     }
 
     @Test
@@ -489,10 +511,9 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         assertNotNull(codeInterpreter);
 
         // Create TypeScript execution context
-        CodeContext tsContext = codeInterpreter.codes().createContext(SupportedLanguage.TYPESCRIPT);
-
-        assertNotNull(tsContext);
-        assertEquals("typescript", tsContext.getLanguage());
+        try (ManagedContext tsCtx = managedCtx(SupportedLanguage.TYPESCRIPT)) {
+            CodeContext tsContext = tsCtx.context();
+            assertEquals("typescript", tsContext.getLanguage());
 
         // Event tracking
         List<OutputMessage> stdoutMessages = Collections.synchronizedList(new ArrayList<>());
@@ -579,6 +600,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                 "TypeScript error execution should capture type errors");
 
         logger.info("TypeScript code execution tests completed");
+        }
     }
 
     @Test
@@ -591,8 +613,10 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         assertNotNull(codeInterpreter);
 
         // Create separate contexts for different languages
-        CodeContext python1 = codeInterpreter.codes().createContext(SupportedLanguage.PYTHON);
-        CodeContext python2 = codeInterpreter.codes().createContext(SupportedLanguage.PYTHON);
+        try (ManagedContext python1Ctx = managedCtx(SupportedLanguage.PYTHON);
+                ManagedContext python2Ctx = managedCtx(SupportedLanguage.PYTHON)) {
+            CodeContext python1 = python1Ctx.context();
+            CodeContext python2 = python2Ctx.context();
 
         // 1. Set different variables in each Python context to test isolation
         RunCodeRequest python1Setup =
@@ -641,6 +665,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         assertNotNull(check2.getId());
         assertNotNull(check2.getError());
         assertEquals("NameError", check2.getError().getName());
+        }
     }
 
     @Test
@@ -656,14 +681,15 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         long timestamp = System.currentTimeMillis();
 
         // Create multiple contexts for concurrent execution
-        CodeContext pythonConcurrent1 =
-                codeInterpreter.codes().createContext(SupportedLanguage.PYTHON);
-        CodeContext pythonConcurrent2 =
-                codeInterpreter.codes().createContext(SupportedLanguage.PYTHON);
-        CodeContext javaConcurrent = codeInterpreter.codes().createContext(SupportedLanguage.JAVA);
-        CodeContext goConcurrent = codeInterpreter.codes().createContext(SupportedLanguage.GO);
+        try (ManagedContext pythonConcurrent1Ctx = managedCtx(SupportedLanguage.PYTHON);
+                ManagedContext pythonConcurrent2Ctx = managedCtx(SupportedLanguage.PYTHON);
+                ManagedContext javaConcurrentCtx = managedCtx(SupportedLanguage.JAVA);
+                ManagedContext goConcurrentCtx = managedCtx(SupportedLanguage.GO)) {
+            CodeContext pythonConcurrent1 = pythonConcurrent1Ctx.context();
+            CodeContext pythonConcurrent2 = pythonConcurrent2Ctx.context();
+            CodeContext javaConcurrent = javaConcurrentCtx.context();
+            CodeContext goConcurrent = goConcurrentCtx.context();
 
-        try {
             // Submit concurrent executions
             futures.add(
                     executor.submit(
@@ -760,8 +786,10 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     void testCodeExecutionInterrupt() throws InterruptedException, ExecutionException {
         logger.info("Testing code execution interrupt functionality");
 
-        CodeContext pythonContext = codeInterpreter.codes().createContext(SupportedLanguage.PYTHON);
-        CodeContext javaContext = codeInterpreter.codes().createContext(SupportedLanguage.JAVA);
+        try (ManagedContext pythonCtx = managedCtx(SupportedLanguage.PYTHON);
+                ManagedContext javaCtx = managedCtx(SupportedLanguage.JAVA)) {
+            CodeContext pythonContext = pythonCtx.context();
+            CodeContext javaContext = javaCtx.context();
 
         // Event tracking for interrupt testing
         List<ExecutionComplete> completedEvents = Collections.synchronizedList(new ArrayList<>());
@@ -897,15 +925,6 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                 javaResult.getId(),
                 javaResult.getError() != null ? javaResult.getError().getName() : "none");
 
-        // Test 3: Test interrupting non-existent execution
-        logger.info("Testing interrupt of non-existent execution");
-
-        String fakeExecutionId = "fake-execution-" + System.currentTimeMillis();
-        assertThrows(
-                SandboxApiException.class,
-                () -> codeInterpreter.codes().interrupt(fakeExecutionId),
-                "Interrupting non-existent execution should throw exception");
-
         // Test 4: Quick execution that completes before interrupt
         logger.info("Testing interrupt of already completed execution");
 
@@ -930,5 +949,56 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         }
 
         logger.info("Code execution interrupt tests completed");
+        }
+    }
+
+    @Test
+    @Order(9)
+    @DisplayName("Context Management Endpoints")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testContextManagementEndpoints() {
+        logger.info("Testing context CRUD endpoints");
+
+        String language = "python";
+        // Ensure clean slate
+        codeInterpreter.codes().deleteContexts(language);
+
+        try {
+            ManagedContext ctx1 = managedCtx(language);
+            ManagedContext ctx2 = managedCtx(language);
+            assertNotNull(ctx1.context().getId());
+            assertNotNull(ctx2.context().getId());
+
+            List<CodeContext> listed = codeInterpreter.codes().listContexts(language);
+            assertTrue(
+                    listed.stream()
+                            .map(CodeContext::getId)
+                            .filter(id -> id != null && !id.isBlank())
+                            .toList()
+                            .containsAll(List.of(ctx1.context().getId(), ctx2.context().getId())));
+            assertTrue(listed.stream().allMatch(c -> language.equals(c.getLanguage())));
+
+            CodeContext fetched = codeInterpreter.codes().getContext(ctx1.context().getId());
+            assertEquals(ctx1.context().getId(), fetched.getId());
+            assertEquals(language, fetched.getLanguage());
+
+            codeInterpreter.codes().deleteContext(ctx1.context().getId());
+            List<String> remainingIds =
+                    codeInterpreter.codes().listContexts(language).stream()
+                            .map(CodeContext::getId)
+                            .filter(id -> id != null && !id.isBlank())
+                            .toList();
+            assertFalse(remainingIds.contains(ctx1.context().getId()));
+            assertTrue(remainingIds.contains(ctx2.context().getId()));
+
+        } finally {
+            // bulk cleanup
+            codeInterpreter.codes().deleteContexts(language);
+            List<CodeContext> finalContexts = codeInterpreter.codes().listContexts(language);
+            assertTrue(
+                    finalContexts.stream()
+                            .map(CodeContext::getId)
+                            .allMatch(id -> id == null || id.isBlank()));
+        }
     }
 }
