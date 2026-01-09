@@ -8,7 +8,9 @@
 /server/ @Pangjiping @ninan-nn @jwx0925 @Generalwin
 
 # Runtime agent (execd) and sandbox images
-/components/execd/ @Pangjiping @hittyt
+/components/execd/ @Pangjiping @hittyt @ninan-nn
+/components/ingress/ @Pangjiping @hittyt @Generalwin
+/components/egress/ @Pangjiping @hittyt @jwx0925
 /sandboxes/ @Pangjiping @ninan-nn @jwx0925 @hittyt @hellomypastor
 
 # Kubernetes controller
