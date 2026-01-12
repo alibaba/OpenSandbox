@@ -75,3 +75,8 @@ type CreateContextRequest struct {
 	Language Language `json:"language"`
 	Cwd      string   `json:"cwd"`
 }
+
+type CodeContext struct {
+	ID       string   `json:"id,omitempty"`
+	Language Language `json:"language"`
+}

@@ -25,6 +25,7 @@ const (
 	ErrorCodeInvalidFileMetadata ErrorCode = "INVALID_FILE_METADATA"
 	ErrorCodeFileNotFound        ErrorCode = "FILE_NOT_FOUND"
 	ErrorCodeUnknown             ErrorCode = "UNKNOWN"
+	ErrorCodeContextNotFound     ErrorCode = "CONTEXT_NOT_FOUND"
 )
 
 type ErrorResponse struct {

@@ -47,7 +47,7 @@ func (c *Controller) runJupyter(ctx context.Context, request *ExecuteCodeRequest
 
 	kernel := c.getJupyterKernel(targetSessionID)
 	if kernel == nil {
-		return errors.New("session not found")
+		return ErrContextNotFound
 	}
 
 	request.SetDefaultHooks()

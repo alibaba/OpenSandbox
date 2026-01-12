@@ -49,6 +49,7 @@ type jupyterKernel struct {
 	mu       sync.Mutex
 	kernelID string
 	client   *jupyter.Client
+	language Language
 }
 
 type commandKernel struct {
