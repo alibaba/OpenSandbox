@@ -28,6 +28,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+APACHE_2_LICENSE_HEADER = """#\n# Copyright 2026 Alibaba Group Holding Ltd.\n#\n# Licensed under the Apache License, Version 2.0 (the "License");\n# you may not use this file except in compliance with the License.\n# You may obtain a copy of the License at\n#\n#     http://www.apache.org/licenses/LICENSE-2.0\n#\n# Unless required by applicable law or agreed to in writing, software\n# distributed under the License is distributed on an "AS IS" BASIS,\n# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.\n# See the License for the specific language governing permissions and\n# limitations under the License.\n#\n\n"""
+
 
 def run_command(cmd: list[str], description: str) -> subprocess.CompletedProcess:
     """Run a command and handle errors."""
@@ -167,6 +169,32 @@ def generate_sandbox_lifecycle_api() -> None:
                 break
 
 
+def add_license_headers(root: Path) -> None:
+    """Add Apache-2.0 license header to generated python files (idempotent)."""
+    if not root.exists():
+        return
+
+    touched = 0
+    skipped = 0
+
+    for file_path in root.rglob("*.py"):
+        content = file_path.read_text(encoding="utf-8")
+
+        # Avoid double-inserting if generation already includes headers.
+        # Keep the check lightweight and tolerant to minor variations.
+        head = "\n".join(content.splitlines()[:50])
+        if "Licensed under the Apache License, Version 2.0" in head:
+            skipped += 1
+            continue
+
+        file_path.write_text(APACHE_2_LICENSE_HEADER + content, encoding="utf-8")
+        touched += 1
+
+    print(
+        f"✅ Added license headers under {root} (updated={touched}, skipped={skipped})"
+    )
+
+
 def post_process_generated_code() -> None:
     """Post-process the generated code to ensure proper package structure."""
     print("\n🔧 Post-processing generated code...")
@@ -180,6 +208,11 @@ def post_process_generated_code() -> None:
                 '"""OpenSandbox API clients generated from OpenAPI specs."""\n'
             )
             print(f"✅ Created {init_file}")
+
+    # Ensure all generated python files have a license header.
+    add_license_headers(Path("src/opensandbox/api/execd"))
+    add_license_headers(Path("src/opensandbox/api/lifecycle"))
+    add_license_headers(Path("src/opensandbox/api"))
 
 
 def main() -> None:
