@@ -296,7 +296,7 @@ func TestAllocatorSchedule(t *testing.T) {
 			syncer.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(c.sandboxAlloc, nil).Times(len(c.spec.Sandboxes))
 			syncer.EXPECT().SetAllocation(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 			syncer.EXPECT().GetRelease(gomock.Any(), gomock.Any()).Return(c.release, nil).Times(len(c.spec.Sandboxes))
-			status, err := allocator.Schedule(context.Background(), c.spec)
+			status, _, err := allocator.Schedule(context.Background(), c.spec)
 			assert.NoError(t, err)
 			assert.True(t, reflect.DeepEqual(c.wantStatus, status))
 		})

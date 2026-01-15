@@ -32,6 +32,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -136,53 +137,74 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 // reconcilePool contains the main reconciliation logic
 func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha1.Pool, batchSandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (ctrl.Result, error) {
-	needReconcile := false
-	delay := time.Duration(0)
-	// allocate
-	podAllocation, idlePods, supplySandbox, err := r.scheduleSandbox(ctx, pool, batchSandboxes, pods)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if supplySandbox > 0 && len(idlePods) > 0 { // Some idle pods may be pending, retry schedule later.
-		needReconcile = true
-		delay = defaultRetryTime
-	}
-	if int32(len(idlePods)) >= supplySandbox { // Some pods may be pending, no need to create again.
-		supplySandbox = 0
-	} else {
-		supplySandbox -= int32(len(idlePods))
-	}
+	log := logf.FromContext(ctx)
+	var result ctrl.Result
 
-	// update
-	latestRevision, err := r.calculateRevision(pool)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	latestIdlePods, deleteOld, supplyNew := r.updatePool(latestRevision, pods, idlePods)
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		// 1. Get latest Pool CR
+		latestPool := &sandboxv1alpha1.Pool{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(pool), latestPool); err != nil {
+			return err
+		}
 
-	// scale
-	args := &scaleArgs{
-		latestRevision: latestRevision,
-		pool:           pool,
-		pods:           pods,
-		allocatedCnt:   int32(len(podAllocation)),
-		idlePods:       latestIdlePods,
-		redundantPods:  deleteOld,
-		supplyCnt:      supplySandbox + supplyNew,
-	}
-	if err := r.scalePool(ctx, args); err != nil {
-		return ctrl.Result{}, err
-	}
+		// 2. Schedule and allocate
+		podAllocation, idlePods, supplySandbox, poolDirty, err := r.scheduleSandbox(ctx, latestPool, batchSandboxes, pods)
+		if err != nil {
+			return err
+		}
 
-	// update status
-	if err := r.updatePoolStatus(ctx, latestRevision, pool, pods, podAllocation); err != nil {
-		return ctrl.Result{}, err
-	}
+		needReconcile := false
+		delay := time.Duration(0)
+		if supplySandbox > 0 && len(idlePods) > 0 { // Some idle pods may be pending, retry schedule later.
+			needReconcile = true
+			delay = defaultRetryTime
+		}
+		if int32(len(idlePods)) >= supplySandbox { // Some pods may be pending, no need to create again.
+			supplySandbox = 0
+		} else {
+			supplySandbox -= int32(len(idlePods))
+		}
 
-	if needReconcile {
-		return ctrl.Result{RequeueAfter: delay}, nil
-	}
-	return ctrl.Result{}, nil
+		// 3. Persist allocation if needed (Update Annotations)
+		if poolDirty {
+			if err := r.Allocator.PersistPoolAllocation(ctx, latestPool, &AllocStatus{PodAllocation: podAllocation}); err != nil {
+				log.Error(err, "Failed to persist pool allocation")
+				return err
+			}
+		}
+
+		// 4. Update revision and scale (Scaling involves Pod creation/deletion, not Pool CR update)
+		latestRevision, err := r.calculateRevision(latestPool)
+		if err != nil {
+			return err
+		}
+		latestIdlePods, deleteOld, supplyNew := r.updatePool(latestRevision, pods, idlePods)
+
+		args := &scaleArgs{
+			latestRevision: latestRevision,
+			pool:           latestPool,
+			pods:           pods,
+			allocatedCnt:   int32(len(podAllocation)),
+			idlePods:       latestIdlePods,
+			redundantPods:  deleteOld,
+			supplyCnt:      supplySandbox + supplyNew,
+		}
+		if err := r.scalePool(ctx, args); err != nil {
+			return err
+		}
+
+		// 5. Update Status (using latestPool which has updated ResourceVersion)
+		if err := r.updatePoolStatus(ctx, latestRevision, latestPool, pods, podAllocation); err != nil {
+			return err
+		}
+
+		if needReconcile {
+			result = ctrl.Result{RequeueAfter: delay}
+		}
+		return nil
+	})
+
+	return result, err
 }
 
 func (r *PoolReconciler) calculateRevision(pool *sandboxv1alpha1.Pool) (string, error) {
@@ -269,15 +291,15 @@ func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alpha1.Pool, batchSandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (map[string]string, []string, int32, error) {
+func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alpha1.Pool, batchSandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (map[string]string, []string, int32, bool, error) {
 	spec := &AllocSpec{
 		Sandboxes: batchSandboxes,
 		Pool:      pool,
 		Pods:      pods,
 	}
-	status, err := r.Allocator.Schedule(ctx, spec)
+	status, poolDirty, err := r.Allocator.Schedule(ctx, spec)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, 0, false, err
 	}
 	idlePods := make([]string, 0)
 	for _, pod := range pods {
@@ -285,7 +307,7 @@ func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alp
 			idlePods = append(idlePods, pod.Name)
 		}
 	}
-	return status.PodAllocation, idlePods, status.PodSupplement, nil
+	return status.PodAllocation, idlePods, status.PodSupplement, poolDirty, nil
 }
 
 func (r *PoolReconciler) updatePool(latestRevision string, pods []*corev1.Pod, idlePods []string) ([]string, []string, int32) {
