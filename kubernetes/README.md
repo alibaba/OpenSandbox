@@ -211,13 +211,6 @@ metadata:
 spec:
   replicas: 3
   poolRef: example-pool
-  template:
-    spec:
-      containers:
-      - name: sandbox-container
-        image: nginx:latest
-        ports:
-        - containerPort: 80
 ```
 
 Apply the batch sandbox configuration:
@@ -265,18 +258,6 @@ metadata:
 spec:
   replicas: 2
   poolRef: task-example-pool
-  template:
-    spec:
-      shareProcessNamespace: true
-      containers:
-      - name: sandbox-container
-        image: ubuntu:latest
-        command: ["sleep", "3600"]
-      - name: task-executor
-        image: <task-executor-image>:<tag>
-        securityContext:
-          capabilities:
-            add: ["SYS_PTRACE"]
   taskTemplate:
     spec:
       process:
