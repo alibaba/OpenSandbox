@@ -32,6 +32,11 @@ import (
 
 // CreateContext provisions a kernel-backed session and returns its ID.
 func (c *Controller) CreateContext(req *CreateContextRequest) (string, error) {
+	if req.Language == Bash {
+		return c.createBashSession(req)
+	}
+
+	// Create a new Jupyter session.
 	var (
 		client  *jupyter.Client
 		session *jupytersession.Session
@@ -42,7 +47,7 @@ func (c *Controller) CreateContext(req *CreateContextRequest) (string, error) {
 		log.Error("failed to create session, retrying: %v", err)
 		return err != nil
 	}, func() error {
-		client, session, err = c.createContext(*req)
+		client, session, err = c.createJupyterContext(*req)
 		return err
 	})
 	if err != nil {
@@ -120,9 +125,9 @@ func (c *Controller) deleteSessionAndCleanup(session string) error {
 	defer c.mu.Unlock()
 
 	delete(c.jupyterClientMap, session)
-	for lang, id := range c.defaultLanguageJupyterSessions {
+	for lang, id := range c.defaultLanguageSessions {
 		if id == session {
-			delete(c.defaultLanguageJupyterSessions, lang)
+			delete(c.defaultLanguageSessions, lang)
 		}
 	}
 	return nil
@@ -143,8 +148,8 @@ func (c *Controller) newIpynbPath(sessionID, cwd string) (string, error) {
 	return filepath.Join(cwd, fmt.Sprintf("%s.ipynb", sessionID)), nil
 }
 
-// createDefaultLanguageContext prewarms a session for stateless execution.
-func (c *Controller) createDefaultLanguageContext(language Language) error {
+// createDefaultLanguageJupyterContext prewarms a session for stateless execution.
+func (c *Controller) createDefaultLanguageJupyterContext(language Language) error {
 	var (
 		client  *jupyter.Client
 		session *jupytersession.Session
@@ -154,7 +159,7 @@ func (c *Controller) createDefaultLanguageContext(language Language) error {
 		log.Error("failed to create context, retrying: %v", err)
 		return err != nil
 	}, func() error {
-		client, session, err = c.createContext(CreateContextRequest{
+		client, session, err = c.createJupyterContext(CreateContextRequest{
 			Language: language,
 			Cwd:      "",
 		})
@@ -167,7 +172,7 @@ func (c *Controller) createDefaultLanguageContext(language Language) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.defaultLanguageJupyterSessions[language] = session.ID
+	c.defaultLanguageSessions[language] = session.ID
 	c.jupyterClientMap[session.ID] = &jupyterKernel{
 		kernelID: session.Kernel.ID,
 		client:   client,
@@ -176,8 +181,8 @@ func (c *Controller) createDefaultLanguageContext(language Language) error {
 	return nil
 }
 
-// createContext performs the actual context creation workflow.
-func (c *Controller) createContext(request CreateContextRequest) (*jupyter.Client, *jupytersession.Session, error) {
+// createJupyterContext performs the actual context creation workflow.
+func (c *Controller) createJupyterContext(request CreateContextRequest) (*jupyter.Client, *jupytersession.Session, error) {
 	client := c.jupyterClient()
 
 	kernel, err := c.searchKernel(client, request.Language)
@@ -250,7 +255,7 @@ func (c *Controller) listAllContexts() ([]CodeContext, error) {
 		}
 	}
 
-	for language, defaultContext := range c.defaultLanguageJupyterSessions {
+	for language, defaultContext := range c.defaultLanguageSessions {
 		contexts = append(contexts, CodeContext{
 			ID:       defaultContext,
 			Language: language,
@@ -274,7 +279,7 @@ func (c *Controller) listLanguageContexts(language Language) ([]CodeContext, err
 		}
 	}
 
-	if defaultContext := c.defaultLanguageJupyterSessions[language]; defaultContext != "" {
+	if defaultContext := c.defaultLanguageSessions[language]; defaultContext != "" {
 		contexts = append(contexts, CodeContext{
 			ID:       defaultContext,
 			Language: language,

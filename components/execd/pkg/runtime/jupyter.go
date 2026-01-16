@@ -29,8 +29,8 @@ func (c *Controller) runJupyter(ctx context.Context, request *ExecuteCodeRequest
 		return errors.New("language runtime server not configured, please check your image runtime")
 	}
 	if request.Context == "" {
-		if _, exists := c.defaultLanguageJupyterSessions[request.Language]; !exists {
-			err := c.createDefaultLanguageContext(request.Language)
+		if _, exists := c.defaultLanguageSessions[request.Language]; !exists {
+			err := c.createDefaultLanguageJupyterContext(request.Language)
 			if err != nil {
 				return err
 			}
@@ -39,7 +39,7 @@ func (c *Controller) runJupyter(ctx context.Context, request *ExecuteCodeRequest
 
 	var targetSessionID string
 	if request.Context == "" {
-		targetSessionID = c.defaultLanguageJupyterSessions[request.Language]
+		targetSessionID = c.defaultLanguageSessions[request.Language]
 	} else {
 		targetSessionID = request.Context
 	}

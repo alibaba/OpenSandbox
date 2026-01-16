@@ -27,7 +27,7 @@ import (
 func TestListContextsAndNewIpynbPath(t *testing.T) {
 	c := NewController("http://example", "token")
 	c.jupyterClientMap["session-python"] = &jupyterKernel{language: Python}
-	c.defaultLanguageJupyterSessions[Go] = "session-go-default"
+	c.defaultLanguageSessions[Go] = "session-go-default"
 
 	pyContexts, err := c.listLanguageContexts(Python)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestDeleteContext_RemovesCacheOnSuccess(t *testing.T) {
 
 	c := NewController(server.URL, "token")
 	c.jupyterClientMap[sessionID] = &jupyterKernel{language: Python}
-	c.defaultLanguageJupyterSessions[Python] = sessionID
+	c.defaultLanguageSessions[Python] = sessionID
 
 	if err := c.DeleteContext(sessionID); err != nil {
 		t.Fatalf("DeleteContext returned error: %v", err)
@@ -138,7 +138,7 @@ func TestDeleteContext_RemovesCacheOnSuccess(t *testing.T) {
 	if kernel := c.getJupyterKernel(sessionID); kernel != nil {
 		t.Fatalf("expected cache to be cleared, found: %+v", kernel)
 	}
-	if _, ok := c.defaultLanguageJupyterSessions[Python]; ok {
+	if _, ok := c.defaultLanguageSessions[Python]; ok {
 		t.Fatalf("expected default session entry to be removed")
 	}
 }
@@ -168,7 +168,7 @@ func TestDeleteLanguageContext_RemovesCacheOnSuccess(t *testing.T) {
 	c := NewController(server.URL, "token")
 	c.jupyterClientMap[session1] = &jupyterKernel{language: lang}
 	c.jupyterClientMap[session2] = &jupyterKernel{language: lang}
-	c.defaultLanguageJupyterSessions[lang] = session2
+	c.defaultLanguageSessions[lang] = session2
 
 	if err := c.DeleteLanguageContext(lang); err != nil {
 		t.Fatalf("DeleteLanguageContext returned error: %v", err)
@@ -180,7 +180,7 @@ func TestDeleteLanguageContext_RemovesCacheOnSuccess(t *testing.T) {
 	if _, ok := c.jupyterClientMap[session2]; ok {
 		t.Fatalf("expected session2 removed from cache")
 	}
-	if _, ok := c.defaultLanguageJupyterSessions[lang]; ok {
+	if _, ok := c.defaultLanguageSessions[lang]; ok {
 		t.Fatalf("expected default entry removed")
 	}
 	if deleteCalls[session1] != 1 || deleteCalls[session2] != 1 {
