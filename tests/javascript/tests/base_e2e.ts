@@ -34,6 +34,7 @@ export function createConnectionConfig(): ConnectionConfig {
     domain: TEST_DOMAIN,
     protocol: TEST_PROTOCOL === "https" ? "https" : "http",
     apiKey: TEST_API_KEY,
+    requestTimeoutSeconds: 180
   });
 }
 

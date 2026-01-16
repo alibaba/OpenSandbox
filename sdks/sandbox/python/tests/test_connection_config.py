@@ -39,7 +39,7 @@ def test_get_base_url_domain_can_include_scheme() -> None:
 
 @pytest.mark.asyncio
 async def test_close_transport_if_owned_default_transport() -> None:
-    cfg = ConnectionConfig()
+    cfg = ConnectionConfig().with_transport_if_missing()
     # default transport should be closable and owned
     await cfg.close_transport_if_owned()
 

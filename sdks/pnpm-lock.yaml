@@ -48,6 +48,9 @@ importers:
       openapi-fetch:
         specifier: ^0.13.8
         version: 0.13.8
+      undici:
+        specifier: ^7.18.2
+        version: 7.18.2
     devDependencies:
       '@eslint/js':
         specifier: ^9.39.2
@@ -592,6 +595,10 @@ packages:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
     hasBin: true
+
+  undici@7.18.2:
+    resolution: {integrity: sha512-y+8YjDFzWdQlSE9N5nzKMT3g4a5UBX1HKowfdXh0uvAnTaqqwqB92Jt4UXBAeKekDs5IaDKyJFR4X1gYVCgXcw==}
+    engines: {node: '>=20.18.1'}
 
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
@@ -1153,6 +1160,8 @@ snapshots:
       - supports-color
 
   typescript@5.9.3: {}
+
+  undici@7.18.2: {}
 
   uri-js@4.4.1:
     dependencies:

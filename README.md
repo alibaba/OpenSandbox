@@ -170,21 +170,21 @@ For more details, please refer to [examples](examples/README.md) and the README 
 
 ## Project Structure
 
-| Directory | Description |
-|-----------|-------------|
-| [`server/`](server/README.md) | Python FastAPI sandbox lifecycle server |
-| [`components/execd/`](components/execd/README.md) | Sandbox execution daemon (commands and file operations) |
-| [`components/ingress/`](components/ingress/README.md) | Sandbox traffic ingress proxy |
-| [`components/egress/`](components/egress/README.md) | Sandbox network egress control |
-| [`sdks/`](sdks/) | Multi-language SDKs (Python, Java/Kotlin) |
-| [`sandboxes/`](sandboxes/) | Sandbox runtime images (e.g., code-interpreter) |
-| [`kubernetes/`](kubernetes/README.md) | Kubernetes operator and batch sandbox support |
-| [`specs/`](specs/README.md) | OpenAPI specifications |
-| [`examples/`](examples/README.md) | Integration examples and use cases |
-| [`oseps/`](oseps/README.md) | OpenSandbox Enhancement Proposals |
-| [`docs/`](docs/) | Architecture and design documentation |
-| [`tests/`](tests/) | Cross-component E2E tests |
-| [`scripts/`](scripts/) | Development and maintenance scripts |
+| Directory | Description                                                      |
+|-----------|------------------------------------------------------------------|
+| [`server/`](server/README.md) | Python FastAPI sandbox lifecycle server                          |
+| [`components/execd/`](components/execd/README.md) | Sandbox execution daemon (commands and file operations)          |
+| [`components/ingress/`](components/ingress/README.md) | Sandbox traffic ingress proxy                                    |
+| [`components/egress/`](components/egress/README.md) | Sandbox network egress control                                   |
+| [`sdks/`](sdks/) | Multi-language SDKs (Python, Java/Kotlin, Typescript/Javascript) |
+| [`sandboxes/`](sandboxes/) | Sandbox runtime images (e.g., code-interpreter)                  |
+| [`kubernetes/`](kubernetes/README.md) | Kubernetes operator and batch sandbox support                    |
+| [`specs/`](specs/README.md) | OpenAPI specifications                                           |
+| [`examples/`](examples/README.md) | Integration examples and use cases                               |
+| [`oseps/`](oseps/README.md) | OpenSandbox Enhancement Proposals                                |
+| [`docs/`](docs/) | Architecture and design documentation                            |
+| [`tests/`](tests/) | Cross-component E2E tests                                        |
+| [`scripts/`](scripts/) | Development and maintenance scripts                              |
 
 For detailed architecture, see [docs/architecture.md](docs/architecture.md).
 

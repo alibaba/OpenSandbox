@@ -169,21 +169,21 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 ## 项目结构
 
-| 目录 | 说明 |
-|------|------|
-| [`server/`](../server/README_zh.md) | Python FastAPI 沙箱生命周期服务 |
-| [`components/execd/`](../components/execd/README_zh.md) | 沙箱执行守护进程，负责命令和文件操作 |
-| [`components/ingress/`](../components/ingress/README.md) | 沙箱流量入口代理 |
-| [`components/egress/`](../components/egress/README.md) | 沙箱网络 Egress 访问控制 |
-| [`sdks/`](../sdks/) | 多语言 SDK（Python、Java/Kotlin） |
-| [`sandboxes/`](../sandboxes/) | 沙箱运行时镜像（如 code-interpreter） |
-| [`kubernetes/`](../kubernetes/README-ZH.md) | Kubernetes Operator 和批量沙箱支持 |
-| [`specs/`](../specs/README_zh.md) | OpenAPI 规范 |
-| [`examples/`](../examples/README.md) | 集成示例和使用案例 |
+| 目录 | 说明                                |
+|------|-----------------------------------|
+| [`server/`](../server/README_zh.md) | Python FastAPI 沙箱生命周期服务           |
+| [`components/execd/`](../components/execd/README_zh.md) | 沙箱执行守护进程，负责命令和文件操作                |
+| [`components/ingress/`](../components/ingress/README.md) | 沙箱流量入口代理                          |
+| [`components/egress/`](../components/egress/README.md) | 沙箱网络 Egress 访问控制                  |
+| [`sdks/`](../sdks/) | 多语言 SDK（Python、Java/Kotlin、Typescript/Javascript）      |
+| [`sandboxes/`](../sandboxes/) | 沙箱运行时镜像（如 code-interpreter）       |
+| [`kubernetes/`](../kubernetes/README-ZH.md) | Kubernetes Operator 和批量沙箱支持       |
+| [`specs/`](../specs/README_zh.md) | OpenAPI 规范                        |
+| [`examples/`](../examples/README.md) | 集成示例和使用案例                         |
 | [`oseps/`](../oseps/README.md) | OpenSandbox Enhancement Proposals |
-| [`docs/`](../docs/) | 架构和设计文档 |
-| [`tests/`](../tests/) | 跨组件端到端测试 |
-| [`scripts/`](../scripts/) | 开发和维护脚本 |
+| [`docs/`](../docs/) | 架构和设计文档                           |
+| [`tests/`](../tests/) | 跨组件端到端测试                          |
+| [`scripts/`](../scripts/) | 开发和维护脚本                           |
 
 详细架构请参阅 [docs/architecture.md](architecture.md)。
 

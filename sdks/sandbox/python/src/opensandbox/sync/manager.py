@@ -89,7 +89,7 @@ class SandboxManagerSync:
         Returns:
             Configured sandbox manager instance
         """
-        config = connection_config or ConnectionConfigSync()
+        config = (connection_config or ConnectionConfigSync()).with_transport_if_missing()
         factory = AdapterFactorySync(config)
         sandbox_service = factory.create_sandbox_service()
         return cls(sandbox_service, config)

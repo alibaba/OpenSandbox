@@ -31,7 +31,8 @@ class ConnectionConfigSync(BaseModel):
     Synchronous connection configuration shared across all sync SDK HTTP clients.
 
     Ownership rules:
-    - If `transport` is not provided, the SDK creates a default HTTPTransport and will close it.
+    - If `transport` is not provided, the SDK creates a default HTTPTransport per
+      Sandbox/Manager instance and will close it.
     - If `transport` is provided, the SDK will NOT close it (user owns it).
     """
 
@@ -56,12 +57,12 @@ class ConnectionConfigSync(BaseModel):
     )
     headers: dict[str, str] = Field(default_factory=dict, description="User defined headers")
 
-    transport: httpx.BaseTransport = Field(
-        default_factory=httpx.HTTPTransport,
+    transport: httpx.BaseTransport | None = Field(
+        default=None,
         description=(
-            "Shared httpx transport instance used by all sync SDK HTTP clients. "
-            "Pass a custom transport (e.g. HTTPTransport with custom limits/proxies) "
-            "to control connection pooling, proxies, retries, etc."
+            "Shared httpx transport instance used by all HTTP clients within a "
+            "Sandbox/Manager instance. Pass a custom transport (e.g. HTTPTransport "
+            "with custom limits/proxies) to control connection pooling, proxies, retries, etc."
         ),
     )
 
@@ -73,9 +74,29 @@ class ConnectionConfigSync(BaseModel):
     def model_post_init(self, __context: object) -> None:
         self._owns_transport = "transport" not in self.model_fields_set
 
+    def with_transport_if_missing(self) -> "ConnectionConfigSync":
+        """
+        Ensure a transport exists for this SDK resource.
+
+        If `transport` is missing, return a copy with a default transport and
+        mark it as SDK-owned. If present, return self unchanged.
+        """
+        if self.transport is not None:
+            return self
+        transport = httpx.HTTPTransport(
+            limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=20,
+                keepalive_expiry=15.0,
+            ),
+        )
+        config = self.model_copy(update={"transport": transport})
+        config._owns_transport = True
+        return config
+
     def close_transport_if_owned(self) -> None:
         """Close the transport only if it was created by default_factory."""
-        if not self._owns_transport:
+        if self.transport is None or not self._owns_transport:
             return
         try:
             self.transport.close()

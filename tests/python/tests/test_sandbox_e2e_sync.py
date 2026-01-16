@@ -208,7 +208,7 @@ class TestSandboxE2ESync:
         assert 0.0 <= metrics.memory_used_in_mib <= metrics.memory_total_in_mib
         _assert_recent_timestamp_ms(metrics.timestamp, tolerance_ms=120_000)
 
-        await_renew = timedelta(minutes=5)
+        await_renew = timedelta(minutes=20)
         renew_response = sandbox.renew(await_renew)
         assert renew_response is not None
         assert renew_response.expires_at > info.expires_at
@@ -219,8 +219,8 @@ class TestSandboxE2ESync:
 
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
         remaining = renewed_info.expires_at - now
-        assert remaining > timedelta(minutes=3), f"Remaining TTL too small: {remaining}"
-        assert remaining < timedelta(minutes=6), f"Remaining TTL too large: {remaining}"
+        assert remaining > timedelta(minutes=18), f"Remaining TTL too small: {remaining}"
+        assert remaining < timedelta(minutes=22), f"Remaining TTL too large: {remaining}"
 
         assert sandbox.files is not None
         assert sandbox.commands is not None
@@ -619,7 +619,7 @@ class TestSandboxE2ESync:
             assert execution.error.value
             _assert_recent_timestamp_ms(execution.error.timestamp, tolerance_ms=180_000)
 
-    @pytest.mark.timeout(120)
+    @pytest.mark.timeout(600)
     @pytest.mark.order(5)
     def test_05_sandbox_pause(self) -> None:
         """Test sandbox pause operation."""

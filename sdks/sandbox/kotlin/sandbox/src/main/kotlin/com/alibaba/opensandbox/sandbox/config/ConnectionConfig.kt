@@ -18,7 +18,6 @@ package com.alibaba.opensandbox.sandbox.config
 
 import okhttp3.ConnectionPool
 import java.time.Duration
-import java.util.concurrent.TimeUnit
 
 /**
  * Sandbox operations connection configuration.
@@ -38,8 +37,8 @@ class ConnectionConfig private constructor(
     val userAgent: String = DEFAULT_USER_AGENT,
     /** User defined headers */
     val headers: Map<String, String> = mutableMapOf(),
-    /** Connection pool */
-    val connectionPool: ConnectionPool,
+    /** Connection pool (optional) */
+    val connectionPool: ConnectionPool?,
     /** Whether the connection pool is managed by the user */
     val connectionPoolManagedByUser: Boolean,
 ) {
@@ -49,7 +48,7 @@ class ConnectionConfig private constructor(
         private const val ENV_API_KEY = "OPEN_SANDBOX_API_KEY"
         private const val ENV_DOMAIN = "OPEN_SANDBOX_DOMAIN"
 
-        private const val DEFAULT_USER_AGENT = "OpenSandbox-Kotlin-SDK/1.0.1"
+        private const val DEFAULT_USER_AGENT = "OpenSandbox-Kotlin-SDK/1.0.2"
         private const val API_VERSION = "v1"
 
         @JvmStatic
@@ -75,7 +74,14 @@ class ConnectionConfig private constructor(
             return if (trimmed.endsWith("/$API_VERSION")) trimmed else "$trimmed/$API_VERSION"
         }
         val trimmed = currentDomain.removeSuffix("/")
-        return if (trimmed.endsWith("/$API_VERSION")) "$protocol://${trimmed.removeSuffix("/$API_VERSION")}/$API_VERSION" else "$protocol://$trimmed/$API_VERSION"
+        return if (trimmed.endsWith(
+                "/$API_VERSION",
+            )
+        ) {
+            "$protocol://${trimmed.removeSuffix("/$API_VERSION")}/$API_VERSION"
+        } else {
+            "$protocol://$trimmed/$API_VERSION"
+        }
     }
 
     /**
@@ -89,9 +95,9 @@ class ConnectionConfig private constructor(
      *   falling back to `localhost:8080`.
      *
      * ### Lifecycle / resource ownership
-     * - If you do **not** provide a custom [ConnectionPool], the SDK creates and owns a default one.
-     *   Calling `Sandbox.close()` / `SandboxManager.close()` will close SDK-owned HTTP clients and
-     *   release the SDK-owned connection pool.
+     * - If you do **not** provide a custom [ConnectionPool], the SDK creates and owns a default one
+     *   per Sandbox/Manager instance. Calling `Sandbox.close()` / `SandboxManager.close()` will
+     *   close SDK-owned HTTP clients and release the SDK-owned connection pool.
      * - If you **do** provide a [ConnectionPool] via [connectionPool], it is treated as user-owned
      *   and will **not** be evicted by the SDK on close.
      *
@@ -112,7 +118,7 @@ class ConnectionConfig private constructor(
 
         private var headers: Map<String, String> = mutableMapOf()
 
-        private var connectionPool: ConnectionPool = ConnectionPool(32, 1, TimeUnit.MINUTES)
+        private var connectionPool: ConnectionPool? = null
 
         private var connectionPoolManagedByUser: Boolean = false
 

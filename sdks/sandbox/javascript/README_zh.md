@@ -165,6 +165,10 @@ console.log(list.items.map((s) => s.id));
 
 `ConnectionConfig` 类管理与 API 服务器的连接设置。
 
+运行环境说明：
+- 浏览器环境下，SDK 使用全局 `fetch`。
+- Node.js 环境下，SDK 会创建独立的内部 `fetch`，并使用隔离的连接池。
+
 | 参数 | 描述 | 默认值 | 环境变量 |
 | --- | --- | --- | --- |
 | `apiKey` | 用于认证的 API Key | 可选 | `OPEN_SANDBOX_API_KEY` |

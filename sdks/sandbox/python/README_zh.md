@@ -244,7 +244,7 @@ async with await SandboxManager.create(connection_config=config) as manager:
 | `request_timeout` | API 请求超时时间                         | 30 秒                    | -                      |
 | `debug`           | 是否开启 HTTP 请求的调试日志             | `False`                  | -                      |
 | `headers`         | 自定义 HTTP 请求头                       | 空                       | -                      |
-| `transport`       | 共享 httpx transport（连接池/代理/重试） | 默认 AsyncHTTPTransport  | -                      |
+| `transport`       | 共享 httpx transport（连接池/代理/重试） | SDK 每实例创建           | -                      |
 
 ```python
 from datetime import timedelta
@@ -258,6 +258,7 @@ config = ConnectionConfig(
 
 # 2. 进阶配置：自定义请求头和 transport
 # 如果你需要创建大量 Sandbox 实例，建议配置共享 transport 以优化资源使用。
+# SDK 默认连接保活时间为 30 秒。
 import httpx
 
 config = ConnectionConfig(
@@ -268,7 +269,7 @@ config = ConnectionConfig(
         limits=httpx.Limits(
             max_connections=100,
             max_keepalive_connections=50,
-            keepalive_expiry=120.0,
+        keepalive_expiry=30.0,
         )
     ),
 )

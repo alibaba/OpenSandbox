@@ -217,7 +217,7 @@ The `ConnectionConfig` class manages API server connection settings.
 | `requestTimeout` | Timeout for API requests                   | 30 seconds                   | -                      |
 | `debug`          | Enable debug logging for HTTP requests     | `false`                      | -                      |
 | `headers`        | Custom HTTP headers                        | Empty                        | -                      |
-| `connectionPool` | Shared OKHttp ConnectionPool               | New Instance                 | -                      |
+| `connectionPool` | Shared OKHttp ConnectionPool               | SDK-created per instance     | -                      |
 
 ```java
 // 1. Basic configuration
@@ -229,7 +229,8 @@ ConnectionConfig config = ConnectionConfig.builder()
 
 // 2. Advanced: Shared Connection Pool
 // If you create many Sandbox instances, sharing a connection pool is recommended to save resources.
-ConnectionPool sharedPool = new ConnectionPool(50, 5, TimeUnit.MINUTES);
+// SDK default keep-alive is 30 seconds for its own pools.
+ConnectionPool sharedPool = new ConnectionPool(50, 30, TimeUnit.SECONDS);
 
 ConnectionConfig sharedConfig = ConnectionConfig.builder()
     .apiKey("your-key")

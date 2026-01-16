@@ -39,7 +39,6 @@ from code_interpreter.models.code import SupportedLanguage
 from opensandbox import Sandbox
 from opensandbox.config import ConnectionConfig
 from opensandbox.constants import DEFAULT_EXECD_PORT
-from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.execd import (
     ExecutionComplete,
     ExecutionError,
@@ -117,7 +116,7 @@ async def managed_ctx(code_interpreter: CodeInterpreter, language: str):
         try:
             if ctx.id:
                 await code_interpreter.codes.delete_context(ctx.id)
-        except Exception as e:
+        except Exception:
             logger.warning(
                 "Cleanup: failed to delete context %s (%s)", ctx.id, language, exc_info=True
             )
@@ -251,7 +250,7 @@ class TestCodeInterpreterE2E:
         )
 
         # Renewal through CodeInterpreter (extend expiration time)
-        renew_response = await code_interpreter.sandbox.renew(timedelta(minutes=5))
+        renew_response = await code_interpreter.sandbox.renew(timedelta(minutes=20))
         assert renew_response is not None
         logger.info("✓ CodeInterpreter expiration renewed to %s", renew_response.expires_at)
 
@@ -259,8 +258,8 @@ class TestCodeInterpreterE2E:
         assert abs((renewed_info.expires_at - renew_response.expires_at).total_seconds()) < 10
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
         remaining = renewed_info.expires_at - now
-        assert remaining > timedelta(minutes=3)
-        assert remaining < timedelta(minutes=7)
+        assert remaining > timedelta(minutes=18)
+        assert remaining < timedelta(minutes=22)
         logger.info("✓ Expiration updated to %s", renewed_info.expires_at)
 
     @pytest.mark.timeout(900)

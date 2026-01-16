@@ -244,7 +244,7 @@ The `ConnectionConfig` class manages API server connection settings.
 | `request_timeout` | Timeout for API requests                   | 30 seconds                   | -                      |
 | `debug`           | Enable debug logging for HTTP requests     | `False`                      | -                      |
 | `headers`         | Custom HTTP headers                        | Empty                        | -                      |
-| `transport`       | Shared httpx transport (pool/proxy/retry)  | Default AsyncHTTPTransport   | -                      |
+| `transport`       | Shared httpx transport (pool/proxy/retry)  | SDK-created per instance     | -                      |
 
 ```python
 from datetime import timedelta
@@ -258,6 +258,7 @@ config = ConnectionConfig(
 
 # 2. Advanced: Custom headers and custom transport
 # If you create many Sandbox instances, configuring a shared transport is recommended to optimize resource usage.
+# SDK default keep-alive is 30 seconds for its own transports.
 import httpx
 
 config = ConnectionConfig(
@@ -268,7 +269,7 @@ config = ConnectionConfig(
         limits=httpx.Limits(
             max_connections=100,
             max_keepalive_connections=50,
-            keepalive_expiry=120.0,
+        keepalive_expiry=30.0,
         )
     ),
 )

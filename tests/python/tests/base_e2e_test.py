@@ -44,14 +44,7 @@ def create_connection_config() -> ConnectionConfig:
     return ConnectionConfig(
         domain=TEST_DOMAIN,
         api_key=TEST_API_KEY,
-        request_timeout=timedelta(minutes=1),
-        transport=httpx.AsyncHTTPTransport(
-            limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
-                keepalive_expiry=30,
-            )
-        ),
+        request_timeout=timedelta(minutes=3),
         protocol=TEST_PROTOCOL,
     )
 
@@ -61,12 +54,12 @@ def create_connection_config_sync() -> ConnectionConfigSync:
     return ConnectionConfigSync(
         domain=TEST_DOMAIN,
         api_key=TEST_API_KEY,
-        request_timeout=timedelta(minutes=1),
+        request_timeout=timedelta(minutes=3),
         transport=httpx.HTTPTransport(
             limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
-                keepalive_expiry=30,
+                max_connections=100,
+                max_keepalive_connections=20,
+                keepalive_expiry=15,
             )
         ),
         protocol=TEST_PROTOCOL,

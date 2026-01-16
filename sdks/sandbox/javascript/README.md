@@ -165,6 +165,10 @@ console.log(list.items.map((s) => s.id));
 
 The `ConnectionConfig` class manages API server connection settings.
 
+Runtime notes:
+- In browsers, the SDK uses the global `fetch` implementation.
+- In Node.js, the SDK creates a dedicated internal `fetch` backed by an isolated connection pool.
+
 | Parameter | Description | Default | Environment Variable |
 | --- | --- | --- | --- |
 | `apiKey` | API key for authentication | Optional | `OPEN_SANDBOX_API_KEY` |

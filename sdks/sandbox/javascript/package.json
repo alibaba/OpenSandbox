@@ -1,6 +1,6 @@
 {
   "name": "@alibaba-group/opensandbox",
-  "version": "0.1.0-dev2",
+  "version": "0.1.0",
   "description": "OpenSandbox TypeScript/JavaScript SDK (sandbox lifecycle + execd APIs)",
   "license": "Apache-2.0",
   "type": "module",
@@ -40,7 +40,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "openapi-fetch": "^0.13.8"
+    "openapi-fetch": "^0.13.8",
+    "undici": "^7.18.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

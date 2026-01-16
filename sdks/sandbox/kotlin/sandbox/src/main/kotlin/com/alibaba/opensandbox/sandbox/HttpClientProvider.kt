@@ -17,6 +17,7 @@
 package com.alibaba.opensandbox.sandbox
 
 import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
+import okhttp3.ConnectionPool
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Response
@@ -32,10 +33,15 @@ class HttpClientProvider(
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(HttpClientProvider::class.java)
 
+    private val connectionPool =
+        config.connectionPool ?: ConnectionPool(32, 15, TimeUnit.SECONDS)
+
+    private val connectionPoolOwnedBySdk: Boolean = config.connectionPool == null
+
     private val baseBuilder: OkHttpClient.Builder
         get() =
             OkHttpClient.Builder()
-                .connectionPool(config.connectionPool)
+                .connectionPool(connectionPool)
                 .addInterceptor(UserAgentInterceptor(config.userAgent))
                 .addInterceptor(ExtraHeadersInterceptor(config.headers))
 
@@ -155,9 +161,9 @@ class HttpClientProvider(
         shutdownClientQuietly(authenticatedClientLazy, "authenticated client")
         shutdownClientQuietly(sseClientLazy, "sse client")
 
-        if (!config.connectionPoolManagedByUser) {
+        if (connectionPoolOwnedBySdk && !config.connectionPoolManagedByUser) {
             try {
-                config.connectionPool.evictAll()
+                connectionPool.evictAll()
             } catch (e: Exception) {
                 logger.warn("Error evicting connection pool", e)
             }

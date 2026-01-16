@@ -112,7 +112,7 @@ class SandboxManager:
         Returns:
             SandboxManager: Configured sandbox manager instance
         """
-        config = connection_config or ConnectionConfig()
+        config = (connection_config or ConnectionConfig()).with_transport_if_missing()
         factory = AdapterFactory(config)
         sandbox_service = factory.create_sandbox_service()
         return cls(sandbox_service, config)

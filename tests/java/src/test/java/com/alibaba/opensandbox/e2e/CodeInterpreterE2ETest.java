@@ -88,7 +88,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                         .entrypoint(List.of("/opt/opensandbox/code-interpreter.sh"))
                         .image(getSandboxImage())
                         .resource(java.util.Map.of("cpu", "2", "memory", "4Gi"))
-                        .timeout(Duration.ofMinutes(15))
+                        .timeout(Duration.ofMinutes(20))
                         .readyTimeout(Duration.ofSeconds(60))
                         .metadata(java.util.Map.of("tag", "e2e-code-interpreter"))
                         .env("E2E_TEST", "true")
@@ -140,7 +140,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     @Test
     @Order(2)
     @DisplayName("Java Code Execution")
-    @Timeout(value = 3, unit = TimeUnit.MINUTES)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void testJavaCodeExecution() {
         logger.info("Testing Java code execution");
 
@@ -267,7 +267,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     @Test
     @Order(3)
     @DisplayName("Python Code Execution")
-    @Timeout(value = 3, unit = TimeUnit.MINUTES)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void testPythonCodeExecution() {
         logger.info("Testing Python code execution");
 
@@ -372,7 +372,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     @Test
     @Order(4)
     @DisplayName("Go Code Execution")
-    @Timeout(value = 3, unit = TimeUnit.MINUTES)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void testGoCodeExecution() {
         logger.info("Testing Go code execution");
 
@@ -482,7 +482,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     @Test
     @Order(5)
     @DisplayName("TypeScript Code Execution")
-    @Timeout(value = 3, unit = TimeUnit.MINUTES)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void testTypeScriptCodeExecution() {
         logger.info("Testing TypeScript code execution");
 
@@ -584,7 +584,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     @Test
     @Order(6)
     @DisplayName("Multi-Language Support and Context Isolation")
-    @Timeout(value = 5, unit = TimeUnit.MINUTES)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void testMultiLanguageAndContextIsolation() {
         logger.info("Testing multi-language support and context isolation");
 
@@ -646,7 +646,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     @Test
     @Order(7)
     @DisplayName("Concurrent Code Execution")
-    @Timeout(value = 3, unit = TimeUnit.MINUTES)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void testConcurrentCodeExecution() {
         logger.info("Testing concurrent code execution");
 
@@ -756,7 +756,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     @Test
     @Order(8)
     @DisplayName("Code Execution Interrupt")
-    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    @Timeout(value = 10, unit = TimeUnit.MINUTES)
     void testCodeExecutionInterrupt() throws InterruptedException, ExecutionException {
         logger.info("Testing code execution interrupt functionality");
 

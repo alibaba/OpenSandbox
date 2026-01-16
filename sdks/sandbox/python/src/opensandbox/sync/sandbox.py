@@ -372,7 +372,7 @@ class SandboxSync:
         Raises:
             SandboxException: if sandbox creation or initialization fails
         """
-        config = connection_config or ConnectionConfigSync()
+        config = (connection_config or ConnectionConfigSync()).with_transport_if_missing()
         entrypoint = entrypoint or ["tail", "-f", "/dev/null"]
         env = env or {}
         metadata = metadata or {}
@@ -468,7 +468,7 @@ class SandboxSync:
         # Accept any string identifier.
         sandbox_id = str(sandbox_id)
 
-        config = connection_config or ConnectionConfigSync()
+        config = (connection_config or ConnectionConfigSync()).with_transport_if_missing()
         logger.info("Connecting to sandbox: %s", sandbox_id)
         factory = AdapterFactorySync(config)
 
@@ -534,7 +534,7 @@ class SandboxSync:
         # Accept any string identifier.
         sandbox_id = str(sandbox_id)
 
-        config = connection_config or ConnectionConfigSync()
+        config = (connection_config or ConnectionConfigSync()).with_transport_if_missing()
 
         logger.info("Resuming sandbox: %s", sandbox_id)
         factory = AdapterFactorySync(config)

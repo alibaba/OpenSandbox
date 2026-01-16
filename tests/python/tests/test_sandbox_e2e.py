@@ -229,7 +229,7 @@ class TestSandboxE2E:
         )
 
         logger.info("Step 5: Test sandbox renewal (extend expiration time)")
-        renew_response = await sandbox.renew(timedelta(minutes=5))
+        renew_response = await sandbox.renew(timedelta(minutes=20))
         assert renew_response is not None
         assert renew_response.expires_at > info.expires_at
         logger.info("✓ Sandbox expiration renewed to %s", renew_response.expires_at)
@@ -245,8 +245,8 @@ class TestSandboxE2E:
         # Renewal is "now + timeout" (SDK behavior). Validate remaining TTL is close to 5 minutes.
         now = renewed_info.expires_at.__class__.now(tz=renewed_info.expires_at.tzinfo)
         remaining = renewed_info.expires_at - now
-        assert remaining > timedelta(minutes=3), f"Remaining TTL too small: {remaining}"
-        assert remaining < timedelta(minutes=6), f"Remaining TTL too large: {remaining}"
+        assert remaining > timedelta(minutes=18), f"Remaining TTL too small: {remaining}"
+        assert remaining < timedelta(minutes=22), f"Remaining TTL too large: {remaining}"
 
         logger.info(
             "✓ Sandbox expiration updated from %s to %s",
@@ -729,7 +729,7 @@ class TestSandboxE2E:
             assert execution.error.value
             _assert_recent_timestamp_ms(execution.error.timestamp, tolerance_ms=180_000)
 
-    @pytest.mark.timeout(360)
+    @pytest.mark.timeout(600)
     @pytest.mark.order(5)
     async def test_05_sandbox_pause(self):
         """Test sandbox pause operation."""

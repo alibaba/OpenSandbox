@@ -218,7 +218,7 @@ sandboxes.getSandboxInfos().forEach(info -> {
 | `requestTimeout` | API 请求超时时间             | 30 秒                    | -                      |
 | `debug`          | 是否开启 HTTP 请求的调试日志 | `false`                  | -                      |
 | `headers`        | 自定义 HTTP 请求头           | 空                       | -                      |
-| `connectionPool` | 共享 OKHttp 连接池           | 新实例                   | -                      |
+| `connectionPool` | 共享 OKHttp 连接池           | SDK 每实例创建            | -                      |
 
 ```java
 // 1. 基础配置
@@ -230,7 +230,8 @@ ConnectionConfig config = ConnectionConfig.builder()
 
 // 2. 进阶配置：共享连接池 (Shared Connection Pool)
 // 如果你需要创建大量 Sandbox 实例，建议共享连接池以节省资源。
-ConnectionPool sharedPool = new ConnectionPool(50, 5, TimeUnit.MINUTES);
+// SDK 默认连接保活时间为 30 秒。
+ConnectionPool sharedPool = new ConnectionPool(50, 30, TimeUnit.SECONDS);
 
 ConnectionConfig sharedConfig = ConnectionConfig.builder()
     .apiKey("your-key")
