@@ -35,24 +35,20 @@ import (
 )
 
 func (c *Controller) createBashSession(_ *CreateContextRequest) (string, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	session := newBashSession(nil)
 	if err := session.start(); err != nil {
 		return "", fmt.Errorf("failed to start bash session: %w", err)
 	}
 
-	c.bashSessionClientMap[session.config.Session] = session
+	c.bashSessionClientMap.Store(session.config.Session, session)
 	log.Info("created bash session %s", session.config.Session)
 	return session.config.Session, nil
 }
 
 func (c *Controller) runBashSession(_ context.Context, request *ExecuteCodeRequest) error {
 	if request.Context == "" {
-		if _, exists := c.defaultLanguageSessions[request.Language]; !exists {
-			err := c.createDefaultBashSession()
-			if err != nil {
+		if c.getDefaultLanguageSession(request.Language) == "" {
+			if err := c.createDefaultBashSession(); err != nil {
 				return err
 			}
 		}
@@ -60,7 +56,7 @@ func (c *Controller) runBashSession(_ context.Context, request *ExecuteCodeReque
 
 	targetSessionID := request.Context
 	if targetSessionID == "" {
-		targetSessionID = c.defaultLanguageSessions[request.Language]
+		targetSessionID = c.getDefaultLanguageSession(request.Language)
 	}
 
 	session := c.getBashSession(targetSessionID)
@@ -77,15 +73,17 @@ func (c *Controller) createDefaultBashSession() error {
 		return err
 	}
 
-	c.defaultLanguageSessions[Bash] = session
+	c.setDefaultLanguageSession(Bash, session)
 	return nil
 }
 
 func (c *Controller) getBashSession(sessionId string) *bashSession {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return c.bashSessionClientMap[sessionId]
+	if v, ok := c.bashSessionClientMap.Load(sessionId); ok {
+		if s, ok := v.(*bashSession); ok {
+			return s
+		}
+	}
+	return nil
 }
 
 func (c *Controller) closeBashSession(sessionId string) error {
@@ -94,25 +92,23 @@ func (c *Controller) closeBashSession(sessionId string) error {
 		return ErrContextNotFound
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	err := session.close()
 	if err != nil {
 		return err
 	}
 
-	delete(c.bashSessionClientMap, sessionId)
+	c.bashSessionClientMap.Delete(sessionId)
 	return nil
 }
 
+// nolint:unused
 func (c *Controller) listBashSessions() []string {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	sessions := make([]string, 0, len(c.bashSessionClientMap))
-	for sessionID := range c.bashSessionClientMap {
+	sessions := make([]string, 0)
+	c.bashSessionClientMap.Range(func(key, _ any) bool {
+		sessionID, _ := key.(string)
 		sessions = append(sessions, sessionID)
-	}
+		return true
+	})
 
 	return sessions
 }

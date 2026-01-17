@@ -121,15 +121,8 @@ func (c *Controller) deleteSessionAndCleanup(session string) error {
 		return err
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	delete(c.jupyterClientMap, session)
-	for lang, id := range c.defaultLanguageSessions {
-		if id == session {
-			delete(c.defaultLanguageSessions, lang)
-		}
-	}
+	c.jupyterClientMap.Delete(session)
+	c.deleteDefaultSessionByID(session)
 	return nil
 }
 
@@ -150,6 +143,10 @@ func (c *Controller) newIpynbPath(sessionID, cwd string) (string, error) {
 
 // createDefaultLanguageJupyterContext prewarms a session for stateless execution.
 func (c *Controller) createDefaultLanguageJupyterContext(language Language) error {
+	if c.getDefaultLanguageSession(language) != "" {
+		return nil
+	}
+
 	var (
 		client  *jupyter.Client
 		session *jupytersession.Session
@@ -169,15 +166,12 @@ func (c *Controller) createDefaultLanguageJupyterContext(language Language) erro
 		return err
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.defaultLanguageSessions[language] = session.ID
-	c.jupyterClientMap[session.ID] = &jupyterKernel{
+	c.setDefaultLanguageSession(language, session.ID)
+	c.jupyterClientMap.Store(session.ID, &jupyterKernel{
 		kernelID: session.Kernel.ID,
 		client:   client,
 		language: language,
-	}
+	})
 	return nil
 }
 
@@ -222,10 +216,7 @@ func (c *Controller) createJupyterContext(request CreateContextRequest) (*jupyte
 
 // storeJupyterKernel caches a session -> kernel mapping.
 func (c *Controller) storeJupyterKernel(sessionID string, kernel *jupyterKernel) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.jupyterClientMap[sessionID] = kernel
+	c.jupyterClientMap.Store(sessionID, kernel)
 }
 
 func (c *Controller) jupyterClient() *jupyter.Client {
@@ -241,49 +232,63 @@ func (c *Controller) jupyterClient() *jupyter.Client {
 		jupyter.WithHTTPClient(httpClient))
 }
 
-func (c *Controller) listAllContexts() ([]CodeContext, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	contexts := make([]CodeContext, 0)
-	for session, kernel := range c.jupyterClientMap {
-		if kernel != nil {
-			contexts = append(contexts, CodeContext{
-				ID:       session,
-				Language: kernel.language,
-			})
+func (c *Controller) getDefaultLanguageSession(language Language) string {
+	if v, ok := c.defaultLanguageSessions.Load(language); ok {
+		if session, ok := v.(string); ok {
+			return session
 		}
 	}
+	return ""
+}
 
-	for language, defaultContext := range c.defaultLanguageSessions {
-		contexts = append(contexts, CodeContext{
-			ID:       defaultContext,
-			Language: language,
-		})
-	}
+func (c *Controller) setDefaultLanguageSession(language Language, sessionID string) {
+	c.defaultLanguageSessions.Store(language, sessionID)
+}
+
+func (c *Controller) deleteDefaultSessionByID(sessionID string) {
+	c.defaultLanguageSessions.Range(func(key, value any) bool {
+		if s, ok := value.(string); ok && s == sessionID {
+			c.defaultLanguageSessions.Delete(key)
+		}
+		return true
+	})
+}
+
+func (c *Controller) listAllContexts() ([]CodeContext, error) {
+	contexts := make([]CodeContext, 0)
+	c.jupyterClientMap.Range(func(key, value any) bool {
+		session, _ := key.(string)
+		if kernel, ok := value.(*jupyterKernel); ok && kernel != nil {
+			contexts = append(contexts, CodeContext{ID: session, Language: kernel.language})
+		}
+		return true
+	})
+
+	c.defaultLanguageSessions.Range(func(key, value any) bool {
+		lang, _ := key.(Language)
+		session, _ := value.(string)
+		if session == "" {
+			return true
+		}
+		contexts = append(contexts, CodeContext{ID: session, Language: lang})
+		return true
+	})
 
 	return contexts, nil
 }
 
 func (c *Controller) listLanguageContexts(language Language) ([]CodeContext, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	contexts := make([]CodeContext, 0)
-	for session, kernel := range c.jupyterClientMap {
-		if kernel != nil && kernel.language == language {
-			contexts = append(contexts, CodeContext{
-				ID:       session,
-				Language: language,
-			})
+	c.jupyterClientMap.Range(func(key, value any) bool {
+		session, _ := key.(string)
+		if kernel, ok := value.(*jupyterKernel); ok && kernel != nil && kernel.language == language {
+			contexts = append(contexts, CodeContext{ID: session, Language: language})
 		}
-	}
+		return true
+	})
 
-	if defaultContext := c.defaultLanguageSessions[language]; defaultContext != "" {
-		contexts = append(contexts, CodeContext{
-			ID:       defaultContext,
-			Language: language,
-		})
+	if defaultContext := c.getDefaultLanguageSession(language); defaultContext != "" {
+		contexts = append(contexts, CodeContext{ID: defaultContext, Language: language})
 	}
 
 	return contexts, nil

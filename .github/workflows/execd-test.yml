@@ -25,7 +25,7 @@ jobs:
       - name: Run golint
         run: |
           cd components/execd
-          # make golint
+          make golint
 
       - name: Build (Multi platform compile)
         run: |

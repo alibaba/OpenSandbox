@@ -38,10 +38,10 @@ type Controller struct {
 	baseURL                 string
 	token                   string
 	mu                      sync.RWMutex
-	jupyterClientMap        map[string]*jupyterKernel
-	defaultLanguageSessions map[Language]string
-	commandClientMap        map[string]*commandKernel
-	bashSessionClientMap    map[string]*bashSession
+	jupyterClientMap        sync.Map // sessionID -> *jupyterKernel
+	defaultLanguageSessions sync.Map // Language -> sessionID
+	commandClientMap        sync.Map // sessionID -> *commandKernel
+	bashSessionClientMap    sync.Map // sessionID -> *bashSession
 	db                      *sql.DB
 	dbOnce                  sync.Once
 }
@@ -72,10 +72,10 @@ func NewController(baseURL, token string) *Controller {
 		baseURL: baseURL,
 		token:   token,
 
-		jupyterClientMap:        make(map[string]*jupyterKernel),
-		defaultLanguageSessions: make(map[Language]string),
-		commandClientMap:        make(map[string]*commandKernel),
-		bashSessionClientMap:    make(map[string]*bashSession),
+		jupyterClientMap:        sync.Map{},
+		defaultLanguageSessions: sync.Map{},
+		commandClientMap:        sync.Map{},
+		bashSessionClientMap:    sync.Map{},
 	}
 }
 

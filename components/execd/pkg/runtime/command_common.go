@@ -45,18 +45,17 @@ func (c *Controller) tailStdPipe(file string, onExecute func(text string), done 
 
 // getCommandKernel retrieves a command execution context.
 func (c *Controller) getCommandKernel(sessionID string) *commandKernel {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return c.commandClientMap[sessionID]
+	if v, ok := c.commandClientMap.Load(sessionID); ok {
+		if kernel, ok := v.(*commandKernel); ok {
+			return kernel
+		}
+	}
+	return nil
 }
 
 // storeCommandKernel registers a command execution context.
 func (c *Controller) storeCommandKernel(sessionID string, kernel *commandKernel) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.commandClientMap[sessionID] = kernel
+	c.commandClientMap.Store(sessionID, kernel)
 }
 
 // stdLogDescriptor creates temporary files for capturing command output.
