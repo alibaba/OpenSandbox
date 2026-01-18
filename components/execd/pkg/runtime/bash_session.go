@@ -215,8 +215,9 @@ func (s *bashSession) run(command string, timeout time.Duration, hooks *ExecuteR
 
 	cleanCmd := strings.ReplaceAll(command, "\n", " ; ")
 
-	// send command + marker
-	cmdText := fmt.Sprintf("%s\nprintf \"%s$?%s\\n\"\n", cleanCmd, exitCodePrefix, exitCodeSuffix)
+	// send command + marker, preserving the user's last exit code
+	// use a subshell at the end to restore $? to the original exit code
+	cmdText := fmt.Sprintf("%s\n__c=$?\nprintf \"%s${__c}%s\\n\"\n(exit ${__c})\n", cleanCmd, exitCodePrefix, exitCodeSuffix)
 	if _, err := fmt.Fprint(s.stdin, cmdText); err != nil {
 		if errors.Is(err, io.ErrClosedPipe) || strings.Contains(err.Error(), "broken pipe") {
 			s.terminated.Store(true)
