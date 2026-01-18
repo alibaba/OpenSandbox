@@ -893,3 +893,95 @@ class TestCodeInterpreterE2ESync:
         assert len(final_contexts) == 0
         logger.info("✓ delete_contexts removed all bash contexts")
 
+    @pytest.mark.timeout(300)
+    @pytest.mark.order(10)
+    def test_10_bash_env_propagation(self):
+        """Ensure bash commands share env/vars across sequential executions."""
+        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
+        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
+        assert code_interpreter is not None
+
+        stdout_messages: list[OutputMessage] = []
+        stderr_messages: list[OutputMessage] = []
+        errors: list[ExecutionError] = []
+        completed_events: list[ExecutionComplete] = []
+        init_events: list[ExecutionInit] = []
+
+        def on_stdout(msg: OutputMessage):
+            stdout_messages.append(msg)
+
+        def on_stderr(msg: OutputMessage):
+            stderr_messages.append(msg)
+
+        def on_error(err: ExecutionError):
+            errors.append(err)
+
+        def on_complete(evt: ExecutionComplete):
+            completed_events.append(evt)
+
+        def on_init(evt: ExecutionInit):
+            init_events.append(evt)
+
+        handlers = ExecutionHandlersSync(
+            on_stdout=on_stdout,
+            on_stderr=on_stderr,
+            on_result=None,
+            on_error=on_error,
+            on_execution_complete=on_complete,
+            on_init=on_init,
+        )
+
+        # Send three sequential commands in the same session, validating env propagation.
+        code1 = (
+            "export FOO=hello\n"
+            "export BAR=world\n"
+        )
+        code2 = (
+            "printf \"step1:$FOO:$BAR\\n\"\n"
+        )
+        code3 = (
+            "export FOO=${FOO}_next\n"
+            "printf \"step2:$FOO:$BAR\\n\"\n"
+            "export BAR=${BAR}_next\n"
+            "printf \"step3:$FOO:$BAR\\n\"\n"
+        )
+
+        # export envs
+        result1 = code_interpreter.codes.run(
+            code1,
+            language=SupportedLanguage.BASH,
+            handlers=handlers,
+        )
+
+        assert result1 is not None
+        assert result1.id is not None and str(result1.id).strip()
+        assert result1.error is None
+
+        # print env
+        result2 = code_interpreter.codes.run(
+            code2,
+            language=SupportedLanguage.BASH,
+            handlers=handlers,
+        )
+
+        assert result2 is not None
+        assert result2.id is not None and str(result2.id).strip()
+        assert result2.error is None
+
+        # print env
+        result3 = code_interpreter.codes.run(
+            code3,
+            language=SupportedLanguage.BASH,
+            handlers=handlers,
+        )
+        assert result3 is not None
+        assert result3.id is not None and str(result3.id).strip()
+        assert result3.error is None
+
+        # Expect at least three stdout lines with propagated env values.
+        stdout_texts = [m.text.strip() for m in stdout_messages if m.text]
+        assert "step1:hello:world" in stdout_texts
+        assert "step2:hello_next:world" in stdout_texts
+        assert "step3:hello_next:world_next" in stdout_texts
+        for m in stdout_messages[:3]:
+            _assert_recent_timestamp_ms(m.timestamp)

@@ -35,6 +35,8 @@ jobs:
           pip install uv
 
       - name: Run tests
+        env:
+          OPENSANDBOX_SANDBOX_DEFAULT_IMAGE: opensandbox/code-interpreter:latest
         run: |
           set -e
 
