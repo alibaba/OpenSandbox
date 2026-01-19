@@ -186,8 +186,20 @@ type AllocStatus struct {
 	PodSupplement int32
 }
 
+// Allocator is responsible for managing pod allocation from Pool to BatchSandboxes.
+// It performs allocation calculations and persists the allocation state.
 type Allocator interface {
-	Schedule(ctx context.Context, spec *AllocSpec) (*AllocStatus, error)
+	// Schedule computes the allocation of pods to BatchSandboxes based on the current pool state.
+	// It returns:
+	//   - AllocStatus: the computed allocation state (pod-to-sandbox mapping and required supplement count)
+	//   - poolDirty: indicates whether the Pool's allocation state has changed and needs persistence
+	//   - error: any error during the scheduling process
+	// This method only performs calculation and does not modify the Pool CR directly.
+	Schedule(ctx context.Context, spec *AllocSpec) (*AllocStatus, bool, error)
+
+	// PersistPoolAllocation persists the allocation status.
+	// This method should be called after Schedule() when poolDirty is true.
+	PersistPoolAllocation(ctx context.Context, pool *sandboxv1alpha1.Pool, status *AllocStatus) error
 }
 
 type defaultAllocator struct {
@@ -202,12 +214,11 @@ func NewDefaultAllocator(client client.Client) Allocator {
 	}
 }
 
-func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec) (*AllocStatus, error) {
+func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec) (*AllocStatus, bool, error) {
 	log := logf.FromContext(ctx)
-	pool := spec.Pool
 	status, err := allocator.initAllocation(ctx, spec)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	availablePods := make([]string, 0)
 	for _, pod := range spec.Pods {
@@ -231,16 +242,13 @@ func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec
 	if err != nil {
 		log.Error(err, "deallocate failed")
 	}
-	if poolDeallocate || poolAllocate {
-		if err := allocator.updateAllocStatus(ctx, status, pool); err != nil {
-			log.Error(err, "update alloc status failed")
-			return nil, err // Do not push the allocation to the sandbox and batch sandbox if allocation persist failed.
-		}
-	}
+
+	poolDirty := poolDeallocate || poolAllocate
+
 	if err := allocator.syncAllocResult(ctx, dirtySandboxes, sandboxAlloc, spec.Sandboxes); err != nil {
 		log.Error(err, "sync alloc result failed")
 	}
-	return status, nil // Do not return the error of sandboxes witch will block pool schedule.
+	return status, poolDirty, nil // Do not return the error of sandboxes witch will block pool schedule.
 }
 
 func (allocator *defaultAllocator) initAllocation(ctx context.Context, spec *AllocSpec) (*AllocStatus, error) {
@@ -393,7 +401,7 @@ func (allocator *defaultAllocator) getPodAllocation(ctx context.Context, pool *s
 	return alloc.PodAllocation, nil
 }
 
-func (allocator *defaultAllocator) updateAllocStatus(ctx context.Context, status *AllocStatus, pool *sandboxv1alpha1.Pool) error {
+func (allocator *defaultAllocator) PersistPoolAllocation(ctx context.Context, pool *sandboxv1alpha1.Pool, status *AllocStatus) error {
 	alloc := &PoolAllocation{}
 	alloc.PodAllocation = status.PodAllocation
 	return allocator.store.SetAllocation(ctx, pool, alloc)
