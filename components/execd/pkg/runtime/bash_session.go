@@ -123,7 +123,7 @@ func newBashSession(config *bashSessionConfig) *bashSession {
 	}
 	return &bashSession{
 		config:      config,
-		stdoutLines: make(chan string, 256),
+		stdoutLines: make(chan string, 1024),
 		stdoutErr:   make(chan error, 1),
 	}
 }
@@ -147,10 +147,9 @@ func (s *bashSession) start() error {
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("stderr pipe: %w", err)
-	}
+
+	// merge stderr into stdout
+	cmd.Stderr = cmd.Stdout
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start bash: %w", err)
@@ -159,12 +158,10 @@ func (s *bashSession) start() error {
 	s.cmd = cmd
 	s.stdin = stdin
 	s.stdout = stdout
-	s.stderr = stderr
 	s.started = true
 
 	// drain stdout/stderr into channel
 	go s.readStdout(stdout)
-	go s.discardStderr(stderr)
 	return nil
 }
 
@@ -187,10 +184,6 @@ func (s *bashSession) readStdout(r io.Reader) {
 	}
 }
 
-func (s *bashSession) discardStderr(r io.Reader) {
-	_, _ = io.Copy(io.Discard, r)
-}
-
 func (s *bashSession) run(command string, timeout time.Duration, hooks *ExecuteResultHook) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -210,7 +203,7 @@ func (s *bashSession) run(command string, timeout time.Duration, hooks *ExecuteR
 
 	wait := timeout
 	if wait <= 0 {
-		wait = 3600 * time.Second
+		wait = 24 * 3600 * time.Second // default to 24 hours
 	}
 
 	cleanCmd := strings.ReplaceAll(command, "\n", " ; ")

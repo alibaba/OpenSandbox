@@ -108,7 +108,6 @@ type bashSession struct {
 	cmd         *exec.Cmd
 	stdin       io.WriteCloser
 	stdout      io.ReadCloser
-	stderr      io.ReadCloser
 	stdoutLines chan string
 	stdoutErr   chan error
 	mu          sync.Mutex
