@@ -82,7 +82,6 @@ jobs:
 
       - name: Run tests
         env:
-          TAG: latest
           GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-user-home
         run: |
           set -e
@@ -136,8 +135,6 @@ jobs:
         run: pip install uv
 
       - name: Run tests
-        env:
-          TAG: latest
         run: |
           set -e
 

@@ -345,11 +345,16 @@ class DockerSandboxService(SandboxService):
 
             container = None
             try:
-                with self._docker_operation(
-                    f"pull execd image {self.execd_image}",
-                    "execd-cache",
-                ):
-                    self.docker_client.images.pull(self.execd_image)
+                try:
+                    # Prefer a locally built image (e.g., opensandbox/execd:local); pull only if missing.
+                    self.docker_client.images.get(self.execd_image)
+                    logger.info("Found execd image %s locally; skipping pull", self.execd_image)
+                except ImageNotFound:
+                    with self._docker_operation(
+                        f"pull execd image {self.execd_image}",
+                        "execd-cache",
+                    ):
+                        self.docker_client.images.pull(self.execd_image)
 
                 with self._docker_operation("execd cache create container", "execd-cache"):
                     container = self.docker_client.containers.create(
