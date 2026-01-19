@@ -1,6 +1,6 @@
 {
   "name": "@alibaba-group/opensandbox-code-interpreter",
-  "version": "0.1.0",
+  "version": "0.1.0-dev4",
   "description": "OpenSandbox Code Interpreter TypeScript/JavaScript SDK",
   "license": "Apache-2.0",
   "type": "module",
