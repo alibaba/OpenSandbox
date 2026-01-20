@@ -1,6 +1,6 @@
 {
   "name": "@alibaba-group/opensandbox-code-interpreter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenSandbox Code Interpreter TypeScript/JavaScript SDK",
   "license": "Apache-2.0",
   "type": "module",
@@ -23,7 +23,8 @@
   },
   "homepage": "https://github.com/alibaba/OpenSandbox",
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
   "engines": {
     "node": ">=20"

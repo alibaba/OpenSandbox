@@ -7,6 +7,7 @@
 
     "declaration": true,
     "declarationMap": true,
+    "sourceMap": true,
     "removeComments": false,
 
     "strict": true,
