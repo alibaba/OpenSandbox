@@ -15,7 +15,6 @@
 package strategy
 
 import (
-	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/api/v1alpha1"
 	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
 
@@ -24,8 +23,8 @@ import (
 // task scheduling is needed and how to generate task specifications.
 type TaskSchedulingStrategy interface {
 	// NeedTaskScheduling determines whether the BatchSandbox requires task scheduling.
-	NeedTaskScheduling(batchSbx *sandboxv1alpha1.BatchSandbox) bool
+	NeedTaskScheduling() bool
 
 	// GenerateTaskSpecs generates the complete list of task specifications for the BatchSandbox.
-	GenerateTaskSpecs(batchSbx *sandboxv1alpha1.BatchSandbox) ([]*api.Task, error)
+	GenerateTaskSpecs() ([]*api.Task, error)
 }

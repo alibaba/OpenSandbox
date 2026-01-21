@@ -122,7 +122,7 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// handle finalizers
 	if batchSbx.DeletionTimestamp == nil {
-		if taskStrategy.NeedTaskScheduling(batchSbx) {
+		if taskStrategy.NeedTaskScheduling() {
 			if !controllerutil.ContainsFinalizer(batchSbx, FinalizerTaskCleanup) {
 				err := utils.UpdateFinalizer(r.Client, batchSbx, utils.AddFinalizerOpType, FinalizerTaskCleanup)
 				if err != nil {
@@ -134,16 +134,16 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			}
 		}
 	} else {
-		if !taskStrategy.NeedTaskScheduling(batchSbx) {
+		if !taskStrategy.NeedTaskScheduling() {
 			return ctrl.Result{}, nil
 		}
 	}
 
-	pods, err := r.listPods(ctx, batchSbx)
+	pods, err := r.listPods(ctx, poolStrategy, batchSbx)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to list pods %w", err)
 	}
-	podIndex, err := calPodIndex(batchSbx, pods)
+	podIndex, err := calPodIndex(poolStrategy, batchSbx, pods)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to cal pod index %w", err)
 	}
@@ -152,7 +152,7 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		utils.PodNameSorter,
 	}).Sort)
 	// Normal Mode need scale Pods
-	if !poolStrategy.IsPooledMode(batchSbx) {
+	if !poolStrategy.IsPooledMode() {
 		err := r.scaleBatchSandbox(ctx, batchSbx, batchSbx.Spec.Template, pods)
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to scale batch sandbox %w", err)
@@ -198,7 +198,7 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	}
 
-	if taskStrategy.NeedTaskScheduling(batchSbx) {
+	if taskStrategy.NeedTaskScheduling() {
 		// Because tasks are in-memory and there is no event mechanism, periodic reconciliation is required.
 		DurationStore.Push(types.NamespacedName{Namespace: batchSbx.Namespace, Name: batchSbx.Name}.String(), 3*time.Second)
 		sch, err := r.getTaskScheduler(batchSbx, pods)
@@ -246,9 +246,9 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	return reconcile.Result{RequeueAfter: DurationStore.Pop(req.String())}, gerrors.Join(aggErrors...)
 }
 
-func calPodIndex(batchSbx *sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (map[string]int, error) {
+func calPodIndex(poolStrategy strategy.PoolStrategy, batchSbx *sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (map[string]int, error) {
 	podIndex := map[string]int{}
-	if batchSbx.Spec.PoolRef != "" {
+	if poolStrategy.IsPooledMode() {
 		// cal index from pool alloc result while using pooling
 		alloc, err := parseSandboxAllocation(batchSbx)
 		if err != nil {
@@ -270,9 +270,9 @@ func calPodIndex(batchSbx *sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (ma
 	return podIndex, nil
 }
 
-func (r *BatchSandboxReconciler) listPods(ctx context.Context, batchSbx *sandboxv1alpha1.BatchSandbox) ([]*corev1.Pod, error) {
+func (r *BatchSandboxReconciler) listPods(ctx context.Context, poolStrategy strategy.PoolStrategy, batchSbx *sandboxv1alpha1.BatchSandbox) ([]*corev1.Pod, error) {
 	var ret []*corev1.Pod
-	if batchSbx.Spec.PoolRef != "" {
+	if poolStrategy.IsPooledMode() {
 		var (
 			allocSet    = make(sets.Set[string])
 			releasedSet = make(sets.Set[string])
@@ -327,7 +327,7 @@ func (r *BatchSandboxReconciler) getTaskScheduler(batchSbx *sandboxv1alpha1.Batc
 			policy = *batchSbx.Spec.TaskResourcePolicyWhenCompleted
 		}
 		taskStrategy := strategy.NewTaskSchedulingStrategy(batchSbx)
-		taskSpecs, err := taskStrategy.GenerateTaskSpecs(batchSbx)
+		taskSpecs, err := taskStrategy.GenerateTaskSpecs()
 		if err != nil {
 			return nil, err
 		}

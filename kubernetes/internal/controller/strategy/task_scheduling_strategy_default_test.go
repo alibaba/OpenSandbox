@@ -26,7 +26,6 @@ import (
 )
 
 func TestDefaultTaskSchedulingStrategy_NeedTaskScheduling(t *testing.T) {
-	strategy := NewDefaultTaskSchedulingStrategy()
 	tests := []struct {
 		name     string
 		batchSbx *sandboxv1alpha1.BatchSandbox
@@ -53,7 +52,8 @@ func TestDefaultTaskSchedulingStrategy_NeedTaskScheduling(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := strategy.NeedTaskScheduling(tt.batchSbx); got != tt.want {
+			strategy := NewDefaultTaskSchedulingStrategy(tt.batchSbx)
+			if got := strategy.NeedTaskScheduling(); got != tt.want {
 				t.Errorf("DefaultTaskSchedulingStrategy.NeedTaskScheduling() = %v, want %v", got, tt.want)
 			}
 		})
@@ -61,7 +61,6 @@ func TestDefaultTaskSchedulingStrategy_NeedTaskScheduling(t *testing.T) {
 }
 
 func TestDefaultTaskSchedulingStrategy_getTaskSpec(t *testing.T) {
-	strategy := NewDefaultTaskSchedulingStrategy()
 	type args struct {
 		batchSbx *sandboxv1alpha1.BatchSandbox
 		idx      int
@@ -197,7 +196,8 @@ func TestDefaultTaskSchedulingStrategy_getTaskSpec(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := strategy.getTaskSpec(tt.args.batchSbx, tt.args.idx)
+			strategy := NewDefaultTaskSchedulingStrategy(tt.args.batchSbx)
+			got, err := strategy.getTaskSpec(tt.args.idx)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("DefaultTaskSchedulingStrategy.getTaskSpec() error = %v, wantErr %v", err, tt.wantErr)
 				return

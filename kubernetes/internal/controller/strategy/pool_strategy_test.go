@@ -25,7 +25,6 @@ import (
 )
 
 func TestDefaultPoolStrategy_IsPooledMode(t *testing.T) {
-	strategy := NewDefaultPoolStrategy()
 	tests := []struct {
 		name     string
 		batchSbx *sandboxv1alpha1.BatchSandbox
@@ -62,7 +61,8 @@ func TestDefaultPoolStrategy_IsPooledMode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := strategy.IsPooledMode(tt.batchSbx); got != tt.want {
+			strategy := NewDefaultPoolStrategy(tt.batchSbx)
+			if got := strategy.IsPooledMode(); got != tt.want {
 				t.Errorf("DefaultPoolStrategy.IsPooledMode() = %v, want %v", got, tt.want)
 			}
 		})

@@ -14,10 +14,6 @@
 
 package strategy
 
-import (
-	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/api/v1alpha1"
-)
-
 type PoolStrategy interface {
-	IsPooledMode(batchSbx *sandboxv1alpha1.BatchSandbox) bool
+	IsPooledMode() bool
 }

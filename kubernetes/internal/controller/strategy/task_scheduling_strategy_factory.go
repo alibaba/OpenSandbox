@@ -21,5 +21,5 @@ import (
 // NewTaskSchedulingStrategy creates a task scheduling strategy based on BatchSandbox properties.
 // This function is designed to be easily customizable for different implementations:
 func NewTaskSchedulingStrategy(batchSbx *sandboxv1alpha1.BatchSandbox) TaskSchedulingStrategy {
-	return NewDefaultTaskSchedulingStrategy()
+	return NewDefaultTaskSchedulingStrategy(batchSbx)
 }

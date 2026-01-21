@@ -18,12 +18,16 @@ import (
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/api/v1alpha1"
 )
 
-type DefaultPoolStrategy struct{}
-
-func NewDefaultPoolStrategy() *DefaultPoolStrategy {
-	return &DefaultPoolStrategy{}
+type DefaultPoolStrategy struct {
+	*sandboxv1alpha1.BatchSandbox
 }
 
-func (s *DefaultPoolStrategy) IsPooledMode(batchSbx *sandboxv1alpha1.BatchSandbox) bool {
-	return batchSbx.Spec.PoolRef != ""
+func NewDefaultPoolStrategy(batchSandbox *sandboxv1alpha1.BatchSandbox) *DefaultPoolStrategy {
+	return &DefaultPoolStrategy{
+		BatchSandbox: batchSandbox,
+	}
+}
+
+func (s *DefaultPoolStrategy) IsPooledMode() bool {
+	return s.Spec.PoolRef != ""
 }

@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/api/v1alpha1"
+	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/strategy"
 	taskscheduler "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/scheduler"
 	mock_scheduler "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/scheduler/mock"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/fieldindex"
@@ -156,7 +157,7 @@ var _ = Describe("BatchSandbox Controller", func() {
 					json.Unmarshal([]byte(raw), &gotIPs)
 				}
 
-				podIndex, err := calPodIndex(bs, pods)
+				podIndex, err := calPodIndex(strategy.NewPoolStrategy(bs), bs, pods)
 				g.Expect(err).NotTo(HaveOccurred())
 				expectedIPs := make([]string, len(pods))
 				for _, pod := range pods {
@@ -972,7 +973,8 @@ func Test_calPodIndex(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := calPodIndex(tt.args.batchSbx, tt.args.pods)
+			poolStrategy := strategy.NewPoolStrategy(tt.args.batchSbx)
+			got, err := calPodIndex(poolStrategy, tt.args.batchSbx, tt.args.pods)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("calPodIndex() error = %v, wantErr %v", err, tt.wantErr)
 				return
