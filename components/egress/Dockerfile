@@ -32,6 +32,7 @@ RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         iptables \
         ca-certificates \
+        sudo \
         curl \
         wget \
         net-tools \
