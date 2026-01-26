@@ -16,10 +16,13 @@ package log
 
 import (
 	"fmt"
+	"os"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+const logFileEnvKey = "EXECD_LOG_FILE"
 
 var (
 	atomicLevel = zap.NewAtomicLevelAt(zap.InfoLevel)
@@ -30,6 +33,17 @@ var (
 func init() {
 	cfg := zap.NewProductionConfig()
 	cfg.Level = atomicLevel
+
+	logFile := os.Getenv(logFileEnvKey)
+	if logFile != "" {
+		cfg.OutputPaths = []string{logFile}
+		cfg.ErrorOutputPaths = []string{logFile}
+	} else {
+		// outputs log to stdout pipe by default
+		cfg.OutputPaths = []string{"stdout"}
+		cfg.ErrorOutputPaths = []string{"stdout"}
+	}
+
 	logger, err := cfg.Build()
 	if err != nil {
 		panic(fmt.Sprintf("failed to init logger: %v", err))

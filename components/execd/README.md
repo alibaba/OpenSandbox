@@ -250,6 +250,8 @@ logs.Error("message")   // error
 logs.Debug("message")   // debug
 ```
 
+- Env: `EXECD_LOG_FILE` writes execd logs to the given file path; when unset, logs are sent to stdout.
+
 Log levels (0-7):
 
 - 0: Emergency
