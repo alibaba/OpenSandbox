@@ -46,7 +46,6 @@ class TestAgentSandboxProvider:
         """
         provider = AgentSandboxProvider(
             mock_k8s_client,
-            execd_mode="init",
             shutdown_policy="Delete",
             service_account="agent-sa",
         )
@@ -83,58 +82,6 @@ class TestAgentSandboxProvider:
         assert "initContainers" in body["spec"]["podTemplate"]["spec"]
         assert "containers" in body["spec"]["podTemplate"]["spec"]
         assert "volumes" in body["spec"]["podTemplate"]["spec"]
-
-    def test_create_workload_embedded_mode_omits_init_and_volumes(self, mock_k8s_client):
-        """
-        Test case: Verify embedded mode skips init container and volumes
-        """
-        provider = AgentSandboxProvider(
-            mock_k8s_client,
-            execd_mode="embedded",
-        )
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
-            "metadata": {"name": "sandbox-test-id", "uid": "test-uid"}
-        }
-
-        provider.create_workload(
-            sandbox_id="test-id",
-            namespace="test-ns",
-            image_spec=ImageSpec(uri="python:3.11"),
-            entrypoint=["/bin/bash"],
-            env={},
-            resource_limits={},
-            labels={},
-            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
-            execd_image="execd:latest",
-        )
-
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
-        pod_spec = body["spec"]["podTemplate"]["spec"]
-
-        assert "initContainers" not in pod_spec
-        assert "volumes" not in pod_spec
-        container = pod_spec["containers"][0]
-        assert "volumeMounts" not in container
-
-    def test_create_workload_invalid_execd_mode_raises(self, mock_k8s_client):
-        """
-        Test case: Verify invalid execd mode raises ValueError
-        """
-        provider = AgentSandboxProvider(mock_k8s_client, execd_mode="invalid")
-
-        with pytest.raises(ValueError, match="Unsupported execd_mode"):
-            provider.create_workload(
-                sandbox_id="test-id",
-                namespace="test-ns",
-                image_spec=ImageSpec(uri="python:3.11"),
-                entrypoint=["/bin/bash"],
-                env={},
-                resource_limits={},
-                labels={},
-                expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
-                execd_image="execd:latest",
-            )
 
     def test_get_workload_returns_none_on_404(self, mock_k8s_client):
         """

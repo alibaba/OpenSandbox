@@ -313,7 +313,7 @@ curl -X DELETE http://localhost:8080/v1/sandboxes/<sandbox-id>
 
 | 键 | 类型 | 必需 | 描述 |
 |----|------|------|------|
-| `runtime.type` | string | 是 | 运行时实现（`"docker"`、`"kubernetes"` 或 `"agent-sandbox"`）|
+| `runtime.type` | string | 是 | 运行时实现（`"docker"` 或 `"kubernetes"`）|
 | `runtime.execd_image` | string | 是 | 包含 execd 二进制文件的容器镜像 |
 
 ### Docker 配置
@@ -326,8 +326,7 @@ curl -X DELETE http://localhost:8080/v1/sandboxes/<sandbox-id>
 
 | 键 | 类型 | 默认值 | 描述 |
 |----|------|--------|------|
-| `agent_sandbox.template_file` | string | `null` | agent-sandbox 的 Sandbox CR YAML 模板路径 |
-| `agent_sandbox.execd_mode` | string | `"init"` | execd 注入模式（`"init"` 或 `"embedded"`） |
+| `agent_sandbox.template_file` | string | `null` | agent-sandbox 的 Sandbox CR YAML 模板路径（仅在 `kubernetes.workload_provider = "agent-sandbox"` 时使用） |
 | `agent_sandbox.shutdown_policy` | string | `"Delete"` | 过期时的关停策略（`"Delete"` 或 `"Retain"`） |
 | `agent_sandbox.ingress_enabled` | boolean | `true` | 是否启用 ingress 路由 |
 

@@ -1,0 +1,11 @@
+[runtime]
+type = "kubernetes"
+execd_image = "opensandbox/execd:latest"
+
+[kubernetes]
+namespace = "default"
+kubeconfig_path = "/Users/jinwenxiang/.kube/config"
+workload_provider = "agent-sandbox"
+
+[agent_sandbox]
+shutdown_policy = "Delete"

@@ -311,7 +311,7 @@ curl -X DELETE \
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `runtime.type` | string | Yes | Runtime implementation (`"docker"`, `"kubernetes"`, or `"agent-sandbox"`) |
+| `runtime.type` | string | Yes | Runtime implementation (`"docker"` or `"kubernetes"`) |
 | `runtime.execd_image` | string | Yes | Container image with execd binary |
 
 ### Docker configuration
@@ -324,8 +324,7 @@ curl -X DELETE \
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `agent_sandbox.template_file` | string | `null` | Sandbox CR YAML template for agent-sandbox |
-| `agent_sandbox.execd_mode` | string | `"init"` | Execd injection mode (`"init"` or `"embedded"`) |
+| `agent_sandbox.template_file` | string | `null` | Sandbox CR YAML template for agent-sandbox (used when `kubernetes.workload_provider = "agent-sandbox"`) |
 | `agent_sandbox.shutdown_policy` | string | `"Delete"` | Shutdown policy on expiry (`"Delete"` or `"Retain"`) |
 | `agent_sandbox.ingress_enabled` | boolean | `true` | Whether ingress routing is expected to be enabled |
 

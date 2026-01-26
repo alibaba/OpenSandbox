@@ -6,7 +6,7 @@ executes `echo hello world` via the OpenSandbox Python SDK.
 ## Prerequisites
 
 - A Kubernetes cluster with the agent-sandbox controller and CRDs installed.
-- OpenSandbox server configured with `runtime.type = "agent-sandbox"`.
+- OpenSandbox server configured with Kubernetes runtime and `workload_provider = "agent-sandbox"`.
 - Sandbox image should include `bash` (default example uses `ubuntu:22.04`).
 
 ## Start OpenSandbox server
@@ -22,15 +22,15 @@ cp example.config.toml ~/.sandbox.toml
 
 ```toml
 [runtime]
-type = "agent-sandbox"
+type = "kubernetes"
 execd_image = "opensandbox/execd:latest"
 
 [kubernetes]
 namespace = "default"
 # kubeconfig_path = "/absolute/path/to/kubeconfig"  # optional if running in-cluster
+workload_provider = "agent-sandbox"
 
 [agent_sandbox]
-execd_mode = "init"
 shutdown_policy = "Delete"
 ```
 

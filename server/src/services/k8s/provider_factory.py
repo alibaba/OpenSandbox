@@ -19,7 +19,7 @@ Factory for creating WorkloadProvider instances.
 import logging
 from typing import Dict, Type, Optional
 
-from src.config import KubernetesRuntimeConfig
+from src.config import KubernetesRuntimeConfig, AgentSandboxRuntimeConfig
 from src.services.k8s.workload_provider import WorkloadProvider
 from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from src.services.k8s.agent_sandbox_provider import AgentSandboxProvider
@@ -44,6 +44,7 @@ def create_workload_provider(
     provider_type: str | None,
     k8s_client: K8sClient,
     k8s_config: Optional[KubernetesRuntimeConfig] = None,
+    agent_sandbox_config: Optional[AgentSandboxRuntimeConfig] = None,
 ) -> WorkloadProvider:
     """
     Create a WorkloadProvider instance based on the provider type.
@@ -53,6 +54,7 @@ def create_workload_provider(
                       If None, uses the first registered provider.
         k8s_client: Kubernetes client instance
         k8s_config: Optional Kubernetes runtime configuration (for template file paths, etc.)
+        agent_sandbox_config: Optional agent-sandbox configuration (for template/shutdown policy)
         
     Returns:
         WorkloadProvider instance
@@ -88,6 +90,16 @@ def create_workload_provider(
         if template_file:
             logger.info(f"Using BatchSandbox template file: {template_file}")
         return provider_class(k8s_client, template_file_path=template_file)
+
+    # Special handling for AgentSandboxProvider - pass agent-specific settings
+    if provider_type_lower == PROVIDER_TYPE_AGENT_SANDBOX:
+        agent_config = agent_sandbox_config or AgentSandboxRuntimeConfig()
+        return provider_class(
+            k8s_client,
+            template_file_path=agent_config.template_file,
+            shutdown_policy=agent_config.shutdown_policy,
+            service_account=k8s_config.service_account if k8s_config else None,
+        )
     
     return provider_class(k8s_client)
 

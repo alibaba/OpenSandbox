@@ -107,6 +107,7 @@ class KubernetesSandboxService(SandboxService):
                 provider_type=provider_type,
                 k8s_client=self.k8s_client,
                 k8s_config=self.app_config.kubernetes,
+                agent_sandbox_config=self.app_config.agent_sandbox,
             )
             logger.info(
                 f"Initialized workload provider: {self.workload_provider.__class__.__name__}"
@@ -687,7 +688,7 @@ class KubernetesSandboxService(SandboxService):
         
         if isinstance(workload, dict):
             # For CRD, extract from template
-            template = spec.get("template", {})
+            template = spec.get("template") or spec.get("podTemplate") or {}
             pod_spec = template.get("spec", {})
             containers = pod_spec.get("containers", [])
             if containers:

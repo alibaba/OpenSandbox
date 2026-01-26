@@ -46,7 +46,6 @@ class AgentSandboxProvider(WorkloadProvider):
         self,
         k8s_client: K8sClient,
         template_file_path: Optional[str] = None,
-        execd_mode: str = "init",
         shutdown_policy: str = "Delete",
         service_account: Optional[str] = None,
     ):
@@ -58,7 +57,6 @@ class AgentSandboxProvider(WorkloadProvider):
         self.version = "v1alpha1"
         self.plural = "sandboxes"
 
-        self.execd_mode = execd_mode
         self.shutdown_policy = shutdown_policy
         self.service_account = service_account
         self.template_manager = AgentSandboxTemplateManager(template_file_path)
@@ -133,39 +131,24 @@ class AgentSandboxProvider(WorkloadProvider):
         resource_limits: Dict[str, str],
         execd_image: str,
     ) -> Dict[str, Any]:
-        if self.execd_mode == "init":
-            init_container = self._build_execd_init_container(execd_image)
-            main_container = self._build_main_container(
-                image_spec=image_spec,
-                entrypoint=entrypoint,
-                env=env,
-                resource_limits=resource_limits,
-                include_execd_volume=True,
-            )
-            return {
-                "initContainers": [self._container_to_dict(init_container)],
-                "containers": [self._container_to_dict(main_container)],
-                "volumes": [
-                    {
-                        "name": "opensandbox-bin",
-                        "emptyDir": {},
-                    }
-                ],
-            }
-
-        if self.execd_mode == "embedded":
-            main_container = self._build_main_container(
-                image_spec=image_spec,
-                entrypoint=entrypoint,
-                env=env,
-                resource_limits=resource_limits,
-                include_execd_volume=False,
-            )
-            return {
-                "containers": [self._container_to_dict(main_container)],
-            }
-
-        raise ValueError(f"Unsupported execd_mode '{self.execd_mode}' for agent-sandbox")
+        init_container = self._build_execd_init_container(execd_image)
+        main_container = self._build_main_container(
+            image_spec=image_spec,
+            entrypoint=entrypoint,
+            env=env,
+            resource_limits=resource_limits,
+            include_execd_volume=True,
+        )
+        return {
+            "initContainers": [self._container_to_dict(init_container)],
+            "containers": [self._container_to_dict(main_container)],
+            "volumes": [
+                {
+                    "name": "opensandbox-bin",
+                    "emptyDir": {},
+                }
+            ],
+        }
 
     def _build_execd_init_container(self, execd_image: str) -> V1Container:
         script = (

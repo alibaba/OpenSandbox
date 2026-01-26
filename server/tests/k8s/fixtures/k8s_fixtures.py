@@ -217,7 +217,7 @@ def k8s_app_config(k8s_runtime_config):
 
 @pytest.fixture
 def agent_sandbox_app_config(agent_sandbox_runtime_config):
-    """Provide complete app configuration (agent-sandbox type)"""
+    """Provide complete app configuration (kubernetes + agent-sandbox provider)"""
     from src.config import AppConfig, RuntimeConfig, ServerConfig, AgentSandboxRuntimeConfig
 
     return AppConfig(
@@ -228,13 +228,12 @@ def agent_sandbox_app_config(agent_sandbox_runtime_config):
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
-            type="agent-sandbox",
+            type="kubernetes",
             execd_image="ghcr.io/opensandbox/execd:test",
         ),
         kubernetes=agent_sandbox_runtime_config,
         agent_sandbox=AgentSandboxRuntimeConfig(
             template_file=None,
-            execd_mode="init",
             shutdown_policy="Delete",
             ingress_enabled=True,
         ),
