@@ -77,7 +77,7 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
 
    [runtime]
    type = "docker"
-   execd_image = "opensandbox/execd:latest"
+   execd_image = "opensandbox/execd:v1.0.3"
 
    [docker]
    network_mode = "host"  # Containers share host network; only one sandbox instance at a time
@@ -93,7 +93,7 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
 
    [runtime]
    type = "docker"
-   execd_image = "opensandbox/execd:latest"
+   execd_image = "opensandbox/execd:v1.0.3"
 
    [docker]
    network_mode = "bridge"  # Isolated container networking

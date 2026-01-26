@@ -49,7 +49,7 @@ const config = new ConnectionConfig({
 // 2. 创建 Sandbox（必须使用 code-interpreter 镜像），并指定语言版本
 const sandbox = await Sandbox.create({
   connectionConfig: config,
-  image: "opensandbox/code-interpreter:latest",
+  image: "opensandbox/code-interpreter:v1.0.1",
   entrypoint: ["/opt/opensandbox/code-interpreter.sh"],
   env: {
     PYTHON_VERSION: "3.11",
@@ -99,7 +99,7 @@ Code Interpreter SDK 依赖于特定的运行环境。请确保你的沙箱服�
 ```ts
 const sandbox = await Sandbox.create({
   connectionConfig: config,
-  image: "opensandbox/code-interpreter:latest",
+  image: "opensandbox/code-interpreter:v1.0.1",
   entrypoint: ["/opt/opensandbox/code-interpreter.sh"],
   env: {
     JAVA_VERSION: "17",

@@ -81,7 +81,7 @@ api_key = "your-secret-api-key-change-this"
 
 [runtime]
 type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:latest"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.3"
 
 [docker]
 network_mode = "host"  # 容器共享宿主机网络，只能创建一个sandbox实例
@@ -97,7 +97,7 @@ api_key = "your-secret-api-key-change-this"
 
 [runtime]
 type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:latest"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.3"
 
 [docker]
 network_mode = "bridge"  # 容器隔离网络

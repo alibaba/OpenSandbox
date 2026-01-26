@@ -59,7 +59,7 @@ This guide provides comprehensive information for developers working on OpenSand
 
    [runtime]
    type = "docker"
-   execd_image = "opensandbox/execd:latest"
+   execd_image = "opensandbox/execd:v1.0.3"
 
    [docker]
    network_mode = "host"

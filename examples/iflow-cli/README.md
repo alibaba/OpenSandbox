@@ -7,10 +7,10 @@ Call OpenAI-compatible iFlow/custom HTTP endpoints via the `iflow-cli` npm packa
 Pre-pull the code-interpreter image (includes Node.js):
 
 ```shell
-docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest
+docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.1
 
 # use docker hub
-# docker pull opensandbox/code-interpreter:latest
+# docker pull opensandbox/code-interpreter:v1.0.1
 ```
 
 Start the local OpenSandbox server, logs will be visible in the terminal:
@@ -41,7 +41,7 @@ The script installs the iFlow CLI (`npm install -g @iflow-ai/iflow-cli@latest`) 
 
 - `SANDBOX_DOMAIN`: Sandbox service address (default: `localhost:8080`)
 - `SANDBOX_API_KEY`: API key if your server requires authentication (optional for local)
-- `SANDBOX_IMAGE`: Sandbox image to use (default: `sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest`)
+- `SANDBOX_IMAGE`: Sandbox image to use (default: `sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.1`)
 - `IFLOW_API_KEY`: Your iFlow/DashScope API key (required)
 - `IFLOW_BASE_URL`: The iFlow API endpoint URL (default: `https://apis.iflow.cn/v1`)
 - `IFLOW_MODEL_NAME`: Model to use (default: `qwen3-coder-plus`)

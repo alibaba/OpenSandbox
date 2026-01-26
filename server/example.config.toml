@@ -32,7 +32,7 @@ api_key = ""
 # Runtime selection (docker | kubernetes)
 # -----------------------------------------------------------------
 type = "docker"
-execd_image = "opensandbox/execd:latest"
+execd_image = "opensandbox/execd:v1.0.3"
 
 [docker]
 # Docker-specific knobs

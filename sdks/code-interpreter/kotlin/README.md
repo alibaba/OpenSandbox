@@ -55,7 +55,7 @@ public class QuickStart {
         // Use try-with-resources to ensure sandbox is closed
         try (Sandbox sandbox = Sandbox.builder()
                 .connectionConfig(config)
-                .image("opensandbox/code-interpreter:latest")
+                .image("opensandbox/code-interpreter:v1.0.1")
                 .entrypoint("/opt/opensandbox/code-interpreter.sh")
                 .env("PYTHON_VERSION", "3.11") // Select specific language version
                 .build()) {
@@ -115,7 +115,7 @@ You can specify the desired version of a programming language by setting the cor
 
 ```java
 Sandbox sandbox = Sandbox.builder()
-    .image("opensandbox/code-interpreter:latest")
+    .image("opensandbox/code-interpreter:v1.0.1")
     .entrypoint("/opt/opensandbox/code-interpreter.sh")
     .env("JAVA_VERSION", "17")
     .env("GO_VERSION", "1.23")
