@@ -28,7 +28,7 @@ const (
 // Only domain/wildcard targets are honored in this MVP.
 type NetworkPolicy struct {
 	Egress        []EgressRule `json:"egress"`
-	DefaultAction string       `json:"default_action"`
+	DefaultAction string       `json:"defaultAction"`
 }
 
 type EgressRule struct {

@@ -30,7 +30,7 @@ func TestProxyUpdatePolicy(t *testing.T) {
 		t.Fatalf("expected initial allow-all (nil policy)")
 	}
 
-	pol, err := policy.ParsePolicy(`{"default_action":"deny","egress":[{"action":"allow","target":"example.com"}]}`)
+	pol, err := policy.ParsePolicy(`{"defaultAction":"deny","egress":[{"action":"allow","target":"example.com"}]}`)
 	if err != nil {
 		t.Fatalf("parse policy: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestProxyUpdatePolicy(t *testing.T) {
 
 func TestLoadPolicyFromEnvVar(t *testing.T) {
 	const envName = "TEST_EGRESS_POLICY"
-	t.Setenv(envName, `{"default_action":"deny","egress":[{"action":"allow","target":"example.com"}]}`)
+	t.Setenv(envName, `{"defaultAction":"deny","egress":[{"action":"allow","target":"example.com"}]}`)
 
 	pol, err := LoadPolicyFromEnvVar(envName)
 	if err != nil {

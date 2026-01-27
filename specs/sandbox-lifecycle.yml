@@ -132,7 +132,7 @@ paths:
                     memory: "512Mi"
                   entrypoint: ["python", "/app/main.py"]
                   networkPolicy:
-                    default_action: deny
+                    defaultAction: deny
                     egress:
                       - action: allow
                         target: "pypi.org"
@@ -147,7 +147,7 @@ paths:
                     memory: "512Mi"
                   entrypoint: ["python", "/app/main.py"]
                   networkPolicy:
-                    default_action: allow
+                    defaultAction: allow
                     egress:
                       - action: deny
                         target: "bad.example.com"
@@ -837,10 +837,10 @@ components:
       type: object
       description: |
         Egress network policy matching the sidecar `/policy` request body.
-        If `default_action` is omitted, the sidecar defaults to "deny"; passing an empty
+        If `defaultAction` is omitted, the sidecar defaults to "deny"; passing an empty
         object or null results in allow-all behavior at startup.
       properties:
-        default_action:
+        defaultAction:
           type: string
           enum: [allow, deny]
           description: Default action when no egress rule matches. Defaults to "deny".

@@ -2,7 +2,7 @@
 
 ## Gaps vs OSEP-0001
 - No Layer 2 yet: no nftables full isolation, no DoH/DoT blocking, no IP/CIDR rules.
-- Policy surface is minimal: only domain allow + default_action; missing deny rules, IP/CIDR, `require_full_isolation`.
+- Policy surface is minimal: only domain allow + defaultAction; missing deny rules, IP/CIDR, `require_full_isolation`.
 - Observability missing: no enforcement mode/status exposure, no violation logs.
 - Capability probing missing: no CAP_NET_ADMIN/nftables detection; no hostNetwork rejection.
 - Platform integration missing: server/SDK/spec not updated; sidecar not wired into server flow.

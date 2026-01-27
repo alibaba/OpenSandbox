@@ -55,10 +55,10 @@ Examples:
 
 ```bash
 curl -XPOST http://11.167.115.8:18080/policy \
-  -d '{"default_action":"deny","egress":[{"action":"allow","target":"*.bing.com"}]}'
+  -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"*.bing.com"}]}'
 
 curl -XPOST http://11.167.115.8:18080/policy \
-  -d '{"default_action":"allow","egress":[{"action":"deny","target":"*.bing.com"}]}'
+  -d '{"defaultAction":"allow","egress":[{"action":"deny","target":"*.bing.com"}]}'
 ```
 
 ## Build & Run
@@ -92,7 +92,7 @@ To test the sidecar with a sandbox application:
     ```bash
     curl -XPOST http://11.167.84.130:18080/policy \
       -H "OPENSANDBOX-EGRESS-AUTH: $OPENSANDBOX_EGRESS_TOKEN" \
-      -d '{"default_action":"deny","egress":[{"action":"allow","target":"*.bing.com"}]}'
+      -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"*.bing.com"}]}'
     ```
 
 2.  **Start Application** (shares sidecar's network):

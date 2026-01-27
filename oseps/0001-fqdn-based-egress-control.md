@@ -213,7 +213,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EgressRule'
-        default_action:
+        defaultAction:
           type: string
           enum: [allow, deny]
           default: deny
@@ -268,7 +268,7 @@ sandbox = await Sandbox.create(
             EgressRule(action="allow", target="10.0.0.5"),       # Single IP
             EgressRule(action="allow", target="10.96.0.0/12"),   # K8s Service CIDR
         ],
-        default_action="deny",
+        defaultAction="deny",
     ),
 )
 ```
@@ -530,7 +530,7 @@ func (p *DNSProxy) respondNXDomain(w dns.ResponseWriter, r *dns.Msg) {
 
 type NetworkPolicy struct {
     Egress        []EgressRule `json:"egress"`
-    DefaultAction Action       `json:"default_action"`
+    DefaultAction Action       `json:"defaultAction"`
 }
 
 type TargetType int
@@ -1179,7 +1179,7 @@ class EgressRule(BaseModel):
 
 class NetworkPolicy(BaseModel):
     egress: List[EgressRule]
-    default_action: Literal["allow", "deny"] = "deny"
+    defaultAction: Literal["allow", "deny"] = "deny"
     require_full_isolation: bool = False
 ```
 

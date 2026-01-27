@@ -40,6 +40,6 @@ func TestParsePolicy_DefaultActionFallback(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if p == nil || p.DefaultAction != ActionDeny {
-		t.Fatalf("expected default_action fallback to deny, got %+v", p)
+		t.Fatalf("expected defaultAction fallback to deny, got %+v", p)
 	}
 }
