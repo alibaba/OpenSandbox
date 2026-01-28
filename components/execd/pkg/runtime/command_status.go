@@ -40,11 +40,11 @@ type CommandOutput struct {
 }
 
 func (c *Controller) commandSnapshot(session string) *commandKernel {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	kernel, ok := c.commandClientMap[session]
-	if !ok || kernel == nil {
+	var kernel *commandKernel
+	if v, ok := c.commandClientMap.Load(session); ok {
+		kernel, _ = v.(*commandKernel)
+	}
+	if kernel == nil {
 		return nil
 	}
 
@@ -116,8 +116,11 @@ func (c *Controller) markCommandFinished(session string, exitCode int, errMsg st
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	kernel, ok := c.commandClientMap[session]
-	if !ok || kernel == nil {
+	var kernel *commandKernel
+	if v, ok := c.commandClientMap.Load(session); ok {
+		kernel, _ = v.(*commandKernel)
+	}
+	if kernel == nil {
 		return
 	}
 
