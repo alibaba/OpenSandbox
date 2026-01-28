@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Copyright 2025 Alibaba Group Holding Ltd.
 #
@@ -47,11 +47,11 @@ fi
 
 set -x
 if [ "$CMD" != "" ]; then
-	exec /bin/sh -c "$CMD"
+	exec bash -c "$CMD"
 fi
 
 if [ $# -eq 0 ]; then
-	exec /bin/sh
+	exec bash
 fi
 
 exec "$@"
