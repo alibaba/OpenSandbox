@@ -99,4 +99,7 @@ jobs:
           python3 tests/smoke_api.py
       - name: Show logs
         if: always()
-        run: cat components/execd/execd.log
+        run: |
+          set -x
+          cat components/execd/startup.log || true
+          cat components/execd/execd.log || true

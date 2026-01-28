@@ -249,6 +249,8 @@ logs.Error("message")   // 错误条件
 logs.Debug("message") // 调试级别消息
 ```
 
+- 环境变量：`EXECD_LOG_FILE` 指定日志输出文件；未设置时日志输出到标准输出（stdout）。
+
 日志级别（0-7）：
 
 - 0：紧急
