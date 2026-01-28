@@ -201,6 +201,114 @@ class TestBatchSandboxProvider:
         assert env_dict["BAZ"] == "qux"
         # Verify EXECD is automatically injected
         assert env_dict["EXECD"] == "/opt/opensandbox/bin/execd"
+
+    def test_create_workload_merges_template_volumes_and_mounts(self, mock_k8s_client, tmp_path):
+        """
+        Test case: Verify template volumes/volumeMounts are merged into runtime manifest
+        """
+        template_file = tmp_path / "template.yaml"
+        template_file.write_text(
+            """
+spec:
+  template:
+    spec:
+      volumes:
+        - name: sandbox-shared-data
+          emptyDir: {}
+      containers:
+        - name: sandbox
+          image: ubuntu:latest
+          volumeMounts:
+            - name: sandbox-shared-data
+              mountPath: /data
+"""
+        )
+        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "sandbox-test", "uid": "uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest"
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        spec = body["spec"]["template"]["spec"]
+
+        volume_names = [v["name"] for v in spec["volumes"]]
+        assert "sandbox-shared-data" in volume_names
+        assert "opensandbox-bin" in volume_names
+
+        # Runtime container should stay intact (template image should not override)
+        container = spec["containers"][0]
+        assert container["name"] == "sandbox"
+        assert container["image"] == "python:3.11"
+
+        mount_names = [m["name"] for m in container["volumeMounts"]]
+        assert "sandbox-shared-data" in mount_names
+        assert "opensandbox-bin" in mount_names
+
+    def test_create_workload_dedupes_template_volume_and_mount_names(self, mock_k8s_client, tmp_path):
+        """
+        Test case: Verify template entries do not duplicate runtime volumes/volumeMounts
+        """
+        template_file = tmp_path / "template.yaml"
+        template_file.write_text(
+            """
+spec:
+  template:
+    spec:
+      volumes:
+        - name: opensandbox-bin
+          emptyDir: {}
+        - name: sandbox-shared-data
+          emptyDir: {}
+      containers:
+        - name: sandbox
+          volumeMounts:
+            - name: opensandbox-bin
+              mountPath: /opt/opensandbox/bin
+            - name: sandbox-shared-data
+              mountPath: /data
+"""
+        )
+        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "sandbox-test", "uid": "uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest"
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        spec = body["spec"]["template"]["spec"]
+
+        volume_names = [v["name"] for v in spec["volumes"]]
+        assert volume_names.count("opensandbox-bin") == 1
+        assert "sandbox-shared-data" in volume_names
+
+        mount_names = [m["name"] for m in spec["containers"][0]["volumeMounts"]]
+        assert mount_names.count("opensandbox-bin") == 1
+        assert "sandbox-shared-data" in mount_names
     
     def test_create_workload_sets_resource_limits_and_requests(self, mock_k8s_client):
         """

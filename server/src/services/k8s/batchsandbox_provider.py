@@ -118,6 +118,9 @@ class BatchSandboxProvider(WorkloadProvider):
                 env=env,
             )
         
+        # Extract extra pod spec fragments from template (volumes/volumeMounts only).
+        extra_volumes, extra_mounts = self._extract_template_pod_extras()
+
         # Build init container for execd installation
         init_container = self._build_execd_init_container(execd_image)
         
@@ -162,6 +165,7 @@ class BatchSandboxProvider(WorkloadProvider):
         
         # Merge with template to get final manifest
         batchsandbox = self.template_manager.merge_with_runtime_values(runtime_manifest)
+        self._merge_pod_spec_extras(batchsandbox, extra_volumes, extra_mounts)
         
         # Create BatchSandbox
         created = self.custom_api.create_namespaced_custom_object(
@@ -239,6 +243,86 @@ class BatchSandboxProvider(WorkloadProvider):
             "name": created["metadata"]["name"],
             "uid": created["metadata"]["uid"],
         }
+
+    def _extract_template_pod_extras(self) -> tuple[list[Dict[str, Any]], list[Dict[str, Any]]]:
+        """
+        Extract extra volumes and volume mounts from the BatchSandbox template.
+
+        Only these fields are supported here because runtime manifests must
+        always inject execd init container, main container, and volumes.
+        """
+        template = self.template_manager.get_base_template()
+        spec = template.get("spec", {}) if isinstance(template, dict) else {}
+        template_spec = spec.get("template", {}).get("spec", {})
+        extra_volumes = template_spec.get("volumes", []) or []
+
+        extra_mounts: list[Dict[str, Any]] = []
+        containers = template_spec.get("containers", []) or []
+        if containers:
+            # Prefer container named "sandbox" if present, otherwise first container.
+            target = None
+            for container in containers:
+                if container.get("name") == "sandbox":
+                    target = container
+                    break
+            if target is None:
+                target = containers[0]
+            extra_mounts = target.get("volumeMounts", []) or []
+
+        if not isinstance(extra_volumes, list):
+            extra_volumes = []
+        if not isinstance(extra_mounts, list):
+            extra_mounts = []
+        return extra_volumes, extra_mounts
+
+    def _merge_pod_spec_extras(
+        self,
+        batchsandbox: Dict[str, Any],
+        extra_volumes: list[Dict[str, Any]],
+        extra_mounts: list[Dict[str, Any]],
+    ) -> None:
+        """
+        Merge extra volumes/volumeMounts into the runtime-generated pod spec.
+
+        This keeps execd injections intact while allowing user templates to
+        provide additional read-only mounts (e.g., shared skills directory).
+        """
+        try:
+            spec = batchsandbox["spec"]["template"]["spec"]
+        except KeyError:
+            return
+
+        # Merge volumes by name (do not overwrite existing runtime volumes).
+        volumes = spec.get("volumes", []) or []
+        if isinstance(volumes, list) and extra_volumes:
+            existing = {v.get("name") for v in volumes if isinstance(v, dict)}
+            for vol in extra_volumes:
+                if not isinstance(vol, dict):
+                    continue
+                name = vol.get("name")
+                if not name or name in existing:
+                    continue
+                volumes.append(vol)
+                existing.add(name)
+            spec["volumes"] = volumes
+
+        # Merge volumeMounts into the main container (index 0).
+        containers = spec.get("containers", []) or []
+        if not containers or not isinstance(containers, list):
+            return
+        main_container = containers[0]
+        mounts = main_container.get("volumeMounts", []) or []
+        if isinstance(mounts, list) and extra_mounts:
+            existing = {m.get("name") for m in mounts if isinstance(m, dict)}
+            for mnt in extra_mounts:
+                if not isinstance(mnt, dict):
+                    continue
+                name = mnt.get("name")
+                if not name or name in existing:
+                    continue
+                mounts.append(mnt)
+                existing.add(name)
+            main_container["volumeMounts"] = mounts
 
     # Todo support empty cmd or env
     def _build_task_template(
