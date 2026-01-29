@@ -27,6 +27,7 @@ import (
 	goruntime "runtime"
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
@@ -42,7 +43,7 @@ func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
 
 	var got []string
 	c := &Controller{}
-	nextPos := c.readFromPos(mutex, logFile, 0, func(s string) { got = append(got, s) })
+	nextPos := c.readFromPos(mutex, logFile, 0, func(s string) { got = append(got, s) }, false)
 
 	want := []string{"line1", "prog 10%", "prog 20%", "prog 30%", "last"}
 	if len(got) != len(want) {
@@ -67,7 +68,7 @@ func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
 	_ = f.Close()
 
 	got = got[:0]
-	c.readFromPos(mutex, logFile, nextPos, func(s string) { got = append(got, s) })
+	c.readFromPos(mutex, logFile, nextPos, func(s string) { got = append(got, s) }, false)
 	want = []string{"tail1", "tail2"}
 	if len(got) != len(want) {
 		t.Fatalf("incremental token count: got %d want %d", len(got), len(want))
@@ -91,7 +92,7 @@ func TestReadFromPos_LongLine(t *testing.T) {
 
 	var got []string
 	c := &Controller{}
-	c.readFromPos(&sync.Mutex{}, logFile, 0, func(s string) { got = append(got, s) })
+	c.readFromPos(&sync.Mutex{}, logFile, 0, func(s string) { got = append(got, s) }, false)
 
 	if len(got) != 1 {
 		t.Fatalf("expected one token, got %d", len(got))
@@ -99,6 +100,30 @@ func TestReadFromPos_LongLine(t *testing.T) {
 	if got[0] != strings.TrimSuffix(longLine, "\n") {
 		t.Fatalf("long line mismatch: got %d chars want %d chars", len(got[0]), len(longLine)-1)
 	}
+}
+
+func TestReadFromPos_FlushesTrailingLine(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "stdout.log")
+	content := []byte("line1\nlastline-without-newline")
+	err := os.WriteFile(file, content, 0o644)
+	assert.NoError(t, err)
+
+	c := NewController("", "")
+	mutex := &sync.Mutex{}
+	var lines []string
+	onExecute := func(text string) {
+		lines = append(lines, text)
+	}
+
+	// First read: should only get complete lines with newlines
+	pos := c.readFromPos(mutex, file, 0, onExecute, false)
+	assert.GreaterOrEqual(t, pos, int64(0))
+	assert.Equal(t, []string{"line1"}, lines)
+
+	// Flush at end: should output the last line (without newline)
+	c.readFromPos(mutex, file, pos, onExecute, true)
+	assert.Equal(t, []string{"line1", "lastline-without-newline"}, lines)
 }
 
 func TestRunCommand_Echo(t *testing.T) {
