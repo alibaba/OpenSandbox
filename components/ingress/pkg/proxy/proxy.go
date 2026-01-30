@@ -16,29 +16,25 @@ package proxy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"strings"
 
 	"go.uber.org/zap"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/informers"
-	listerv1 "k8s.io/client-go/listers/core/v1"
-	kubeclient "knative.dev/pkg/client/injection/kube/client"
-	"knative.dev/pkg/controller"
 
-	"github.com/alibaba/opensandbox/ingress/pkg/flag"
+	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
 )
 
 type Proxy struct {
-	lister listerv1.PodLister
+	sandboxProvider sandbox.Provider
 }
 
-func NewProxy(ctx context.Context) *Proxy {
-	proxy := &Proxy{}
-	proxy.watchSandboxPods(ctx)
+func NewProxy(ctx context.Context, sandboxProvider sandbox.Provider) *Proxy {
+	proxy := &Proxy{
+		sandboxProvider: sandboxProvider,
+	}
 
 	return proxy
 }
@@ -57,7 +53,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// parse backend pod metadata from Header 'OPEN-SANDBOX-INGRESS'
+	// parse sandbox metadata from Header 'OPEN-SANDBOX-INGRESS'
 	targetHost := r.Header.Get(SandboxIngress)
 	if targetHost == "" {
 		Logger.Warnw("Proxy: proxy target host from header 'OPEN-SANDBOX-INGRESS' is empty. Try parse from 'Host'", zap.String("host", r.Host))
@@ -77,9 +73,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	targetHost, err, code := p.fetchRealHost(host)
 	if err != nil {
-		if code == http.StatusNotFound {
-			Logger.Warnw("Proxy: no pod found for ingress rule", "ingress", host.ingressKey)
-		}
+		Logger.Warnw("Proxy: failed to get sandbox endpoint", "ingressKey", host.ingressKey, "error", err)
 		http.Error(w, fmt.Sprintf("Proxy: %v", err), code)
 		return
 	}
@@ -155,21 +149,23 @@ func (p *Proxy) parseSandboxHost(s string) (sandboxHost, error) {
 }
 
 func (p *Proxy) fetchRealHost(host sandboxHost) (string, error, int) {
-	pods, err := p.lister.List(labels.Set{
-		flag.IngressLabelKey: host.ingressKey,
-	}.AsSelector())
+	// Get endpoint IP from sandbox provider
+	endpointIP, err := p.sandboxProvider.GetEndpoint(host.ingressKey)
 	if err != nil {
-		return "", err, http.StatusBadGateway
+		// Map sandbox errors to HTTP status codes
+		switch {
+		case errors.Is(err, sandbox.ErrSandboxNotFound):
+			return "", err, http.StatusNotFound
+		case errors.Is(err, sandbox.ErrSandboxNotReady):
+			return "", err, http.StatusServiceUnavailable
+		default:
+			return "", err, http.StatusBadGateway
+		}
 	}
 
-	switch {
-	case len(pods) == 1 && pods[0].Status.PodIP != "":
-		return pods[0].Status.PodIP + ":" + host.port, nil, 0
-	case len(pods) > 1:
-		return "", fmt.Errorf("multiple sandboxes found for host: %s", host.ingressKey), http.StatusConflict
-	default:
-		return "", fmt.Errorf("no sandboxes found for host: %s", host.ingressKey), http.StatusNotFound
-	}
+	// Construct target host with port
+	targetHost := endpointIP + ":" + host.port
+	return targetHost, nil, 0
 }
 
 func (p *Proxy) getClientIP(r *http.Request) string {
@@ -186,21 +182,4 @@ func (p *Proxy) getClientIP(r *http.Request) string {
 	}
 
 	return clientIP
-}
-
-func (p *Proxy) watchSandboxPods(ctx context.Context) {
-	factory := informers.NewSharedInformerFactoryWithOptions(
-		kubeclient.Get(ctx),
-		controller.GetResyncPeriod(ctx),
-		informers.WithNamespace(flag.Namespace),
-		informers.WithTweakListOptions(func(options *v1.ListOptions) {
-			options.LabelSelector = flag.IngressLabelKey
-		}),
-	)
-
-	podInformer := factory.Core().V1().Pods()
-	p.lister = podInformer.Lister()
-
-	factory.Start(ctx.Done())
-	factory.WaitForCacheSync(ctx.Done())
 }

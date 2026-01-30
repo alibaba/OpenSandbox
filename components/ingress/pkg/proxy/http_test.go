@@ -21,38 +21,49 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/alibaba/opensandbox/ingress/pkg/flag"
-	"github.com/google/uuid"
+	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
 	"github.com/stretchr/testify/assert"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
-	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	"knative.dev/pkg/logging"
 )
+
+// mockProvider implements sandbox.Provider interface for testing
+type mockProvider struct {
+	endpoints map[string]string // sandboxName -> IP
+	notReady  map[string]bool   // sandboxName -> notReady flag
+}
+
+func (m *mockProvider) GetEndpoint(name string) (string, error) {
+	if m.notReady != nil && m.notReady[name] {
+		return "", fmt.Errorf("%w: %s", sandbox.ErrSandboxNotReady, name)
+	}
+	if ip, ok := m.endpoints[name]; ok {
+		return ip, nil
+	}
+	return "", fmt.Errorf("%w: %s", sandbox.ErrSandboxNotFound, name)
+}
+
+func (m *mockProvider) Start(ctx context.Context) error {
+	return nil
+}
 
 func Test_HTTPProxy(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(realBackendHTTPHandler))
 	defer server.Close()
 	serverPort := server.URL[len("http://127.0.0.1:"):]
 
-	pod1 := MakePod().
-		Name("sandbox-1").
-		Namespace(flag.Namespace).
-		IP("127.0.0.1").
-		Phase(corev1.PodRunning).
-		Label(flag.IngressLabelKey, strings.ReplaceAll(uuid.New().String(), "-", "")).
-		Obj()
+	// Create mock provider with sandbox endpoint
+	provider := &mockProvider{
+		endpoints: map[string]string{
+			"test-sandbox": "127.0.0.1",
+		},
+	}
 
-	clientset := fake.NewSimpleClientset(pod1)
-
-	ctx := context.WithValue(context.Background(), kubeclient.Key{}, clientset)
+	ctx := context.Background()
 	Logger = logging.FromContext(ctx)
-	proxy := NewProxy(ctx)
+	proxy := NewProxy(ctx, provider)
 
 	http.Handle("/", proxy)
 	port, err := findAvailablePort()
@@ -73,47 +84,20 @@ func Test_HTTPProxy(t *testing.T) {
 	bytes, _ := io.ReadAll(response.Body)
 	t.Log(string(bytes))
 
-	// no pod backend
+	// no sandbox backend
 	request, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v/hello", port), nil)
-	request.Header.Set(SandboxIngress, fmt.Sprintf("%s-%v", uuid.New().String(), port))
+	request.Header.Set(SandboxIngress, fmt.Sprintf("non-existent-%v", port))
 	response, err = http.DefaultClient.Do(request)
 	assert.Nil(t, err)
-	assert.Equal(t, http.StatusNotFound, response.StatusCode)
+	assert.Equal(t, http.StatusNotFound, response.StatusCode) // ErrSandboxNotFound -> 404
 	bytes, _ = io.ReadAll(response.Body)
 	t.Log(string(bytes))
 
-	// has two pod
-	session := strings.ReplaceAll(uuid.New().String(), "-", "")
-	_, err = clientset.CoreV1().Pods(flag.Namespace).Create(ctx, MakePod().
-		Name("sandbox-2").
-		Namespace(flag.Namespace).
-		IP("127.0.0.1").
-		Phase(corev1.PodRunning).
-		Label(flag.IngressLabelKey, session).
-		Obj(), metav1.CreateOptions{})
-	assert.Nil(t, err)
-	_, err = clientset.CoreV1().Pods(flag.Namespace).Create(ctx, MakePod().
-		Name("sandbox-3").
-		Namespace(flag.Namespace).
-		IP("127.0.0.1").
-		Phase(corev1.PodRunning).
-		Label(flag.IngressLabelKey, session).
-		Obj(), metav1.CreateOptions{})
-	assert.Nil(t, err)
-
-	request, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v/hello", port), nil)
-	request.Header.Set(SandboxIngress, fmt.Sprintf("%s-%v", session, port))
-	response, err = http.DefaultClient.Do(request)
-	assert.Nil(t, err)
-	assert.Equal(t, http.StatusConflict, response.StatusCode)
-	bytes, _ = io.ReadAll(response.Body)
-	t.Log(string(bytes))
-
-	// current pod backend
+	// valid sandbox request
 	request, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v/hello?a=1&b=2", port), nil)
 	assert.Nil(t, err)
 
-	request.Header.Set(SandboxIngress, fmt.Sprintf("%s-%v", pod1.Labels[flag.IngressLabelKey], serverPort))
+	request.Header.Set(SandboxIngress, fmt.Sprintf("test-sandbox-%v", serverPort))
 	response, err = http.DefaultClient.Do(request)
 	assert.Nil(t, err)
 	if response.StatusCode != http.StatusOK {
@@ -123,11 +107,11 @@ func Test_HTTPProxy(t *testing.T) {
 	}
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 
-	// // Compatible Host parsing for reverse proxy mode
+	// Compatible Host parsing for reverse proxy mode
 	request, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v/hello?a=1&b=2", port), nil)
 	assert.Nil(t, err)
 
-	request.Host = fmt.Sprintf("%s-%v.sandbox.alibaba-inc.com", pod1.Labels[flag.IngressLabelKey], serverPort)
+	request.Host = fmt.Sprintf("test-sandbox-%v.sandbox.alibaba-inc.com", serverPort)
 	response, err = http.DefaultClient.Do(request)
 	assert.Nil(t, err)
 	if response.StatusCode != http.StatusOK {

@@ -37,3 +37,7 @@ LDFLAGS := -X 'github.com/alibaba/opensandbox/router/version.Version=$(VERSION)'
 build: vet ## Build the binary.
 	@mkdir -p bin
 	go build -ldflags "$(LDFLAGS)" -o bin/router main.go
+
+.PHONY: clean
+clean: ## Clean build artifacts.
+	rm -rf bin/ vendor/
