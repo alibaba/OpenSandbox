@@ -175,14 +175,6 @@ curl -X POST "http://localhost:8080/v1/sandboxes" \
       "cpu": "500m",
       "memory": "512Mi"
     },
-    "volumes": [
-      {"name":"user-session-data","persistentVolumeClaim":{"claimName":"user-session-data"}},
-      {"name":"public-skills-dir","persistentVolumeClaim":{"claimName":"public-skills-dir"}}
-    ],
-    "mounts": [
-      {"name":"user-session-data","mountPath":"/workspace","subPath":"uid-1-sessionId-1"},
-      {"name":"public-skills-dir","mountPath":"/skills","readOnly":true}
-    ],
     "env": {
       "PYTHONUNBUFFERED": "1"
     },
@@ -193,7 +185,28 @@ curl -X POST "http://localhost:8080/v1/sandboxes" \
   }'
 ```
 
-Note: `volumes` and `mounts` are supported by the Kubernetes runtime only and are merged on top of the BatchSandbox template.
+**Kubernetes: Custom volumes/mounts**
+
+The `volumes` and `mounts` fields are supported only in Kubernetes mode. They are merged on top of the `batchsandbox-template.yaml` defaults, and request values override template entries with the same name.
+
+```bash
+curl -X POST "http://localhost:8080/v1/sandboxes" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image": {"uri": "python:3.11-slim"},
+    "entrypoint": ["python","-m","http.server","8000"],
+    "timeout": 3600,
+    "resourceLimits": {"cpu":"500m","memory":"512Mi"},
+    "volumes": [
+      {"name":"user-session-data","persistentVolumeClaim":{"claimName":"user-session-data"}},
+      {"name":"public-skills-dir","persistentVolumeClaim":{"claimName":"public-skills-dir"}}
+    ],
+    "mounts": [
+      {"name":"user-session-data","mountPath":"/workspace","subPath":"uid-1-sessionId-1"},
+      {"name":"public-skills-dir","mountPath":"/skills","readOnly":true}
+    ]
+  }'
+```
 
 Response:
 ```json
