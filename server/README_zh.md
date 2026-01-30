@@ -177,6 +177,14 @@ curl -X POST "http://localhost:8080/v1/sandboxes" \
       "cpu": "500m",
       "memory": "512Mi"
     },
+    "volumes": [
+      {"name":"user-session-data","persistentVolumeClaim":{"claimName":"user-session-data"}},
+      {"name":"public-skills-dir","persistentVolumeClaim":{"claimName":"public-skills-dir"}}
+    ],
+    "mounts": [
+      {"name":"user-session-data","mountPath":"/workspace","subPath":"uid-1-sessionId-1"},
+      {"name":"public-skills-dir","mountPath":"/skills","readOnly":true}
+    ],
     "env": {
       "PYTHONUNBUFFERED": "1"
     },
@@ -186,6 +194,8 @@ curl -X POST "http://localhost:8080/v1/sandboxes" \
     }
   }'
 ```
+
+说明：`volumes` 和 `mounts` 仅在 Kubernetes 运行时生效，并会在 BatchSandbox 模板基础上合并。
 
 响应：
 ```json

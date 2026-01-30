@@ -272,6 +272,8 @@ class KubernetesSandboxService(SandboxService):
                 labels=labels,
                 expires_at=expires_at,
                 execd_image=self.execd_image,
+                volumes=request.volumes,
+                mounts=request.mounts,
                 extensions=request.extensions,
             )
             

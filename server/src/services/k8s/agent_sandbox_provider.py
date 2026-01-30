@@ -72,6 +72,8 @@ class AgentSandboxProvider(WorkloadProvider):
         labels: Dict[str, str],
         expires_at: datetime,
         execd_image: str,
+        volumes: Optional[List[Dict[str, Any]]] = None,
+        mounts: Optional[List[Dict[str, Any]]] = None,
         extensions: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         sandbox_name = f"sandbox-{sandbox_id}"

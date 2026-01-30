@@ -76,6 +76,8 @@ class BatchSandboxProvider(WorkloadProvider):
         labels: Dict[str, str],
         expires_at: datetime,
         execd_image: str,
+        volumes: Optional[List[Dict[str, Any]]] = None,
+        mounts: Optional[List[Dict[str, Any]]] = None,
         extensions: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
@@ -96,6 +98,8 @@ class BatchSandboxProvider(WorkloadProvider):
             labels: Labels to apply
             expires_at: Expiration time
             execd_image: execd daemon image (not used in pool mode)
+            volumes: Optional list of volume specs to append (not used in pool mode)
+            mounts: Optional list of volumeMount specs to append (not used in pool mode)
             extensions: General extension field for additional configuration.
                 When contains 'poolRef', enables pool-based creation.
         
@@ -133,7 +137,7 @@ class BatchSandboxProvider(WorkloadProvider):
         )
         
         # Build shared volume for execd
-        volumes = [
+        runtime_volumes = [
             {
                 "name": "opensandbox-bin",
                 "emptyDir": {}
@@ -157,7 +161,7 @@ class BatchSandboxProvider(WorkloadProvider):
                     "spec": {
                         "initContainers": [self._container_to_dict(init_container)],
                         "containers": [self._container_to_dict(main_container)],
-                        "volumes": volumes,
+                        "volumes": runtime_volumes,
                     }
                 },
             },
@@ -166,6 +170,7 @@ class BatchSandboxProvider(WorkloadProvider):
         # Merge with template to get final manifest
         batchsandbox = self.template_manager.merge_with_runtime_values(runtime_manifest)
         self._merge_pod_spec_extras(batchsandbox, extra_volumes, extra_mounts)
+        self._merge_request_pod_mounts(batchsandbox, volumes, mounts)
         
         # Create BatchSandbox
         created = self.custom_api.create_namespaced_custom_object(
@@ -323,6 +328,66 @@ class BatchSandboxProvider(WorkloadProvider):
                 mounts.append(mnt)
                 existing.add(name)
             main_container["volumeMounts"] = mounts
+
+    def _merge_request_pod_mounts(
+        self,
+        batchsandbox: Dict[str, Any],
+        request_volumes: Optional[List[Dict[str, Any]]],
+        request_mounts: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        """
+        Apply request-provided volumes/volumeMounts after template merge.
+
+        Request entries override template entries with the same name.
+        """
+        if not request_volumes and not request_mounts:
+            return
+        try:
+            spec = batchsandbox["spec"]["template"]["spec"]
+        except KeyError:
+            return
+
+        if request_volumes:
+            volumes = spec.get("volumes", []) or []
+            if isinstance(volumes, list):
+                index_by_name = {
+                    v.get("name"): idx for idx, v in enumerate(volumes) if isinstance(v, dict)
+                }
+                for vol in request_volumes:
+                    if not isinstance(vol, dict):
+                        continue
+                    name = vol.get("name")
+                    if not name or name == "opensandbox-bin":
+                        continue
+                    if name in index_by_name:
+                        volumes[index_by_name[name]] = vol
+                    else:
+                        volumes.append(vol)
+                        index_by_name[name] = len(volumes) - 1
+                spec["volumes"] = volumes
+
+        if request_mounts:
+            containers = spec.get("containers", []) or []
+            if not containers or not isinstance(containers, list):
+                return
+            main_container = containers[0]
+            mounts = main_container.get("volumeMounts", []) or []
+            if isinstance(mounts, list):
+                index_by_name = {
+                    m.get("name"): idx for idx, m in enumerate(mounts) if isinstance(m, dict)
+                }
+                for mnt in request_mounts:
+                    if not isinstance(mnt, dict):
+                        continue
+                    name = mnt.get("name")
+                    if not name or name == "opensandbox-bin":
+                        continue
+                    if name in index_by_name:
+                        mounts[index_by_name[name]] = mnt
+                    else:
+                        mounts.append(mnt)
+                        index_by_name[name] = len(mounts) - 1
+                main_container["volumeMounts"] = mounts
 
     # Todo support empty cmd or env
     def _build_task_template(
