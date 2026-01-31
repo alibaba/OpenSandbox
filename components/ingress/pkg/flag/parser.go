@@ -22,8 +22,8 @@ import (
 func InitFlags() {
 	flag.StringVar(&LogLevel, "log-level", "info", "Server log level")
 	flag.IntVar(&Port, "port", 28888, "Server listening port (default: 28888)")
-	flag.StringVar(&IngressLabelKey, "ingress-label-key", "", "The Kubernetes label key used to identify sandbox instances for routing")
-	flag.StringVar(&Namespace, "namespace", "", "The Kubernetes namespace to watch for sandbox pods")
+	flag.StringVar(&Namespace, "namespace", "opensandbox", "The Kubernetes namespace to watch for sandbox resources")
+	flag.StringVar(&ProviderType, "provider-type", "batchsandbox", "The sandbox provider type (default: batchsandbox)")
 
 	// Parse flags - these will override environment variables if provided
 	flag.Parse()
