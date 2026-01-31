@@ -20,7 +20,7 @@ for request/response validation and serialization.
 """
 
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, RootModel
 
@@ -133,6 +133,14 @@ class CreateSandboxRequest(BaseModel):
         min_length=1,
         description="The command to execute as the sandbox's entry process",
         example=["python", "/app/main.py"],
+    )
+    volumes: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Kubernetes volume specs to append to the sandbox pod (K8s runtime only)",
+    )
+    mounts: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Kubernetes volumeMount specs to append to the sandbox container (K8s runtime only)",
     )
     extensions: Optional[Dict[str, str]] = Field(
         None,

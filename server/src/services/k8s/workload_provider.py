@@ -43,6 +43,8 @@ class WorkloadProvider(ABC):
         labels: Dict[str, str],
         expires_at: datetime,
         execd_image: str,
+        volumes: Optional[List[Dict[str, Any]]] = None,
+        mounts: Optional[List[Dict[str, Any]]] = None,
         extensions: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
@@ -58,6 +60,8 @@ class WorkloadProvider(ABC):
             labels: Labels to apply to the workload
             expires_at: Expiration time
             execd_image: execd daemon image
+            volumes: Optional list of volume specs to append (provider-specific).
+            mounts: Optional list of volumeMount specs to append (provider-specific).
             extensions: General extension field for passing additional configuration.
                 This is a flexible field for various use cases (e.g., ``poolRef`` for pool-based creation).
             
