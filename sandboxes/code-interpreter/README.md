@@ -55,7 +55,7 @@ docker run -it --rm \
   -e JAVA_VERSION=17 \
   -e NODE_VERSION=20 \
   -e GO_VERSION=1.24 \
-  opensandbox/code-interpreter:v1.0.1
+  opensandbox/code-interpreter:latest
 ```
 
 ## Version Switching
@@ -167,7 +167,7 @@ Mount a local directory to persist your work:
 ```bash
 docker run -it --rm \
   -v $(pwd)/workspace:/workspace \
-  opensandbox/code-interpreter:v1.0.1
+  opensandbox/code-interpreter:latest
 ```
 
 ### Custom Configuration
@@ -177,7 +177,7 @@ Override Jupyter configuration:
 ```bash
 docker run -it --rm \
   -v $(pwd)/jupyter_config.py:/root/.jupyter/jupyter_notebook_config.py \
-  opensandbox/code-interpreter:v1.0.1
+  opensandbox/code-interpreter:latest
 ```
 
 ### Install Additional Packages
