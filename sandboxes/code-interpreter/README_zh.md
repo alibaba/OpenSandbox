@@ -39,7 +39,7 @@ cd sandboxes/code-interpreter
 # 构建本地镜像
 docker build -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest .
 
-# 多架构构建（需要 Docker Buildx）
+# 构建多架构镜像（需要 Docker Buildx）
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest .
 ```
@@ -54,7 +54,7 @@ docker run -it --rm \
   -e JAVA_VERSION=17 \
   -e NODE_VERSION=20 \
   -e GO_VERSION=1.24 \
-  sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest
+  sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.1
 ```
 
 ## 如何切换版本
@@ -165,7 +165,7 @@ source /opt/opensandbox/code-interpreter-env.sh go
 ```bash
 docker run -it --rm \
   -v $(pwd)/workspace:/workspace \
-  sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest
+  sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.1
 ```
 
 ### 自定义配置
@@ -175,7 +175,7 @@ docker run -it --rm \
 ```bash
 docker run -it --rm \
   -v $(pwd)/jupyter_config.py:/root/.jupyter/jupyter_notebook_config.py \
-  sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest
+  sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.1
 ```
 
 ### 安装额外的包

@@ -27,6 +27,8 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -92,3 +94,51 @@ jobs:
           export TAG=$IMAGE_TAG
           chmod +x build.sh
           ./build.sh
+
+      - name: Update Component Version in Docs
+        if: steps.parse_tag.outputs.image_tag != 'latest'
+        run: |
+          COMPONENT="${{ steps.parse_tag.outputs.component }}"
+          IMAGE_TAG="${{ steps.parse_tag.outputs.image_tag }}"
+          
+          echo "Updating documentation for component: $COMPONENT to version: $IMAGE_TAG"
+
+          # Configure git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # We need to switch to main branch to push changes
+          git fetch origin main
+          git checkout main
+          git pull origin main
+          
+          # Determine version file path
+          if [[ "$COMPONENT" == "code-interpreter" ]]; then
+             VERSION_FILE="sandboxes/code-interpreter/VERSION_TAG"
+          elif [[ "$COMPONENT" == "execd" ]]; then
+             VERSION_FILE="components/execd/VERSION_TAG"
+          elif [[ "$COMPONENT" == "ingress" ]]; then
+             VERSION_FILE="components/ingress/VERSION_TAG"
+          elif [[ "$COMPONENT" == "egress" ]]; then
+             VERSION_FILE="components/egress/VERSION_TAG"
+          else
+             echo "Unknown component for version update: $COMPONENT"
+             exit 0
+          fi
+          
+          # Update the version file
+          echo "$IMAGE_TAG" > "$VERSION_FILE"
+          
+          # Run the update script for the specific component
+          chmod +x scripts/manage_sandbox_version.py
+          python3 scripts/manage_sandbox_version.py update --component "$COMPONENT"
+          
+          # Check if there are changes
+          if [[ -n $(git status --porcelain) ]]; then
+            git add .
+            git commit -m "chore: update $COMPONENT version to $IMAGE_TAG"
+            git push origin main
+            echo "Successfully updated documentation version for $COMPONENT."
+          else
+            echo "No changes detected."
+          fi
