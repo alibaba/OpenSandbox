@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -111,6 +112,10 @@ jobs:
           git fetch origin main
           git checkout main
           git pull origin main
+
+          # Create a new branch for the update
+          BRANCH_NAME="chore/update-${COMPONENT}-${IMAGE_TAG}"
+          git checkout -b "$BRANCH_NAME"
           
           # Determine version file path
           if [[ "$COMPONENT" == "code-interpreter" ]]; then
@@ -137,8 +142,20 @@ jobs:
           if [[ -n $(git status --porcelain) ]]; then
             git add .
             git commit -m "chore: update $COMPONENT version to $IMAGE_TAG"
-            git push origin main
-            echo "Successfully updated documentation version for $COMPONENT."
+            
+            # Push the branch
+            git push origin "$BRANCH_NAME"
+            
+            # Create a Pull Request
+            gh pr create \
+              --title "chore: update $COMPONENT version to $IMAGE_TAG" \
+              --body "Automated version update for $COMPONENT to $IMAGE_TAG triggered by workflow." \
+              --base main \
+              --head "$BRANCH_NAME"
+              
+            echo "Successfully created PR for $COMPONENT version update."
           else
             echo "No changes detected."
           fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
