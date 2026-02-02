@@ -35,7 +35,7 @@ The following example demonstrates how to initialize the client with a specific 
 ```java
 import com.alibaba.opensandbox.codeinterpreter.CodeInterpreter;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.CodeContext;
-import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.Execution;
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.Execution;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.RunCodeRequest;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.SupportedLanguage;
 import com.alibaba.opensandbox.sandbox.Sandbox;
