@@ -280,7 +280,6 @@ class TestSandboxE2E:
         logger.info("TEST 1 PASSED: Sandbox lifecycle and health test completed successfully")
 
 
-    @pytest.mark.skip(reason="server-side networkPolicy not fully supported yet")
     @pytest.mark.timeout(120)
     @pytest.mark.order(1)
     async def test_01a_network_policy_create(self):
@@ -300,9 +299,11 @@ class TestSandboxE2E:
             ),
         )
         try:
-            result = await sandbox.commands.run("echo policy-ok")
+            await asyncio.sleep(5)
+            result = await sandbox.commands.run("curl -I https://www.github.com")
+            assert result.error is not None
+            result = await sandbox.commands.run("curl -I https://pypi.org")
             assert result.error is None
-            assert result.logs.stdout[0].text == "policy-ok"
         finally:
             try:
                 await sandbox.kill()

@@ -26,6 +26,7 @@ from src.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
     ImageSpec,
+    NetworkPolicy,
     ListSandboxesRequest,
     ResourceLimits,
     Sandbox,
@@ -92,7 +93,11 @@ def test_env_allows_empty_string_and_skips_none():
 def test_create_sandbox_applies_security_defaults(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
-    mock_client.api.create_host_config.return_value = {"host": "cfg"}
+    mock_client.api.create_host_config.return_value = {
+        "security_opt": ["no-new-privileges:true"],
+        "cap_drop": _app_config().docker.drop_capabilities,
+        "pids_limit": _app_config().docker.pids_limit,
+    }
     mock_client.api.create_container.return_value = {"Id": "cid"}
     mock_client.containers.get.return_value = MagicMock()
     mock_docker.from_env.return_value = mock_client
@@ -112,11 +117,10 @@ def test_create_sandbox_applies_security_defaults(mock_docker):
     ):
         service.create_sandbox(request)
 
-    host_kwargs = mock_client.api.create_host_config.call_args.kwargs
-    assert "no-new-privileges:true" in host_kwargs["security_opt"]
-    assert host_kwargs["cap_drop"] == service.app_config.docker.drop_capabilities
-    assert host_kwargs["pids_limit"] == service.app_config.docker.pids_limit
-    assert mock_client.api.create_container.call_args.kwargs["host_config"] == {"host": "cfg"}
+    host_config = mock_client.api.create_container.call_args.kwargs["host_config"]
+    assert "no-new-privileges:true" in host_config.get("security_opt", [])
+    assert host_config.get("cap_drop") == service.app_config.docker.drop_capabilities
+    assert host_config.get("pids_limit") == service.app_config.docker.pids_limit
 
 
 @patch("src.services.docker.docker")
@@ -170,6 +174,152 @@ def test_create_sandbox_requires_entrypoint(mock_docker):
     mock_client.containers.create.assert_not_called()
 
 
+@patch("src.services.docker.docker")
+def test_network_policy_rejected_on_host_mode(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "host"
+    cfg.runtime.egress_image = "egress:latest"
+    service = DockerSandboxService(config=cfg)
+
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+        networkPolicy=NetworkPolicy(default_action="deny", egress=[]),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        service.create_sandbox(request)
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+
+
+@patch("src.services.docker.docker")
+def test_network_policy_requires_egress_image(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "bridge"
+    cfg.runtime.egress_image = None
+    service = DockerSandboxService(config=cfg)
+
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+        networkPolicy=NetworkPolicy(default_action="deny", egress=[]),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        service.create_sandbox(request)
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+
+
+@patch("src.services.docker.docker")
+def test_egress_sidecar_injection_and_capabilities(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+
+    def host_cfg_side_effect(**kwargs):
+        return kwargs
+
+    mock_client.api.create_host_config.side_effect = host_cfg_side_effect
+    mock_client.api.create_container.side_effect = [
+        {"Id": "sidecar-id"},
+        {"Id": "main-id"},
+    ]
+    mock_client.containers.get.side_effect = [MagicMock(id="sidecar-id"), MagicMock(id="main-id")]
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "bridge"
+    cfg.runtime.egress_image = "egress:latest"
+    service = DockerSandboxService(config=cfg)
+
+    req = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+        networkPolicy=NetworkPolicy(default_action="deny", egress=[]),
+    )
+
+    with patch.object(service, "_ensure_image_available"), patch.object(service, "_prepare_sandbox_runtime"):
+        service.create_sandbox(req)
+
+    assert len(mock_client.api.create_container.call_args_list) == 2
+    sidecar_call = mock_client.api.create_container.call_args_list[0]
+    main_call = mock_client.api.create_container.call_args_list[1]
+    sidecar_kwargs = sidecar_call.kwargs
+    main_kwargs = main_call.kwargs
+
+    # Sidecar host config should have NET_ADMIN and port bindings
+    assert "NET_ADMIN" in sidecar_kwargs["host_config"]["cap_add"]
+    assert "44772" in sidecar_kwargs["host_config"]["port_bindings"]
+    assert "8080" in sidecar_kwargs["host_config"]["port_bindings"]
+
+    # Main container should share sidecar netns, drop NET_ADMIN, and have no port bindings
+    assert main_kwargs["host_config"]["network_mode"] == "container:sidecar-id"
+    assert "NET_ADMIN" in set(main_kwargs["host_config"].get("cap_drop") or [])
+    assert "port_bindings" not in main_kwargs["host_config"]
+
+    # Main container labels should carry host port info
+    labels = main_kwargs["labels"]
+    assert labels.get("opensandbox.io/embedding-proxy-port")
+    assert labels.get("opensandbox.io/http-port")
+
+
+def test_expire_cleans_sidecar():
+    service = DockerSandboxService(config=_app_config())
+    mock_container = MagicMock()
+    mock_container.attrs = {"State": {"Running": False}, "Config": {"Labels": {}}}
+    mock_container.kill = MagicMock()
+    mock_container.remove = MagicMock()
+
+    with patch.object(service, "_get_container_by_sandbox_id", return_value=mock_container), patch.object(
+        service, "_remove_expiration_tracking"
+    ) as mock_remove, patch.object(service, "_cleanup_egress_sidecar") as mock_cleanup, patch.object(
+        service, "_docker_operation"
+    ) as mock_op:
+        mock_op.return_value.__enter__.return_value = None
+        mock_op.return_value.__exit__.return_value = None
+        service._expire_sandbox("sandbox-id")
+
+    mock_cleanup.assert_called_once_with("sandbox-id")
+    mock_remove.assert_called_once()
+
+
+def test_restore_cleans_orphan_sidecar():
+    cfg = _app_config()
+    service = DockerSandboxService(config=cfg)
+
+    orphan_sidecar = MagicMock()
+    orphan_sidecar.attrs = {"Config": {"Labels": {"opensandbox.io/egress-sidecar-for": "orphan-id"}}}
+
+    with patch.object(service.docker_client.containers, "list", return_value=[orphan_sidecar]), patch.object(
+        service, "_get_container_by_sandbox_id"
+    ) as mock_get, patch.object(service, "_cleanup_egress_sidecar") as mock_cleanup:
+        mock_get.side_effect = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={})
+        service._restore_existing_sandboxes()
+
+    mock_cleanup.assert_called_once_with("orphan-id")
 @patch("src.services.docker.docker")
 def test_create_sandbox_async_returns_provisioning(mock_docker):
     mock_client = MagicMock()

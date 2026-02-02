@@ -15,7 +15,7 @@
 
 English | [中文](docs/README_zh.md)
 
-OpenSandbox is a **universal sandbox platform** for AI application scenarios, providing **multi-language SDKs, unified sandbox protocols, and sandbox runtimes** for LLM-related capabilities (command execution, file operations, code execution, browser operations, Agent execution, etc.).
+OpenSandbox is a **general-purpose sandbox platform** for AI applications, offering multi-language SDKs, unified sandbox APIs, and Docker/Kubernetes runtimes for scenarios like Coding Agents, GUI Agents, Agent Evaluation, AI Code Execution, and RL Training.
 
 ## Features
 
@@ -121,51 +121,29 @@ OpenSandbox provides rich examples demonstrating sandbox usage in different scen
 
 #### 🎯 Basic Examples
 
-- **[code-interpreter](examples/code-interpreter/README.md)** - Complete Code Interpreter SDK example
-
-  - Run commands and execute Python/Java/Go/TypeScript code inside a sandbox
-  - Covers context creation, code execution, and result streaming
-  - Supports custom language versions
-
-- **[aio-sandbox](examples/aio-sandbox/README.md)** - All-in-One sandbox example
-  - Uses OpenSandbox SDK to create an [agent-sandbox](https://github.com/agent-infra/sandbox) instance
-  - Shows how to connect and use the full AIO sandbox capabilities
+- **[code-interpreter](examples/code-interpreter/README.md)** - End-to-end Code Interpreter SDK workflow in a sandbox.
+- **[aio-sandbox](examples/aio-sandbox/README.md)** - All-in-One sandbox setup using the OpenSandbox SDK.
+- **[agent-sandbox](examples/agent-sandbox/README.md)** - Run OpenSandbox on Kubernetes via [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox).
 
 #### 🤖 Coding Agent Integrations
 
-OpenSandbox integrates various Coding Agents, including Claude Code, Google Gemini, OpenAI Codex, and more.
-
-- **[claude-code](examples/claude-code/README.md)** - Claude Code integration
-- **[gemini-cli](examples/gemini-cli/README.md)** - Google Gemini CLI integration
-- **[codex-cli](examples/codex-cli/README.md)** - OpenAI Codex CLI integration
-- **[iflow-cli](examples/iflow-cli/README.md)** - iFLow CLI integration
-- **[langgraph](examples/langgraph/README.md)** - LangGraph integration
-- **[google-adk](examples/google-adk/README.md)** - Google ADK integration
+- **[claude-code](examples/claude-code/README.md)** - Run Claude Code inside OpenSandbox.
+- **[gemini-cli](examples/gemini-cli/README.md)** - Run Google Gemini CLI inside OpenSandbox.
+- **[codex-cli](examples/codex-cli/README.md)** - Run OpenAI Codex CLI inside OpenSandbox.
+- **[iflow-cli](examples/iflow-cli/README.md)** - Run iFLow CLI inside OpenSandbox.
+- **[langgraph](examples/langgraph/README.md)** - LangGraph state-machine workflow that creates/runs a sandbox job with fallback retry.
+- **[google-adk](examples/google-adk/README.md)** - Google ADK agent using OpenSandbox tools to write/read files and run commands.
 
 #### 🌐 Browser and Desktop Environments
 
-- **[chrome](examples/chrome/README.md)** - Chrome headless browser
+- **[chrome](examples/chrome/README.md)** - Headless Chromium with VNC and DevTools access for automation/debugging.
+- **[playwright](examples/playwright/README.md)** - Playwright + Chromium headless scraping and testing example.
+- **[desktop](examples/desktop/README.md)** - Full desktop environment in a sandbox with VNC access.
+- **[vscode](examples/vscode/README.md)** - code-server (VS Code Web) running inside a sandbox for remote dev.
 
-  - Launches Chromium browser with remote debugging functionality
-  - Provides VNC (port 5901) and DevTools (port 9222) access
-  - Suitable for scenarios requiring browser automation or debugging
+#### 🧠 ML and Training
 
-- **[playwright](examples/playwright/README.md)** - Playwright browser automation
-
-  - Uses Playwright + Chromium in headless mode to scrape web content
-  - Can extract web page titles, body text, and other information
-  - Suitable for web crawling and automated testing
-
-- **[desktop](examples/desktop/README.md)** - VNC desktop environment
-
-  - Launches a complete desktop environment (Xvfb + x11vnc + fluxbox)
-  - Remote access to sandbox desktop via VNC client
-  - Supports custom VNC password
-
-- **[vscode](examples/vscode/README.md)** - VS Code Web environment
-  - Runs code-server (VS Code web version) in a sandbox
-  - Access complete VS Code development environment through browser
-  - Suitable for remote development and code editing scenarios
+- **[rl-training](examples/rl-training/README.md)** - DQN CartPole training in a sandbox with checkpoints and summary output.
 
 For more details, please refer to [examples](examples/README.md) and the README files in each example directory.
 
@@ -173,14 +151,14 @@ For more details, please refer to [examples](examples/README.md) and the README 
 
 | Directory | Description                                                      |
 |-----------|------------------------------------------------------------------|
+| [`sdks/`](sdks/) | Multi-language SDKs (Python, Java/Kotlin, TypeScript/JavaScript) |
+| [`specs/`](specs/README.md) | OpenAPI specs and lifecycle specifications                      |
 | [`server/`](server/README.md) | Python FastAPI sandbox lifecycle server                          |
+| [`kubernetes/`](kubernetes/README.md) | Kubernetes deployment and examples                               |
 | [`components/execd/`](components/execd/README.md) | Sandbox execution daemon (commands and file operations)          |
 | [`components/ingress/`](components/ingress/README.md) | Sandbox traffic ingress proxy                                    |
 | [`components/egress/`](components/egress/README.md) | Sandbox network egress control                                   |
-| [`sdks/`](sdks/) | Multi-language SDKs (Python, Java/Kotlin, Typescript/Javascript) |
-| [`sandboxes/`](sandboxes/) | Sandbox runtime images (e.g., code-interpreter)                  |
-| [`kubernetes/`](kubernetes/README.md) | Kubernetes operator and batch sandbox support                    |
-| [`specs/`](specs/README.md) | OpenAPI specifications                                           |
+| [`sandboxes/`](sandboxes/) | Runtime sandbox implementations                                   |
 | [`examples/`](examples/README.md) | Integration examples and use cases                               |
 | [`oseps/`](oseps/README.md) | OpenSandbox Enhancement Proposals                                |
 | [`docs/`](docs/) | Architecture and design documentation                            |
@@ -202,8 +180,6 @@ For detailed architecture, see [docs/architecture.md](docs/architecture.md).
 
 This project is open source under the [Apache 2.0 License](LICENSE).
 
-You can use OpenSandbox for personal or commercial projects in compliance with the license terms.
-
 ## Roadmap
 
 ### SDK
@@ -213,7 +189,7 @@ You can use OpenSandbox for personal or commercial projects in compliance with t
 ### Server Runtime
 
 - [x] **OpenSandbox Kubernetes Runtime** - High-performance sandbox scheduling implementation (see [`kubernetes/`](kubernetes/README.md))
-- [x] **kubernetes-sigs/agent-sandbox Support** - Integration with [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox)
+- [x] **kubernetes-sigs/agent-sandbox Support** - Integration with [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) (see [OSEP-0002](oseps/0002-kubernetes-sigs-agent-sandbox-support.md) and [Example](examples/agent-sandbox/README.md))
 - [ ] **Declarative Network Isolation** - Network egress control with allow/deny rules for specific domains (see [OSEP-0001](oseps/0001-fqdn-based-egress-control.md))
   - [x] DNS-based egress control (Layer 1)
   - [ ] Network-based egress control (Layer 2)
@@ -221,5 +197,6 @@ You can use OpenSandbox for personal or commercial projects in compliance with t
 ## Contact and Discussion
 
 - Issues: Submit bugs, feature requests, or design discussions through GitHub Issues
+## Star History
 
-We welcome everyone to help build OpenSandbox into a universal sandbox infrastructure for AI scenarios.
+[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/OpenSandbox&type=date&legend=top-left)](https://www.star-history.com/#alibaba/OpenSandbox&type=date&legend=top-left)

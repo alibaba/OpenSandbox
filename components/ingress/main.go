@@ -19,17 +19,17 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"go.uber.org/zap/zapcore"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/kubernetes"
-	kubeclient "knative.dev/pkg/client/injection/kube/client"
 	"knative.dev/pkg/injection"
 	"knative.dev/pkg/logging"
 	"knative.dev/pkg/signals"
 
 	"github.com/alibaba/opensandbox/ingress/pkg/flag"
 	"github.com/alibaba/opensandbox/ingress/pkg/proxy"
+	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
 	"github.com/alibaba/opensandbox/ingress/version"
 )
 
@@ -37,26 +37,41 @@ func main() {
 	version.EchoVersion()
 
 	flag.InitFlags()
-	if flag.IngressLabelKey == "" || flag.Namespace == "" {
-		log.Panicf("'-ingress-label-key' and/or '-namespace' not set.")
+	if flag.Namespace == "" {
+		log.Panicf("'-namespace' not set.")
 	}
 
 	cfg := injection.ParseAndGetRESTConfigOrDie()
 	cfg.ContentType = runtime.ContentTypeProtobuf
 	cfg.UserAgent = "opensandbox-ingress/" + version.GitCommit
 
-	ctx := injection.WithNamespaceScope(signals.NewContext(), flag.Namespace)
+	ctx := signals.NewContext()
 	ctx = withLogger(ctx, flag.LogLevel)
 
-	clientset := kubernetes.NewForConfigOrDie(cfg)
-	ctx = context.WithValue(ctx, kubeclient.Key{}, clientset)
+	// Create sandbox provider factory
+	providerFactory := sandbox.NewProviderFactory(
+		cfg,
+		flag.Namespace,
+		time.Second*30, // resync period
+	)
 
-	reverseProxy := proxy.NewProxy(ctx)
+	// Create sandbox provider based on provider type
+	sandboxProvider, err := providerFactory.CreateProvider(flag.ProviderType)
+	if err != nil {
+		log.Panicf("Failed to create sandbox provider: %v", err)
+	}
+
+	// Start provider (includes cache sync)
+	if err := sandboxProvider.Start(ctx); err != nil {
+		log.Panicf("Failed to start sandbox provider: %v", err)
+	}
+
+	// Create reverse proxy with sandbox provider
+	reverseProxy := proxy.NewProxy(ctx, sandboxProvider)
 	http.Handle("/", reverseProxy)
 	http.HandleFunc("/status.ok", proxy.Healthz)
 
-	err := http.ListenAndServe(fmt.Sprintf(":%v", flag.Port), nil)
-	if err != nil {
+	if err := http.ListenAndServe(fmt.Sprintf(":%v", flag.Port), nil); err != nil {
 		log.Panicf("Error starting http server: %v", err)
 	}
 

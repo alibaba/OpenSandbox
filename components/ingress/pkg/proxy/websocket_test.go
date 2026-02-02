@@ -23,30 +23,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alibaba/opensandbox/ingress/pkg/flag"
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes/fake"
-	kubeclient "knative.dev/pkg/client/injection/kube/client"
-	logging2 "knative.dev/pkg/logging"
+	"knative.dev/pkg/logging"
 )
 
 func Test_WebSocketProxy(t *testing.T) {
-	pod1 := MakePod().
-		Name("sandbox-x").
-		Namespace(flag.Namespace).
-		IP("127.0.0.1").
-		Phase(corev1.PodPending).
-		Label(flag.IngressLabelKey, strings.ReplaceAll(uuid.New().String(), "-", "")).
-		Obj()
+	// Create mock provider
+	provider := &mockProvider{
+		endpoints: map[string]string{
+			"test-sandbox": "127.0.0.1",
+		},
+	}
 
-	clientset := fake.NewSimpleClientset(pod1)
-
-	ctx := context.WithValue(context.Background(), kubeclient.Key{}, clientset)
-	Logger = logging2.FromContext(ctx)
-	proxy := NewProxy(ctx)
+	ctx := context.Background()
+	Logger = logging.FromContext(ctx)
+	proxy := NewProxy(ctx, provider)
 
 	http.Handle("/ws", proxy)
 	proxyPort, err := findAvailablePort()
@@ -97,7 +89,7 @@ func Test_WebSocketProxy(t *testing.T) {
 	// frontend server, dial now our proxy, which will reverse proxy our
 	// message to the backend websocket server.
 	h := http.Header{}
-	h.Set(SandboxIngress, pod1.Labels[flag.IngressLabelKey]+"-"+strconv.Itoa(backendPort))
+	h.Set(SandboxIngress, "test-sandbox-"+strconv.Itoa(backendPort))
 	conn, _, err := websocket.DefaultDialer.Dial(proxyURL+"/ws", h)
 	if err != nil {
 		t.Fatal(err)

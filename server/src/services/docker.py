@@ -35,6 +35,7 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from threading import Lock, Timer
 from typing import Any, Dict, Optional
+import json
 from uuid import uuid4
 
 import docker
@@ -52,7 +53,7 @@ from src.api.schema import (
     RenewSandboxExpirationRequest,
     RenewSandboxExpirationResponse,
     Sandbox,
-    SandboxStatus,
+    SandboxStatus, NetworkPolicy,
 )
 from src.config import AppConfig, get_config
 from src.services.constants import (
@@ -95,6 +96,8 @@ HOST_NETWORK_MODE = "host"
 BRIDGE_NETWORK_MODE = "bridge"
 PENDING_FAILURE_TTL_SECONDS = int(os.environ.get("PENDING_FAILURE_TTL", "3600"))
 DOCKER_CLIENT_TIMEOUT = _resolve_docker_timeout()
+EGRESS_RULES_ENV = "OPENSANDBOX_EGRESS_RULES"
+EGRESS_SIDECAR_LABEL = "opensandbox.io/egress-sidecar-for"
 
 
 @dataclass
@@ -292,26 +295,31 @@ class DockerSandboxService(SandboxService):
             logger.warning("Failed to remove expired sandbox %s: %s", sandbox_id, exc)
 
         self._remove_expiration_tracking(sandbox_id)
+        # Ensure sidecar is also cleaned up on expiration
+        self._cleanup_egress_sidecar(sandbox_id)
 
     def _restore_existing_sandboxes(self) -> None:
         """On startup, rebuild expiration timers for containers already running."""
         try:
-            containers = self.docker_client.containers.list(
-                all=True,
-                filters={"label": [SANDBOX_ID_LABEL]},
-            )
+            containers = self.docker_client.containers.list(all=True)
         except DockerException as exc:
             logger.warning("Failed to restore existing sandboxes: %s", exc)
             return
 
         restored = 0
+        seen_sidecars: set[str] = set()
         now = datetime.now(timezone.utc)
         for container in containers:
             labels = container.attrs.get("Config", {}).get("Labels") or {}
+            # Sidecar only
+            sidecar_for = labels.get(EGRESS_SIDECAR_LABEL)
+            if sidecar_for:
+                seen_sidecars.add(sidecar_for)
+                continue
+
             sandbox_id = labels.get(SANDBOX_ID_LABEL)
             if not sandbox_id:
                 continue
-            # Sandbox IDs now follow standard UUID4 format (hyphenated strings)
             expires_label = labels.get(SANDBOX_EXPIRES_AT_LABEL)
             if expires_label:
                 expires_at = parse_timestamp(expires_label)
@@ -329,6 +337,16 @@ class DockerSandboxService(SandboxService):
 
             self._schedule_expiration(sandbox_id, expires_at)
             restored += 1
+
+        # Cleanup orphan sidecars (no matching sandbox container)
+        for orphan_id in seen_sidecars:
+            try:
+                self._get_container_by_sandbox_id(orphan_id)
+            except HTTPException as exc:
+                if exc.status_code == status.HTTP_404_NOT_FOUND:
+                    self._cleanup_egress_sidecar(orphan_id)
+                else:
+                    logger.warning("Failed to check sandbox %s for orphan sidecar cleanup: %s", orphan_id, exc)
 
         if restored:
             logger.info("Restored expiration timers for %d sandbox(es).", restored)
@@ -609,6 +627,7 @@ class DockerSandboxService(SandboxService):
         """
         ensure_entrypoint(request.entrypoint)
         ensure_metadata_labels(request.metadata)
+        self._ensure_network_policy_support(request)
         sandbox_id, created_at, expires_at = self._prepare_creation_context(request)
         return self._provision_sandbox(sandbox_id, request, created_at, expires_at)
 
@@ -655,6 +674,7 @@ class DockerSandboxService(SandboxService):
             containers = self.docker_client.containers.list(all=True, filters={"label": label_selector})
         except DockerException as exc:
             logger.warning("sandbox=%s | cleanup listing failed containers: %s", sandbox_id, exc)
+            self._cleanup_egress_sidecar(sandbox_id)
             return
 
         for container in containers:
@@ -663,6 +683,8 @@ class DockerSandboxService(SandboxService):
                     container.remove(force=True)
             except DockerException as exc:
                 logger.warning("sandbox=%s | failed to remove leftover container %s: %s", sandbox_id, container.id, exc)
+        # Always attempt to cleanup sidecar as well
+        self._cleanup_egress_sidecar(sandbox_id)
 
     def _remove_pending_sandbox(self, sandbox_id: str) -> None:
         with self._pending_lock:
@@ -764,148 +786,62 @@ class DockerSandboxService(SandboxService):
         created_at: datetime,
         expires_at: datetime,
     ) -> CreateSandboxResponse:
-        metadata = request.metadata or {}
-        labels = {key: str(value) for key, value in metadata.items()}
-        labels[SANDBOX_ID_LABEL] = sandbox_id
+        labels, environment = self._build_labels_and_env(sandbox_id, request, expires_at)
+        image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
+        mem_limit, nano_cpus = self._resolve_resource_limits(request)
 
-        env_dict = request.env or {}
-        environment = []
-        for key, value in env_dict.items():
-            if value is None:
-                continue
-            environment.append(f"{key}={value}")
-
-        image_uri = request.image.uri
-        auth_config = None
-        if request.image.auth:
-            auth_config = {
-                "username": request.image.auth.username,
-                "password": request.image.auth.password,
-            }
-
-        self._ensure_image_available(image_uri, auth_config, sandbox_id)
-
-        resource_limits = request.resource_limits.root or {}
-        mem_limit = parse_memory_limit(resource_limits.get("memory"))
-        nano_cpus = parse_nano_cpus(resource_limits.get("cpu"))
-
-        host_config_kwargs: Dict[str, Any] = {"network_mode": self.network_mode}
-        security_opts: list[str] = []
-        docker_cfg = self.app_config.docker
-        if docker_cfg.no_new_privileges:
-            security_opts.append("no-new-privileges:true")
-        if docker_cfg.apparmor_profile:
-            security_opts.append(f"apparmor={docker_cfg.apparmor_profile}")
-        if docker_cfg.seccomp_profile:
-            security_opts.append(f"seccomp={docker_cfg.seccomp_profile}")
-        if security_opts:
-            host_config_kwargs["security_opt"] = security_opts
-        if docker_cfg.drop_capabilities:
-            host_config_kwargs["cap_drop"] = docker_cfg.drop_capabilities
-        if docker_cfg.pids_limit is not None:
-            host_config_kwargs["pids_limit"] = docker_cfg.pids_limit
-        if mem_limit:
-            host_config_kwargs["mem_limit"] = mem_limit
-        if nano_cpus:
-            host_config_kwargs["nano_cpus"] = nano_cpus
-
+        sidecar_container = None
+        host_config_kwargs: Dict[str, Any]
         exposed_ports: Optional[list[str]] = None
-        if self.network_mode == BRIDGE_NETWORK_MODE:
-            host_execd_port = self._allocate_host_port()
-            host_http_port = self._allocate_host_port()
-            if host_execd_port is None or host_http_port is None:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={
-                        "code": SandboxErrorCodes.CONTAINER_START_FAILED,
-                        "message": "Failed to allocate host ports for sandbox container.",
-                    },
-                )
-            # ensure distinct ports
-            while host_http_port == host_execd_port:
-                host_http_port = self._allocate_host_port()
-                if host_http_port is None:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail={
-                            "code": SandboxErrorCodes.CONTAINER_START_FAILED,
-                            "message": "Failed to allocate distinct host ports for sandbox container.",
-                        },
-                    )
 
-            port_bindings = {
-                "44772": ("0.0.0.0", host_execd_port),
-                "8080": ("0.0.0.0", host_http_port),
-            }
-            host_config_kwargs["port_bindings"] = port_bindings
-            exposed_ports = list(port_bindings.keys())
+        if request.network_policy:
+            host_execd_port, host_http_port = self._allocate_distinct_host_ports()
+            sidecar_container = self._start_egress_sidecar(
+                sandbox_id=sandbox_id,
+                network_policy=request.network_policy,
+                host_execd_port=host_execd_port,
+                host_http_port=host_http_port,
+            )
             labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
             labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
+            host_config_kwargs = self._base_host_config_kwargs(
+                mem_limit, nano_cpus, f"container:{sidecar_container.id}"
+            )
+            # Drop NET_ADMIN for the main container; only the sidecar should keep it
+            cap_drop = set(host_config_kwargs.get("cap_drop") or [])
+            cap_drop.add("NET_ADMIN")
+            if cap_drop:
+                host_config_kwargs["cap_drop"] = list(cap_drop)
+        else:
+            host_config_kwargs = self._base_host_config_kwargs(mem_limit, nano_cpus, self.network_mode)
+            if self.network_mode == BRIDGE_NETWORK_MODE:
+                host_execd_port, host_http_port = self._allocate_distinct_host_ports()
+                port_bindings = {
+                    "44772": ("0.0.0.0", host_execd_port),
+                    "8080": ("0.0.0.0", host_http_port),
+                }
+                host_config_kwargs["port_bindings"] = port_bindings
+                exposed_ports = list(port_bindings.keys())
+                labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
+                labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
 
-        labels[SANDBOX_EXPIRES_AT_LABEL] = expires_at.isoformat()
-
-        container_name = f"sandbox-{sandbox_id}"
-
-        # Keep user command in CMD and override container ENTRYPOINT with our bootstrap.
-        # This avoids relying on the base image ENTRYPOINT (which may be a non-shell binary).
-        bootstrap_command = request.entrypoint
-
-        host_config = self.docker_client.api.create_host_config(**host_config_kwargs)
-        container_id: Optional[str] = None
-        container = None
         try:
-            with self._docker_operation("create sandbox container", sandbox_id):
-                response = self.docker_client.api.create_container(
-                    image=image_uri,
-                    entrypoint=[BOOTSTRAP_PATH],
-                    command=bootstrap_command,
-                    ports=exposed_ports,
-                    name=container_name,
-                    environment=environment,
-                    labels=labels,
-                    host_config=host_config,
-                )
-            container_id = response.get("Id")
-            if not container_id:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={
-                        "code": SandboxErrorCodes.CONTAINER_START_FAILED,
-                        "message": "Docker did not return a container ID.",
-                    },
-                )
-            container = self.docker_client.containers.get(container_id)
-            self._prepare_sandbox_runtime(container, sandbox_id)
-            with self._docker_operation("start sandbox container", sandbox_id):
-                container.start()
-        except DockerException as exc:
-            if container is not None:
+            self._create_and_start_container(
+                sandbox_id,
+                image_uri,
+                request.entrypoint,
+                labels,
+                environment,
+                host_config_kwargs,
+                exposed_ports,
+            )
+        except Exception:
+            if sidecar_container is not None:
                 try:
-                    with self._docker_operation("cleanup sandbox container", sandbox_id):
-                        container.remove(force=True)
+                    sidecar_container.remove(force=True)
                 except DockerException as cleanup_exc:
-                    logger.warning(
-                        "Failed to cleanup container for sandbox %s: %s",
-                        sandbox_id,
-                        cleanup_exc,
-                    )
-            elif container_id:
-                try:
-                    with self._docker_operation("cleanup sandbox container (API)", sandbox_id):
-                        self.docker_client.api.remove_container(container_id, force=True)
-                except DockerException as cleanup_exc:
-                    logger.warning(
-                        "Failed to cleanup container for sandbox %s: %s",
-                        sandbox_id,
-                        cleanup_exc,
-                    )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "code": SandboxErrorCodes.CONTAINER_START_FAILED,
-                    "message": f"Failed to create or start container: {str(exc)}",
-                },
-            ) from exc
+                    logger.warning("Failed to cleanup egress sidecar for sandbox %s: %s", sandbox_id, cleanup_exc)
+            raise
 
         status_info = SandboxStatus(
             state="Running",
@@ -914,7 +850,6 @@ class DockerSandboxService(SandboxService):
             last_transition_at=created_at,
         )
 
-        # Track timeout so the sandbox is cleaned up automatically
         self._schedule_expiration(sandbox_id, expires_at)
 
         return CreateSandboxResponse(
@@ -925,6 +860,29 @@ class DockerSandboxService(SandboxService):
             createdAt=created_at,
             entrypoint=request.entrypoint,
         )
+
+    def _ensure_network_policy_support(self, request: CreateSandboxRequest) -> None:
+        """
+        Validate that network policy can be honored under the current runtime config.
+        """
+        if not request.network_policy:
+            return
+        if self.network_mode == HOST_NETWORK_MODE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": "networkPolicy is not supported when docker network_mode=host.",
+                },
+            )
+        if not self.app_config.runtime.egress_image:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": "runtime.egress_image must be configured when networkPolicy is provided.",
+                },
+            )
 
     def list_sandboxes(self, request: ListSandboxesRequest) -> ListSandboxesResponse:
         """
@@ -1048,6 +1006,7 @@ class DockerSandboxService(SandboxService):
             ) from exc
         finally:
             self._remove_expiration_tracking(sandbox_id)
+            self._cleanup_egress_sidecar(sandbox_id)
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
@@ -1242,6 +1201,262 @@ class DockerSandboxService(SandboxService):
 
         ip_address = self._extract_bridge_ip(container)
         return Endpoint(endpoint=f"{ip_address}:{port}")
+
+    # ---------------------------
+    # Common helpers for creation
+    # ---------------------------
+    def _build_labels_and_env(
+                self,
+                sandbox_id: str,
+                request: CreateSandboxRequest,
+                expires_at: datetime,
+        ) -> tuple[dict[str, str], list[str]]:
+            metadata = request.metadata or {}
+            labels = {key: str(value) for key, value in metadata.items()}
+            labels[SANDBOX_ID_LABEL] = sandbox_id
+            labels[SANDBOX_EXPIRES_AT_LABEL] = expires_at.isoformat()
+
+            env_dict = request.env or {}
+            environment = []
+            for key, value in env_dict.items():
+                if value is None:
+                    continue
+                environment.append(f"{key}={value}")
+            return labels, environment
+
+    def _resolve_image_auth(self, request: CreateSandboxRequest, sandbox_id: str) -> tuple[str, Optional[dict]]:
+            image_uri = request.image.uri
+            auth_config = None
+            if request.image.auth:
+                auth_config = {
+                    "username": request.image.auth.username,
+                    "password": request.image.auth.password,
+                }
+            self._ensure_image_available(image_uri, auth_config, sandbox_id)
+            return image_uri, auth_config
+
+    def _resolve_resource_limits(self, request: CreateSandboxRequest) -> tuple[Optional[int], Optional[int]]:
+            resource_limits = request.resource_limits.root or {}
+            mem_limit = parse_memory_limit(resource_limits.get("memory"))
+            nano_cpus = parse_nano_cpus(resource_limits.get("cpu"))
+            return mem_limit, nano_cpus
+
+    def _base_host_config_kwargs(
+                self,
+                mem_limit: Optional[int],
+                nano_cpus: Optional[int],
+                network_mode: str,
+        ) -> Dict[str, Any]:
+            host_config_kwargs: Dict[str, Any] = {"network_mode": network_mode}
+            security_opts: list[str] = []
+            docker_cfg = self.app_config.docker
+            if docker_cfg.no_new_privileges:
+                security_opts.append("no-new-privileges:true")
+            if docker_cfg.apparmor_profile:
+                security_opts.append(f"apparmor={docker_cfg.apparmor_profile}")
+            if docker_cfg.seccomp_profile:
+                security_opts.append(f"seccomp={docker_cfg.seccomp_profile}")
+            if security_opts:
+                host_config_kwargs["security_opt"] = security_opts
+            if docker_cfg.drop_capabilities:
+                host_config_kwargs["cap_drop"] = docker_cfg.drop_capabilities
+            if docker_cfg.pids_limit is not None:
+                host_config_kwargs["pids_limit"] = docker_cfg.pids_limit
+            if mem_limit:
+                host_config_kwargs["mem_limit"] = mem_limit
+            if nano_cpus:
+                host_config_kwargs["nano_cpus"] = nano_cpus
+            return host_config_kwargs
+
+    def _allocate_distinct_host_ports(self) -> tuple[int, int]:
+            host_execd_port = self._allocate_host_port()
+            host_http_port = self._allocate_host_port()
+            if host_execd_port is None or host_http_port is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": SandboxErrorCodes.CONTAINER_START_FAILED,
+                        "message": "Failed to allocate host ports for sandbox container.",
+                    },
+                )
+            while host_http_port == host_execd_port:
+                host_http_port = self._allocate_host_port()
+                if host_http_port is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "code": SandboxErrorCodes.CONTAINER_START_FAILED,
+                            "message": "Failed to allocate distinct host ports for sandbox container.",
+                        },
+                    )
+            return host_execd_port, host_http_port
+
+    def _cleanup_egress_sidecar(self, sandbox_id: str) -> None:
+        """
+        Remove egress sidecar associated with sandbox_id (best effort).
+        """
+        try:
+            containers = self.docker_client.containers.list(
+                all=True, filters={"label": f"{EGRESS_SIDECAR_LABEL}={sandbox_id}"}
+            )
+        except DockerException as exc:
+            logger.warning("sandbox=%s | failed to list egress sidecar: %s", sandbox_id, exc)
+            return
+
+        for container in containers:
+            try:
+                with self._docker_operation("cleanup egress sidecar", sandbox_id):
+                    container.remove(force=True)
+            except DockerException as exc:
+                logger.warning("sandbox=%s | failed to remove egress sidecar %s: %s", sandbox_id, container.id, exc)
+
+    def _start_egress_sidecar(
+        self,
+        sandbox_id: str,
+        network_policy: NetworkPolicy,
+        host_execd_port: int,
+        host_http_port: int,
+    ):
+        sidecar_name = f"sandbox-egress-{sandbox_id}"
+        sidecar_labels = {
+            EGRESS_SIDECAR_LABEL: sandbox_id,
+        }
+
+        # Ensure sidecar image is available before create/start.
+        self._ensure_image_available(self.app_config.runtime.egress_image, None, sandbox_id)
+
+        policy_payload = json.dumps(network_policy.model_dump(by_alias=True, exclude_none=True))
+        sidecar_env = [f"{EGRESS_RULES_ENV}={policy_payload}"]
+
+        sidecar_host_config_kwargs: dict[str, Any] = {
+            "network_mode": BRIDGE_NETWORK_MODE,
+            "cap_add": ["NET_ADMIN"],
+            "port_bindings": {
+                "44772": ("0.0.0.0", host_execd_port),
+                "8080": ("0.0.0.0", host_http_port),
+            },
+            # FIXME(Pangjiping): Disable IPv6 in the shared namespace to keep policy enforcement consistent.
+            "sysctls": {
+                "net.ipv6.conf.all.disable_ipv6": 1,
+                "net.ipv6.conf.default.disable_ipv6": 1,
+                "net.ipv6.conf.lo.disable_ipv6": 1,
+            },
+        }
+
+        sidecar_host_config = self.docker_client.api.create_host_config(**sidecar_host_config_kwargs)
+
+        sidecar_container = None
+        try:
+            with self._docker_operation("create egress sidecar", sandbox_id):
+                sidecar_resp = self.docker_client.api.create_container(
+                    image=self.app_config.runtime.egress_image,
+                    name=sidecar_name,
+                    host_config=sidecar_host_config,
+                    labels=sidecar_labels,
+                    environment=sidecar_env,
+                    # Expose the ports that have host bindings so Docker publishes them in bridge mode.
+                    ports=["44772", "8080"],
+                )
+            sidecar_id = sidecar_resp.get("Id")
+            if not sidecar_id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": SandboxErrorCodes.CONTAINER_START_FAILED,
+                        "message": "Docker did not return an egress sidecar container ID.",
+                    },
+                )
+            sidecar_container = self.docker_client.containers.get(sidecar_id)
+            with self._docker_operation("start egress sidecar", sandbox_id):
+                sidecar_container.start()
+            return sidecar_container
+        except Exception:
+            if sidecar_container is not None:
+                try:
+                    sidecar_container.remove(force=True)
+                except DockerException:
+                    logger.warning("Failed to cleanup egress sidecar for sandbox %s", sandbox_id)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.CONTAINER_START_FAILED,
+                    "message": "Egress sidecar container failed to start.",
+                },
+            )
+
+    def _create_and_start_container(
+        self,
+        sandbox_id: str,
+        image_uri: str,
+        bootstrap_command: list[str],
+        labels: dict[str, str],
+        environment: list[str],
+        host_config_kwargs: Dict[str, Any],
+        exposed_ports: Optional[list[str]],
+    ):
+        # Normalize single-string entrypoint containing spaces to avoid shell path issues in bootstrap.
+        if len(bootstrap_command) == 1 and " " in bootstrap_command[0]:
+            import shlex
+
+            bootstrap_command = shlex.split(bootstrap_command[0])
+        
+        host_config = self.docker_client.api.create_host_config(**host_config_kwargs)
+        container = None
+        container_id: Optional[str] = None
+        try:
+            with self._docker_operation("create sandbox container", sandbox_id):
+                response = self.docker_client.api.create_container(
+                    image=image_uri,
+                    entrypoint=[BOOTSTRAP_PATH],
+                    command=bootstrap_command,
+                    ports=exposed_ports,
+                    name=f"sandbox-{sandbox_id}",
+                    environment=environment,
+                    labels=labels,
+                    host_config=host_config,
+                )
+            container_id = response.get("Id")
+            if not container_id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": SandboxErrorCodes.CONTAINER_START_FAILED,
+                        "message": "Docker did not return a container ID.",
+                    },
+                )
+            container = self.docker_client.containers.get(container_id)
+            self._prepare_sandbox_runtime(container, sandbox_id)
+            with self._docker_operation("start sandbox container", sandbox_id):
+                container.start()
+            return container
+        except DockerException as exc:
+            if container is not None:
+                try:
+                    with self._docker_operation("cleanup sandbox container", sandbox_id):
+                        container.remove(force=True)
+                except DockerException as cleanup_exc:
+                    logger.warning(
+                        "Failed to cleanup container for sandbox %s: %s",
+                        sandbox_id,
+                        cleanup_exc,
+                    )
+            elif container_id:
+                try:
+                    with self._docker_operation("cleanup sandbox container (API)", sandbox_id):
+                        self.docker_client.api.remove_container(container_id, force=True)
+                except DockerException as cleanup_exc:
+                    logger.warning(
+                        "Failed to cleanup container for sandbox %s: %s",
+                        sandbox_id,
+                        cleanup_exc,
+                    )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.CONTAINER_START_FAILED,
+                    "message": f"Failed to create or start container: {str(exc)}",
+                },
+            ) from exc
 
     @staticmethod
     def _parse_host_port_label(value: Optional[str], label_name: str) -> Optional[int]:

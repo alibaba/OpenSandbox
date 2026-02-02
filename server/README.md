@@ -10,7 +10,7 @@ A production-grade, FastAPI-based service for managing the lifecycle of containe
 - **Lifecycle APIs**: Standardized REST interfaces for create, start, pause, resume, delete
 - **Pluggable runtimes**:
   - **Docker**: Production-ready
-  - **Kubernetes**: Configuration placeholder, under development
+  - **Kubernetes**: Supported (see `kubernetes/` for deployment)
 - **Automatic expiration**: Configurable TTL with renewal
 - **Access control**: API Key authentication (`OPEN-SANDBOX-API-KEY`); can be disabled for local/dev
 - **Networking modes**:
@@ -33,7 +33,7 @@ A production-grade, FastAPI-based service for managing the lifecycle of containe
 - **Package Manager**: [uv](https://github.com/astral-sh/uv) (recommended) or pip
 - **Runtime Backend**:
   - Docker Engine 20.10+ (for Docker runtime)
-  - Kubernetes 1.21+ (for Kubernetes runtime, when available)
+  - Kubernetes 1.21+ (for Kubernetes runtime)
 - **Operating System**: Linux, macOS, or Windows with WSL2
 
 ## Quick Start
@@ -77,7 +77,7 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
 
    [runtime]
    type = "docker"
-   execd_image = "opensandbox/execd:v1.0.3"
+   execd_image = "opensandbox/execd:v1.0.5"
 
    [docker]
    network_mode = "host"  # Containers share host network; only one sandbox instance at a time
@@ -93,7 +93,7 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
 
    [runtime]
    type = "docker"
-   execd_image = "opensandbox/execd:v1.0.3"
+   execd_image = "opensandbox/execd:v1.0.5"
 
    [docker]
    network_mode = "bridge"  # Isolated container networking
@@ -111,6 +111,37 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
    seccomp_profile = ""        # path or profile name; empty uses Docker default
    ```
    Further reading on Docker container security: https://docs.docker.com/engine/security/
+
+### (Optional) Egress sidecar for `networkPolicy`
+
+- Configure the sidecar image (used only when requests include `networkPolicy`):
+   ```toml
+   [runtime]
+   type = "docker"
+   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.3"
+   egress_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:latest"
+   ```
+- Supported only in Docker bridge mode; requests with `networkPolicy` are rejected when `network_mode=host`.
+- Main container shares the sidecar netns and explicitly drops `NET_ADMIN`; the sidecar keeps `NET_ADMIN` to manage iptables.
+- IPv6 is disabled in the shared namespace when the egress sidecar is injected to keep policy enforcement consistent.
+- Sidecar image is pulled before start; delete/expire/failure paths attempt to clean up the sidecar as well.
+- Request example (`CreateSandboxRequest` with `networkPolicy`):
+   ```json
+   {
+     "image": {"uri": "python:3.11-slim"},
+     "entrypoint": ["python", "-m", "http.server", "8000"],
+     "timeout": 3600,
+     "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+     "networkPolicy": {
+       "defaultAction": "deny",
+       "egress": [
+         {"action": "allow", "target": "pypi.org"},
+         {"action": "allow", "target": "*.python.org"}
+       ]
+     }
+   }
+   ```
+- When `networkPolicy` is empty or omitted, no sidecar is injected (allow-all at start).
 
 ### Run the server
 
@@ -332,10 +363,11 @@ curl -X DELETE \
 
 ### Runtime configuration
 
-| Key | Type | Required | Description |
-|-----|------|----------|-------------|
-| `runtime.type` | string | Yes | Runtime implementation (`"docker"` or `"kubernetes"`) |
-| `runtime.execd_image` | string | Yes | Container image with execd binary |
+| Key                    | Type   | Required | Description                                           |
+|------------------------|--------|----------|-------------------------------------------------------|
+| `runtime.type`         | string | Yes      | Runtime implementation (`"docker"` or `"kubernetes"`) |
+| `runtime.execd_image`  | string | Yes      | Container image with execd binary                     |
+| `runtime.egress_image` | string | No       | Container image with egress binary                    |
 
 ### Docker configuration
 

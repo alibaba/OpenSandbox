@@ -71,6 +71,7 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:latest"
+          egress_image = "opensandbox/egress:latest"
           [docker]
           network_mode = "${{ matrix.network }}"
           EOF
@@ -81,12 +82,10 @@ jobs:
           # Wait for server to start
           sleep 10
 
-          # Show server logs for debugging
-          cat app.log
-
           # Run smoke test
           chmod +x tests/smoke.sh
           ./tests/smoke.sh
-
-          # Show final logs
-          cat app.log
+      - name: Show logs
+        if: always()
+        run: |
+          cat server/app.log

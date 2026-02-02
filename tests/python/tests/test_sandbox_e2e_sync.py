@@ -243,7 +243,6 @@ class TestSandboxE2ESync:
         finally:
             sandbox2.close()
 
-    @pytest.mark.skip(reason="server-side networkPolicy not fully supported yet")
     @pytest.mark.timeout(120)
     @pytest.mark.order(1)
     def test_01a_network_policy_create(self) -> None:
@@ -263,9 +262,11 @@ class TestSandboxE2ESync:
             ),
         )
         try:
-            result = sandbox.commands.run("echo policy-ok")
+            time.sleep(5)
+            result = sandbox.commands.run("curl -I https://www.github.com")
+            assert result.error is not None
+            result = sandbox.commands.run("curl -I https://pypi.org")
             assert result.error is None
-            assert result.logs.stdout[0].text == "policy-ok"
         finally:
             try:
                 sandbox.kill()

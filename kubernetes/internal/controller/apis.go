@@ -20,6 +20,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils"
+	pkgutils "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/utils"
 )
 
 const (
@@ -31,9 +32,10 @@ const (
 	AnnoPoolAllocGenerationKey = "pool.opensandbox.io/alloc-generation"
 
 	FinalizerTaskCleanup = "batch-sandbox.sandbox.opensandbox.io/task-cleanup"
-
-	AnnotationSandboxEndpoints = "sandbox.opensandbox.io/endpoints"
 )
+
+// AnnotationSandboxEndpoints Use the exported constant from pkg/utils
+var AnnotationSandboxEndpoints = pkgutils.AnnotationEndpoints
 
 type SandboxAllocation struct {
 	Pods []string `json:"pods"`

@@ -221,7 +221,6 @@ public class SandboxE2ETest extends BaseE2ETest {
     @Test
     @Order(2)
     @DisplayName("Sandbox create with networkPolicy")
-    @Disabled("server-side networkPolicy not fully supported yet")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     void testSandboxCreateWithNetworkPolicy() {
         NetworkPolicy networkPolicy =
@@ -242,15 +241,25 @@ public class SandboxE2ETest extends BaseE2ETest {
                         .readyTimeout(Duration.ofSeconds(60))
                         .networkPolicy(networkPolicy)
                         .build();
+        try {
+            Thread.sleep(5);
+        } catch (InterruptedException ignored) {
+        }
 
         try {
             Execution r =
                     policySandbox
                             .commands()
-                            .run(RunCommandRequest.builder().command("echo policy-ok").build());
+                            .run(RunCommandRequest.builder().command("curl -I https://www.github.com").build());
+            assertNotNull(r);
+            assertNotNull(r.getError());
+
+            r =
+                    policySandbox
+                            .commands()
+                            .run(RunCommandRequest.builder().command("curl -I https://pypi.org").build());
             assertNotNull(r);
             assertNull(r.getError());
-            assertEquals("policy-ok", r.getLogs().getStdout().get(0).getText());
         } finally {
             try {
                 policySandbox.kill();

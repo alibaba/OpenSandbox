@@ -143,6 +143,11 @@ class RuntimeConfig(BaseModel):
         description="Container image that contains the execd binary for sandbox initialization.",
         min_length=1,
     )
+    egress_image: Optional[str] = Field(
+        default=None,
+        description="Container image for the egress sidecar (used when network policy is requested).",
+        min_length=1,
+    )
 
 
 class DockerConfig(BaseModel):

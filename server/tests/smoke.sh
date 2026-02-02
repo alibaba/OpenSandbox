@@ -51,18 +51,13 @@ error() {
 
 BASE_URL="${BASE_URL:-http://localhost:32888}"
 BASE_API_URL="${BASE_URL}/v1"
-API_KEY_HEADER=()
-if [[ -n "${OPEN_SANDBOX_API_KEY:-}" ]]; then
-  API_KEY_HEADER=(-H "OPEN-SANDBOX-API-KEY: ${OPEN_SANDBOX_API_KEY}")
-fi
-
 curl_json() {
-  curl -sfSL "$@" "${API_KEY_HEADER[@]}"
+  curl -sfSL "$@"
 }
 
 curl_json_status() {
   # Returns body + trailing status code line to allow non-2xx handling.
-  curl -sSL -w "\n%{http_code}" "$@" "${API_KEY_HEADER[@]}"
+  curl -sSL -w "\n%{http_code}" "$@"
 }
 
 wait_for_running() {
@@ -108,6 +103,23 @@ wait_for_expired() {
     if (( SECONDS >= deadline )); then
       error "Sandbox ${sandbox_id} did not expire within expected window (last status ${status})."
       echo "${body}"
+      return 1
+    fi
+    sleep 2
+  done
+}
+
+wait_for_sidecar_gone() {
+  local sandbox_id=$1
+  local deadline=$((SECONDS + 20))
+  while true; do
+    if ! docker ps -a --filter "label=opensandbox.io/egress-sidecar-for=${sandbox_id}" -q | grep -q .; then
+      info "No sidecar remaining for sandbox ${sandbox_id}"
+      return 0
+    fi
+    if (( SECONDS >= deadline )); then
+      error "Sidecar for sandbox ${sandbox_id} still present after timeout"
+      docker ps -a --filter "label=opensandbox.io/egress-sidecar-for=${sandbox_id}"
       return 1
     fi
     sleep 2
@@ -219,6 +231,61 @@ echo "Endpoint: ${endpoint}"
 step "Delete sandbox"
 curl_json -X DELETE "${BASE_API_URL}/sandboxes/${SANDBOX_ID}"
 echo "Sandbox ${SANDBOX_ID} deleted."
+
+step "Create sandbox with networkPolicy (egress sidecar)"
+egress_payload='{
+  "image": { "uri": "ubuntu" },
+  "env": {},
+  "metadata": { "egress": "on" },
+  "entrypoint": ["tail", "-f", "/dev/null"],
+  "resourceLimits": { "cpu": "500m", "memory": "512Mi" },
+  "timeout": 60,
+  "networkPolicy": {
+    "defaultAction": "deny",
+    "egress": [
+      { "action": "allow", "target": "pypi.org" }
+    ]
+  }
+}'
+
+create_resp_with_status=$(curl_json_status \
+  -H 'Content-Type: application/json' \
+  -d "${egress_payload}" \
+  "${BASE_API_URL}/sandboxes")
+
+status_code="${create_resp_with_status##*$'\n'}"
+create_resp_body="${create_resp_with_status%$'\n'*}"
+
+if [[ "${status_code}" != "202" ]]; then
+  warn "Skip egress sidecar smoke (status ${status_code}). Body: ${create_resp_body}"
+  warn "Likely network_mode=host or egress_image unset."
+else
+  SANDBOX_ID=$(python - <<'PY' "${create_resp_body}"
+import json,sys
+data=json.loads(sys.argv[1])
+sid=str(data.get("id","")).strip()
+if not sid:
+    raise SystemExit("Failed to parse sandbox id from response")
+print(sid,end="")
+PY
+)
+  echo "Egress sandbox created: id=${SANDBOX_ID}"
+
+  step "Wait for egress sandbox to reach Running"
+  wait_for_running >/dev/null
+
+  step "Verify egress sidecar is running"
+  SIDECAR_ID=$(docker ps -a --filter "label=opensandbox.io/egress-sidecar-for=${SANDBOX_ID}" -q | head -n1 || true)
+  if [[ -z "${SIDECAR_ID}" ]]; then
+    error "Expected egress sidecar for sandbox ${SANDBOX_ID}, but none found."
+    exit 1
+  fi
+  info "Sidecar ${SIDECAR_ID} detected for sandbox ${SANDBOX_ID}"
+
+  step "Delete egress sandbox and ensure sidecar cleanup"
+  curl_json -X DELETE "${BASE_API_URL}/sandboxes/${SANDBOX_ID}"
+  wait_for_sidecar_gone "${SANDBOX_ID}"
+fi
 
 step "Create short-lived sandbox (60s TTL) for auto-expiration"
 create_payload_short='{

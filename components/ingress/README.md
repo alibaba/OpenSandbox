@@ -3,15 +3,14 @@
 English | [中文](README_zh.md)
 
 ## Overview
-- HTTP/WebSocket reverse proxy that routes to sandbox Pods by `OPEN-SANDBOX-INGRESS` header or Host.
-- Watches Pods in a target Namespace filtered by an ingress label, and routes only when exactly one ready Pod matches.
+- HTTP/WebSocket reverse proxy that routes to sandbox instances by `OPEN-SANDBOX-INGRESS` header or Host.
+- Watches BatchSandbox CRs in a target Namespace, and routes to sandbox endpoints from annotations.
 - Exposes `/status.ok` health check; prints build metadata (version, commit, time, Go/platform) at startup.
 
 ## Quick Start
 ```bash
 go run main.go \
   --namespace <target-namespace> \
-  --ingress-label-key <label-key> \
   --port 28888 \
   --log-level info
 ```
@@ -44,11 +43,15 @@ TAG=local VERSION=1.2.3 GIT_COMMIT=abc BUILD_TIME=2025-01-01T00:00:00Z bash buil
 
 ## Runtime Requirements
 - Access to Kubernetes API (in-cluster or via KUBECONFIG).
-- Pods in the specified Namespace labeled with the configured ingress label; Pod IPs must be reachable.
+- BatchSandbox CRs in the specified Namespace with `sandbox.opensandbox.io/endpoints` annotation containing Pod IPs.
 
 ## Behavior Notes
-- Routing key priority: `OPEN-SANDBOX-INGRESS` header first, otherwise Host parsing `<ingress>-<port>.*`.
-- Multiple matching Pods → HTTP 409; no matching Pod → HTTP 404.
+- Routing key priority: `OPEN-SANDBOX-INGRESS` header first, otherwise Host parsing `<sandbox-name>-<port>.*`.
+- Sandbox name extracted from request is used to query BatchSandbox CR for endpoint IP.
+- Error handling:
+  - `ErrSandboxNotFound` (sandbox resource not exists) → HTTP 404
+  - `ErrSandboxNotReady` (not enough replicas, missing endpoints, invalid config) → HTTP 503
+  - Other errors (K8s API errors, etc.) → HTTP 502
 - WebSocket path forwards essential headers and X-Forwarded-*; HTTP path strips `OPEN-SANDBOX-INGRESS` before proxying.
 
 ## Development & Tests
@@ -58,6 +61,7 @@ go test ./...
 ```
 Key code:
 - `main.go`: entrypoint and handlers.
-- `pkg/proxy/`: HTTP/WebSocket proxy logic, pod watching, health check.
+- `pkg/proxy/`: HTTP/WebSocket proxy logic, sandbox endpoint resolution.
+- `pkg/sandbox/`: Sandbox provider abstraction and BatchSandbox implementation.
 - `version/`: build metadata output (populated via ldflags).
 

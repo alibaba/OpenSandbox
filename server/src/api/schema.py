@@ -70,6 +70,41 @@ class ResourceLimits(RootModel[Dict[str, str]]):
     )
 
 
+class NetworkRule(BaseModel):
+    """
+    Egress rule: allow/deny a specific domain or wildcard.
+    """
+
+    action: str = Field(..., description="Whether to allow or deny matching targets (allow | deny).")
+    target: str = Field(
+        ...,
+        description="FQDN or wildcard domain (e.g., 'example.com', '*.example.com').",
+        min_length=1,
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class NetworkPolicy(BaseModel):
+    """
+    Egress network policy matching the sidecar /policy payload.
+    """
+
+    default_action: Optional[str] = Field(
+        default=None,
+        alias="defaultAction",
+        description="Default action when no egress rule matches (allow | deny). If omitted, sidecar defaults to deny.",
+    )
+    egress: list[NetworkRule] = Field(
+        default_factory=list,
+        description="Ordered egress rules. Empty/omitted yields allow-all at startup.",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
 # ============================================================================
 # Sandbox Status
 # ============================================================================
@@ -141,6 +176,14 @@ class CreateSandboxRequest(BaseModel):
     mounts: Optional[List[Dict[str, Any]]] = Field(
         None,
         description="Kubernetes volumeMount specs to append to the sandbox container (K8s runtime only)",
+    )
+    network_policy: Optional[NetworkPolicy] = Field(
+        None,
+        alias="networkPolicy",
+        description=(
+            "Optional outbound network policy. Shape matches the egress sidecar /policy endpoint. "
+            "Empty/omitted means allow-all until updated."
+        ),
     )
     extensions: Optional[Dict[str, str]] = Field(
         None,

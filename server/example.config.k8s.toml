@@ -30,7 +30,7 @@ log_level = "INFO"
 
 [runtime]
 type = "kubernetes"
-execd_image = "opensandbox/execd:v1.0.3"
+execd_image = "opensandbox/execd:v1.0.5"
 
 [kubernetes]
 # Path to kubeconfig file. Leave as null to use in-cluster configuration
