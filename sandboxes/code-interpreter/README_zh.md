@@ -39,7 +39,7 @@ cd sandboxes/code-interpreter
 # 构建本地镜像
 docker build -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest .
 
-# 多架构构建（需要 Docker Buildx）
+# 构建多架构镜像（需要 Docker Buildx）
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest .
 ```
