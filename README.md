@@ -33,20 +33,29 @@ Requirements:
 - Docker (required for local execution)
 - Python 3.10+ (recommended for examples and local runtime)
 
-#### 1. Clone the Repository
+#### 1. Install and Configure the Sandbox Server
 
 ```bash
-git clone https://github.com/alibaba/OpenSandbox.git
-cd OpenSandbox
+uv pip install opensandbox-server
+opensandbox-server init-config ~/.sandbox.toml --example docker
+```
+
+> If you prefer working from source, you can still clone the repo for development, but server startup no longer requires it.
+>
+> ```bash
+> git clone https://github.com/alibaba/OpenSandbox.git
+> cd OpenSandbox/server
+> uv sync
+> cp example.config.toml ~/.sandbox.toml # Copy configuration file
+> uv run python -m src.main # Start the service
 ```
 
 #### 2. Start the Sandbox Server
 
 ```bash
-cd server
-uv sync
-cp example.config.toml ~/.sandbox.toml # Copy configuration file
-uv run python -m src.main # Start the service
+opensandbox-server
+
+# opensandbox-server -h # Show help
 ```
 
 #### 3. Create a Code Interpreter and Execute Commands
