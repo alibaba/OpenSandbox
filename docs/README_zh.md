@@ -33,7 +33,7 @@ OpenSandbox 是一个面向 AI 应用场景设计的「通用沙箱平台」，�
 
 ## 核心特性
 
-- **多语言 SDK**：提供 Python、Java/Kotlin、JavaScript/TypeScript 等语言的客户端 SDK。
+- **多语言 SDK**：提供 Python、Java/Kotlin、JavaScript/TypeScript、C#/.NET 等语言的客户端 SDK，Go SDK 仍在规划中。
 - **沙箱协议**：定义了沙箱生命周期管理 API 和沙箱执行 API。你可以通过这些沙箱协议扩展自己的沙箱运行时。
 - **沙箱运行时**：沙箱全生命周期管理，支持 Docker 和[自研高性能 Kubernetes 运行时](../kubernetes)，实现本地运行、企业级大规模分布式沙箱调度。
 - **沙箱环境**：内置 Command、Filesystem、Code Interpreter 实现。并提供 Coding Agent（Claude Code 等）、浏览器自动化（Chrome、Playwright）和桌面环境（VNC、VS Code）等示例。
@@ -179,7 +179,7 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 | 目录 | 说明                                                |
 |------|---------------------------------------------------|
-| [`sdks/`](../sdks/) | 多语言 SDK（Python、Java/Kotlin、TypeScript/JavaScript） |
+| [`sdks/`](../sdks/) | 多语言 SDK（Python、Java/Kotlin、TypeScript/JavaScript、C#/.NET）      |
 | [`specs/`](../specs/) | OpenAPI 与生命周期规范                                   |
 | [`server/`](../server/README_zh.md) | Python FastAPI 沙箱生命周期服务，并集成多种运行时实现                |
 | [`kubernetes/`](../kubernetes/README-ZH.md) | Kubernetes 部署与示例                                  |
@@ -199,8 +199,8 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 - [docs/architecture.md](architecture.md) – 整体架构 & 设计理念
 - SDK
-  - Sandbox SDK（[Java\Kotlin SDK](../sdks/sandbox/kotlin/README_zh.md)、[Python SDK](../sdks/sandbox/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/sandbox/javascript/README_zh.md)）- 包含沙箱生命周期、命令执行、文件操作
-  - Code Interpreter SDK（[Java\Kotlin SDK](../sdks/code-interpreter/kotlin/README_zh.md) 、[Python SDK](../sdks/code-interpreter/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/code-interpreter/javascript/README_zh.md)）- 代码解释器
+  - Sandbox 基础 SDK（[Java\Kotlin SDK](../sdks/sandbox/kotlin/README_zh.md)、[Python SDK](../sdks/sandbox/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/sandbox/javascript/README_zh.md)、[C#/.NET SDK](../sdks/sandbox/csharp/README_zh.md)）- 包含沙箱生命周期、命令执行、文件操作
+  - Code Interpreter SDK（[Java\Kotlin SDK](../sdks/code-interpreter/kotlin/README_zh.md) 、[Python SDK](../sdks/code-interpreter/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/code-interpreter/javascript/README_zh.md)、[C#/.NET SDK](../sdks/code-interpreter/csharp/README_zh.md)）- 代码解释器
 - [specs/README.md](../specs/README_zh.md) - 包含沙箱生命周期 API 和沙箱执行 API 的 OpenAPI 定义
 - [server/README.md](../server/README_zh.md) - 包含沙箱 Server 的启动和配置，支持 Docker 与 Kubernetes Runtime
 
