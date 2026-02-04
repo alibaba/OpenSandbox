@@ -165,3 +165,15 @@ class WorkloadProvider(ABC):
             Endpoint string (e.g., "10.244.0.5:8080") or None if not available
         """
         pass
+
+    def legacy_resource_name(self, sandbox_id: str) -> str:
+        """
+        Convert a sandbox_id to the legacy resource name with prefix.
+
+        Pre-upgrade sandboxes were named ``sandbox-<id>``. This helper
+        preserves access to those resources while allowing plain IDs
+        for new ones.
+        """
+        if sandbox_id.startswith("sandbox-"):
+            return sandbox_id
+        return f"sandbox-{sandbox_id}"

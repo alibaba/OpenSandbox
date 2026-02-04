@@ -153,6 +153,15 @@ uv run python -m src.main
 
 The server will start at `http://0.0.0.0:8080` (or your configured host/port).
 
+### Run the server (installed package)
+
+After installing the package (wheel or PyPI), you can use the CLI entrypoint:
+
+```bash
+opensandbox-server --config ~/.sandbox.toml
+```
+
+
 **Health check**
 
 ```bash

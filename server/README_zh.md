@@ -159,6 +159,14 @@ uv run python -m src.main
 
 服务将在 `http://0.0.0.0:8080`（或您配置的主机/端口）启动。
 
+### 启动服务（安装包方式）
+
+安装为 Python 包后，可直接使用 CLI 启动：
+
+```bash
+opensandbox-server --config ~/.sandbox.toml
+```
+
 **健康检查**
 
 ```bash

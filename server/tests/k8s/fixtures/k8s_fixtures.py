@@ -141,7 +141,7 @@ def mock_batchsandbox_response():
         "apiVersion": "sandbox.opensandbox.io/v1alpha1",
         "kind": "BatchSandbox",
         "metadata": {
-            "name": "sandbox-test-id",
+            "name": "test-id",
             "namespace": "test-namespace",
             "creationTimestamp": "2025-12-24T10:00:00Z",
             "uid": "test-uid-12345",

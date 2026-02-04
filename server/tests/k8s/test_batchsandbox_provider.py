@@ -72,7 +72,7 @@ class TestBatchSandboxProvider:
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
-            "metadata": {"name": "sandbox-test-id", "uid": "test-uid"}
+            "metadata": {"name": "test-id", "uid": "test-uid"}
         }
         
         expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
@@ -89,7 +89,7 @@ class TestBatchSandboxProvider:
             execd_image="execd:latest"
         )
         
-        assert result == {"name": "sandbox-test-id", "uid": "test-uid"}
+        assert result == {"name": "test-id", "uid": "test-uid"}
         
         # Verify API call
         call_args = mock_api.create_namespaced_custom_object.call_args
@@ -97,7 +97,7 @@ class TestBatchSandboxProvider:
         
         assert body["apiVersion"] == "sandbox.opensandbox.io/v1alpha1"
         assert body["kind"] == "BatchSandbox"
-        assert body["metadata"]["name"] == "sandbox-test-id"
+        assert body["metadata"]["name"] == "test-id"
         assert body["metadata"]["namespace"] == "test-ns"
         assert body["spec"]["replicas"] == 1
         assert body["spec"]["expireTime"] == "2025-12-31T10:00:00+00:00"
@@ -113,7 +113,7 @@ class TestBatchSandboxProvider:
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
-            "metadata": {"name": "sandbox-test", "uid": "uid"}
+            "metadata": {"name": "test", "uid": "uid"}
         }
         
         provider.create_workload(
@@ -375,12 +375,12 @@ spec:
         """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.return_value = mock_batchsandbox_list_response
+        mock_api.get_namespaced_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
         result = provider.get_workload("test-id", "test-ns")
         
         assert result is not None
-        assert result["metadata"]["name"] == "sandbox-test-id"
+        assert result["metadata"]["name"] == "test-id"
     
     def test_get_workload_returns_none_when_not_found(self, mock_k8s_client):
         """
@@ -388,11 +388,31 @@ spec:
         """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.return_value = {"items": []}
+        mock_api.get_namespaced_custom_object.side_effect = [
+            ApiException(status=404),
+            ApiException(status=404),
+        ]
         
         result = provider.get_workload("test-id", "test-ns")
         
         assert result is None
+
+    def test_get_workload_falls_back_to_legacy_name(self, mock_k8s_client):
+        """
+        Test case: Verify legacy sandbox-<id> name is used when primary lookup 404s
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.get_namespaced_custom_object.side_effect = [
+            ApiException(status=404),
+            {"metadata": {"name": "sandbox-test-id"}},
+        ]
+        
+        result = provider.get_workload("test-id", "test-ns")
+        
+        assert result["metadata"]["name"] == "sandbox-test-id"
+        assert mock_api.get_namespaced_custom_object.call_args_list[0].kwargs["name"] == "test-id"
+        assert mock_api.get_namespaced_custom_object.call_args_list[1].kwargs["name"] == "sandbox-test-id"
     
     def test_get_workload_handles_404_gracefully(self, mock_k8s_client):
         """
@@ -403,7 +423,7 @@ spec:
         
         # Mock 404 exception
         error = ApiException(status=404)
-        mock_api.list_namespaced_custom_object.side_effect = error
+        mock_api.get_namespaced_custom_object.side_effect = [error, error]
         
         result = provider.get_workload("test-id", "test-ns")
         
@@ -418,7 +438,7 @@ spec:
         
         # Mock 500 exception
         error = ApiException(status=500)
-        mock_api.list_namespaced_custom_object.side_effect = error
+        mock_api.get_namespaced_custom_object.side_effect = error
         
         with pytest.raises(ApiException) as exc_info:
             provider.get_workload("test-id", "test-ns")
@@ -431,7 +451,7 @@ spec:
         """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.side_effect = RuntimeError("Unexpected")
+        mock_api.get_namespaced_custom_object.side_effect = RuntimeError("Unexpected")
         
         with pytest.raises(RuntimeError, match="Unexpected"):
             provider.get_workload("test-id", "test-ns")
@@ -451,7 +471,7 @@ spec:
         result = provider.list_workloads("test-ns", "opensandbox.io/id")
         
         assert len(result) == 1
-        assert result[0]["metadata"]["name"] == "sandbox-test-id"
+        assert result[0]["metadata"]["name"] == "test-id"
     
     def test_list_workloads_returns_empty_on_404(self, mock_k8s_client):
         """
@@ -475,7 +495,7 @@ spec:
         """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.return_value = mock_batchsandbox_list_response
+        mock_api.get_namespaced_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
         provider.delete_workload("test-id", "test-ns")
         
@@ -484,7 +504,7 @@ spec:
             version="v1alpha1",
             namespace="test-ns",
             plural="batchsandboxes",
-            name="sandbox-test-id",
+            name="test-id",
             grace_period_seconds=0
         )
     
@@ -494,7 +514,10 @@ spec:
         """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.return_value = {"items": []}
+        mock_api.get_namespaced_custom_object.side_effect = [
+            ApiException(status=404),
+            ApiException(status=404),
+        ]
         
         with pytest.raises(Exception) as exc_info:
             provider.delete_workload("test-id", "test-ns")
@@ -509,7 +532,7 @@ spec:
         """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.return_value = mock_batchsandbox_list_response
+        mock_api.get_namespaced_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
         provider.delete_workload("test-id", "test-ns")
         
@@ -526,7 +549,7 @@ spec:
         """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.return_value = mock_batchsandbox_list_response
+        mock_api.get_namespaced_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
         expires_at = datetime(2025, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
         provider.update_expiration("test-id", "test-ns", expires_at)
@@ -980,7 +1003,7 @@ spec:
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
-            "metadata": {"name": "sandbox-test-id", "uid": "test-uid"}
+            "metadata": {"name": "test-id", "uid": "test-uid"}
         }
         
         expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
@@ -1003,7 +1026,7 @@ spec:
         # Verify basic structure
         assert body["apiVersion"] == "sandbox.opensandbox.io/v1alpha1"
         assert body["kind"] == "BatchSandbox"
-        assert body["metadata"]["name"] == "sandbox-test-id"
+        assert body["metadata"]["name"] == "test-id"
         assert body["metadata"]["labels"] == {"test": "label"}
         
         # Verify pool-specific fields
