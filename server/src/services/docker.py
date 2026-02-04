@@ -26,6 +26,7 @@ import io
 import math
 import logging
 import os
+import posixpath
 import tarfile
 import time
 import socket
@@ -89,8 +90,13 @@ def _resolve_docker_timeout(default: int = 180) -> int:
         return default
 
 OPENSANDBOX_DIR = "/opt/opensandbox"
-EXECED_INSTALL_PATH = os.path.join(OPENSANDBOX_DIR, "execd")
-BOOTSTRAP_PATH = os.path.join(OPENSANDBOX_DIR, "bootstrap.sh")
+# Use raw strings and explicit forward slashes to avoid MSYS path conversion on Windows
+EXECED_INSTALL_PATH = "//opt/opensandbox/execd"
+BOOTSTRAP_PATH = "//opt/opensandbox/bootstrap.sh"
+
+# Debug: print paths at module load time
+import sys
+print(f"DEBUG MODULE LOAD: BOOTSTRAP_PATH={BOOTSTRAP_PATH!r}", file=sys.stderr)
 
 HOST_NETWORK_MODE = "host"
 BRIDGE_NETWORK_MODE = "bridge"
@@ -534,7 +540,9 @@ class DockerSandboxService(SandboxService):
     def _copy_execd_to_container(self, container, sandbox_id: str) -> None:
         """Copy execd artifacts from the platform container into the sandbox."""
         archive = self._fetch_execd_archive()
-        target_parent = os.path.dirname(EXECED_INSTALL_PATH.rstrip("/")) or "/"
+        # Use hardcoded path to avoid Windows path issues
+        target_parent = "/opt/opensandbox"
+        logger.info("Copying execd to %s for sandbox %s", target_parent, sandbox_id)
         self._ensure_directory(container, target_parent, sandbox_id)
         try:
             with self._docker_operation("copy execd archive to sandbox", sandbox_id):
@@ -548,21 +556,35 @@ class DockerSandboxService(SandboxService):
                 },
             ) from exc
 
-    def _install_bootstrap_script(self, container, sandbox_id: str) -> None:
+    def _install_bootstrap_script(self, container, sandbox_id: str, original_entrypoint: Optional[list[str]] = None) -> None:
         """Install the bootstrap launcher that starts execd then chains to user command."""
-        script_path = BOOTSTRAP_PATH
-        script_dir = os.path.dirname(script_path)
+        # Use hardcoded path to avoid Windows path issues
+        script_path = "/opt/opensandbox/bootstrap.sh"
+        script_dir = "/opt/opensandbox"
+        logger.info("Installing bootstrap script at %s for sandbox %s", script_path, sandbox_id)
         self._ensure_directory(container, script_dir, sandbox_id)
-        execd_binary = EXECED_INSTALL_PATH
+        execd_binary = "/opt/opensandbox/execd"
+
+        # If the image has an original entrypoint, chain through it
+        if original_entrypoint and len(original_entrypoint) > 0:
+            # Build the exec command that calls original entrypoint with user args
+            original_ep_str = " ".join(f'"{arg}"' for arg in original_entrypoint)
+            exec_line = f'exec {original_ep_str} "$@"'
+            logger.info("Bootstrap will chain to original entrypoint: %s", original_ep_str)
+        else:
+            exec_line = 'exec "$@"'
+            logger.info("Bootstrap will directly exec user command")
+
         script_content = "\n".join(
             [
                 "#!/bin/sh",
                 "set -e",
                 f"{execd_binary} >/tmp/execd.log 2>&1 &",
-                'exec "$@"',
+                exec_line,
                 "",
             ]
         ).encode("utf-8")
+        logger.info("Bootstrap script content:\n%s", script_content.decode("utf-8"))
 
         tar_stream = io.BytesIO()
         with tarfile.open(fileobj=tar_stream, mode="w") as tar:
@@ -584,10 +606,11 @@ class DockerSandboxService(SandboxService):
                 },
             ) from exc
 
-    def _prepare_sandbox_runtime(self, container, sandbox_id: str) -> None:
+    def _prepare_sandbox_runtime(self, container, sandbox_id: str, original_entrypoint: Optional[list[str]] = None) -> None:
         """Copy execd artifacts and bootstrap launcher into the sandbox container."""
+        logger.info("Preparing sandbox runtime for %s (original_entrypoint=%s)", sandbox_id, original_entrypoint)
         self._copy_execd_to_container(container, sandbox_id)
-        self._install_bootstrap_script(container, sandbox_id)
+        self._install_bootstrap_script(container, sandbox_id, original_entrypoint)
 
     def _prepare_creation_context(
         self,
@@ -1394,20 +1417,35 @@ class DockerSandboxService(SandboxService):
         host_config_kwargs: Dict[str, Any],
         exposed_ports: Optional[list[str]],
     ):
+        import sys
+        print(f"DEBUG _create_and_start_container: sandbox_id={sandbox_id}", file=sys.stderr, flush=True)
         # Normalize single-string entrypoint containing spaces to avoid shell path issues in bootstrap.
         if len(bootstrap_command) == 1 and " " in bootstrap_command[0]:
             import shlex
 
             bootstrap_command = shlex.split(bootstrap_command[0])
-        
+
+        # Get the original entrypoint from the image
+        original_entrypoint: Optional[list[str]] = None
+        try:
+            image = self.docker_client.images.get(image_uri)
+            image_config = image.attrs.get("Config", {})
+            original_entrypoint = image_config.get("Entrypoint")
+            logger.info("Image %s has original entrypoint: %s", image_uri, original_entrypoint)
+        except DockerException as exc:
+            logger.warning("Failed to get image entrypoint for %s: %s", image_uri, exc)
+
         host_config = self.docker_client.api.create_host_config(**host_config_kwargs)
         container = None
         container_id: Optional[str] = None
         try:
+            # Use /bin/sh -c to avoid Windows path conversion issues with Docker Python library
+            # The bootstrap script path is passed as a string argument to sh -c
+            bootstrap_entrypoint = ["/bin/sh", "-c", "/opt/opensandbox/bootstrap.sh \"$@\"", "--"]
             with self._docker_operation("create sandbox container", sandbox_id):
                 response = self.docker_client.api.create_container(
                     image=image_uri,
-                    entrypoint=[BOOTSTRAP_PATH],
+                    entrypoint=bootstrap_entrypoint,
                     command=bootstrap_command,
                     ports=exposed_ports,
                     name=f"sandbox-{sandbox_id}",
@@ -1425,7 +1463,7 @@ class DockerSandboxService(SandboxService):
                     },
                 )
             container = self.docker_client.containers.get(container_id)
-            self._prepare_sandbox_runtime(container, sandbox_id)
+            self._prepare_sandbox_runtime(container, sandbox_id, original_entrypoint)
             with self._docker_operation("start sandbox container", sandbox_id):
                 container.start()
             return container
