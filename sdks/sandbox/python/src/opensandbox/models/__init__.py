@@ -20,6 +20,8 @@ Core Pydantic models for sandbox operations.
 """
 
 from opensandbox.models.execd import (
+    CommandLogs,
+    CommandStatus,
     Execution,
     ExecutionComplete,
     ExecutionError,
@@ -61,6 +63,8 @@ __all__ = [
     "ExecutionError",
     "ExecutionComplete",
     "ExecutionInit",
+    "CommandStatus",
+    "CommandLogs",
     # Filesystem models
     "EntryInfo",
     "WriteEntry",

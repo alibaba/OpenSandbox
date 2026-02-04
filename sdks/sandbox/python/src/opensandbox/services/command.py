@@ -21,7 +21,13 @@ Protocol for sandbox command execution operations.
 
 from typing import Protocol
 
-from opensandbox.models.execd import Execution, ExecutionHandlers, RunCommandOpts
+from opensandbox.models.execd import (
+    CommandLogs,
+    CommandStatus,
+    Execution,
+    ExecutionHandlers,
+    RunCommandOpts,
+)
 
 
 class Commands(Protocol):
@@ -68,6 +74,39 @@ class Commands(Protocol):
 
         Args:
             execution_id: Unique identifier of the execution to interrupt
+
+        Raises:
+            SandboxException: if the operation fails
+        """
+        ...
+
+    async def get_command_status(self, execution_id: str) -> CommandStatus:
+        """
+        Get the current running status for a command.
+
+        Args:
+            execution_id: Unique identifier of the execution to query
+
+        Returns:
+            CommandStatus describing running state and exit code if available
+
+        Raises:
+            SandboxException: if the operation fails
+        """
+        ...
+
+    async def get_background_command_logs(
+        self, execution_id: str, cursor: int | None = None
+    ) -> CommandLogs:
+        """
+        Get background command logs (non-streamed).
+
+        Args:
+            execution_id: Unique identifier of the execution to query
+            cursor: Optional line cursor for incremental reads
+
+        Returns:
+            CommandLogs containing raw output and latest cursor
 
         Raises:
             SandboxException: if the operation fails

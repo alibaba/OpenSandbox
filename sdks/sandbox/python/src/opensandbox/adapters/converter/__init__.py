@@ -25,6 +25,9 @@ This package provides:
 - ExecutionConverter: Convert execution-related models
 """
 
+from opensandbox.adapters.converter.command_model_converter import (
+    to_command_status,
+)
 from opensandbox.adapters.converter.exception_converter import (
     ExceptionConverter,
     parse_sandbox_error,
@@ -47,6 +50,7 @@ __all__ = [
     "parse_sandbox_error",
     "FilesystemModelConverter",
     "MetricsModelConverter",
+    "to_command_status",
     "SandboxModelConverter",
     "handle_api_error",
 ]

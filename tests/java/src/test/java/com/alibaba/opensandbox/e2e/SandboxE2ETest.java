@@ -250,14 +250,20 @@ public class SandboxE2ETest extends BaseE2ETest {
             Execution r =
                     policySandbox
                             .commands()
-                            .run(RunCommandRequest.builder().command("curl -I https://www.github.com").build());
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("curl -I https://www.github.com")
+                                            .build());
             assertNotNull(r);
             assertNotNull(r.getError());
 
             r =
                     policySandbox
                             .commands()
-                            .run(RunCommandRequest.builder().command("curl -I https://pypi.org").build());
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("curl -I https://pypi.org")
+                                            .build());
             assertNotNull(r);
             assertNull(r.getError());
         } finally {
@@ -405,6 +411,45 @@ public class SandboxE2ETest extends BaseE2ETest {
 
     @Test
     @Order(4)
+    @DisplayName("Command status + background logs")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testCommandStatusAndLogs() throws Exception {
+        assertNotNull(sandbox);
+
+        RunCommandRequest backgroundRequest =
+                RunCommandRequest.builder()
+                        .command("sh -c 'echo log-line-1; echo log-line-2; sleep 2'")
+                        .background(true)
+                        .build();
+        Execution exec = sandbox.commands().run(backgroundRequest);
+        assertNotNull(exec.getId());
+        String commandId = exec.getId();
+
+        CommandStatus status = sandbox.commands().getCommandStatus(commandId);
+        String statusId = status.getId();
+        Boolean runningValue = status.getRunning();
+        assertEquals(commandId, statusId);
+        assertNotNull(runningValue);
+
+        StringBuilder logsText = new StringBuilder();
+        Long cursor = null;
+        for (int i = 0; i < 20; i++) {
+            CommandLogs logs = sandbox.commands().getBackgroundCommandLogs(commandId, cursor);
+            String content = logs.getContent();
+            cursor = logs.getCursor();
+            logsText.append(content);
+            if (logsText.toString().contains("log-line-2")) {
+                break;
+            }
+            Thread.sleep(1000);
+        }
+
+        assertTrue(logsText.toString().contains("log-line-1"));
+        assertTrue(logsText.toString().contains("log-line-2"));
+    }
+
+    @Test
+    @Order(5)
     @DisplayName("Filesystem operations: CRUD + replace/move/delete + mtime checks")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     void testBasicFilesystemOperations() {
@@ -641,7 +686,7 @@ public class SandboxE2ETest extends BaseE2ETest {
     }
 
     @Test
-    @Order(5)
+    @Order(6)
     @DisplayName("Interrupt command")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     void testInterruptCommand() throws Exception {
@@ -691,7 +736,7 @@ public class SandboxE2ETest extends BaseE2ETest {
     }
 
     @Test
-    @Order(6)
+    @Order(7)
     @DisplayName("Sandbox Pause Operation")
     @Timeout(value = 5, unit = TimeUnit.MINUTES)
     void testSandboxPause() throws InterruptedException {
@@ -730,7 +775,7 @@ public class SandboxE2ETest extends BaseE2ETest {
     }
 
     @Test
-    @Order(7)
+    @Order(8)
     @DisplayName("Sandbox Resume Operation")
     @Timeout(value = 3, unit = TimeUnit.MINUTES)
     void testSandboxResume() throws InterruptedException {
@@ -744,7 +789,6 @@ public class SandboxE2ETest extends BaseE2ETest {
                         .healthCheckPollingInterval(Duration.ofSeconds(1))
                         .resume();
 
-        int pollCount = 0;
         SandboxStatus status = resumedSandbox.getInfo().getStatus();
 
         assertNotNull(status, "Failed to get final status after resume operation");

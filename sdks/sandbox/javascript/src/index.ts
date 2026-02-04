@@ -63,6 +63,8 @@ export type {
 
 export type {
   CommandExecution,
+  CommandLogs,
+  CommandStatus,
   RunCommandOpts,
   RunCommandRequest,
   ServerStreamEvent,
