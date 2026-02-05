@@ -231,7 +231,7 @@ func (s *bashSession) run(request *ExecuteCodeRequest) error {
 			inEnv = false
 		case strings.HasPrefix(line, exitMarkerPrefix):
 			if code, err := strconv.Atoi(strings.TrimPrefix(line, exitMarkerPrefix)); err == nil {
-				exitCode = &code
+				exitCode = &code //nolint:ineffassign
 			}
 		case strings.HasPrefix(line, pwdMarkerPrefix):
 			pwdLine = strings.TrimPrefix(line, pwdMarkerPrefix)
@@ -258,8 +258,8 @@ func (s *bashSession) run(request *ExecuteCodeRequest) error {
 	}
 
 	if exitCode == nil && cmd.ProcessState != nil {
-		code := cmd.ProcessState.ExitCode()
-		exitCode = &code
+		code := cmd.ProcessState.ExitCode() //nolint:staticcheck
+		exitCode = &code                    //nolint:ineffassign
 	}
 
 	updatedEnv := parseExportDump(envLines)
@@ -315,9 +315,10 @@ func buildWrappedScript(command string, env map[string]string, cwd string) strin
 	}
 
 	b.WriteString("__USER_EXIT_CODE__=$?\n")
-	b.WriteString("echo \"" + envDumpStartMarker + "\"\n")
+	// Ensure env dump markers are always on their own lines even if the user command omitted a trailing newline.
+	b.WriteString("printf \"\\n%s\\n\" \"" + envDumpStartMarker + "\"\n")
 	b.WriteString("export -p\n")
-	b.WriteString("echo \"" + envDumpEndMarker + "\"\n")
+	b.WriteString("printf \"%s\\n\" \"" + envDumpEndMarker + "\"\n")
 	b.WriteString("printf \"" + pwdMarkerPrefix + "%s\\n\" \"$(pwd)\"\n")
 	b.WriteString("printf \"" + exitMarkerPrefix + "%s\\n\" \"$__USER_EXIT_CODE__\"\n")
 	b.WriteString("exit \"$__USER_EXIT_CODE__\"\n")

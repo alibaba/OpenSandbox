@@ -92,13 +92,6 @@ type bashSessionConfig struct {
 	StartupTimeout time.Duration
 }
 
-const (
-	// exitCodePrefix marks the beginning of exit code output.
-	exitCodePrefix = "EXITCODESTART"
-	// exitCodeSuffix marks the end of exit code output.
-	exitCodeSuffix = "EXITCODEEND"
-)
-
 // bashSession represents a bash session.
 type bashSession struct {
 	config  *bashSessionConfig

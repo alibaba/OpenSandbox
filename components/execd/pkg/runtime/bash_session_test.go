@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-func TestBashSessionEnvAndExitCode(t *testing.T) {
+func TestBashSession_envAndExitCode(t *testing.T) {
 	session := newBashSession(nil)
 	t.Cleanup(func() { _ = session.close() })
 
@@ -117,7 +117,7 @@ func TestBashSessionEnvAndExitCode(t *testing.T) {
 	}
 }
 
-func TestBashSessionEnvLargeOutputChained(t *testing.T) {
+func TestBashSession_envLargeOutputChained(t *testing.T) {
 	session := newBashSession(nil)
 	t.Cleanup(func() { _ = session.close() })
 
@@ -195,7 +195,7 @@ func TestBashSessionEnvLargeOutputChained(t *testing.T) {
 	}
 }
 
-func TestBashSessionCwdPersistsWithoutOverride(t *testing.T) {
+func TestBashSession_cwdPersistsWithoutOverride(t *testing.T) {
 	session := newBashSession(nil)
 	t.Cleanup(func() { _ = session.close() })
 
@@ -245,7 +245,7 @@ func TestBashSessionCwdPersistsWithoutOverride(t *testing.T) {
 	}
 }
 
-func TestBashSessionRequestCwdOverridesAfterCd(t *testing.T) {
+func TestBashSession_requestCwdOverridesAfterCd(t *testing.T) {
 	session := newBashSession(nil)
 	t.Cleanup(func() { _ = session.close() })
 
@@ -297,6 +297,82 @@ func TestBashSessionRequestCwdOverridesAfterCd(t *testing.T) {
 	session.mu.Unlock()
 	if finalCwd != overrideDir {
 		t.Fatalf("expected session cwd updated to override dir %q, got %q", overrideDir, finalCwd)
+	}
+}
+
+func TestBashSession_envDumpNotLeakedWhenNoTrailingNewline(t *testing.T) {
+	session := newBashSession(nil)
+	t.Cleanup(func() { _ = session.close() })
+
+	if err := session.start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	var stdoutLines []string
+	hooks := ExecuteResultHook{
+		OnExecuteStdout: func(line string) {
+			stdoutLines = append(stdoutLines, line)
+		},
+	}
+
+	request := &ExecuteCodeRequest{
+		Code:    `set +x; printf '{"foo":1}'`,
+		Hooks:   hooks,
+		Timeout: 3 * time.Second,
+	}
+
+	if err := session.run(request); err != nil {
+		t.Fatalf("runCommand(no-trailing-newline) error = %v", err)
+	}
+
+	if len(stdoutLines) != 1 {
+		t.Fatalf("expected exactly one stdout line, got %v", stdoutLines)
+	}
+	if strings.TrimSpace(stdoutLines[0]) != `{"foo":1}` {
+		t.Fatalf("unexpected stdout content %q", stdoutLines[0])
+	}
+	for _, line := range stdoutLines {
+		if strings.Contains(line, envDumpStartMarker) || strings.Contains(line, "declare -x") {
+			t.Fatalf("env dump leaked into stdout: %v", stdoutLines)
+		}
+	}
+}
+
+func TestBashSession_envDumpNotLeakedWhenNoOutput(t *testing.T) {
+	session := newBashSession(nil)
+	t.Cleanup(func() { _ = session.close() })
+
+	if err := session.start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	var stdoutLines []string
+	hooks := ExecuteResultHook{
+		OnExecuteStdout: func(line string) {
+			stdoutLines = append(stdoutLines, line)
+		},
+	}
+
+	request := &ExecuteCodeRequest{
+		Code:    `set +x; true`,
+		Hooks:   hooks,
+		Timeout: 3 * time.Second,
+	}
+
+	if err := session.run(request); err != nil {
+		t.Fatalf("runCommand(no-output) error = %v", err)
+	}
+
+	if len(stdoutLines) > 1 {
+		t.Fatalf("expected at most one stdout line, got %v", stdoutLines)
+	}
+	if len(stdoutLines) == 1 && strings.TrimSpace(stdoutLines[0]) != "" {
+		t.Fatalf("expected empty stdout, got %q", stdoutLines[0])
+	}
+	for _, line := range stdoutLines {
+		if strings.Contains(line, envDumpStartMarker) || strings.Contains(line, "declare -x") {
+			t.Fatalf("env dump leaked into stdout: %v", stdoutLines)
+		}
 	}
 }
 
