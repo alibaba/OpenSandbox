@@ -44,18 +44,6 @@ type CodeContextRequest struct {
 	Cwd      string `json:"cwd,omitempty"`
 }
 
-// RunCommandRequest represents a shell command execution request.
-type RunCommandRequest struct {
-	Command    string `json:"command" validate:"required"`
-	Cwd        string `json:"cwd,omitempty"`
-	Background bool   `json:"background,omitempty"`
-}
-
-func (r *RunCommandRequest) Validate() error {
-	validate := validator.New()
-	return validate.Struct(r)
-}
-
 type ServerStreamEventType string
 
 const (
