@@ -70,31 +70,30 @@ func TestRunCommand_requestValidateUserExists(t *testing.T) {
 
 func TestUserIdentity_jsonRoundTrip(t *testing.T) {
 	var user UserIdentity
-	assert.NoError(t, json.Unmarshal([]byte(`"sandbox"`), &user))
-	name, ok := user.Username()
-	assert.True(t, ok)
-	assert.Equal(t, "sandbox", name)
-	_, ok = user.UID()
-	assert.False(t, ok)
+	assert.NoError(t, json.Unmarshal([]byte(`{"name":"sandbox"}`), &user))
+	if assert.NotNil(t, user.Username) {
+		assert.Equal(t, "sandbox", *user.Username)
+	}
+	assert.Nil(t, user.UID)
 	assert.NoError(t, user.validate())
 	b, err := json.Marshal(&user)
 	assert.NoError(t, err)
-	assert.Equal(t, `"sandbox"`, string(b))
+	assert.JSONEq(t, `{"name":"sandbox"}`, string(b))
 
 	var uidUser UserIdentity
-	assert.NoError(t, json.Unmarshal([]byte(`1001`), &uidUser))
-	uid, ok := uidUser.UID()
-	assert.True(t, ok)
-	assert.Equal(t, int64(1001), uid)
-	_, ok = uidUser.Username()
-	assert.False(t, ok)
+	assert.NoError(t, json.Unmarshal([]byte(`{"uid":1001}`), &uidUser))
+	if assert.NotNil(t, uidUser.UID) {
+		assert.Equal(t, int64(1001), *uidUser.UID)
+	}
+	assert.Nil(t, uidUser.Username)
 	assert.NoError(t, uidUser.validate())
 	b, err = json.Marshal(&uidUser)
 	assert.NoError(t, err)
-	assert.Equal(t, "1001", string(b))
+	assert.JSONEq(t, `{"uid":1001}`, string(b))
 }
 
 func TestUserIdentity_unmarshalInvalid(t *testing.T) {
 	var user UserIdentity
-	assert.Error(t, json.Unmarshal([]byte(`{"name":"bad"}`), &user))
+	assert.NoError(t, json.Unmarshal([]byte(`{"other":"bad"}`), &user))
+	assert.Error(t, user.validateExists())
 }

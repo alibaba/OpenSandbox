@@ -15,6 +15,8 @@
 package model
 
 import (
+	"os/user"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,3 +29,34 @@ func TestRunCommandRequestValidate(t *testing.T) {
 	req.Command = ""
 	assert.Error(t, req.Validate())
 }
+
+func TestRunCommandRequestValidate_UserObject(t *testing.T) {
+	cur, err := user.Current()
+	if err != nil {
+		t.Skipf("cannot get current user: %v", err)
+	}
+
+	req := RunCommandRequest{
+		Command: "ls",
+		User: &UserIdentity{
+			Username: &cur.Username,
+		},
+	}
+	assert.NoError(t, req.Validate())
+
+	if uid, parseErr := strconv.ParseInt(cur.Uid, 10, 64); parseErr == nil {
+		req.User = &UserIdentity{
+			UID: &uid,
+		}
+		assert.NoError(t, req.Validate())
+	}
+
+	req.User = &UserIdentity{
+		Username: ptrString("sandbox"),
+		UID:      ptrInt64(1001),
+	}
+	assert.Error(t, req.Validate())
+}
+
+func ptrString(s string) *string { return &s }
+func ptrInt64(i int64) *int64    { return &i }
