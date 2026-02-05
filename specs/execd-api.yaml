@@ -288,7 +288,8 @@ paths:
       description: |
         Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
         The command can run in foreground or background mode. The response includes stdout, stderr,
-        execution status, and completion events.
+        execution status, and completion events. Use the optional `user` field to run the command as
+        a specific system user when supported by the sandbox.
       operationId: runCommand
       tags:
         - Command
@@ -304,12 +305,14 @@ paths:
                 value:
                   command: ls -la /workspace
                   cwd: /workspace
+                  user: sandbox
                   background: false
               background:
                 summary: Background command
                 value:
                   command: python server.py
                   cwd: /app
+                  user: 1001
                   background: true
       responses:
         "200":
@@ -929,6 +932,16 @@ components:
           description: Whether to run command in detached mode
           default: false
           example: false
+        user:
+          oneOf:
+            - type: string
+              description: POSIX username
+              example: sandbox
+            - type: integer
+              format: int64
+              description: Numeric UID
+              example: 1001
+          description: Username or numeric UID to run the command as; defaults to the execd process user (current OS user) if omitted
 
     CommandStatusResponse:
       type: object
@@ -942,6 +955,15 @@ components:
           type: string
           description: Original command content
           example: ls -la
+        user:
+          oneOf:
+            - type: string
+              description: Effective username that executed the command
+              example: sandbox
+            - type: integer
+              format: int64
+              description: Effective UID that executed the command
+              example: 1001
         running:
           type: boolean
           description: Whether the command is still running
