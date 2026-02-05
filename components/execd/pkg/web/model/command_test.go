@@ -14,16 +14,16 @@
 
 package model
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestRunCommandRequestValidate(t *testing.T) {
 	req := RunCommandRequest{Command: "ls"}
-	if err := req.Validate(); err != nil {
-		t.Fatalf("expected command validation success: %v", err)
-	}
+	assert.NoError(t, req.Validate())
 
 	req.Command = ""
-	if err := req.Validate(); err == nil {
-		t.Fatalf("expected validation error when command is empty")
-	}
+	assert.Error(t, req.Validate())
 }

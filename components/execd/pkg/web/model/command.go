@@ -34,10 +34,13 @@ type CommandStatusResponse struct {
 
 // RunCommandRequest represents a shell command execution request.
 type RunCommandRequest struct {
-	Command    string        `json:"command" validate:"required"`
-	Cwd        string        `json:"cwd,omitempty"`
-	Background bool          `json:"background,omitempty"`
-	User       *UserIdentity `json:"user,omitempty"`
+	Command    string `json:"command" validate:"required"`
+	Cwd        string `json:"cwd,omitempty"`
+	Background bool   `json:"background,omitempty"`
+	// User specifies the username or UID to run the command as.
+	// Effective switching requires root or CAP_SETUID/CAP_SETGID (and valid UID/GID
+	// mappings when using user namespaces); otherwise it will fail with a permission error.
+	User *UserIdentity `json:"user,omitempty"`
 }
 
 func (r *RunCommandRequest) Validate() error {

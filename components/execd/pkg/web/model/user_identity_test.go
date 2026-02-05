@@ -19,6 +19,8 @@ import (
 	"os/user"
 	"strconv"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRunCommand_requestValidateWithUser(t *testing.T) {
@@ -31,26 +33,18 @@ func TestRunCommand_requestValidateWithUser(t *testing.T) {
 		Command: "ls",
 		User:    newUserIdentityFromUsername(cur.Username),
 	}
-	if err := req.Validate(); err != nil {
-		t.Fatalf("expected validation success with uid user: %v", err)
-	}
+	assert.NoError(t, req.Validate(), "expected validation success with uid user")
 
 	if uid, parseErr := strconv.ParseInt(cur.Uid, 10, 64); parseErr == nil {
 		req.User = newUserIdentityFromUID(uid)
-		if err := req.Validate(); err != nil {
-			t.Fatalf("expected validation success with existing uid: %v", err)
-		}
+		assert.NoError(t, req.Validate(), "expected validation success with existing uid")
 	}
 
 	req.User = newUserIdentityFromUID(-1)
-	if err := req.Validate(); err == nil {
-		t.Fatalf("expected validation error for negative uid")
-	}
+	assert.Error(t, req.Validate(), "expected validation error for negative uid")
 
 	req.User = newUserIdentityFromUsername("")
-	if err := req.Validate(); err == nil {
-		t.Fatalf("expected validation error for empty username")
-	}
+	assert.Error(t, req.Validate(), "expected validation error for empty username")
 }
 
 func TestRunCommand_requestValidateUserExists(t *testing.T) {
@@ -63,70 +57,44 @@ func TestRunCommand_requestValidateUserExists(t *testing.T) {
 		Command: "echo ok",
 		User:    newUserIdentityFromUsername(cur.Username),
 	}
-	if err := req.Validate(); err != nil {
-		t.Fatalf("expected validation success with existing username: %v", err)
-	}
+	assert.NoError(t, req.Validate(), "expected validation success with existing username")
 
 	if uid, parseErr := strconv.ParseInt(cur.Uid, 10, 64); parseErr == nil {
 		req.User = newUserIdentityFromUID(uid)
-		if err := req.Validate(); err != nil {
-			t.Fatalf("expected validation success with existing uid: %v", err)
-		}
+		assert.NoError(t, req.Validate(), "expected validation success with existing uid")
 	}
 
 	req.User = newUserIdentityFromUsername("user-does-not-exist-123456789")
-	if err := req.Validate(); err == nil {
-		t.Fatalf("expected validation error for missing username")
-	}
+	assert.Error(t, req.Validate(), "expected validation error for missing username")
 }
 
 func TestUserIdentity_jsonRoundTrip(t *testing.T) {
 	var user UserIdentity
-	if err := json.Unmarshal([]byte(`"sandbox"`), &user); err != nil {
-		t.Fatalf("unexpected unmarshal error: %v", err)
-	}
-	if name, ok := user.Username(); !ok || name != "sandbox" {
-		t.Fatalf("expected username=sandbox, got %q", name)
-	}
-	if _, ok := user.UID(); ok {
-		t.Fatalf("expected uid to be unset")
-	}
-	if err := user.validate(); err != nil {
-		t.Fatalf("unexpected validation error: %v", err)
-	}
+	assert.NoError(t, json.Unmarshal([]byte(`"sandbox"`), &user))
+	name, ok := user.Username()
+	assert.True(t, ok)
+	assert.Equal(t, "sandbox", name)
+	_, ok = user.UID()
+	assert.False(t, ok)
+	assert.NoError(t, user.validate())
 	b, err := json.Marshal(&user)
-	if err != nil {
-		t.Fatalf("marshal error: %v", err)
-	}
-	if string(b) != `"sandbox"` {
-		t.Fatalf("expected marshaled username, got %s", string(b))
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, `"sandbox"`, string(b))
 
 	var uidUser UserIdentity
-	if err := json.Unmarshal([]byte(`1001`), &uidUser); err != nil {
-		t.Fatalf("unexpected unmarshal error: %v", err)
-	}
-	if uid, ok := uidUser.UID(); !ok || uid != 1001 {
-		t.Fatalf("expected uid=1001, got %d", uid)
-	}
-	if _, ok := uidUser.Username(); ok {
-		t.Fatalf("expected username to be unset")
-	}
-	if err := uidUser.validate(); err != nil {
-		t.Fatalf("unexpected validation error: %v", err)
-	}
+	assert.NoError(t, json.Unmarshal([]byte(`1001`), &uidUser))
+	uid, ok := uidUser.UID()
+	assert.True(t, ok)
+	assert.Equal(t, int64(1001), uid)
+	_, ok = uidUser.Username()
+	assert.False(t, ok)
+	assert.NoError(t, uidUser.validate())
 	b, err = json.Marshal(&uidUser)
-	if err != nil {
-		t.Fatalf("marshal error: %v", err)
-	}
-	if string(b) != "1001" {
-		t.Fatalf("expected marshaled uid, got %s", string(b))
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, "1001", string(b))
 }
 
 func TestUserIdentity_unmarshalInvalid(t *testing.T) {
 	var user UserIdentity
-	if err := json.Unmarshal([]byte(`{"name":"bad"}`), &user); err == nil {
-		t.Fatalf("expected error for object input")
-	}
+	assert.Error(t, json.Unmarshal([]byte(`{"name":"bad"}`), &user))
 }

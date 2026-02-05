@@ -52,6 +52,7 @@ English | [中文](README_zh.md)
 - Proper signal forwarding with process groups
 - Real-time stdout/stderr streaming
 - Context-aware interruption
+- Optional user/UID switch per request (requires container/user namespace permissions; see below)
 
 ### Filesystem
 
@@ -168,6 +169,13 @@ export JUPYTER_TOKEN=your-token
 ```
 
 Environment variables override defaults but are superseded by explicit CLI flags.
+
+### User switching (runCommand `user` field)
+
+- The `user` field in the command API supports username or UID.
+- Effective switching requires the execd process to have **root** or at least **CAP_SETUID** and **CAP_SETGID**; in a user namespace, the target UID/GID must be mapped.
+- If these capabilities/mappings are missing, command start will fail with a permission error.
+- Ensure the target user exists in the container’s `/etc/passwd` (or NSS) before enabling.
 
 ## API Reference
 

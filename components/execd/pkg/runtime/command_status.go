@@ -68,6 +68,7 @@ func (c *Controller) GetCommandStatus(session string) (*CommandStatus, error) {
 		StartedAt:  kernel.startedAt,
 		FinishedAt: kernel.finishedAt,
 		Content:    kernel.content,
+		User:       kernel.user,
 	}
 	return status, nil
 }

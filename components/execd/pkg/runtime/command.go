@@ -52,6 +52,17 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 
 	startAt := time.Now()
 	log.Info("received command: %v", request.Code)
+	cred, resolvedUser, err := resolveUserCredential(request.User)
+	if err != nil {
+		request.Hooks.OnExecuteInit(session)
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{
+			EName:     "CommandExecError",
+			EValue:    err.Error(),
+			Traceback: []string{err.Error()},
+		})
+		log.Error("CommandExecError: error preparing command user: %v", err)
+		return nil
+	}
 	cmd := exec.CommandContext(ctx, "bash", "-c", request.Code)
 
 	cmd.Stdout = stdout
@@ -72,7 +83,11 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 
 	cmd.Dir = request.Cwd
 	// use a dedicated process group so signals propagate to children.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	sysProcAttr := &syscall.SysProcAttr{Setpgid: true}
+	if cred != nil {
+		sysProcAttr.Credential = cred
+	}
+	cmd.SysProcAttr = sysProcAttr
 
 	err = cmd.Start()
 	if err != nil {
@@ -90,6 +105,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		running:      true,
 		content:      request.Code,
 		isBackground: false,
+		user:         resolvedUser,
 	}
 	c.storeCommandKernel(session, kernel)
 	request.Hooks.OnExecuteInit(session)
@@ -169,8 +185,30 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 	log.Info("received command: %v", request.Code)
 	cmd := exec.CommandContext(context.Background(), "bash", "-c", request.Code)
 
+	cred, resolvedUser, err := resolveUserCredential(request.User)
+	if err != nil {
+		log.Error("CommandExecError: error preparing command user: %v", err)
+		kernel := &commandKernel{
+			pid:          -1,
+			stdoutPath:   stdoutPath,
+			stderrPath:   stderrPath,
+			startedAt:    startAt,
+			running:      false,
+			content:      request.Code,
+			isBackground: true,
+			user:         nil,
+		}
+		c.storeCommandKernel(session, kernel)
+		c.markCommandFinished(session, 255, err.Error())
+		return nil
+	}
+
 	cmd.Dir = request.Cwd
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	sysProcAttr := &syscall.SysProcAttr{Setpgid: true}
+	if cred != nil {
+		sysProcAttr.Credential = cred
+	}
+	cmd.SysProcAttr = sysProcAttr
 	cmd.Stdout = pipe
 	cmd.Stderr = pipe
 	cmd.Env = mergeEnvs(os.Environ(), loadExtraEnvFromFile())
@@ -190,6 +228,7 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 			running:      true,
 			content:      request.Code,
 			isBackground: true,
+			user:         resolvedUser,
 		}
 
 		if err != nil {
