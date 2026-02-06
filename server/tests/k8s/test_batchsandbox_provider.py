@@ -309,6 +309,70 @@ spec:
         mount_names = [m["name"] for m in spec["containers"][0]["volumeMounts"]]
         assert mount_names.count("opensandbox-bin") == 1
         assert "sandbox-shared-data" in mount_names
+
+    def test_create_workload_uses_request_volumes_and_mounts(self, mock_k8s_client, tmp_path):
+        """
+        Test case: Verify request volumes/mounts override template entries (curl example).
+        """
+        template_file = tmp_path / "template.yaml"
+        template_file.write_text(
+            """
+spec:
+  template:
+    spec:
+      volumes:
+        - name: user-session-data
+          emptyDir: {}
+        - name: public-skills-dir
+          emptyDir: {}
+      containers:
+        - name: sandbox
+          volumeMounts:
+            - name: user-session-data
+              mountPath: /data
+            - name: public-skills-dir
+              mountPath: /skills
+"""
+        )
+        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "sandbox-test", "uid": "uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11-slim"),
+            entrypoint=["python", "-m", "http.server", "8000"],
+            env={},
+            resource_limits={"cpu": "500m", "memory": "512Mi"},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest",
+            volumes=[
+                {"name": "user-session-data", "persistentVolumeClaim": {"claimName": "user-session-data"}},
+                {"name": "public-skills-dir", "persistentVolumeClaim": {"claimName": "public-skills-dir"}},
+            ],
+            mounts=[
+                {"name": "user-session-data", "mountPath": "/workspace", "subPath": "uid-1-sessionId-1"},
+                {"name": "public-skills-dir", "mountPath": "/skills", "readOnly": True},
+            ],
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        spec = body["spec"]["template"]["spec"]
+
+        volume_map = {v.get("name"): v for v in spec["volumes"]}
+        assert "persistentVolumeClaim" in volume_map["user-session-data"]
+        assert "persistentVolumeClaim" in volume_map["public-skills-dir"]
+        assert "opensandbox-bin" in volume_map
+
+        mounts = {m.get("name"): m for m in spec["containers"][0]["volumeMounts"]}
+        assert mounts["user-session-data"]["mountPath"] == "/workspace"
+        assert mounts["user-session-data"]["subPath"] == "uid-1-sessionId-1"
+        assert mounts["public-skills-dir"]["mountPath"] == "/skills"
+        assert mounts["public-skills-dir"]["readOnly"] is True
     
     def test_create_workload_sets_resource_limits_and_requests(self, mock_k8s_client):
         """
