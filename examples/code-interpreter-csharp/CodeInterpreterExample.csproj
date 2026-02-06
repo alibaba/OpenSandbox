@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CodeInterpreterExample</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\sdks\sandbox\csharp\src\OpenSandbox\OpenSandbox.csproj" />
+    <ProjectReference Include="..\..\sdks\code-interpreter\csharp\src\OpenSandbox.CodeInterpreter\OpenSandbox.CodeInterpreter.csproj" />
+  </ItemGroup>
+
+</Project>

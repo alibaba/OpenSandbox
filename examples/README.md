@@ -5,7 +5,8 @@ Examples for common OpenSandbox use cases. Each subdirectory contains runnable c
 ## Integrations / Sandboxes
 - [**aio-sandbox**](aio-sandbox): All-in-one sandbox setup using OpenSandbox SDK and agent-sandbox
 - [**agent-sandbox**](agent-sandbox): Create a kubernetes-sigs/agent-sandbox instance and run a command
-- [**code-interpreter**](code-interpreter): Code Interpreter SDK singleton example
+- [**code-interpreter**](code-interpreter): Code Interpreter SDK singleton example (Python)
+- [**code-interpreter-csharp**](code-interpreter-csharp): Code Interpreter SDK example (C#/.NET)
 - [**rl-training**](rl-training): Reinforcement learning training loop inside a sandbox
 - [**claude-code**](claude-code): Call Claude (Anthropic) API/CLI within the sandbox
 - [**iflow-cli**](iflow-cli): CLI invocation template for iFlow/custom HTTP LLM services
