@@ -39,8 +39,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run smoke test
+      - name: Run dns test
+        working-directory: components/egress
         run: |
-          cd components/egress
-          chmod +x tests/smoke.sh
-          ./tests/smoke.sh
+          chmod +x tests/smoke-dns.sh
+          ./tests/smoke-dns.sh
+
+      - name: Run nft test
+        working-directory: components/egress
+        run: |
+          chmod +x tests/smoke-nft.sh
+          ./tests/smoke-nft.sh
