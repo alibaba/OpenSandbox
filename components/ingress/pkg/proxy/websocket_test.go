@@ -38,7 +38,7 @@ func Test_WebSocketProxy(t *testing.T) {
 
 	ctx := context.Background()
 	Logger = logging.FromContext(ctx)
-	proxy := NewProxy(ctx, provider)
+	proxy := NewProxy(ctx, provider, ModeHeader)
 
 	http.Handle("/ws", proxy)
 	proxyPort, err := findAvailablePort()

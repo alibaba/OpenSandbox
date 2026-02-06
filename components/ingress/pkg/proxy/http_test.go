@@ -63,7 +63,7 @@ func Test_HTTPProxy(t *testing.T) {
 
 	ctx := context.Background()
 	Logger = logging.FromContext(ctx)
-	proxy := NewProxy(ctx, provider)
+	proxy := NewProxy(ctx, provider, ModeHeader)
 
 	http.Handle("/", proxy)
 	port, err := findAvailablePort()
@@ -80,7 +80,7 @@ func Test_HTTPProxy(t *testing.T) {
 	assert.Nil(t, err)
 	response, err := http.DefaultClient.Do(request)
 	assert.Nil(t, err)
-	assert.Equal(t, http.StatusNotAcceptable, response.StatusCode)
+	assert.Equal(t, http.StatusBadRequest, response.StatusCode)
 	bytes, _ := io.ReadAll(response.Body)
 	t.Log(string(bytes))
 
