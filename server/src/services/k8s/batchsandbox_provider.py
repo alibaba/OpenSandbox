@@ -32,6 +32,11 @@ from kubernetes.client import (
 from src.api.schema import ImageSpec, NetworkPolicy
 from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 from src.services.k8s.client import K8sClient
+from src.services.k8s.egress_helper import (
+    build_egress_sidecar_container,
+    build_ipv6_disable_sysctls,
+    build_security_context_for_main_container,
+)
 from src.services.k8s.workload_provider import WorkloadProvider
 
 logger = logging.getLogger(__name__)
@@ -132,15 +137,36 @@ class BatchSandboxProvider(WorkloadProvider):
             entrypoint=entrypoint,
             env=env,
             resource_limits=resource_limits,
+            has_network_policy=network_policy is not None,
         )
         
-        # Build shared volume for execd
-        volumes = [
-            {
-                "name": "opensandbox-bin",
-                "emptyDir": {}
-            }
-        ]
+        # Build containers list
+        containers = [self._container_to_dict(main_container)]
+        
+        # Add egress sidecar if network policy is provided
+        pod_spec: Dict[str, Any] = {
+            "initContainers": [self._container_to_dict(init_container)],
+            "containers": containers,
+            "volumes": [
+                {
+                    "name": "opensandbox-bin",
+                    "emptyDir": {}
+                }
+            ],
+        }
+        
+        if network_policy and egress_image:
+            # Build and add egress sidecar container
+            sidecar_container = build_egress_sidecar_container(
+                egress_image=egress_image,
+                network_policy=network_policy,
+            )
+            containers.append(sidecar_container)
+            
+            # Disable IPv6 at Pod level
+            if "securityContext" not in pod_spec:
+                pod_spec["securityContext"] = {}
+            pod_spec["securityContext"]["sysctls"] = build_ipv6_disable_sysctls()
         
         # Build runtime-generated BatchSandbox manifest
         # This contains only the essential runtime fields
@@ -156,11 +182,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 "replicas": 1,
                 "expireTime": expires_at.isoformat(),
                 "template": {
-                    "spec": {
-                        "initContainers": [self._container_to_dict(init_container)],
-                        "containers": [self._container_to_dict(main_container)],
-                        "volumes": volumes,
-                    }
+                    "spec": pod_spec,
                 },
             },
         }
@@ -414,6 +436,7 @@ class BatchSandboxProvider(WorkloadProvider):
         entrypoint: List[str],
         env: Dict[str, str],
         resource_limits: Dict[str, str],
+        has_network_policy: bool = False,
     ) -> V1Container:
         """
         Build main container spec with execd support.
@@ -426,6 +449,7 @@ class BatchSandboxProvider(WorkloadProvider):
             entrypoint: Container entrypoint command
             env: Environment variables
             resource_limits: Resource limits
+            has_network_policy: Whether network policy is enabled for this sandbox
             
         Returns:
             V1Container: Main container spec
@@ -446,6 +470,20 @@ class BatchSandboxProvider(WorkloadProvider):
         # Wrap entrypoint with bootstrap script to start execd
         wrapped_command = ["/opt/opensandbox/bin/bootstrap.sh"] + entrypoint
         
+        # Apply security context when network policy is enabled
+        security_context = None
+        if has_network_policy:
+            security_context_dict = build_security_context_for_main_container(True)
+            if security_context_dict:
+                from kubernetes.client import V1SecurityContext, V1Capabilities
+                capabilities = None
+                if "capabilities" in security_context_dict:
+                    caps_dict = security_context_dict["capabilities"]
+                    add_caps = caps_dict.get("add", [])
+                    drop_caps = caps_dict.get("drop", [])
+                    capabilities = V1Capabilities(add=add_caps if add_caps else None, drop=drop_caps if drop_caps else None)
+                security_context = V1SecurityContext(capabilities=capabilities)
+        
         return V1Container(
             name="sandbox",
             image=image_spec.uri,
@@ -458,6 +496,7 @@ class BatchSandboxProvider(WorkloadProvider):
                     mount_path="/opt/opensandbox/bin"
                 )
             ],
+            security_context=security_context,
         )
     
     def _container_to_dict(self, container: V1Container) -> Dict[str, Any]:
@@ -499,6 +538,17 @@ class BatchSandboxProvider(WorkloadProvider):
                 {"name": vm.name, "mountPath": vm.mount_path}
                 for vm in container.volume_mounts
             ]
+        
+        if container.security_context:
+            result["securityContext"] = {}
+            if container.security_context.capabilities:
+                caps = {}
+                if container.security_context.capabilities.add:
+                    caps["add"] = container.security_context.capabilities.add
+                if container.security_context.capabilities.drop:
+                    caps["drop"] = container.security_context.capabilities.drop
+                if caps:
+                    result["securityContext"]["capabilities"] = caps
         
         return result
     
