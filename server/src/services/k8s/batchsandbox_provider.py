@@ -33,9 +33,10 @@ from src.api.schema import ImageSpec, NetworkPolicy
 from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.egress_helper import (
-    build_egress_sidecar_container,
-    build_ipv6_disable_sysctls,
-    build_security_context_for_main_container,
+    apply_egress_to_spec,
+    build_security_context_for_sandbox_container,
+    build_security_context_from_dict,
+    serialize_security_context_to_dict,
 )
 from src.services.k8s.workload_provider import WorkloadProvider
 
@@ -143,7 +144,7 @@ class BatchSandboxProvider(WorkloadProvider):
         # Build containers list
         containers = [self._container_to_dict(main_container)]
         
-        # Add egress sidecar if network policy is provided
+        # Build base pod spec
         pod_spec: Dict[str, Any] = {
             "initContainers": [self._container_to_dict(init_container)],
             "containers": containers,
@@ -155,18 +156,13 @@ class BatchSandboxProvider(WorkloadProvider):
             ],
         }
         
-        if network_policy and egress_image:
-            # Build and add egress sidecar container
-            sidecar_container = build_egress_sidecar_container(
-                egress_image=egress_image,
-                network_policy=network_policy,
-            )
-            containers.append(sidecar_container)
-            
-            # Disable IPv6 at Pod level
-            if "securityContext" not in pod_spec:
-                pod_spec["securityContext"] = {}
-            pod_spec["securityContext"]["sysctls"] = build_ipv6_disable_sysctls()
+        # Add egress sidecar if network policy is provided
+        apply_egress_to_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=network_policy,
+            egress_image=egress_image,
+        )
         
         # Build runtime-generated BatchSandbox manifest
         # This contains only the essential runtime fields
@@ -473,16 +469,8 @@ class BatchSandboxProvider(WorkloadProvider):
         # Apply security context when network policy is enabled
         security_context = None
         if has_network_policy:
-            security_context_dict = build_security_context_for_main_container(True)
-            if security_context_dict:
-                from kubernetes.client import V1SecurityContext, V1Capabilities
-                capabilities = None
-                if "capabilities" in security_context_dict:
-                    caps_dict = security_context_dict["capabilities"]
-                    add_caps = caps_dict.get("add", [])
-                    drop_caps = caps_dict.get("drop", [])
-                    capabilities = V1Capabilities(add=add_caps if add_caps else None, drop=drop_caps if drop_caps else None)
-                security_context = V1SecurityContext(capabilities=capabilities)
+            security_context_dict = build_security_context_for_sandbox_container(True)
+            security_context = build_security_context_from_dict(security_context_dict)
         
         return V1Container(
             name="sandbox",
@@ -540,15 +528,9 @@ class BatchSandboxProvider(WorkloadProvider):
             ]
         
         if container.security_context:
-            result["securityContext"] = {}
-            if container.security_context.capabilities:
-                caps = {}
-                if container.security_context.capabilities.add:
-                    caps["add"] = container.security_context.capabilities.add
-                if container.security_context.capabilities.drop:
-                    caps["drop"] = container.security_context.capabilities.drop
-                if caps:
-                    result["securityContext"]["capabilities"] = caps
+            security_context_dict = serialize_security_context_to_dict(container.security_context)
+            if security_context_dict:
+                result["securityContext"] = security_context_dict
         
         return result
     

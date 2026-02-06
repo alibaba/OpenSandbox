@@ -22,7 +22,7 @@ from src.api.schema import NetworkPolicy, NetworkRule
 from src.services.k8s.egress_helper import (
     EGRESS_RULES_ENV,
     build_egress_sidecar_container,
-    build_security_context_for_main_container,
+    build_security_context_for_sandbox_container,
     build_ipv6_disable_sysctls,
 )
 
@@ -184,12 +184,12 @@ class TestBuildSecurityContextForMainContainer:
 
     def test_returns_empty_dict_when_no_network_policy(self):
         """Test that empty dict is returned when network policy is disabled."""
-        result = build_security_context_for_main_container(has_network_policy=False)
+        result = build_security_context_for_sandbox_container(has_network_policy=False)
         assert result == {}
 
     def test_drops_net_admin_when_network_policy_enabled(self):
         """Test that NET_ADMIN is dropped when network policy is enabled."""
-        result = build_security_context_for_main_container(has_network_policy=True)
+        result = build_security_context_for_sandbox_container(has_network_policy=True)
         
         assert "capabilities" in result
         assert "drop" in result["capabilities"]

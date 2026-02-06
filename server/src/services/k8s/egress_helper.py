@@ -20,7 +20,7 @@ and related configurations that can be reused across different workload provider
 """
 
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
 from src.api.schema import NetworkPolicy
 
@@ -113,7 +113,7 @@ def _build_security_context_for_egress() -> Dict[str, Any]:
     }
 
 
-def build_security_context_for_main_container(
+def build_security_context_for_sandbox_container(
     has_network_policy: bool,
 ) -> Dict[str, Any]:
     """
@@ -138,6 +138,146 @@ def build_security_context_for_main_container(
             "drop": ["NET_ADMIN"],
         },
     }
+
+
+def apply_egress_to_spec(
+    pod_spec: Dict[str, Any],
+    containers: List[Dict[str, Any]],
+    network_policy: Optional[NetworkPolicy],
+    egress_image: Optional[str],
+) -> None:
+    """
+    Apply egress sidecar configuration to Pod spec.
+    
+    This function adds the egress sidecar container to the containers list
+    and configures IPv6 disable sysctls at the Pod level when network policy
+    is provided.
+    
+    Args:
+        pod_spec: Pod specification dict (will be modified in place)
+        containers: List of container dicts (will be modified in place)
+        network_policy: Optional network policy configuration
+        egress_image: Optional egress sidecar image
+        
+    Example:
+        ```python
+        containers = [main_container_dict]
+        pod_spec = {"containers": containers, ...}
+        
+        apply_egress_sidecar_to_pod_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=network_policy,
+            egress_image=egress_image,
+        )
+        ```
+    """
+    if not network_policy or not egress_image:
+        return
+    
+    # Build and add egress sidecar container
+    sidecar_container = build_egress_sidecar_container(
+        egress_image=egress_image,
+        network_policy=network_policy,
+    )
+    containers.append(sidecar_container)
+    
+    # Disable IPv6 at Pod level
+    if "securityContext" not in pod_spec:
+        pod_spec["securityContext"] = {}
+    pod_spec["securityContext"]["sysctls"] = build_ipv6_disable_sysctls()
+
+
+def build_security_context_from_dict(
+    security_context_dict: Dict[str, Any],
+) -> Optional[Any]:
+    """
+    Convert security context dict to V1SecurityContext object.
+    
+    This is a helper function to convert the dict returned by
+    build_security_context_for_main_container() into a Kubernetes
+    V1SecurityContext object that can be used in V1Container.
+    
+    Args:
+        security_context_dict: Security context configuration dict
+        
+    Returns:
+        V1SecurityContext object or None if dict is empty
+        
+    Example:
+        ```python
+        from kubernetes.client import V1Container
+        
+        security_context_dict = build_security_context_for_main_container(True)
+        security_context = build_v1_security_context_from_dict(security_context_dict)
+        
+        container = V1Container(
+            name="sandbox",
+            security_context=security_context,
+        )
+        ```
+    """
+    if not security_context_dict:
+        return None
+    
+    from kubernetes.client import V1SecurityContext, V1Capabilities
+    
+    capabilities = None
+    if "capabilities" in security_context_dict:
+        caps_dict = security_context_dict["capabilities"]
+        add_caps = caps_dict.get("add", [])
+        drop_caps = caps_dict.get("drop", [])
+        capabilities = V1Capabilities(
+            add=add_caps if add_caps else None,
+            drop=drop_caps if drop_caps else None,
+        )
+    
+    return V1SecurityContext(capabilities=capabilities)
+
+
+def serialize_security_context_to_dict(
+    security_context: Optional[Any],
+) -> Optional[Dict[str, Any]]:
+    """
+    Serialize V1SecurityContext to dict format for CRD.
+    
+    This function converts a V1SecurityContext object (from V1Container)
+    into a dict format that can be used in Kubernetes CRD specifications.
+    
+    Args:
+        security_context: V1SecurityContext object or None
+        
+    Returns:
+        Dict representation of security context or None
+        
+    Example:
+        ```python
+        container_dict = {
+            "name": container.name,
+            "image": container.image,
+        }
+        
+        if container.security_context:
+            container_dict["securityContext"] = serialize_security_context_to_dict(
+                container.security_context
+            )
+        ```
+    """
+    if not security_context:
+        return None
+    
+    result: Dict[str, Any] = {}
+    
+    if security_context.capabilities:
+        caps: Dict[str, Any] = {}
+        if security_context.capabilities.add:
+            caps["add"] = security_context.capabilities.add
+        if security_context.capabilities.drop:
+            caps["drop"] = security_context.capabilities.drop
+        if caps:
+            result["capabilities"] = caps
+    
+    return result if result else None
 
 
 def build_ipv6_disable_sysctls() -> list[Dict[str, str]]:
