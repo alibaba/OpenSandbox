@@ -1,10 +1,10 @@
 ---
 title: Volume Support
 authors:
-  - "yutian.taoyt"
+  - "@hittyt"
 creation-date: 2026-01-29
-last-updated: 2026-02-02
-status: implementable
+last-updated: 2026-02-03
+status: implementing
 ---
 
 # OSEP-0003: Volume Support
@@ -70,7 +70,7 @@ OpenSandbox users running long-lived agents need artifacts (web pages, images, r
 ## Proposal
 
 Add a new optional field to the Lifecycle API:
-- `volumes[]`: defines storage mounts for the sandbox. Each entry includes a named backend-specific struct (e.g., `host`, `ossfs`, `pvc`, `nfs`) and common mount settings (`name`, `mountPath`, `accessMode`, `subPath`).
+- `volumes[]`: defines storage mounts for the sandbox. Each entry includes a named backend-specific struct (e.g., `host`, `ossfs`, `pvc`, `nfs`) and common mount settings (`name`, `mountPath`, `readOnly`, `subPath`).
 
 The core API describes what storage is required using strongly-typed backend definitions. Each backend type has its own dedicated struct with explicit fields, making the schema self-documenting and enabling compile-time validation in typed SDKs. Runtime providers translate the model into platform-specific mounts.
 
@@ -84,7 +84,7 @@ The core API describes what storage is required using strongly-typed backend def
 
 ### Risks and Mitigations
 
-- Security risk: Docker hostPath mounts can expose host data. Mitigation: enforce allowlist prefixes, forbid path traversal, and require explicit `accessMode=RW` for write access.
+- Security risk: Docker hostPath mounts can expose host data. Mitigation: enforce allowlist prefixes, forbid path traversal, and use `readOnly: true` for read-only access when appropriate.
 - Portability risk: different backends behave differently. Mitigation: keep core API minimal and require explicit backend selection.
 - Operational risk: storage misconfiguration causes startup failures. Mitigation: validate mounts early and provide clear error responses.
 
@@ -95,12 +95,11 @@ Add to `CreateSandboxRequest`:
 
 ```yaml
 volumes:
-  # Host path mount
+  # Host path mount (read-write by default)
   - name: workdir
     host:
       path: "/data/opensandbox/user-a"
     mountPath: /mnt/work
-    accessMode: RW
     subPath: "task-001"
 
   # OSSFS mount
@@ -113,23 +112,22 @@ volumes:
       accessKeySecret: "SECRETEXAMPLE"
       version: "2.0"
     mountPath: /mnt/data
-    accessMode: RW
 
-  # PVC mount (Kubernetes)
+  # PVC mount (Kubernetes, read-only)
   - name: models
     pvc:
       claimName: "shared-models-pvc"
     mountPath: /mnt/models
-    accessMode: RO
+    readOnly: true
 
-  # NFS mount (future)
+  # NFS mount (future, read-only)
   - name: shared
     nfs:
       server: "nfs.example.com"
       path: "/exports/sandbox"
       options: "nfsvers=4.1,hard,timeo=600"
     mountPath: /mnt/shared
-    accessMode: RO
+    readOnly: true
 ```
 
 ### Core semantics
@@ -137,12 +135,8 @@ volumes:
   - `name`: unique identifier for the volume within the sandbox.
   - Exactly one backend struct (`host`, `ossfs`, `pvc`, `nfs`, etc.) with backend-specific typed fields.
   - `mountPath`: absolute path inside the container where the volume is mounted.
-  - `accessMode`: `RW` (read/write) or `RO` (read-only).
+  - `readOnly` (optional): if true, the volume is mounted as read-only. Defaults to false (read-write).
   - `subPath` (optional): subdirectory under the backend path to mount.
-
-### API enum specifications
-Enumerations are fixed and validated by the API:
-- `accessMode`: use short forms `RW` (read/write) and `RO` (read-only). Examples in this document follow that convention.
 
 ### Backend struct definitions
 Each backend type is defined as a distinct struct with explicit typed fields:
@@ -192,15 +186,15 @@ These constraints are enforced in request validation and surfaced as clear API e
 ### Permissions and ownership
 Volume permissions are a frequent source of runtime failures and must be explicit in the contract:
 - Default behavior: OpenSandbox does not automatically fix ownership or permissions on mounted storage. Users are responsible for ensuring the backend target is writable by the sandbox process UID/GID.
-- Docker: host path permissions are enforced by the host filesystem. Even with `accessMode=RW`, writes will fail if the host path is not writable by the container user.
+- Docker: host path permissions are enforced by the host filesystem. Even with `readOnly: false`, writes will fail if the host path is not writable by the container user.
 - Kubernetes: filesystem permissions vary by storage driver. Future enhancement: add optional `fsGroup` field to backend structs that support it for pod-level volume access control.
 
 ### Concurrency and isolation
-SubPath provides path-level isolation, not concurrency control. If multiple sandboxes mount the same volume without distinct `subPath` values and use `accessMode=RW`, they may overwrite each other. OpenSandbox does not provide file-locking or coordination; users are responsible for handling concurrent access safely.
+SubPath provides path-level isolation, not concurrency control. If multiple sandboxes mount the same volume without distinct `subPath` values and use `readOnly: false`, they may overwrite each other. OpenSandbox does not provide file-locking or coordination; users are responsible for handling concurrent access safely.
 
 ### Docker mapping
 - `host` backend maps to bind mounts. `host.path + subPath` resolves to a concrete host directory.
-- The host config uses `mounts`/`binds` with `readOnly` derived from `accessMode`.
+- The host config uses `mounts`/`binds` with `ReadOnly` set from `readOnly` field.
 - If the resolved host path does not exist, the request fails validation (do not auto-create host directories in MVP to avoid permission and security pitfalls).
 - Allowed host paths are restricted by a server-side allowlist; users must specify a `host.path` under permitted prefixes. The allowlist is an operator-configured policy and should be documented for users of a given deployment.
 - `ossfs` backend requires the runtime to mount OSS via ossfs during sandbox creation using the struct fields. If the runtime does not support ossfs mounting, the request is rejected.
@@ -222,7 +216,6 @@ volumes:
     host:
       path: "/data/opensandbox/user-a"
     mountPath: /mnt/work
-    accessMode: RW
     subPath: "task-001"
 ```
 
@@ -235,7 +228,7 @@ from opensandbox.api.lifecycle.models.create_sandbox_request import CreateSandbo
 from opensandbox.api.lifecycle.models.image_spec import ImageSpec
 from opensandbox.api.lifecycle.models.resource_limits import ResourceLimits
 from opensandbox.api.lifecycle.models.volume import Volume
-from opensandbox.api.lifecycle.models.host_backend import HostBackend
+from opensandbox.api.lifecycle.models.host import Host
 
 client = AuthenticatedClient(base_url="https://api.opensandbox.io", token="YOUR_API_KEY")
 
@@ -248,11 +241,10 @@ request = CreateSandboxRequest(
     volumes=[
         Volume(
             name="workdir",
-            host=HostBackend(
+            host=Host(
                 path="/data/opensandbox/user-a",
             ),
             mount_path="/mnt/work",
-            access_mode="RW",
             sub_path="task-001",
         )
     ],
@@ -278,14 +270,13 @@ volumes:
         - "allow_other"
         - "umask=0022"
     mountPath: /mnt/work
-    accessMode: RW
     subPath: "task-001"
 ```
 
 Runtime mapping (Docker):
 - host path: created by ossfs mount under a configured mount root (e.g., `/mnt/ossfs/<bucket>/<path>`), then bind-mounted into the container
 - container path: `/mnt/work`
-- accessMode: `RW`
+- readOnly: false (default, read-write)
 
 ### Example: Python SDK (lifecycle client)
 Use the Python SDK lifecycle client to create a sandbox with an OSSFS volume mount (future typed model):
@@ -297,7 +288,7 @@ from opensandbox.api.lifecycle.models.create_sandbox_request import CreateSandbo
 from opensandbox.api.lifecycle.models.image_spec import ImageSpec
 from opensandbox.api.lifecycle.models.resource_limits import ResourceLimits
 from opensandbox.api.lifecycle.models.volume import Volume
-from opensandbox.api.lifecycle.models.ossfs_backend import OSSFSBackend
+from opensandbox.api.lifecycle.models.ossfs import OSSFS
 
 client = AuthenticatedClient(base_url="https://api.opensandbox.io", token="YOUR_API_KEY")
 
@@ -310,7 +301,7 @@ request = CreateSandboxRequest(
     volumes=[
         Volume(
             name="workdir",
-            ossfs=OSSFSBackend(
+            ossfs=OSSFS(
                 bucket="my-bucket",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
                 path="/sandbox/user-a",
@@ -320,7 +311,6 @@ request = CreateSandboxRequest(
                 options=["allow_other", "umask=0022"],
             ),
             mount_path="/mnt/work",
-            access_mode="RW",
             sub_path="task-001",
         )
     ],
@@ -338,7 +328,7 @@ volumes:
     pvc:
       claimName: "shared-models-pvc"
     mountPath: /mnt/models
-    accessMode: RO
+    readOnly: true
     subPath: "v1.0"
 ```
 
@@ -353,7 +343,7 @@ containers:
     volumeMounts:
       - name: models
         mountPath: /mnt/models
-        readOnly: true  # derived from accessMode=RO
+        readOnly: true
         subPath: v1.0
 ```
 
@@ -366,7 +356,7 @@ from opensandbox.api.lifecycle.models.create_sandbox_request import CreateSandbo
 from opensandbox.api.lifecycle.models.image_spec import ImageSpec
 from opensandbox.api.lifecycle.models.resource_limits import ResourceLimits
 from opensandbox.api.lifecycle.models.volume import Volume
-from opensandbox.api.lifecycle.models.pvc_backend import PVCBackend
+from opensandbox.api.lifecycle.models.pvc import PVC
 
 client = AuthenticatedClient(base_url="https://api.opensandbox.io", token="YOUR_API_KEY")
 
@@ -379,11 +369,11 @@ request = CreateSandboxRequest(
     volumes=[
         Volume(
             name="models",
-            pvc=PVCBackend(
+            pvc=PVC(
                 claim_name="shared-models-pvc",
             ),
             mount_path="/mnt/models",
-            access_mode="RO",
+            read_only=True,
             sub_path="v1.0",
         )
     ],
@@ -403,7 +393,6 @@ volumes:
       path: "/exports/sandbox"
       options: "nfsvers=4.1,hard,timeo=600"
     mountPath: /mnt/work
-    accessMode: RW
     subPath: "task-001"
 ```
 
@@ -419,7 +408,7 @@ containers:
     volumeMounts:
       - name: workdir
         mountPath: /mnt/work
-        readOnly: false  # derived from accessMode=RW
+        readOnly: false
         subPath: task-001
 ```
 
@@ -432,7 +421,7 @@ from opensandbox.api.lifecycle.models.create_sandbox_request import CreateSandbo
 from opensandbox.api.lifecycle.models.image_spec import ImageSpec
 from opensandbox.api.lifecycle.models.resource_limits import ResourceLimits
 from opensandbox.api.lifecycle.models.volume import Volume
-from opensandbox.api.lifecycle.models.nfs_backend import NFSBackend
+from opensandbox.api.lifecycle.models.nfs import NFS
 
 client = AuthenticatedClient(base_url="https://api.opensandbox.io", token="YOUR_API_KEY")
 
@@ -445,13 +434,12 @@ request = CreateSandboxRequest(
     volumes=[
         Volume(
             name="workdir",
-            nfs=NFSBackend(
+            nfs=NFS(
                 server="nfs.example.com",
                 path="/exports/sandbox",
                 options="nfsvers=4.1,hard,timeo=600",
             ),
             mount_path="/mnt/work",
-            access_mode="RW",
             sub_path="task-001",
         )
     ],

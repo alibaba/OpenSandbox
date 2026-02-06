@@ -20,6 +20,7 @@ Models for code execution, results, and output handling.
 """
 
 from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -231,3 +232,37 @@ class RunCommandOpts(BaseModel):
     )
 
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
+
+
+class CommandStatus(BaseModel):
+    """
+    Command execution status for foreground/background commands.
+    """
+
+    id: str | None = Field(default=None, description="Command ID")
+    content: str | None = Field(default=None, description="Original command content")
+    running: bool | None = Field(default=None, description="True if command is still running")
+    exit_code: int | None = Field(
+        default=None, description="Exit code if the command has finished"
+    )
+    error: str | None = Field(default=None, description="Error message if the command failed")
+    started_at: datetime | None = Field(
+        default=None, description="Command start time (RFC3339)", alias="started_at"
+    )
+    finished_at: datetime | None = Field(
+        default=None, description="Command finish time (RFC3339)", alias="finished_at"
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CommandLogs(BaseModel):
+    """
+    Background command logs with optional tail cursor for incremental reads.
+    """
+
+    content: str = Field(description="Raw stdout/stderr content")
+    cursor: int | None = Field(
+        default=None,
+        description="Latest tail cursor for incremental reads",
+    )

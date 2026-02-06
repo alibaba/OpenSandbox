@@ -1,4 +1,4 @@
-name: Manual Docker Publish
+name: Publish Components Image
 
 on:
   workflow_dispatch:

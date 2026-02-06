@@ -34,15 +34,19 @@ The egress control is implemented as a **Sidecar** that shares the network names
 
 ## Configuration
 
-- Starts in deny-all mode by default.
-- Use the built-in HTTP API to push/update policy; empty/whitespace/`{}`/`null` resets to default deny-all.
-- Optional token auth to restrict calls to the platform:
-  - Set `OPENSANDBOX_EGRESS_TOKEN` in the sidecar container.
-  - Callers must send header `OPENSANDBOX-EGRESS-AUTH: <token>`.
-  - If token is not set, the endpoint stays open (not recommended for shared environments).
-- Optional bootstrap at start via env:
-  - `OPENSANDBOX_EGRESS_RULES` (JSON, same shape as `/policy`) seeds initial policy.
-  - If unset/empty/`{}`/`null`, sidecar starts with default deny-all until HTTP updates.
+- Policy bootstrap & runtime:
+  - Default deny-all. Seed initial policy via `OPENSANDBOX_EGRESS_RULES` (JSON, same shape as `/policy`); empty/`{}`/`null` stays deny-all.
+  - `/policy` at runtime; empty body resets to default deny-all.
+- HTTP service:
+  - Listen address: `OPENSANDBOX_EGRESS_HTTP_ADDR` (default `:18080`).
+  - Auth: `OPENSANDBOX_EGRESS_TOKEN` with header `OPENSANDBOX-EGRESS-AUTH: <token>`; if unset, endpoint is open.
+- Mode (`OPENSANDBOX_EGRESS_MODE`, default `dns`):
+  - `dns`: DNS proxy only, no nftables (IP/CIDR rules have no effect at L2).
+  - `dns+nft`: enable nftables; if nft apply fails, fallback to `dns`. IP/CIDR enforcement and DoH/DoT blocking require this mode.
+- DoH/DoT blocking:
+  - DoT (tcp/udp 853) blocked by default.
+  - Optional DoH over 443: `OPENSANDBOX_EGRESS_BLOCK_DOH_443=true`. If enabled without blocklist, all 443 is dropped.
+  - DoH blocklist (IP/CIDR, comma-separated): `OPENSANDBOX_EGRESS_DOH_BLOCKLIST="9.9.9.9,1.1.1.1/32,2001:db8::/32"`.
 
 ### Runtime HTTP API
 
@@ -53,13 +57,26 @@ The egress control is implemented as a **Sidecar** that shares the network names
 
 Examples:
 
-```bash
-curl -XPOST http://11.167.115.8:18080/policy \
-  -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"*.bing.com"}]}'
-
-curl -XPOST http://11.167.115.8:18080/policy \
-  -d '{"defaultAction":"allow","egress":[{"action":"deny","target":"*.bing.com"}]}'
-```
+- DNS allowlist (default deny):
+  ```bash
+  curl -XPOST http://127.0.0.1:18080/policy \
+    -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"*.bing.com"}]}'
+  ```
+- DNS blocklist (default allow):
+  ```bash
+  curl -XPOST http://127.0.0.1:18080/policy \
+    -d '{"defaultAction":"allow","egress":[{"action":"deny","target":"*.bing.com"}]}'
+  ```
+- IP/CIDR only:
+  ```bash
+  curl -XPOST http://127.0.0.1:18080/policy \
+    -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"1.1.1.1"},{"action":"deny","target":"10.0.0.0/8"}]}'
+  ```
+- Mixed DNS + IP/CIDR:
+  ```bash
+  curl -XPOST http://127.0.0.1:18080/policy \
+    -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"*.example.com"},{"action":"allow","target":"203.0.113.0/24"},{"action":"deny","target":"*.bad.com"}]}'
+  ```
 
 ## Build & Run
 
@@ -133,4 +150,4 @@ go test ./...
 
 - **"iptables setup failed"**: Ensure the sidecar container has `--cap-add=NET_ADMIN`.
 - **DNS resolution fails for all domains**: Check if the upstream DNS (from `/etc/resolv.conf`) is reachable.
-- **Traffic not blocked**: Currently only DNS is filtered. Direct IP access is not yet blocked (Layer 2 pending).
+- **Traffic not blocked**: If nftables应用失败会回退为 DNS-only；检查日志、`nft list table inet opensandbox`、以及 `CAP_NET_ADMIN` 权限。

@@ -131,6 +131,16 @@ class AgentSandboxRuntimeConfig(BaseModel):
     )
 
 
+class EgressConfig(BaseModel):
+    """Egress sidecar configuration."""
+
+    image: Optional[str] = Field(
+        default=None,
+        description="Container image for the egress sidecar (used when network policy is requested).",
+        min_length=1,
+    )
+
+
 class RuntimeConfig(BaseModel):
     """Runtime selection (docker, kubernetes, etc.)."""
 
@@ -141,11 +151,6 @@ class RuntimeConfig(BaseModel):
     execd_image: str = Field(
         ...,
         description="Container image that contains the execd binary for sandbox initialization.",
-        min_length=1,
-    )
-    egress_image: Optional[str] = Field(
-        default=None,
-        description="Container image for the egress sidecar (used when network policy is requested).",
         min_length=1,
     )
 
@@ -205,6 +210,7 @@ class AppConfig(BaseModel):
     agent_sandbox: Optional["AgentSandboxRuntimeConfig"] = None
     router: Optional[RouterConfig] = None
     docker: DockerConfig = Field(default_factory=DockerConfig)
+    egress: Optional[EgressConfig] = None
 
     @model_validator(mode="after")
     def validate_runtime_blocks(self) -> "AppConfig":
@@ -317,6 +323,7 @@ __all__ = [
     "RouterConfig",
     "DockerConfig",
     "KubernetesRuntimeConfig",
+    "EgressConfig",
     "DEFAULT_CONFIG_PATH",
     "CONFIG_ENV_VAR",
     "get_config",

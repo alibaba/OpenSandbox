@@ -33,7 +33,11 @@ api_key = ""
 # -----------------------------------------------------------------
 type = "docker"
 execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
-egress_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.0"
+
+[egress]
+# Egress configuration
+# -----------------------------------------------------------------
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.0"
 
 [docker]
 # Docker-specific knobs

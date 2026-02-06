@@ -43,6 +43,7 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
     SandboxInfo,
     SandboxRenewResponse,
+    Volume,
 )
 from opensandbox.sync.services.sandbox import SandboxesSync
 
@@ -94,6 +95,7 @@ class SandboxesAdapterSync(SandboxesSync):
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
+        volumes: list[Volume] | None,
     ) -> SandboxCreateResponse:
         logger.info("Creating sandbox with image: %s", spec.image)
         try:
@@ -111,6 +113,7 @@ class SandboxesAdapterSync(SandboxesSync):
                 resource=resource,
                 network_policy=network_policy,
                 extensions=extensions,
+                volumes=volumes,
             )
             response_obj = post_sandboxes.sync_detailed(client=self._get_client(), body=create_request)
             handle_api_error(response_obj, "Create sandbox")

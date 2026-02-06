@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import HTTPException, status
 
-from src.config import AppConfig, RouterConfig, RuntimeConfig, ServerConfig
+from src.config import AppConfig, EgressConfig, RouterConfig, RuntimeConfig, ServerConfig
 from src.services.constants import SANDBOX_ID_LABEL, SandboxErrorCodes
 from src.services.docker import DockerSandboxService, PendingSandbox
 from src.services.helpers import parse_memory_limit, parse_nano_cpus, parse_timestamp
@@ -182,7 +182,7 @@ def test_network_policy_rejected_on_host_mode(mock_docker):
 
     cfg = _app_config()
     cfg.docker.network_mode = "host"
-    cfg.runtime.egress_image = "egress:latest"
+    cfg.egress = EgressConfig(image="egress:latest")
     service = DockerSandboxService(config=cfg)
 
     request = CreateSandboxRequest(
@@ -210,7 +210,7 @@ def test_network_policy_requires_egress_image(mock_docker):
 
     cfg = _app_config()
     cfg.docker.network_mode = "bridge"
-    cfg.runtime.egress_image = None
+    cfg.egress = None
     service = DockerSandboxService(config=cfg)
 
     request = CreateSandboxRequest(
@@ -248,7 +248,7 @@ def test_egress_sidecar_injection_and_capabilities(mock_docker):
 
     cfg = _app_config()
     cfg.docker.network_mode = "bridge"
-    cfg.runtime.egress_image = "egress:latest"
+    cfg.egress = EgressConfig(image="egress:latest")
     service = DockerSandboxService(config=cfg)
 
     req = CreateSandboxRequest(

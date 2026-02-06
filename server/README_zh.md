@@ -67,6 +67,19 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s
 
 **[可选] 编辑配置以适配您的环境**
 
+- 用于快速 e2e/demo：
+  ```bash
+  opensandbox-server init-config ~/.sandbox.toml --example docker  # 或 docker-zh|k8s|k8s-zh
+  # 已有文件需覆盖时加 --force
+  ```
+- 省略 `--example` 时生成“配置框架”（无默认值，只有占位符）：
+  ```bash
+  opensandbox-server init-config ~/.sandbox.toml
+  # 已有文件需覆盖时加 --force
+  ```
+
+**[可选] 编辑 `~/.sandbox.toml`** 适配您的环境
+
 在启动服务器前，编辑配置文件以适配您的环境。您也可以通过 `opensandbox-server init-config ~/.sandbox.toml` 生成一个新的空配置文件。
 
 **Docker 运行时 + Host 网络模式**
@@ -114,17 +127,19 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s
    ```
    更多 Docker 容器安全参考：https://docs.docker.com/engine/security/
 
-### （可选）Egress sidecar 配置与使用
+### Egress sidecar 配置与使用
 
-- 配置镜像（仅在请求携带 `networkPolicy` 时注入）：
+- **使用 `networkPolicy` 时必需**：配置 sidecar 镜像。当请求携带 `networkPolicy` 时，`egress.image` 配置项是必需的：
 ```toml
 [runtime]
 type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.3"
-egress_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:latest"
+execd_image = "opensandbox/execd:v1.0.5"
+
+[egress]
+image = "opensandbox/egress:v1.0.0"
 ```
 
-- 仅支持 Docker bridge 模式（`network_mode=host` 时会拒绝携带 `networkPolicy` 的请求）。
+- 仅支持 Docker bridge 模式（`network_mode=host` 时会拒绝携带 `networkPolicy` 的请求，或当 `egress.image` 未配置时也会拒绝）。
 - 主容器共享 sidecar 网络命名空间，主容器会显式 drop `NET_ADMIN`，sidecar 保留 `NET_ADMIN` 完成 iptables。
 - 注入 sidecar 时会在共享 netns 内默认禁用 IPv6，以保持策略生效一致性。
 - 侧车镜像会在启动前自动拉取；删除/过期/失败时会尝试同步清理 sidecar。
@@ -155,6 +170,14 @@ opensandbox-server
 ```
 
 服务将在 `http://0.0.0.0:8080`（或您配置的主机/端口）启动。
+
+### 启动服务（安装包方式）
+
+安装为 Python 包后，可直接使用 CLI 启动：
+
+```bash
+opensandbox-server --config ~/.sandbox.toml
+```
 
 **健康检查**
 
@@ -346,7 +369,12 @@ curl -X DELETE \
 |------------------------|--------|----|------------------------------------|
 | `runtime.type`         | string | 是  | 运行时实现（`"docker"` 或 `"kubernetes"`） |
 | `runtime.execd_image`  | string | 是  | 包含 execd 二进制文件的容器镜像                |
-| `runtime.egress_image` | string | 否  | 包含 egress 二进制文件的容器镜像               |
+
+### Egress 配置
+
+| 键           | 类型     | 必需 | 描述                    |
+|---------------|--------|----|--------------------------------|
+| `egress.image` | string | **使用 `networkPolicy` 时必需** | 包含 egress 二进制文件的容器镜像。当创建沙箱的请求中包含 `networkPolicy` 时，必须配置此项。               |
 
 ### Docker 配置
 

@@ -103,6 +103,7 @@ class SandboxesAdapterTest {
                 resource = mapOf("cpu" to "1"),
                 networkPolicy = networkPolicy,
                 extensions = extensions,
+                volumes = null,
             )
 
         // Verify request

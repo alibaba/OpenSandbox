@@ -235,6 +235,37 @@ test("02 command execution: success, cwd, background, failure", async () => {
   expect(completedEvents.length).toBe(0);
 });
 
+test("02a command status + background logs", async () => {
+  if (!sandbox) throw new Error("sandbox not created");
+
+  const exec = await sandbox.commands.run(
+    "sh -c 'echo log-line-1; echo log-line-2; sleep 2'",
+    { background: true }
+  );
+  expect(exec.id).toBeTruthy();
+
+  const commandId = exec.id!;
+  const status = await sandbox.commands.getCommandStatus(commandId);
+  expect(status.id).toBe(commandId);
+  expect(typeof status.running).toBe("boolean");
+
+  let logsText = "";
+  let cursor: number | undefined = undefined;
+  for (let i = 0; i < 20; i++) {
+    const logs = await sandbox.commands.getBackgroundCommandLogs(
+      commandId,
+      cursor
+    );
+    logsText += logs.content;
+    cursor = logs.cursor ?? cursor;
+    if (logsText.includes("log-line-2")) break;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+
+  expect(logsText.includes("log-line-1")).toBe(true);
+  expect(logsText.includes("log-line-2")).toBe(true);
+});
+
 test("03 filesystem operations: CRUD + replace/move/delete + range + stream", async () => {
   if (!sandbox) throw new Error("sandbox not created");
 

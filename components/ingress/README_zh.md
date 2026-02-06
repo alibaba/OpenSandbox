@@ -1,18 +1,22 @@
 # OpenSandbox Ingress
 
 ## 功能概览
-- 基于 Kubernetes BatchSandbox CR 的 HTTP / WebSocket 反向代理，按 `OPEN-SANDBOX-INGRESS` 或 Host 解析目标沙箱。
-- 自动监听目标 Namespace 内的 BatchSandbox 资源，从 annotation 中获取端点 IP。
+- 基于 Kubernetes Sandbox CR（BatchSandbox 或 AgentSandbox，通过 `--provider-type` 选择）的 HTTP / WebSocket 反向代理，按 `OPEN-SANDBOX-INGRESS` 或 Host 解析目标沙箱。
+- 监听目标 Namespace 内的 Sandbox 资源：
+  - BatchSandbox：从 `sandbox.opensandbox.io/endpoints` annotation 读取端点。
+  - AgentSandbox：从 `status.serviceFQDN` 读取端点。
 - 提供 `/status.ok` 健康探针，启动时打印编译版本、时间、提交、Go/平台信息。
 
 ## 启动与参数
 ```bash
 go run main.go \
   --namespace <目标命名空间> \
+  --provider-type <batchsandbox|agent-sandbox> \
   --port 28888 \
   --log-level info
 ```
 - `--namespace`：监听的 Kubernetes 命名空间。
+- `--provider-type`：沙箱 Provider 类型，支持 `batchsandbox`（默认）或 `agent-sandbox`。
 - `--port`：监听端口（默认 28888）。
 - `--log-level`：日志级别，遵循 zap 定义。
 
@@ -46,7 +50,8 @@ TAG=local VERSION=1.2.3 GIT_COMMIT=abc BUILD_TIME=2025-01-01T00:00:00Z bash buil
 
 ## 运行时依赖
 - 可访问的 Kubernetes API（集群内或 KUBECONFIG）。
-- 目标命名空间中的 BatchSandbox CR 必须包含 `sandbox.opensandbox.io/endpoints` annotation。
+- `batchsandbox` 模式：目标命名空间中的 BatchSandbox CR 必须包含 `sandbox.opensandbox.io/endpoints` annotation。
+- `agent-sandbox` 模式：AgentSandbox CR 的 `status.serviceFQDN` 需要已填充。
 
 ## 开发与测试
 ```bash
@@ -61,7 +66,9 @@ go test ./...
 
 ## 常见行为说明
 - Header 优先：`OPEN-SANDBOX-INGRESS`，否则回退 Host 解析 `<sandbox-name>-<port>.*`。
-- 从请求中提取沙箱名称，查询 BatchSandbox CR 获取端点 IP。
+- 从请求中提取沙箱名称，基于 informer 缓存查询对应 CR：
+  - BatchSandbox：取 endpoints annotation。
+  - AgentSandbox：取 `status.serviceFQDN`。
 - 错误处理：
   - `ErrSandboxNotFound`（沙箱资源不存在）→ HTTP 404
   - `ErrSandboxNotReady`（副本数不足、缺少端点、配置无效）→ HTTP 503

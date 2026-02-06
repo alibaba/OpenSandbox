@@ -32,3 +32,21 @@ jobs:
         run: |
           cd components/egress
           go test ./...
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run dns test
+        working-directory: components/egress
+        run: |
+          chmod +x tests/smoke-dns.sh
+          ./tests/smoke-dns.sh
+
+      - name: Run nft test
+        working-directory: components/egress
+        run: |
+          chmod +x tests/smoke-nft.sh
+          ./tests/smoke-nft.sh

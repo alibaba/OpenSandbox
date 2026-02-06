@@ -78,28 +78,30 @@ func (p *BatchSandboxProvider) Start(ctx context.Context) error {
 }
 
 // GetEndpoint retrieves the endpoint IP for a BatchSandbox
-func (p *BatchSandboxProvider) GetEndpoint(name string) (string, error) {
+func (p *BatchSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
 	// Get BatchSandbox from cache using lister with provider's namespace
-	batchSandbox, err := p.lister.BatchSandboxes(p.namespace).Get(name)
+	batchSandbox, err := p.lister.BatchSandboxes(p.namespace).Get(sandboxId)
 	if err != nil {
 		if kerrors.IsNotFound(err) {
-			return "", fmt.Errorf("%w: %s/%s", ErrSandboxNotFound, p.namespace, name)
+			return "", fmt.Errorf("%w: %s/%s", ErrSandboxNotFound, p.namespace, sandboxId)
 		}
-		return "", fmt.Errorf("failed to get BatchSandbox %s/%s: %w", p.namespace, name, err)
+		return "", fmt.Errorf("failed to get BatchSandbox %s/%s: %w", p.namespace, sandboxId, err)
 	}
 
 	// Check if BatchSandbox is ready
 	if batchSandbox.Status.Ready < 1 {
 		return "", fmt.Errorf("%w: %s/%s (ready: %d/%d)",
-			ErrSandboxNotReady, p.namespace, name, batchSandbox.Status.Ready, batchSandbox.Status.Replicas)
+			ErrSandboxNotReady, p.namespace, sandboxId, batchSandbox.Status.Ready, batchSandbox.Status.Replicas)
 	}
 
 	// Get endpoints from BatchSandbox using kubernetes utils
 	endpoints, err := utils.GetEndpoints(batchSandbox)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s/%s: %w", ErrSandboxNotReady, p.namespace, name, err)
+		return "", fmt.Errorf("%w: %s/%s: %w", ErrSandboxNotReady, p.namespace, sandboxId, err)
 	}
 
 	// Return the first available endpoint
 	return endpoints[0], nil
 }
+
+var _ Provider = (*BatchSandboxProvider)(nil)

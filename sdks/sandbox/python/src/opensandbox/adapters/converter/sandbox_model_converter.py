@@ -41,15 +41,18 @@ from opensandbox.api.lifecycle.models import (
 from opensandbox.api.lifecycle.models.create_sandbox_request import CreateSandboxRequest
 from opensandbox.api.lifecycle.models.image_spec import ImageSpec
 from opensandbox.models.sandboxes import (
+    Host,
     NetworkPolicy,
     PagedSandboxInfos,
     PaginationInfo,
+    PVC,
     SandboxCreateResponse,
     SandboxEndpoint,
     SandboxImageSpec,
     SandboxInfo,
     SandboxRenewResponse,
     SandboxStatus,
+    Volume,
 )
 
 
@@ -84,6 +87,39 @@ class SandboxModelConverter:
         )
 
     @staticmethod
+    def to_api_volume(volume: Volume):
+        """Convert domain Volume to API Volume."""
+        from opensandbox.api.lifecycle.models.host import (
+            Host as ApiHost,
+        )
+        from opensandbox.api.lifecycle.models.pvc import (
+            PVC as ApiPVC,
+        )
+        from opensandbox.api.lifecycle.models.volume import Volume as ApiVolume
+        from opensandbox.api.lifecycle.types import UNSET
+
+        api_host = UNSET
+        if volume.host is not None:
+            api_host = ApiHost(path=volume.host.path)
+
+        api_pvc = UNSET
+        if volume.pvc is not None:
+            api_pvc = ApiPVC(claim_name=volume.pvc.claim_name)
+
+        api_sub_path = UNSET
+        if volume.sub_path is not None:
+            api_sub_path = volume.sub_path
+
+        return ApiVolume(
+            name=volume.name,
+            mount_path=volume.mount_path,
+            read_only=volume.read_only,
+            host=api_host,
+            pvc=api_pvc,
+            sub_path=api_sub_path,
+        )
+
+    @staticmethod
     def to_api_create_sandbox_request(
         spec: SandboxImageSpec,
         entrypoint: list[str],
@@ -93,6 +129,7 @@ class SandboxModelConverter:
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
+        volumes: list[Volume] | None,
     ) -> CreateSandboxRequest:
         """Convert domain parameters to API CreateSandboxRequest."""
         from opensandbox.api.lifecycle.models.create_sandbox_request import (
@@ -167,6 +204,13 @@ class SandboxModelConverter:
             CreateSandboxRequestExtensions.from_dict(extensions) if extensions else UNSET
         )
 
+        # Convert volumes to API model
+        api_volumes = UNSET
+        if volumes is not None and len(volumes) > 0:
+            api_volumes = [
+                SandboxModelConverter.to_api_volume(v) for v in volumes
+            ]
+
         return CreateSandboxRequest(
             image=SandboxModelConverter.to_api_image_spec(spec),
             entrypoint=entrypoint,
@@ -176,6 +220,7 @@ class SandboxModelConverter:
             resource_limits=api_resource_limits,
             network_policy=api_network_policy,
             extensions=api_extensions,
+            volumes=api_volumes,
         )
 
     @staticmethod

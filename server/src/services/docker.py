@@ -875,12 +875,13 @@ class DockerSandboxService(SandboxService):
                     "message": "networkPolicy is not supported when docker network_mode=host.",
                 },
             )
-        if not self.app_config.runtime.egress_image:
+        egress_image = self.app_config.egress.image if self.app_config.egress else None
+        if not egress_image:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": SandboxErrorCodes.INVALID_PARAMETER,
-                    "message": "runtime.egress_image must be configured when networkPolicy is provided.",
+                    "message": "egress.image must be configured when networkPolicy is provided.",
                 },
             )
 
@@ -1323,7 +1324,10 @@ class DockerSandboxService(SandboxService):
         }
 
         # Ensure sidecar image is available before create/start.
-        self._ensure_image_available(self.app_config.runtime.egress_image, None, sandbox_id)
+        egress_image = self.app_config.egress.image if self.app_config.egress else None
+        if not egress_image:
+            raise ValueError("egress.image must be configured when networkPolicy is provided.")
+        self._ensure_image_available(egress_image, None, sandbox_id)
 
         policy_payload = json.dumps(network_policy.model_dump(by_alias=True, exclude_none=True))
         sidecar_env = [f"{EGRESS_RULES_ENV}={policy_payload}"]
@@ -1349,7 +1353,7 @@ class DockerSandboxService(SandboxService):
         try:
             with self._docker_operation("create egress sidecar", sandbox_id):
                 sidecar_resp = self.docker_client.api.create_container(
-                    image=self.app_config.runtime.egress_image,
+                    image=egress_image,
                     name=sidecar_name,
                     host_config=sidecar_host_config,
                     labels=sidecar_labels,

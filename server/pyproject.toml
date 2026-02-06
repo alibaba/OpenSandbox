@@ -12,15 +12,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
 [project]
-name = "sandbox-server"
-version = "0.1.0"
+name = "opensandbox-server"
+dynamic = ["version"]
 description = "FastAPI control plane for OpenSandbox that manages sandbox lifecycle on Docker (ready) and Kubernetes (planned) runtimes."
 readme = "README.md"
 authors = [
     { name = "OpenSandbox Team", email = "pangjiping.pjp@alibaba-inc.com" }
 ]
+license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
+keywords = ["sandbox", "server", "control-plane", "fastapi", "opensandbox"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
 dependencies = [
     "docker",
     "fastapi",
@@ -33,20 +53,46 @@ dependencies = [
     "uvicorn",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+[project.urls]
+Homepage = "https://github.com/alibaba/OpenSandbox"
+Repository = "https://github.com/alibaba/OpenSandbox"
+Issues = "https://github.com/alibaba/OpenSandbox/issues"
+
+[project.scripts]
+opensandbox-server = "src.cli:main"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+# This package is in a subdirectory; explicitly point setuptools-scm at the git root.
+root = ".."
+tag_regex = "^server/v(?P<version>\\d+\\.\\d+\\.\\d+(?:[\\.\\w\\+\\-]*)?)$"
+git_describe_command = 'git describe --dirty --tags --long --match "server/v*"'
+fallback_version = "0.1.0.dev0"
+
+[tool.hatch.build]
+include = [
+    "LICENSE",
+    "example.config.toml",
+    "example.config.zh.toml",
+    "example.config.k8s.toml",
+    "example.config.k8s.zh.toml",
+    "example.batchsandbox-template.yaml",
+    "src/**/py.typed",
+    "src",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
 [dependency-groups]
 dev = [
-    "httpx",
-    "pytest",
-    "pytest-asyncio",
-    "pytest-cov",
-    "ruff",
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.14.8",
+    "pyright>=1.1.0",
 ]
 
 [tool.ruff]
@@ -56,3 +102,21 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]
+
+[tool.pyright]
+typeCheckingMode = "standard"
+pythonVersion = "3.10"
+pythonPlatform = "All"
+
+include = ["src", "tests"]
+
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+]
+
+venvPath = "."
+venv = ".venv"
+
+reportMissingImports = true
+reportMissingTypeStubs = false

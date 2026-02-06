@@ -48,7 +48,8 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
-          egress_image = "opensandbox/egress:latest"
+          [egress]
+          image = "opensandbox/egress:latest"
           [docker]
           network_mode = "bridge"
           EOF
@@ -97,7 +98,8 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
-          egress_image = "opensandbox/egress:latest"
+          [egress]
+          image = "opensandbox/egress:latest"
           [docker]
           network_mode = "bridge"
           EOF
@@ -150,7 +152,8 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
-          egress_image = "opensandbox/egress:latest"
+          [egress]
+          image = "opensandbox/egress:latest"
           [docker]
           network_mode = "bridge"
           EOF

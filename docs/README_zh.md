@@ -13,14 +13,15 @@
 
 中文 | [English](../README.md)
 
-OpenSandbox 是一个面向 AI 应用场景设计的「通用沙箱平台」，为大模型相关的能力（命令执行、文件操作、代码执行、浏览器操作、Agent 运行等）提供 **多语言 SDK、沙箱接口协议和沙箱运行时**。
+OpenSandbox 是一个面向 AI 应用场景设计的「通用沙箱平台」，为LLM相关的能力（命令执行、文件操作、代码执行、浏览器操作、Agent 运行等）提供 **多语言 SDK、沙箱接口协议和沙箱运行时**。
 
 ## 核心特性
 
-- **多语言 SDK**：提供 Python、Java/Kotlin、JavaScript/TypeScript 等语言的客户端 SDK，Go SDK 仍在规划中。
+- **多语言 SDK**：提供 Python、Java/Kotlin、JavaScript/TypeScript 等语言的客户端 SDK。
 - **沙箱协议**：定义了沙箱生命周期管理 API 和沙箱执行 API。你可以通过这些沙箱协议扩展自己的沙箱运行时。
-- **沙箱运行时**：默认实现沙箱生命周期管理，支持 Docker 和 Kubernetes 运行时，实现大规模分布式沙箱调度。
+- **沙箱运行时**：沙箱全生命周期管理，支持 Docker 和[自研高性能 Kubernetes 运行时](../kubernetes)，实现本地运行、企业级大规模分布式沙箱调度。
 - **沙箱环境**：内置 Command、Filesystem、Code Interpreter 实现。并提供 Coding Agent（Claude Code 等）、浏览器自动化（Chrome、Playwright）和桌面环境（VNC、VS Code）等示例。
+- **网络策略**：提供统一的 [Ingress Gateway](../components/ingress) 实现，并支持多种路由策略；提供单实例级别的沙箱[出口网络限制](../components/egress)。
 
 ## 使用示例
 
@@ -158,21 +159,21 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 ## 项目结构
 
-| 目录 | 说明                                |
-|------|-----------------------------------|
-| [`sdks/`](../sdks/) | 多语言 SDK（Python、Java/Kotlin、TypeScript/JavaScript）      |
-| [`specs/`](../specs/) | OpenAPI 与生命周期规范                                    |
-| [`server/`](../server/README_zh.md) | Python FastAPI 沙箱生命周期服务           |
-| [`kubernetes/`](../kubernetes/README-ZH.md) | Kubernetes 部署与示例                                 |
-| [`components/execd/`](../components/execd/README_zh.md) | 沙箱执行守护进程，负责命令和文件操作                |
-| [`components/ingress/`](../components/ingress/README.md) | 沙箱流量入口代理                          |
-| [`components/egress/`](../components/egress/README.md) | 沙箱网络 Egress 访问控制                  |
-| [`sandboxes/`](../sandboxes/) | 沙箱运行时实现与镜像（如 code-interpreter）            |
-| [`examples/`](../examples/README.md) | 集成示例和使用案例                         |
-| [`oseps/`](../oseps/README.md) | OpenSandbox Enhancement Proposals |
-| [`docs/`](../docs/) | 架构和设计文档                           |
-| [`tests/`](../tests/) | 跨组件端到端测试                          |
-| [`scripts/`](../scripts/) | 开发和维护脚本                           |
+| 目录 | 说明                                                |
+|------|---------------------------------------------------|
+| [`sdks/`](../sdks/) | 多语言 SDK（Python、Java/Kotlin、TypeScript/JavaScript） |
+| [`specs/`](../specs/) | OpenAPI 与生命周期规范                                   |
+| [`server/`](../server/README_zh.md) | Python FastAPI 沙箱生命周期服务，并集成多种运行时实现                |
+| [`kubernetes/`](../kubernetes/README-ZH.md) | Kubernetes 部署与示例                                  |
+| [`components/execd/`](../components/execd/README_zh.md) | 沙箱执行守护进程，负责命令和文件操作                                |
+| [`components/ingress/`](../components/ingress/README.md) | 沙箱流量入口代理                                          |
+| [`components/egress/`](../components/egress/README.md) | 沙箱网络 Egress 访问控制                                  |
+| [`sandboxes/`](../sandboxes/) | 沙箱运行时实现与镜像（如 code-interpreter）                    |
+| [`examples/`](../examples/README.md) | 集成示例和使用案例                                         |
+| [`oseps/`](../oseps/README.md) | OpenSandbox Enhancement Proposals                 |
+| [`docs/`](../docs/) | 架构和设计文档                                           |
+| [`tests/`](../tests/) | 跨组件端到端测试                                          |
+| [`scripts/`](../scripts/) | 开发和维护脚本                                           |
 
 详细架构请参阅 [docs/architecture.md](architecture.md)。
 
@@ -180,7 +181,7 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 - [docs/architecture.md](architecture.md) – 整体架构 & 设计理念
 - SDK
-  - Sandbox 基础 SDK（[Java\Kotlin SDK](../sdks/sandbox/kotlin/README_zh.md)、[Python SDK](../sdks/sandbox/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/sandbox/javascript/README_zh.md)）- 包含沙箱生命周期、命令执行、文件操作
+  - Sandbox SDK（[Java\Kotlin SDK](../sdks/sandbox/kotlin/README_zh.md)、[Python SDK](../sdks/sandbox/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/sandbox/javascript/README_zh.md)）- 包含沙箱生命周期、命令执行、文件操作
   - Code Interpreter SDK（[Java\Kotlin SDK](../sdks/code-interpreter/kotlin/README_zh.md) 、[Python SDK](../sdks/code-interpreter/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/code-interpreter/javascript/README_zh.md)）- 代码解释器
 - [specs/README.md](../specs/README_zh.md) - 包含沙箱生命周期 API 和沙箱执行 API 的 OpenAPI 定义
 - [server/README.md](../server/README_zh.md) - 包含沙箱 Server 的启动和配置，支持 Docker 与 Kubernetes Runtime
@@ -197,13 +198,15 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 - [ ] **Go SDK** - Go 客户端 SDK，用于沙箱生命周期管理、命令执行和文件操作
 
-### Server Runtime
+### Sandbox Runtime
 
-- [x] **自研 Kubernetes 沙箱调度器** - 高性能沙箱调度实现（见 [`kubernetes/`](../kubernetes/README-ZH.md)）
-- [x] **kubernetes-sigs/agent-sandbox 支持** - 集成 [kubernetes-sigs/agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox) 沙箱调度能力（OSEP：[0002](../oseps/0002-kubernetes-sigs-agent-sandbox-support.md)，示例：[agent-sandbox](../examples/agent-sandbox/README.md)）
-- [ ] **声明式网络隔离** - 支持允许/禁止特定域名规则的网络 egress 访问控制（见 [OSEP-0001](../oseps/0001-fqdn-based-egress-control.md)）
-  - [x] 基于 DNS 的 Egress 控制（Layer 1）
-  - [ ] 基于网络的 Egress 控制（Layer 2）
+- [ ] **持久化存储** - 沙箱的持久化存储挂载，[Proposal 0003](../oseps/0003-volume-and-volumebinding-support.md)。
+- [ ] **Ingress 多网络策略的深度集成**：多 Kubernetes provision、多网络模式的 Ingress Gateway 集成。
+- [ ] **本地轻量级沙箱**：用于为运行在 PC 上的 AI 工具提供安全可靠的轻量级沙箱实现。
+
+### Deployment
+
+- [ ] **Kubernetes Helm**：Kubernetes Helm 部署所有组件。
 
 ## 联系与讨论
 

@@ -47,6 +47,7 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
     SandboxInfo,
     SandboxRenewResponse,
+    Volume,
 )
 from opensandbox.services.sandbox import Sandboxes
 
@@ -117,6 +118,7 @@ class SandboxesAdapter(Sandboxes):
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
+        volumes: list[Volume] | None,
     ) -> SandboxCreateResponse:
         """Create a new sandbox instance with the specified configuration."""
         logger.info(f"Creating sandbox with image: {spec.image}")
@@ -133,6 +135,7 @@ class SandboxesAdapter(Sandboxes):
                 resource=resource,
                 network_policy=network_policy,
                 extensions=extensions,
+                volumes=volumes,
             )
 
             client = await self._get_client()

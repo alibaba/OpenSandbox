@@ -107,19 +107,125 @@ def _assert_terminal_event_contract(
         _assert_recent_timestamp_ms(errors[0].timestamp)
 
 
+async def run_with_retry(
+    code_interpreter: CodeInterpreter,
+    code: str,
+    *,
+    context=None,
+    language=None,
+    handlers=None,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+):
+    """
+    Run code with retry logic for flaky kernel initialization and network errors.
+
+    Returns the execution result, retrying on:
+    - Empty/None id responses (kernel not ready)
+    - Network errors (connection reset, server disconnected)
+    """
+    last_result = None
+    last_exception = None
+
+    for attempt in range(max_retries):
+        try:
+            result = await code_interpreter.codes.run(
+                code,
+                context=context,
+                language=language,
+                handlers=handlers,
+            )
+            last_result = result
+            if result is not None and result.id is not None:
+                return result
+            # Empty result - retry
+            if attempt < max_retries - 1:
+                logger.warning(
+                    "Execution returned empty result (attempt %d/%d), retrying in %.1fs...",
+                    attempt + 1, max_retries, retry_delay
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 1.5  # exponential backoff
+        except Exception as e:
+            last_exception = e
+            error_name = type(e).__name__
+            # Check if it's a retryable network error
+            error_str = str(e).lower()
+            is_retryable = any(keyword in error_str for keyword in [
+                "disconnected", "connection", "reset", "closed", "timeout",
+                "remoteerror", "protocol", "peer closed"
+            ])
+            if is_retryable and attempt < max_retries - 1:
+                logger.warning(
+                    "Execution failed with %s (attempt %d/%d), retrying in %.1fs: %s",
+                    error_name, attempt + 1, max_retries, retry_delay, str(e)[:100]
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 1.5
+            else:
+                # Non-retryable error or last attempt
+                raise
+
+    # If we have a result (even empty), return it; otherwise raise last exception
+    if last_result is not None:
+        return last_result
+    if last_exception is not None:
+        raise last_exception
+    return None
+
+
+async def create_context_with_retry(
+    code_interpreter: CodeInterpreter,
+    language: str,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
+):
+    """Create a code context with retry logic for network errors."""
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            ctx = await code_interpreter.codes.create_context(language)
+            # Small delay to allow kernel initialization
+            await asyncio.sleep(0.5)
+            return ctx
+        except Exception as e:
+            last_exception = e
+            error_str = str(e).lower()
+            is_retryable = any(keyword in error_str for keyword in [
+                "disconnected", "connection", "reset", "closed", "timeout",
+                "remoteerror", "protocol", "peer closed"
+            ])
+            if is_retryable and attempt < max_retries - 1:
+                logger.warning(
+                    "Context creation failed (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1, max_retries, retry_delay, str(e)[:100]
+                )
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 1.5
+            else:
+                raise
+    raise last_exception  # type: ignore
+
+
 @asynccontextmanager
 async def managed_ctx(code_interpreter: CodeInterpreter, language: str):
-    ctx = await code_interpreter.codes.create_context(language)
+    ctx = await create_context_with_retry(code_interpreter, language)
     try:
         yield ctx
     finally:
-        try:
-            if ctx.id:
-                await code_interpreter.codes.delete_context(ctx.id)
-        except Exception:
-            logger.warning(
-                "Cleanup: failed to delete context %s (%s)", ctx.id, language, exc_info=True
-            )
+        # Best-effort cleanup with retry
+        for cleanup_attempt in range(2):
+            try:
+                if ctx.id:
+                    await code_interpreter.codes.delete_context(ctx.id)
+                break
+            except Exception:
+                if cleanup_attempt == 0:
+                    await asyncio.sleep(0.5)
+                else:
+                    logger.warning(
+                        "Cleanup: failed to delete context %s (%s)", ctx.id, language, exc_info=True
+                    )
 
 
 @asynccontextmanager
@@ -804,11 +910,14 @@ class TestCodeInterpreterE2E:
         ) as (python1, python2, java1, go1):
             logger.info("✓ Created multiple contexts for different languages")
 
-            result1 = await code_interpreter.codes.run(
+            # Use retry helper for flaky kernel initialization
+            result1 = await run_with_retry(
+                code_interpreter,
                 "secret_value1 = 'python1_secret'\nprint(f'Python1 secret: {secret_value1}')",
                 context=python1,
             )
-            result2 = await code_interpreter.codes.run(
+            result2 = await run_with_retry(
+                code_interpreter,
                 "secret_value2 = 'python2_secret'\nprint(f'Python2 secret: {secret_value2}')",
                 context=python2,
             )
@@ -830,12 +939,14 @@ class TestCodeInterpreterE2E:
             assert check2.error.name == "NameError"
             logger.info("✓ Context isolation verified - contexts are properly isolated")
 
-            java_result = await code_interpreter.codes.run(
+            java_result = await run_with_retry(
+                code_interpreter,
                 "String javaSecret = \"java_secret\";\n"
                 + "System.out.println(\"Java secret: \" + javaSecret);",
                 context=java1,
                 )
-            go_result = await code_interpreter.codes.run(
+            go_result = await run_with_retry(
+                code_interpreter,
                 "package main\n"
                 + "import \"fmt\"\n"
                 + "func main() {\n"

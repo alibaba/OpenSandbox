@@ -21,11 +21,14 @@ import pytest
 
 from opensandbox.models.filesystem import MoveEntry, WriteEntry
 from opensandbox.models.sandboxes import (
+    Host,
+    PVC,
     SandboxFilter,
     SandboxImageAuth,
     SandboxImageSpec,
     SandboxInfo,
     SandboxStatus,
+    Volume,
 )
 
 
@@ -79,3 +82,110 @@ def test_filesystem_models_aliases_and_validation() -> None:
 
     with pytest.raises(ValueError):
         WriteEntry(path="  ", data="x")
+
+
+# ============================================================================
+# Volume Model Tests
+# ============================================================================
+
+
+def test_host_backend_requires_absolute_path() -> None:
+    backend = Host(path="/data/shared")
+    assert backend.path == "/data/shared"
+
+    with pytest.raises(ValueError, match="absolute path"):
+        Host(path="relative/path")
+
+
+def test_pvc_backend_rejects_blank_claim_name() -> None:
+    backend = PVC(claimName="my-pvc")
+    assert backend.claim_name == "my-pvc"
+
+    with pytest.raises(ValueError, match="blank"):
+        PVC(claimName="   ")
+
+
+def test_volume_with_host_backend() -> None:
+    vol = Volume(
+        name="data",
+        host=Host(path="/data/shared"),
+        mountPath="/mnt/data",
+    )
+    assert vol.name == "data"
+    assert vol.host is not None
+    assert vol.host.path == "/data/shared"
+    assert vol.pvc is None
+    assert vol.mount_path == "/mnt/data"
+    assert vol.read_only is False  # default is read-write
+    assert vol.sub_path is None
+
+
+def test_volume_with_pvc_backend() -> None:
+    vol = Volume(
+        name="models",
+        pvc=PVC(claimName="shared-models"),
+        mountPath="/mnt/models",
+        readOnly=True,
+        subPath="v1",
+    )
+    assert vol.name == "models"
+    assert vol.host is None
+    assert vol.pvc is not None
+    assert vol.pvc.claim_name == "shared-models"
+    assert vol.mount_path == "/mnt/models"
+    assert vol.read_only is True
+    assert vol.sub_path == "v1"
+
+
+def test_volume_rejects_blank_name() -> None:
+    with pytest.raises(ValueError, match="blank"):
+        Volume(
+            name="   ",
+            host=Host(path="/data"),
+            mountPath="/mnt",
+        )
+
+
+def test_volume_requires_absolute_mount_path() -> None:
+    with pytest.raises(ValueError, match="absolute path"):
+        Volume(
+            name="test",
+            host=Host(path="/data"),
+            mountPath="relative/path",
+        )
+
+
+def test_volume_serialization_uses_aliases() -> None:
+    vol = Volume(
+        name="test",
+        pvc=PVC(claimName="my-pvc"),
+        mountPath="/mnt/test",
+        readOnly=True,
+        subPath="sub",
+    )
+    dumped = vol.model_dump(by_alias=True, mode="json")
+    assert "mountPath" in dumped
+    assert "readOnly" in dumped
+    assert "subPath" in dumped
+    assert dumped["pvc"]["claimName"] == "my-pvc"
+    assert dumped["readOnly"] is True
+
+
+def test_volume_rejects_no_backend() -> None:
+    """Volume must have exactly one backend specified."""
+    with pytest.raises(ValueError, match="none was provided"):
+        Volume(
+            name="test",
+            mountPath="/mnt/test",
+        )
+
+
+def test_volume_rejects_multiple_backends() -> None:
+    """Volume must have exactly one backend, not multiple."""
+    with pytest.raises(ValueError, match="multiple were provided"):
+        Volume(
+            name="test",
+            host=Host(path="/data"),
+            pvc=PVC(claimName="my-pvc"),
+            mountPath="/mnt/test",
+        )

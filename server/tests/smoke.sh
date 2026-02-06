@@ -258,7 +258,7 @@ create_resp_body="${create_resp_with_status%$'\n'*}"
 
 if [[ "${status_code}" != "202" ]]; then
   warn "Skip egress sidecar smoke (status ${status_code}). Body: ${create_resp_body}"
-  warn "Likely network_mode=host or egress_image unset."
+  warn "Likely network_mode=host or egress.image unset."
 else
   SANDBOX_ID=$(python - <<'PY' "${create_resp_body}"
 import json,sys

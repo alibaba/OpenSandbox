@@ -62,6 +62,71 @@ export interface NetworkPolicy extends Record<string, unknown> {
   egress?: NetworkRule[];
 }
 
+// ============================================================================
+// Volume Models
+// ============================================================================
+
+/**
+ * Host path bind mount backend.
+ *
+ * Maps a directory on the host filesystem into the container.
+ * Only available when the runtime supports host mounts.
+ */
+export interface Host extends Record<string, unknown> {
+  /**
+   * Absolute path on the host filesystem to mount.
+   */
+  path: string;
+}
+
+/**
+ * Kubernetes PersistentVolumeClaim mount backend.
+ *
+ * References an existing PVC in the same namespace as the sandbox pod.
+ * Only available in Kubernetes runtime.
+ */
+export interface PVC extends Record<string, unknown> {
+  /**
+   * Name of the PersistentVolumeClaim in the same namespace.
+   */
+  claimName: string;
+}
+
+/**
+ * Storage mount definition for a sandbox.
+ *
+ * Each volume entry contains:
+ * - A unique name identifier
+ * - Exactly one backend (host, pvc) with backend-specific fields
+ * - Common mount settings (mountPath, readOnly, subPath)
+ */
+export interface Volume extends Record<string, unknown> {
+  /**
+   * Unique identifier for the volume within the sandbox.
+   */
+  name: string;
+  /**
+   * Host path bind mount backend (mutually exclusive with pvc).
+   */
+  host?: Host;
+  /**
+   * Kubernetes PVC mount backend (mutually exclusive with host).
+   */
+  pvc?: PVC;
+  /**
+   * Absolute path inside the container where the volume is mounted.
+   */
+  mountPath: string;
+  /**
+   * If true, the volume is mounted as read-only. Defaults to false (read-write).
+   */
+  readOnly?: boolean;
+  /**
+   * Optional subdirectory under the backend path to mount.
+   */
+  subPath?: string;
+}
+
 export type SandboxState =
   | "Creating"
   | "Running"
@@ -109,6 +174,10 @@ export interface CreateSandboxRequest extends Record<string, unknown> {
    * Optional outbound network policy for the sandbox.
    */
   networkPolicy?: NetworkPolicy;
+  /**
+   * Optional list of volume mounts for persistent storage.
+   */
+  volumes?: Volume[];
   extensions?: Record<string, unknown>;
 }
 

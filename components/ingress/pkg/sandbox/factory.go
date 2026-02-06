@@ -38,10 +38,12 @@ func NewProviderFactory(config *rest.Config, namespace string, resyncPeriod time
 }
 
 // CreateProvider creates a Provider instance based on the provider type
-func (f *DefaultProviderFactory) CreateProvider(providerType string) (Provider, error) {
+func (f *DefaultProviderFactory) CreateProvider(providerType ProviderType) (Provider, error) {
 	switch providerType {
 	case ProviderTypeBatchSandbox:
 		return NewBatchSandboxProvider(f.config, f.namespace, f.resyncPeriod), nil
+	case ProviderTypeAgentSandbox:
+		return NewAgentSandboxProvider(f.config, f.namespace, f.resyncPeriod), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider type: %s", providerType)
 	}

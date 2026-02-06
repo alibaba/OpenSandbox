@@ -35,14 +35,14 @@ type mockProvider struct {
 	notReady  map[string]bool   // sandboxName -> notReady flag
 }
 
-func (m *mockProvider) GetEndpoint(name string) (string, error) {
-	if m.notReady != nil && m.notReady[name] {
-		return "", fmt.Errorf("%w: %s", sandbox.ErrSandboxNotReady, name)
+func (m *mockProvider) GetEndpoint(sandboxId string) (string, error) {
+	if m.notReady != nil && m.notReady[sandboxId] {
+		return "", fmt.Errorf("%w: %s", sandbox.ErrSandboxNotReady, sandboxId)
 	}
-	if ip, ok := m.endpoints[name]; ok {
+	if ip, ok := m.endpoints[sandboxId]; ok {
 		return ip, nil
 	}
-	return "", fmt.Errorf("%w: %s", sandbox.ErrSandboxNotFound, name)
+	return "", fmt.Errorf("%w: %s", sandbox.ErrSandboxNotFound, sandboxId)
 }
 
 func (m *mockProvider) Start(ctx context.Context) error {

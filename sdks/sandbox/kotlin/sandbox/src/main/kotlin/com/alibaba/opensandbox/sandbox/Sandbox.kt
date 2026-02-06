@@ -28,6 +28,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxMetrics
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
 import com.alibaba.opensandbox.sandbox.domain.services.Commands
 import com.alibaba.opensandbox.sandbox.domain.services.Filesystem
 import com.alibaba.opensandbox.sandbox.domain.services.Health
@@ -261,6 +262,7 @@ class Sandbox internal constructor(
          * @param healthCheck Custom health check function (optional)
          * @param healthCheckPollingInterval Polling interval for readiness/health check
          * @param extensions Optional extension parameters for server-side customized behaviors
+         * @param volumes Optional list of volume mounts for persistent storage
          * @return Fully configured and ready Sandbox instance
          * @throws SandboxException if sandbox creation or initialization fails
          */
@@ -278,6 +280,7 @@ class Sandbox internal constructor(
             healthCheckPollingInterval: Duration,
             extensions: Map<String, String>,
             skipHealthCheck: Boolean,
+            volumes: List<Volume>?,
         ): Sandbox {
             return initializeSandbox(
                 operationName = "create sandbox with image ${imageSpec.image} (timeout: ${timeout.seconds}s)",
@@ -297,6 +300,7 @@ class Sandbox internal constructor(
                         resource,
                         networkPolicy,
                         extensions,
+                        volumes,
                     )
                 InitializationResult.NewSandbox(response.id)
             }
@@ -746,6 +750,11 @@ class Sandbox internal constructor(
         private var networkPolicy: NetworkPolicy? = null
 
         /**
+         * Optional list of volume mounts for persistent storage.
+         */
+        private val volumes = mutableListOf<Volume>()
+
+        /**
          * Lifecycle config
          */
         private var timeout: Duration = Duration.ofSeconds(600)
@@ -944,6 +953,41 @@ class Sandbox internal constructor(
         }
 
         /**
+         * Adds a single volume mount.
+         *
+         * @param volume Volume configuration
+         * @return This builder for method chaining
+         */
+        fun volume(volume: Volume): Builder {
+            this.volumes.add(volume)
+            return this
+        }
+
+        /**
+         * Adds multiple volume mounts.
+         *
+         * @param volumes List of volume configurations to add
+         * @return This builder for method chaining
+         */
+        fun volumes(volumes: List<Volume>): Builder {
+            this.volumes.addAll(volumes)
+            return this
+        }
+
+        /**
+         * Configures a volume mount using a fluent configuration block.
+         *
+         * @param configure Configuration block for Volume.Builder
+         * @return This builder for method chaining
+         */
+        fun volume(configure: Volume.Builder.() -> Unit): Builder {
+            val builder = Volume.builder()
+            builder.configure()
+            this.volumes.add(builder.build())
+            return this
+        }
+
+        /**
          * Adds a single extension parameter.
          *
          * Extensions are opaque client-side and are passed through to the server.
@@ -1091,6 +1135,7 @@ class Sandbox internal constructor(
                 healthCheckPollingInterval = healthCheckPollingInterval,
                 healthCheck = healthCheck,
                 skipHealthCheck = skipHealthCheck,
+                volumes = if (volumes.isEmpty()) null else volumes.toList(),
             )
         }
     }

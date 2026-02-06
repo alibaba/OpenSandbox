@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package policy
+package sandbox
 
-const (
-	EgressServerAddrEnv     = "OPENSANDBOX_EGRESS_HTTP_ADDR"
-	DefaultEgressServerAddr = ":18080"
-
-	EgressAuthTokenEnv    = "OPENSANDBOX_EGRESS_TOKEN"
-	EgressAuthTokenHeader = "OPENSANDBOX-EGRESS-AUTH"
-
-	// Optional bootstrap policy at sidecar start; same shape as /policy.
-	EgressRulesEnv = "OPENSANDBOX_EGRESS_RULES"
+import (
+	"errors"
+	"fmt"
+	"testing"
 )
+
+// Ensure wrapping ErrSandboxNotReady keeps errors.Is behavior.
+func TestErrSandboxNotReadyWrapping(t *testing.T) {
+	wrapped := fmt.Errorf("%w: custom detail", ErrSandboxNotReady)
+
+	if !errors.Is(wrapped, ErrSandboxNotReady) {
+		t.Fatalf("expected errors.Is to match ErrSandboxNotReady, got false; err=%v", wrapped)
+	}
+}

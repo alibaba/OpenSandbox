@@ -405,6 +405,38 @@ class TestSandboxE2ESync:
 
     @pytest.mark.timeout(120)
     @pytest.mark.order(3)
+    def test_02a_command_status_and_logs(self) -> None:
+        """Test command status + background logs (sync)."""
+        TestSandboxE2ESync._ensure_sandbox_created()
+        sandbox = TestSandboxE2ESync.sandbox
+        assert sandbox is not None
+
+        exec_result = sandbox.commands.run(
+            "sh -c 'echo log-line-1; echo log-line-2; sleep 2'",
+            opts=RunCommandOpts(background=True),
+        )
+        assert exec_result.id is not None
+        command_id = exec_result.id
+
+        status = sandbox.commands.get_command_status(command_id)
+        assert status.id == command_id
+        assert isinstance(status.running, bool)
+
+        logs_text = ""
+        cursor = None
+        for _ in range(20):
+            logs = sandbox.commands.get_background_command_logs(command_id, cursor=cursor)
+            logs_text += logs.content
+            cursor = logs.cursor if logs.cursor is not None else cursor
+            if "log-line-2" in logs_text:
+                break
+            time.sleep(1.0)
+
+        assert "log-line-1" in logs_text
+        assert "log-line-2" in logs_text
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(4)
     def test_03_basic_filesystem_operations(self) -> None:
         """Test basic filesystem operations."""
         TestSandboxE2ESync._ensure_sandbox_created()
@@ -590,7 +622,7 @@ class TestSandboxE2ESync:
         assert verify_dirs_deleted.logs.stdout[0].text == "OK"
 
     @pytest.mark.timeout(360)
-    @pytest.mark.order(4)
+    @pytest.mark.order(5)
     def test_04_interrupt_command(self) -> None:
         """Test interrupting a long-running command."""
         TestSandboxE2ESync._ensure_sandbox_created()
@@ -655,7 +687,7 @@ class TestSandboxE2ESync:
             _assert_recent_timestamp_ms(execution.error.timestamp, tolerance_ms=180_000)
 
     @pytest.mark.timeout(600)
-    @pytest.mark.order(5)
+    @pytest.mark.order(6)
     def test_05_sandbox_pause(self) -> None:
         """Test sandbox pause operation."""
         TestSandboxE2ESync._ensure_sandbox_created()
@@ -697,7 +729,7 @@ class TestSandboxE2ESync:
         assert healthy is False, "Sandbox should be unhealthy after pause"
 
     @pytest.mark.timeout(120)
-    @pytest.mark.order(6)
+    @pytest.mark.order(7)
     def test_06_sandbox_resume(self) -> None:
         """Test sandbox resume operation."""
         TestSandboxE2ESync._ensure_sandbox_created()

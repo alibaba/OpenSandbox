@@ -31,6 +31,7 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
     SandboxInfo,
     SandboxRenewResponse,
+    Volume,
 )
 
 
@@ -52,6 +53,7 @@ class Sandboxes(Protocol):
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
+        volumes: list[Volume] | None,
     ) -> SandboxCreateResponse:
         """
         Create a new sandbox with the specified configuration.
@@ -66,6 +68,7 @@ class Sandboxes(Protocol):
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
+            volumes: Optional list of volume mounts for persistent storage.
 
         Returns:
             Sandbox create response

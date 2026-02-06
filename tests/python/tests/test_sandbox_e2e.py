@@ -475,6 +475,37 @@ class TestSandboxE2E:
 
     @pytest.mark.timeout(120)
     @pytest.mark.order(3)
+    async def test_02a_command_status_and_logs(self):
+        """Test command status + background logs."""
+        await self._ensure_sandbox_created()
+        sandbox = TestSandboxE2E.sandbox
+
+        exec_result = await sandbox.commands.run(
+            "sh -c 'echo log-line-1; echo log-line-2; sleep 2'",
+            opts=RunCommandOpts(background=True),
+        )
+        assert exec_result.id is not None
+        command_id = exec_result.id
+
+        status = await sandbox.commands.get_command_status(command_id)
+        assert status.id == command_id
+        assert isinstance(status.running, bool)
+
+        logs_text = ""
+        cursor = None
+        for _ in range(20):
+            logs = await sandbox.commands.get_background_command_logs(command_id, cursor=cursor)
+            logs_text += logs.content
+            cursor = logs.cursor if logs.cursor is not None else cursor
+            if "log-line-2" in logs_text:
+                break
+            await asyncio.sleep(1.0)
+
+        assert "log-line-1" in logs_text
+        assert "log-line-2" in logs_text
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(4)
     async def test_03_basic_filesystem_operations(self):
         """Test basic filesystem operations."""
         await self._ensure_sandbox_created()
@@ -693,7 +724,7 @@ class TestSandboxE2E:
         logger.info("TEST 3 PASSED: Basic filesystem operations test completed successfully")
 
     @pytest.mark.timeout(120)
-    @pytest.mark.order(4)
+    @pytest.mark.order(5)
     async def test_04_interrupt_command(self):
         """Test interrupting a long-running command."""
         await self._ensure_sandbox_created()
@@ -762,7 +793,7 @@ class TestSandboxE2E:
             _assert_recent_timestamp_ms(execution.error.timestamp, tolerance_ms=180_000)
 
     @pytest.mark.timeout(600)
-    @pytest.mark.order(5)
+    @pytest.mark.order(6)
     async def test_05_sandbox_pause(self):
         """Test sandbox pause operation."""
         await self._ensure_sandbox_created()
@@ -814,7 +845,7 @@ class TestSandboxE2E:
         logger.info("TEST 4 PASSED: Sandbox pause operation test completed successfully")
 
     @pytest.mark.timeout(120)
-    @pytest.mark.order(6)
+    @pytest.mark.order(7)
     async def test_06_sandbox_resume(self):
         """Test sandbox resume operation."""
         await self._ensure_sandbox_created()

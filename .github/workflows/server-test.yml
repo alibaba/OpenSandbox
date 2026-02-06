@@ -71,7 +71,8 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:latest"
-          egress_image = "opensandbox/egress:latest"
+          [egress]
+          image = "opensandbox/egress:latest"
           [docker]
           network_mode = "${{ matrix.network }}"
           EOF

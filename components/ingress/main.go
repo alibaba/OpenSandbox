@@ -56,7 +56,7 @@ func main() {
 	)
 
 	// Create sandbox provider based on provider type
-	sandboxProvider, err := providerFactory.CreateProvider(flag.ProviderType)
+	sandboxProvider, err := providerFactory.CreateProvider(sandbox.ProviderType(flag.ProviderType))
 	if err != nil {
 		log.Panicf("Failed to create sandbox provider: %v", err)
 	}

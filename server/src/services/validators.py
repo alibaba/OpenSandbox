@@ -22,12 +22,15 @@ enforce the same preconditions before performing runtime-specific work.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Dict, Optional, Sequence
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 from fastapi import HTTPException, status
 import re
 
 from src.services.constants import SandboxErrorCodes
+
+if TYPE_CHECKING:
+    from src.api.schema import Volume
 
 
 def ensure_entrypoint(entrypoint: Sequence[str]) -> None:
@@ -158,9 +161,309 @@ def ensure_valid_port(port: int) -> None:
         )
 
 
+# Volume name must be a valid DNS label
+VOLUME_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+# Kubernetes resource name pattern
+K8S_RESOURCE_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
+
+
+def ensure_valid_volume_name(name: str) -> None:
+    """
+    Validate that a volume name is a valid DNS label.
+
+    Args:
+        name: Volume name to validate.
+
+    Raises:
+        HTTPException: When the name is invalid.
+    """
+    if not name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_VOLUME_NAME,
+                "message": "Volume name cannot be empty.",
+            },
+        )
+    if len(name) > 63:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_VOLUME_NAME,
+                "message": f"Volume name '{name}' exceeds maximum length of 63 characters.",
+            },
+        )
+    if not VOLUME_NAME_RE.match(name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_VOLUME_NAME,
+                "message": f"Volume name '{name}' is not a valid DNS label. Must be lowercase alphanumeric with optional hyphens.",
+            },
+        )
+
+
+def ensure_valid_mount_path(mount_path: str) -> None:
+    """
+    Validate that a mount path is an absolute path.
+
+    Args:
+        mount_path: Mount path to validate.
+
+    Raises:
+        HTTPException: When the path is not absolute.
+    """
+    if not mount_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_MOUNT_PATH,
+                "message": "Mount path cannot be empty.",
+            },
+        )
+    if not mount_path.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_MOUNT_PATH,
+                "message": f"Mount path '{mount_path}' must be an absolute path starting with '/'.",
+            },
+        )
+
+
+def ensure_valid_sub_path(sub_path: Optional[str]) -> None:
+    """
+    Validate that a subPath does not contain path traversal or is absolute.
+
+    Args:
+        sub_path: SubPath to validate (optional).
+
+    Raises:
+        HTTPException: When the subPath is invalid.
+    """
+    if sub_path is None:
+        return
+
+    if not sub_path:
+        # Empty string is valid (no subpath)
+        return
+
+    # Check for absolute path
+    if sub_path.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_SUB_PATH,
+                "message": f"SubPath '{sub_path}' must be a relative path, not absolute.",
+            },
+        )
+
+    # Check for path traversal
+    # Normalize and check each component
+    parts = sub_path.split("/")
+    for part in parts:
+        if part == "..":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_SUB_PATH,
+                    "message": f"SubPath '{sub_path}' contains path traversal '..' which is not allowed.",
+                },
+            )
+
+
+def ensure_valid_host_path(
+    path: str,
+    allowed_prefixes: Optional[List[str]] = None,
+) -> None:
+    """
+    Validate that a host path is absolute and optionally within allowed prefixes.
+
+    Args:
+        path: Host path to validate.
+        allowed_prefixes: Optional list of allowed path prefixes.
+
+    Raises:
+        HTTPException: When the path is invalid or not allowed.
+    """
+    if not path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_HOST_PATH,
+                "message": "Host path cannot be empty.",
+            },
+        )
+
+    if not path.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_HOST_PATH,
+                "message": f"Host path '{path}' must be an absolute path starting with '/'.",
+            },
+        )
+
+    # Reject path traversal components
+    if "/.." in path or path == "/..":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_HOST_PATH,
+                "message": f"Host path '{path}' contains path traversal component '..'.",
+            },
+        )
+
+    # Reject non-normalized paths (double slashes, trailing slashes except root)
+    if "//" in path or (len(path) > 1 and path.endswith("/")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_HOST_PATH,
+                "message": f"Host path '{path}' is not normalized. Remove redundant slashes.",
+            },
+        )
+
+    # Check against allowed prefixes if provided
+    if allowed_prefixes is not None:
+        is_allowed = any(
+            path == prefix.rstrip("/")
+            or path.startswith(prefix.rstrip("/") + "/")
+            for prefix in allowed_prefixes
+        )
+        if not is_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.HOST_PATH_NOT_ALLOWED,
+                    "message": f"Host path '{path}' is not under any allowed prefix. Allowed prefixes: {allowed_prefixes}",
+                },
+            )
+
+
+def ensure_valid_pvc_name(claim_name: str) -> None:
+    """
+    Validate that a PVC claim name is a valid Kubernetes resource name.
+
+    Args:
+        claim_name: PVC claim name to validate.
+
+    Raises:
+        HTTPException: When the claim name is invalid.
+    """
+    if not claim_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PVC_NAME,
+                "message": "PVC claim name cannot be empty.",
+            },
+        )
+    if len(claim_name) > 253:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PVC_NAME,
+                "message": f"PVC claim name '{claim_name}' exceeds maximum length of 253 characters.",
+            },
+        )
+    if not K8S_RESOURCE_NAME_RE.match(claim_name):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PVC_NAME,
+                "message": f"PVC claim name '{claim_name}' is not a valid Kubernetes resource name.",
+            },
+        )
+
+
+def ensure_volumes_valid(
+    volumes: Optional[List["Volume"]],
+    allowed_host_prefixes: Optional[List[str]] = None,
+) -> None:
+    """
+    Validate a list of volume definitions.
+
+    This function performs comprehensive validation:
+    - Unique volume names
+    - Exactly one backend per volume
+    - Valid mount paths
+    - Valid subPaths
+    - Backend-specific validation (host path, pvc name)
+
+    Args:
+        volumes: List of volumes to validate (optional).
+        allowed_host_prefixes: Optional list of allowed host path prefixes.
+
+    Raises:
+        HTTPException: When any validation fails.
+    """
+    if volumes is None or len(volumes) == 0:
+        return
+
+    # Check for duplicate volume names
+    seen_names: set[str] = set()
+    for volume in volumes:
+        if volume.name in seen_names:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.DUPLICATE_VOLUME_NAME,
+                    "message": f"Duplicate volume name '{volume.name}'. Each volume must have a unique name.",
+                },
+            )
+        seen_names.add(volume.name)
+
+        # Validate volume name
+        ensure_valid_volume_name(volume.name)
+
+        # Validate mount path
+        ensure_valid_mount_path(volume.mount_path)
+
+        # Validate subPath
+        ensure_valid_sub_path(volume.sub_path)
+
+        # Count specified backends
+        backends_specified = sum([
+            volume.host is not None,
+            volume.pvc is not None,
+        ])
+
+        if backends_specified == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_VOLUME_BACKEND,
+                    "message": f"Volume '{volume.name}' must specify exactly one backend (host, pvc), but none was provided.",
+                },
+            )
+
+        if backends_specified > 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_VOLUME_BACKEND,
+                    "message": f"Volume '{volume.name}' must specify exactly one backend (host, pvc), but multiple were provided.",
+                },
+            )
+
+        # Backend-specific validation
+        if volume.host is not None:
+            ensure_valid_host_path(volume.host.path, allowed_host_prefixes)
+
+        if volume.pvc is not None:
+            ensure_valid_pvc_name(volume.pvc.claim_name)
+
+
 __all__ = [
     "ensure_entrypoint",
     "ensure_future_expiration",
     "ensure_valid_port",
     "ensure_metadata_labels",
+    "ensure_valid_volume_name",
+    "ensure_valid_mount_path",
+    "ensure_valid_sub_path",
+    "ensure_valid_host_path",
+    "ensure_valid_pvc_name",
+    "ensure_volumes_valid",
 ]

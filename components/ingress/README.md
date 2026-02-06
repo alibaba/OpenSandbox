@@ -4,13 +4,16 @@ English | [中文](README_zh.md)
 
 ## Overview
 - HTTP/WebSocket reverse proxy that routes to sandbox instances by `OPEN-SANDBOX-INGRESS` header or Host.
-- Watches BatchSandbox CRs in a target Namespace, and routes to sandbox endpoints from annotations.
+- Watches sandbox CRs (BatchSandbox or AgentSandbox, chosen by `--provider-type`) in a target Namespace:
+  - BatchSandbox: reads endpoints from `sandbox.opensandbox.io/endpoints` annotation.
+  - AgentSandbox: reads `status.serviceFQDN`.
 - Exposes `/status.ok` health check; prints build metadata (version, commit, time, Go/platform) at startup.
 
 ## Quick Start
 ```bash
 go run main.go \
   --namespace <target-namespace> \
+  --provider-type <batchsandbox|agent-sandbox> \
   --port 28888 \
   --log-level info
 ```
@@ -43,11 +46,14 @@ TAG=local VERSION=1.2.3 GIT_COMMIT=abc BUILD_TIME=2025-01-01T00:00:00Z bash buil
 
 ## Runtime Requirements
 - Access to Kubernetes API (in-cluster or via KUBECONFIG).
-- BatchSandbox CRs in the specified Namespace with `sandbox.opensandbox.io/endpoints` annotation containing Pod IPs.
+- If `--provider-type=batchsandbox`: BatchSandbox CRs in the specified Namespace with `sandbox.opensandbox.io/endpoints` annotation containing Pod IPs.
+- If `--provider-type=agent-sandbox`: AgentSandbox CRs with `status.serviceFQDN` populated.
 
 ## Behavior Notes
 - Routing key priority: `OPEN-SANDBOX-INGRESS` header first, otherwise Host parsing `<sandbox-name>-<port>.*`.
-- Sandbox name extracted from request is used to query BatchSandbox CR for endpoint IP.
+- Sandbox name extracted from request is used to query the sandbox CR (BatchSandbox or AgentSandbox) via informer cache:
+  - BatchSandbox → endpoints annotation.
+  - AgentSandbox → `status.serviceFQDN`.
 - Error handling:
   - `ErrSandboxNotFound` (sandbox resource not exists) → HTTP 404
   - `ErrSandboxNotReady` (not enough replicas, missing endpoints, invalid config) → HTTP 503

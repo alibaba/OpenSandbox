@@ -19,10 +19,14 @@ import (
 	"errors"
 )
 
+type ProviderType string
+
 const (
-	// Provider type constants
-	ProviderTypeBatchSandbox = "batchsandbox"
+	ProviderTypeBatchSandbox ProviderType = "batchsandbox"
+	ProviderTypeAgentSandbox ProviderType = "agent-sandbox"
 )
+
+func (tpy ProviderType) String() string { return string(tpy) }
 
 // Standard errors for Provider operations
 var (
@@ -37,12 +41,12 @@ var (
 // Provider defines the interface for sandbox resource providers
 // Implementations include BatchSandboxProvider, AgentSandboxProvider, etc.
 type Provider interface {
-	// GetEndpoint retrieves the IP address for a sandbox by its name
+	// GetEndpoint retrieves the IP address for a sandbox by its id/name
 	// The namespace is determined by the provider's configuration
 	// Returns the first available IP from the endpoints annotation
 	// Returns error if sandbox not found or no endpoints available
 	// Note: This is a local cache query, no network I/O involved
-	GetEndpoint(name string) (string, error)
+	GetEndpoint(sandboxId string) (string, error)
 
 	// Start initializes and starts the provider's informer cache
 	// Waits for cache sync before returning
@@ -52,5 +56,5 @@ type Provider interface {
 
 // ProviderFactory creates a Provider instance based on the provider type
 type ProviderFactory interface {
-	CreateProvider(providerType string) (Provider, error)
+	CreateProvider(providerType ProviderType) (Provider, error)
 }

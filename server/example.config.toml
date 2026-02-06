@@ -33,7 +33,11 @@ api_key = ""
 # -----------------------------------------------------------------
 type = "docker"
 execd_image = "opensandbox/execd:v1.0.5"
-egress_image = "opensandbox/egress:v1.0.0"
+
+[egress]
+# Egress configuration
+# -----------------------------------------------------------------
+image = "opensandbox/egress:v1.0.0"
 
 [docker]
 # Docker-specific knobs

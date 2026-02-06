@@ -643,6 +643,12 @@ export interface components {
              */
             networkPolicy?: components["schemas"]["NetworkPolicy"];
             /**
+             * @description Storage mounts for the sandbox. Each volume entry specifies a named backend-specific
+             *     storage source and common mount settings. Exactly one backend type must be specified
+             *     per volume entry.
+             */
+            volumes?: components["schemas"]["Volume"][];
+            /**
              * @description Opaque container for provider-specific or transient parameters not supported by the core API.
              *
              *     **Note**: This field is reserved for internal features, experimental flags, or temporary behaviors. Standard parameters should be proposed as core API fields.
@@ -741,6 +747,63 @@ export interface components {
              *     IP/CIDR not yet supported in the egress MVP.
              */
             target: string;
+        };
+        /**
+         * @description Storage mount definition for a sandbox. Each volume entry contains:
+         *     - A unique name identifier
+         *     - Exactly one backend struct (host, pvc, etc.) with backend-specific fields
+         *     - Common mount settings (mountPath, readOnly, subPath)
+         */
+        Volume: {
+            /**
+             * @description Unique identifier for the volume within the sandbox.
+             *     Must be a valid DNS label (lowercase alphanumeric, hyphens allowed, max 63 chars).
+             */
+            name: string;
+            host?: components["schemas"]["Host"];
+            pvc?: components["schemas"]["PVC"];
+            /**
+             * @description Absolute path inside the container where the volume is mounted.
+             *     Must start with '/'.
+             */
+            mountPath: string;
+            /**
+             * @description If true, the volume is mounted as read-only. Defaults to false (read-write).
+             * @default false
+             */
+            readOnly: boolean;
+            /**
+             * @description Optional subdirectory under the backend path to mount.
+             *     Must be a relative path without '..' components.
+             */
+            subPath?: string;
+        };
+        /**
+         * @description Host path bind mount backend. Maps a directory on the host filesystem
+         *     into the container. Only available when the runtime supports host mounts.
+         *
+         *     Security note: Host paths are restricted by server-side allowlist.
+         *     Users must specify paths under permitted prefixes.
+         */
+        Host: {
+            /**
+             * @description Absolute path on the host filesystem to mount.
+             *     Must start with '/' and be under an allowed prefix.
+             */
+            path: string;
+        };
+        /**
+         * @description Kubernetes PersistentVolumeClaim mount backend. References an existing
+         *     PVC in the same namespace as the sandbox pod.
+         *
+         *     Only available in Kubernetes runtime.
+         */
+        PVC: {
+            /**
+             * @description Name of the PersistentVolumeClaim in the same namespace.
+             *     Must be a valid Kubernetes resource name.
+             */
+            claimName: string;
         };
     };
     responses: {
