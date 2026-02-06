@@ -28,7 +28,7 @@ from kubernetes.client import (
     ApiException,
 )
 
-from src.api.schema import ImageSpec
+from src.api.schema import ImageSpec, NetworkPolicy
 from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.workload_provider import WorkloadProvider
@@ -72,6 +72,7 @@ class AgentSandboxProvider(WorkloadProvider):
         expires_at: datetime,
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
+        network_policy: Optional[NetworkPolicy] = None,
     ) -> Dict[str, Any]:
         pod_spec = self._build_pod_spec(
             image_spec=image_spec,

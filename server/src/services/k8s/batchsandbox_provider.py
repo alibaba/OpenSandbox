@@ -29,7 +29,7 @@ from kubernetes.client import (
     ApiException,
 )
 
-from src.api.schema import ImageSpec
+from src.api.schema import ImageSpec, NetworkPolicy
 from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.workload_provider import WorkloadProvider
@@ -76,6 +76,7 @@ class BatchSandboxProvider(WorkloadProvider):
         expires_at: datetime,
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
+        network_policy: Optional[NetworkPolicy] = None,
     ) -> Dict[str, Any]:
         """
         Create a BatchSandbox workload.
@@ -97,6 +98,8 @@ class BatchSandboxProvider(WorkloadProvider):
             execd_image: execd daemon image (not used in pool mode)
             extensions: General extension field for additional configuration.
                 When contains 'poolRef', enables pool-based creation.
+            network_policy: Optional network policy for egress traffic control.
+                When provided, an egress sidecar container will be added to the Pod.
         
         Returns:
             Dict with 'name' and 'uid' of created BatchSandbox
