@@ -31,6 +31,11 @@ from kubernetes.client import (
 from src.api.schema import ImageSpec, NetworkPolicy
 from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from src.services.k8s.client import K8sClient
+from src.services.k8s.egress_helper import (
+    build_egress_sidecar_container,
+    build_ipv6_disable_sysctls,
+    build_security_context_for_main_container,
+)
 from src.services.k8s.workload_provider import WorkloadProvider
 
 logger = logging.getLogger(__name__)
@@ -73,6 +78,7 @@ class AgentSandboxProvider(WorkloadProvider):
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
+        egress_image: Optional[str] = None,
     ) -> Dict[str, Any]:
         pod_spec = self._build_pod_spec(
             image_spec=image_spec,
@@ -80,6 +86,8 @@ class AgentSandboxProvider(WorkloadProvider):
             env=env,
             resource_limits=resource_limits,
             execd_image=execd_image,
+            network_policy=network_policy,
+            egress_image=egress_image,
         )
 
         if self.service_account:
@@ -128,6 +136,8 @@ class AgentSandboxProvider(WorkloadProvider):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         execd_image: str,
+        network_policy: Optional[NetworkPolicy] = None,
+        egress_image: Optional[str] = None,
     ) -> Dict[str, Any]:
         init_container = self._build_execd_init_container(execd_image)
         main_container = self._build_main_container(
@@ -136,10 +146,15 @@ class AgentSandboxProvider(WorkloadProvider):
             env=env,
             resource_limits=resource_limits,
             include_execd_volume=True,
+            has_network_policy=network_policy is not None,
         )
-        return {
+        
+        containers = [self._container_to_dict(main_container)]
+        
+        # Add egress sidecar if network policy is provided
+        pod_spec: Dict[str, Any] = {
             "initContainers": [self._container_to_dict(init_container)],
-            "containers": [self._container_to_dict(main_container)],
+            "containers": containers,
             "volumes": [
                 {
                     "name": "opensandbox-bin",
@@ -147,6 +162,21 @@ class AgentSandboxProvider(WorkloadProvider):
                 }
             ],
         }
+        
+        if network_policy and egress_image:
+            # Build and add egress sidecar container
+            sidecar_container = build_egress_sidecar_container(
+                egress_image=egress_image,
+                network_policy=network_policy,
+            )
+            containers.append(sidecar_container)
+            
+            # FIXME(Pangjiping): Disable IPv6 at Pod level because of egress doesn't support ipv6 for now.
+            if "securityContext" not in pod_spec:
+                pod_spec["securityContext"] = {}
+            pod_spec["securityContext"]["sysctls"] = build_ipv6_disable_sysctls()
+        
+        return pod_spec
 
     def _build_execd_init_container(self, execd_image: str) -> V1Container:
         script = (
@@ -176,6 +206,7 @@ class AgentSandboxProvider(WorkloadProvider):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         include_execd_volume: bool,
+        has_network_policy: bool = False,
     ) -> V1Container:
         env_vars = [V1EnvVar(name=k, value=v) for k, v in env.items()]
         env_vars.append(V1EnvVar(name="EXECD", value="/opt/opensandbox/bin/execd"))
@@ -198,6 +229,20 @@ class AgentSandboxProvider(WorkloadProvider):
                 )
             ]
 
+        # Apply security context when network policy is enabled
+        security_context = None
+        if has_network_policy:
+            security_context_dict = build_security_context_for_main_container(True)
+            if security_context_dict:
+                from kubernetes.client import V1SecurityContext, V1Capabilities
+                capabilities = None
+                if "capabilities" in security_context_dict:
+                    caps_dict = security_context_dict["capabilities"]
+                    add_caps = caps_dict.get("add", [])
+                    drop_caps = caps_dict.get("drop", [])
+                    capabilities = V1Capabilities(add=add_caps if add_caps else None, drop=drop_caps if drop_caps else None)
+                security_context = V1SecurityContext(capabilities=capabilities)
+
         return V1Container(
             name="sandbox",
             image=image_spec.uri,
@@ -205,6 +250,7 @@ class AgentSandboxProvider(WorkloadProvider):
             env=env_vars if env_vars else None,
             resources=resources,
             volume_mounts=volume_mounts,
+            security_context=security_context,
         )
 
     def _container_to_dict(self, container: V1Container) -> Dict[str, Any]:
@@ -230,6 +276,16 @@ class AgentSandboxProvider(WorkloadProvider):
                 {"name": vm.name, "mountPath": vm.mount_path}
                 for vm in container.volume_mounts
             ]
+        if container.security_context:
+            result["securityContext"] = {}
+            if container.security_context.capabilities:
+                caps = {}
+                if container.security_context.capabilities.add:
+                    caps["add"] = container.security_context.capabilities.add
+                if container.security_context.capabilities.drop:
+                    caps["drop"] = container.security_context.capabilities.drop
+                if caps:
+                    result["securityContext"]["capabilities"] = caps
 
         return result
 

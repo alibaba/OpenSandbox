@@ -77,6 +77,7 @@ class BatchSandboxProvider(WorkloadProvider):
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
+        egress_image: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a BatchSandbox workload.

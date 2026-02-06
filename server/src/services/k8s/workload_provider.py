@@ -45,6 +45,7 @@ class WorkloadProvider(ABC):
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
+        egress_image: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new workload resource.
@@ -63,6 +64,7 @@ class WorkloadProvider(ABC):
                 This is a flexible field for various use cases (e.g., ``poolRef`` for pool-based creation).
             network_policy: Optional network policy for egress traffic control.
                 When provided, an egress sidecar container will be added to the Pod.
+            egress_image: Optional egress sidecar image. Required when network_policy is provided.
             
         Returns:
             Dict containing workload metadata (name, uid, etc.)

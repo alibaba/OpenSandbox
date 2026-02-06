@@ -272,6 +272,11 @@ class KubernetesSandboxService(SandboxService):
             resource_limits = request.resource_limits.root
         
         try:
+            # Get egress image if network policy is provided
+            egress_image = None
+            if request.network_policy:
+                egress_image = self.app_config.egress.image if self.app_config.egress else None
+            
             # Create workload
             workload_info = self.workload_provider.create_workload(
                 sandbox_id=sandbox_id,
@@ -285,6 +290,7 @@ class KubernetesSandboxService(SandboxService):
                 execd_image=self.execd_image,
                 extensions=request.extensions,
                 network_policy=request.network_policy,
+                egress_image=egress_image,
             )
             
             logger.info(
