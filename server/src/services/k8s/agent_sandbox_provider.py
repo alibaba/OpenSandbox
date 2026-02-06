@@ -29,6 +29,8 @@ from kubernetes.client import (
 )
 
 from src.api.schema import ImageSpec
+from src.config import IngressConfig
+from src.services.helpers import format_ingress_endpoint
 from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.workload_provider import WorkloadProvider
@@ -47,6 +49,7 @@ class AgentSandboxProvider(WorkloadProvider):
         template_file_path: Optional[str] = None,
         shutdown_policy: str = "Delete",
         service_account: Optional[str] = None,
+        ingress_config: Optional[IngressConfig] = None,
     ):
         self.k8s_client = k8s_client
         self.custom_api = k8s_client.get_custom_objects_api()
@@ -59,6 +62,7 @@ class AgentSandboxProvider(WorkloadProvider):
         self.shutdown_policy = shutdown_policy
         self.service_account = service_account
         self.template_manager = AgentSandboxTemplateManager(template_file_path)
+        self.ingress_config = ingress_config
 
     def create_workload(
         self,
@@ -416,7 +420,12 @@ class AgentSandboxProvider(WorkloadProvider):
 
         return None
 
-    def get_endpoint_info(self, workload: Dict[str, Any], port: int) -> Optional[str]:
+    def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[str]:
+        # ingress-based endpoint if configured (gateway)
+        ingress_endpoint = format_ingress_endpoint(self.ingress_config, sandbox_id, port)
+        if ingress_endpoint:
+            return ingress_endpoint
+
         status = workload.get("status", {})
         selector = status.get("selector")
         namespace = workload.get("metadata", {}).get("namespace")
@@ -437,3 +446,4 @@ class AgentSandboxProvider(WorkloadProvider):
             return f"{service_fqdn}:{port}"
 
         return None
+

@@ -27,6 +27,13 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from src.api.schema import Sandbox, SandboxFilter
+from src.config import (
+    GATEWAY_ROUTE_MODE_HEADER,
+    GATEWAY_ROUTE_MODE_URI,
+    GATEWAY_ROUTE_MODE_WILDCARD,
+    INGRESS_MODE_GATEWAY,
+    IngressConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,9 +148,48 @@ def matches_filter(sandbox: Sandbox, filter_: SandboxFilter) -> bool:
     return True
 
 
+# ============================================================================
+# Ingress helpers
+# ============================================================================
+def format_ingress_endpoint(
+    ingress_config: Optional[IngressConfig],
+    sandbox_id: str,
+    port: int,
+) -> Optional[str]:
+    """
+    Build an ingress-based endpoint string for a sandbox.
+
+    Returns None when ingress is not in gateway mode or when the route mode is
+    not supported (e.g., header mode is intentionally skipped until Endpoint
+    schema can carry headers).
+    """
+    if not ingress_config or ingress_config.mode != INGRESS_MODE_GATEWAY:
+        return None
+    gateway_cfg = ingress_config.gateway
+    if gateway_cfg is None:
+        return None
+
+    address = gateway_cfg.address
+    route_mode = gateway_cfg.route.mode
+
+    if route_mode == GATEWAY_ROUTE_MODE_WILDCARD:
+        base = address[2:] if address.startswith("*.") else address
+        return f"{sandbox_id}-{port}.{base}"
+
+    if route_mode == GATEWAY_ROUTE_MODE_URI:
+        return f"{address}/{sandbox_id}/{port}"
+
+    if route_mode == GATEWAY_ROUTE_MODE_HEADER:
+        # TODO(Pangjiping): Header mode intentionally not emitted until Endpoint schema supports headers.
+        raise RuntimeError(f"Unsupported route mode: {route_mode}")
+
+    return None
+
+
 __all__ = [
     "parse_memory_limit",
     "parse_nano_cpus",
     "parse_timestamp",
+    "format_ingress_endpoint",
     "matches_filter",
 ]

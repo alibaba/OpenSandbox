@@ -125,6 +125,21 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
    ```
    Further reading on Docker container security: https://docs.docker.com/engine/security/
 
+**Ingress exposure (direct | gateway)**
+   ```toml
+   [ingress]
+   mode = "direct"  # docker runtime only supports direct
+   # gateway.address = "*.example.com"         # host only (domain or IP[:port]); scheme is not allowed
+   # gateway.route.mode = "wildcard"            # wildcard | uri (header not yet supported)
+   ```
+   - `mode=direct`: default; required when `runtime.type=docker` (client ↔ sandbox direct reachability, no L7 gateway).
+   - `mode=gateway`: configure external ingress.
+     - `gateway.address`: wildcard domain required when `gateway.route.mode=wildcard`; otherwise must be domain, IP, or IP:port. Do not include scheme; clients decide http/https.
+    - `gateway.route.mode`: `wildcard` (host-based wildcard), `uri` (path-prefix). `header` is not yet supported.
+     - Response format examples:
+       - `wildcard`: `<sandbox-id>-<port>.example.com/path/to/request`
+       - `uri`: `10.0.0.1:8000/<sandbox-id>/<port>/path/to/request`
+
 ### (Optional) Egress sidecar for `networkPolicy`
 
 - Configure the sidecar image (used only when requests include `networkPolicy`):

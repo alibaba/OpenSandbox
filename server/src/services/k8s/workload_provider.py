@@ -153,13 +153,14 @@ class WorkloadProvider(ABC):
         pass
     
     @abstractmethod
-    def get_endpoint_info(self, workload: Any, port: int) -> Optional[str]:
+    def get_endpoint_info(self, workload: Any, port: int, sandbox_id: str) -> Optional[str]:
         """
         Get endpoint information from workload.
         
         Args:
             workload: Workload object
             port: Port number
+            sandbox_id: Sandbox identifier for ingress-based endpoints
             
         Returns:
             Endpoint string (e.g., "10.244.0.5:8080") or None if not available

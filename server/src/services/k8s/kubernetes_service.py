@@ -82,6 +82,9 @@ class KubernetesSandboxService(SandboxService):
         if not self.app_config.kubernetes:
             raise ValueError("Kubernetes configuration is required")
         
+        # Ingress configuration (direct/gateway) if provided
+        self.ingress_config = self.app_config.ingress
+
         self.namespace = self.app_config.kubernetes.namespace
         self.execd_image = runtime_config.execd_image
         self.service_account = self.app_config.kubernetes.service_account
@@ -108,6 +111,7 @@ class KubernetesSandboxService(SandboxService):
                 k8s_client=self.k8s_client,
                 k8s_config=self.app_config.kubernetes,
                 agent_sandbox_config=self.app_config.agent_sandbox,
+                ingress_config=self.ingress_config,
             )
             logger.info(
                 f"Initialized workload provider: {self.workload_provider.__class__.__name__}"
@@ -621,7 +625,7 @@ class KubernetesSandboxService(SandboxService):
                     },
                 )
             
-            endpoint_str = self.workload_provider.get_endpoint_info(workload, port)
+            endpoint_str = self.workload_provider.get_endpoint_info(workload, port, sandbox_id)
             
             if not endpoint_str:
                 raise HTTPException(

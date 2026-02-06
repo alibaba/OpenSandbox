@@ -22,5 +22,5 @@ api_key = "test-api-key-12345"
 type = "docker"
 execd_image = "ghcr.io/opensandbox/platform:latest"
 
-[router]
-domain = "opensandbox.io"
+[ingress]
+mode = "direct"

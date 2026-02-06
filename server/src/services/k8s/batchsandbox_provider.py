@@ -30,6 +30,8 @@ from kubernetes.client import (
 )
 
 from src.api.schema import ImageSpec
+from src.config import IngressConfig, INGRESS_MODE_GATEWAY
+from src.services.helpers import format_ingress_endpoint
 from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.workload_provider import WorkloadProvider
@@ -45,7 +47,12 @@ class BatchSandboxProvider(WorkloadProvider):
     and provides additional features like task management.
     """
     
-    def __init__(self, k8s_client: K8sClient, template_file_path: Optional[str] = None):
+    def __init__(
+        self,
+        k8s_client: K8sClient,
+        template_file_path: Optional[str] = None,
+        ingress_config: Optional[IngressConfig] = None,
+    ):
         """
         Initialize BatchSandbox provider.
         
@@ -55,6 +62,7 @@ class BatchSandboxProvider(WorkloadProvider):
         """
         self.k8s_client = k8s_client
         self.custom_api = k8s_client.get_custom_objects_api()
+        self.ingress_config = ingress_config
         
         # CRD constants
         self.group = "sandbox.opensandbox.io"
@@ -675,30 +683,24 @@ class BatchSandboxProvider(WorkloadProvider):
             "last_transition_at": creation_timestamp,
         }
     
-    def get_endpoint_info(self, workload: Dict[str, Any], port: int) -> Optional[str]:
+    def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[str]:
         """
         Get endpoint information from BatchSandbox.
-        
-        Reads Pod IP from sandbox.opensandbox.io/endpoints annotation.
-        The annotation contains a JSON array of IP addresses.
-        
-        Args:
-            workload: BatchSandbox dict
-            port: Port number
-            
-        Returns:
-            Endpoint string in format "IP:PORT" or None if not available
+        - gateway mode: use ingress config to format endpoint
+        - direct/default: resolve Pod IP from annotation
         """
         import json
-        
-        # Get annotations
+
+        if self.ingress_config and self.ingress_config.mode == INGRESS_MODE_GATEWAY:
+            return format_ingress_endpoint(self.ingress_config, sandbox_id, port)
+
         annotations = workload.get("metadata", {}).get("annotations", {})
         
         # Get endpoints from annotation
         endpoints_str = annotations.get("sandbox.opensandbox.io/endpoints")
         if not endpoints_str:
             return None
-        
+
         try:
             # Parse JSON array of IPs
             endpoints = json.loads(endpoints_str)
@@ -708,5 +710,5 @@ class BatchSandboxProvider(WorkloadProvider):
                 return f"{pod_ip}:{port}"
         except (json.JSONDecodeError, IndexError, TypeError):
             return None
-        
+
         return None

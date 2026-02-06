@@ -15,15 +15,15 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.config import AppConfig, RouterConfig, RuntimeConfig, ServerConfig
+from src.config import AppConfig, IngressConfig, RuntimeConfig, ServerConfig
 from src.middleware.auth import AuthMiddleware
 
 
 def _app_config_with_api_key() -> AppConfig:
     return AppConfig(
         server=ServerConfig(api_key="secret-key"),
-        runtime=RuntimeConfig(type="docker", execd_image="ghcr.io/opensandbox/platform:latest"),
-        router=RouterConfig(domain="opensandbox.io"),
+        runtime=RuntimeConfig(type="docker", execd_image="opensandbox/execd:latest"),
+        ingress=IngressConfig(mode="direct"),
     )
 
 

@@ -19,7 +19,7 @@ Factory for creating WorkloadProvider instances.
 import logging
 from typing import Dict, Type, Optional
 
-from src.config import KubernetesRuntimeConfig, AgentSandboxRuntimeConfig
+from src.config import KubernetesRuntimeConfig, AgentSandboxRuntimeConfig, IngressConfig
 from src.services.k8s.workload_provider import WorkloadProvider
 from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from src.services.k8s.agent_sandbox_provider import AgentSandboxProvider
@@ -45,6 +45,7 @@ def create_workload_provider(
     k8s_client: K8sClient,
     k8s_config: Optional[KubernetesRuntimeConfig] = None,
     agent_sandbox_config: Optional[AgentSandboxRuntimeConfig] = None,
+    ingress_config: Optional[IngressConfig] = None,
 ) -> WorkloadProvider:
     """
     Create a WorkloadProvider instance based on the provider type.
@@ -85,11 +86,15 @@ def create_workload_provider(
     logger.info(f"Creating workload provider: {provider_class.__name__}")
     
     # Special handling for BatchSandboxProvider - pass template file path
-    if provider_type_lower == PROVIDER_TYPE_BATCHSANDBOX and k8s_config:
-        template_file = k8s_config.batchsandbox_template_file
+    if provider_type_lower == PROVIDER_TYPE_BATCHSANDBOX:
+        template_file = k8s_config.batchsandbox_template_file if k8s_config else None
         if template_file:
             logger.info(f"Using BatchSandbox template file: {template_file}")
-        return provider_class(k8s_client, template_file_path=template_file)
+        return provider_class(
+            k8s_client,
+            template_file_path=template_file,
+            ingress_config=ingress_config,
+        )
 
     # Special handling for AgentSandboxProvider - pass agent-specific settings
     if provider_type_lower == PROVIDER_TYPE_AGENT_SANDBOX:
@@ -99,8 +104,10 @@ def create_workload_provider(
             template_file_path=agent_config.template_file,
             shutdown_policy=agent_config.shutdown_policy,
             service_account=k8s_config.service_account if k8s_config else None,
+            ingress_config=ingress_config,
         )
     
+    # Providers without ingress-specific needs
     return provider_class(k8s_client)
 
 

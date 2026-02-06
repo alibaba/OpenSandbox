@@ -247,7 +247,7 @@ class TestAgentSandboxProvider:
             "metadata": {"namespace": "test-ns"},
         }
 
-        endpoint = provider.get_endpoint_info(workload, 8080)
+        endpoint = provider.get_endpoint_info(workload, 8080, "sandbox-123")
 
         assert endpoint == "10.0.0.9:8080"
 
@@ -263,6 +263,6 @@ class TestAgentSandboxProvider:
             "metadata": {"namespace": "test-ns"},
         }
 
-        endpoint = provider.get_endpoint_info(workload, 9000)
+        endpoint = provider.get_endpoint_info(workload, 9000, "sandbox-123")
 
         assert endpoint == "svc.example.com:9000"

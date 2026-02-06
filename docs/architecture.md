@@ -224,7 +224,7 @@ The pluggable architecture allows implementing custom runtimes by:
 
 **Features:**
 - Dynamic endpoint generation based on sandbox ID and port
-- Supports both domain-based and wildcard-domain routing
+- Supports both domain-based and wildcard routing
 - Reverse proxy to sandbox container ports
 - Automatic cleanup when sandbox terminates
 
