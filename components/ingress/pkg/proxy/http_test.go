@@ -45,11 +45,11 @@ func (m *mockProvider) GetEndpoint(sandboxId string) (string, error) {
 	return "", fmt.Errorf("%w: %s", sandbox.ErrSandboxNotFound, sandboxId)
 }
 
-func (m *mockProvider) Start(ctx context.Context) error {
+func (m *mockProvider) Start(_ context.Context) error {
 	return nil
 }
 
-func Test_HTTPProxy(t *testing.T) {
+func Test_HTTPProxy_with_header_mode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(realBackendHTTPHandler))
 	defer server.Close()
 	serverPort := server.URL[len("http://127.0.0.1:"):]
@@ -112,6 +112,62 @@ func Test_HTTPProxy(t *testing.T) {
 	assert.Nil(t, err)
 
 	request.Host = fmt.Sprintf("test-sandbox-%v.sandbox.alibaba-inc.com", serverPort)
+	response, err = http.DefaultClient.Do(request)
+	assert.Nil(t, err)
+	if response.StatusCode != http.StatusOK {
+		bytes, err := io.ReadAll(response.Body)
+		assert.Nil(t, err)
+		t.Log(string(bytes))
+	}
+	assert.Equal(t, http.StatusOK, response.StatusCode)
+}
+
+func Test_HTTPProxy_with_uri_mode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(realBackendHTTPHandler))
+	defer server.Close()
+	serverPort := server.URL[len("http://127.0.0.1:"):]
+
+	// Create mock provider with sandbox endpoint
+	provider := &mockProvider{
+		endpoints: map[string]string{
+			"test-sandbox": "127.0.0.1",
+		},
+	}
+
+	ctx := context.Background()
+	Logger = logging.FromContext(ctx)
+	proxy := NewProxy(ctx, provider, ModeURI)
+
+	http.Handle("/", proxy)
+	port, err := findAvailablePort()
+	assert.Nil(t, err)
+
+	go func() {
+		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(port), nil))
+	}()
+
+	time.Sleep(2 * time.Second)
+
+	// uri is empty
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v", port), nil)
+	assert.Nil(t, err)
+	response, err := http.DefaultClient.Do(request)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusBadRequest, response.StatusCode)
+	bytes, _ := io.ReadAll(response.Body)
+	t.Log(string(bytes))
+
+	// no sandbox backend
+	request, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v/non-existent-xxx/yyy/hello", port), nil)
+	response, err = http.DefaultClient.Do(request)
+	assert.Nil(t, err)
+	assert.Equal(t, http.StatusNotFound, response.StatusCode) // ErrSandboxNotFound -> 404
+	bytes, _ = io.ReadAll(response.Body)
+	t.Log(string(bytes))
+
+	// valid sandbox request
+	request, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v/test-sandbox/%v/hello?a=1&b=2", port, serverPort), nil)
+	assert.Nil(t, err)
 	response, err = http.DefaultClient.Do(request)
 	assert.Nil(t, err)
 	if response.StatusCode != http.StatusOK {

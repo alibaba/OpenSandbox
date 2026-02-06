@@ -67,7 +67,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// modify if requestURI is not empty
 	if host.requestURI != nil {
-		// TODO: modify requestURI
+		r.URL.Path = *host.requestURI
 	}
 
 	r.Host = targetHost

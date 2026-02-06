@@ -52,8 +52,7 @@ func (p *Proxy) getSandboxHostDefinition(r *http.Request) (*sandboxHost, error) 
 		}
 		return host, nil
 	case ModeURI:
-		// TODO: implement ModeURI
-		return nil, errors.New("mode URI is not implemented")
+		return p.parseSandboxURI(r)
 	}
 
 	return nil, fmt.Errorf("unknown ingress mode: %s", p.mode)
@@ -79,4 +78,38 @@ func (p *Proxy) parseSandboxHost(s string) (*sandboxHost, error) {
 	port := ingressAndPort[len(ingressAndPort)-1]
 	ingress := strings.Join(ingressAndPort[:len(ingressAndPort)-1], "-")
 	return &sandboxHost{ingress, port, nil}, nil
+}
+
+func (p *Proxy) parseSandboxURI(r *http.Request) (*sandboxHost, error) {
+	path := r.URL.Path
+	if path == "" {
+		return nil, errors.New("missing URI path")
+	}
+
+	// Remove leading slash and split by '/'
+	path = strings.TrimPrefix(path, "/")
+	parts := strings.SplitN(path, "/", 3)
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid URI path format: expected '/<sandbox-id>/<sandbox-port>/<path-to-request>', got: %s", r.URL.Path)
+	}
+
+	sandboxID := parts[0]
+	port := parts[1]
+	if sandboxID == "" || port == "" {
+		return nil, errors.New("missing sandbox-id or sandbox-port in URI path")
+	}
+
+	// Extract the remaining path (user's target request URI)
+	var requestURI string
+	if len(parts) >= 3 && parts[2] != "" {
+		requestURI = "/" + parts[2]
+	} else {
+		requestURI = "/"
+	}
+
+	return &sandboxHost{
+		ingressKey: sandboxID,
+		port:       port,
+		requestURI: &requestURI,
+	}, nil
 }
