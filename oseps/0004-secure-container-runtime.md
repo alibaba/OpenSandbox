@@ -3,7 +3,7 @@ title: Pluggable Secure Container Runtime Support
 authors:
   - "@hittyt"
 creation-date: 2026-02-05
-last-updated: 2026-02-05
+last-updated: 2026-02-06
 status: draft
 ---
 
@@ -26,6 +26,9 @@ status: draft
   - [Runtime Validator](#runtime-validator)
   - [Docker Mode Implementation](#docker-mode-implementation)
   - [Kubernetes Mode Implementation](#kubernetes-mode-implementation)
+    - [BatchSandboxProvider](#batchsandboxprovider)
+    - [AgentSandboxProvider](#agentsandboxprovider)
+    - [Pooled Sandbox Handling](#pooled-sandbox-handling)
 - [Test Plan](#test-plan)
 - [Drawbacks](#drawbacks)
 - [Alternatives](#alternatives)
@@ -113,15 +116,31 @@ User API                    Server Config                 Backend
 
 2. **Performance Overhead**: Secure runtimes add latency and resource overhead compared to runc:
    - gVisor: ~10-50ms additional startup, minimal memory overhead
-   - Firecracker: ~125ms cold start, ~5MB memory per microVM
-   - Kata: ~500ms cold start, ~20-50MB memory per VM
+   - Kata Containers: Performance varies significantly by hypervisor backend:
+
+     | Hypervisor | Cold Start | Memory Overhead | Notes |
+     |-----------|-----------|----------------|-------|
+     | QEMU | ~500ms | ~20-50MB | Default, most feature-complete |
+     | Cloud Hypervisor (CLH) | ~200ms | ~10-20MB | Lightweight, Rust-based |
+     | Firecracker | ~125ms | ~5MB | Minimal footprint, limited features |
+     | Dragonball | ~100-200ms | ~10MB | Optimized for cloud-native |
+
+     The actual hypervisor is determined by the `RuntimeClass` handler configured by the SRE administrator (e.g., `kata-qemu`, `kata-clh`, `kata-fc`).
+
+     > **Note**: Firecracker is not a standalone OCI runtime. In this OSEP, `secure_runtime="firecracker"` maps to Kata Containers with the Firecracker hypervisor backend (`kata-fc`). See [Server Configuration](#server-configuration) for details.
 
 3. **Compatibility**: Not all container images work with all secure runtimes:
-   - gVisor: Some syscalls may not be implemented
-   - Firecracker: Requires specific kernel/rootfs configuration
-   - Kata: Generally most compatible but highest overhead
+   - gVisor: Some syscalls may not be implemented; check [gVisor compatibility](https://gvisor.dev/docs/user_guide/compatibility/)
+   - Kata (QEMU/CLH): Generally most compatible but highest overhead
+   - Kata + Firecracker (`kata-fc`): Limited device support; some workloads requiring specific kernel features may not work
 
 4. **execd Injection**: The execd binary injection mechanism must work within secure runtime constraints
+
+5. **Pooled Sandbox Constraint (Kubernetes)**: In Kubernetes mode with resource pools (Pool CRD), the `runtimeClassName` is fixed at pool creation time by the SRE administrator. Pre-warmed Pods cannot change their runtime after creation. This means:
+   - The Pool's `runtimeClassName` determines the secure runtime for all sandboxes allocated from that pool
+   - If a user requests `secure_runtime="kata"` but the pool was created with `runtimeClassName: gvisor`, the request must be rejected
+   - SRE administrators must create separate pools for different secure runtimes if multiple types are needed
+   - The abstraction (`secure_runtime` type) only applies at the SDK/API layer; the infrastructure layer (Pool CRD) still works directly with `runtimeClassName`
 
 ### Risks and Mitigations
 
@@ -220,10 +239,24 @@ enabled = true
 docker_runtime = "runsc"           # Docker: --runtime=runsc
 k8s_runtime_class = "gvisor"       # K8s: pod.spec.runtimeClassName
 
+# Firecracker Integration Note:
+# Firecracker is a VMM (Virtual Machine Monitor), not an OCI-compliant container
+# runtime. It cannot serve as a CRI implementation directly. There are two ways
+# to use Firecracker in Kubernetes:
+#
+#   1. Kata Containers + Firecracker (recommended)
+#      Kata uses Firecracker as a hypervisor backend via the "kata-fc" RuntimeClass
+#      handler. This is the mature, production-ready approach.
+#
+#   2. firecracker-containerd
+#      A containerd runtime shim that uses Firecracker directly. This project is
+#      less actively maintained and not recommended for production use.
+#
+# This OSEP recommends approach (1): Firecracker via Kata Containers.
 [secure_runtimes.firecracker]
 enabled = true
-docker_runtime = "firecracker"     # Requires containerd + firecracker
-k8s_runtime_class = "kata-fc"      # Some clusters expose via kata
+docker_runtime = ""                # Not supported in Docker mode
+k8s_runtime_class = "kata-fc"      # Kata Containers with Firecracker hypervisor
 
 [secure_runtimes.kata]
 enabled = true
@@ -311,12 +344,21 @@ metadata:
 handler: runsc  # Matches containerd handler name
 
 ---
-# Kata Containers RuntimeClass
+# Kata Containers (QEMU backend) RuntimeClass
 apiVersion: node.k8s.io/v1
 kind: RuntimeClass
 metadata:
   name: kata-qemu
 handler: kata-qemu
+
+---
+# Kata Containers (Firecracker backend) RuntimeClass
+# This is what secure_runtime="firecracker" maps to
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-fc
+handler: kata-fc
 ```
 
 containerd configuration (`/etc/containerd/config.toml`):
@@ -327,6 +369,9 @@ containerd configuration (`/etc/containerd/config.toml`):
 
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-qemu]
   runtime_type = "io.containerd.kata-qemu.v2"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc]
+  runtime_type = "io.containerd.kata-fc.v2"
 ```
 
 ### Runtime Mapper
@@ -368,6 +413,11 @@ class SecureRuntimeMapper:
             )
         
         if self.runtime_mode == "docker":
+            if not runtime_config.docker_runtime:
+                raise ValueError(
+                    f"Secure runtime '{secure_runtime_type}' is not supported in Docker mode. "
+                    f"It is only available in Kubernetes mode."
+                )
             return runtime_config.docker_runtime
         else:  # kubernetes
             return runtime_config.k8s_runtime_class
@@ -464,45 +514,82 @@ class DockerSandboxService(SandboxService):
 
 ### Kubernetes Mode Implementation
 
-Changes to `server/src/services/k8s/batchsandbox_template.py`:
+Both Kubernetes workload providers must support `runtimeClassName` injection. The core resolution and validation logic is shared; each provider applies it to its own Pod spec path.
+
+#### Shared Logic
+
+The `_resolve_and_validate_runtime_class` helper is shared by both providers (e.g., via mixin or utility function):
 
 ```python
-class BatchSandboxTemplateManager:
-    def __init__(self, config: AppConfig, k8s_client):
-        # ... existing initialization ...
-        self.runtime_mapper = SecureRuntimeMapper(config)
-        self.runtime_validator = RuntimeValidator(k8s_client=k8s_client)
-    
-    def _apply_secure_runtime(self, pod_spec: dict, request: CreateSandboxRequest):
-        """Inject runtimeClassName into Pod spec."""
-        if not request.secure_runtime:
-            default = self.config.secure_runtimes.default
-            if not default:
-                return  # Use cluster default
-            secure_runtime_type = default
-        else:
-            secure_runtime_type = (
-                request.secure_runtime 
-                if isinstance(request.secure_runtime, str) 
-                else request.secure_runtime.type
-            )
-        
-        runtime_class = self.runtime_mapper.resolve(secure_runtime_type)
-        
-        if not self.runtime_validator.validate_k8s_runtime_class(runtime_class):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "code": "SECURE_RUNTIME_UNAVAILABLE",
-                    "message": f"RuntimeClass '{runtime_class}' does not exist. "
-                               f"Please ensure the RuntimeClass is created by cluster administrator."
-                }
-            )
-        
-        pod_spec["runtimeClassName"] = runtime_class
+def _resolve_and_validate_runtime_class(
+    runtime_mapper: SecureRuntimeMapper,
+    runtime_validator: RuntimeValidator,
+    secure_runtimes_config: SecureRuntimesConfig,
+    request: CreateSandboxRequest,
+) -> Optional[str]:
+    """
+    Resolve user's secure_runtime to a runtimeClassName and validate it.
+    Returns None if no secure runtime is requested.
+    """
+    if not request.secure_runtime:
+        default = secure_runtimes_config.default
+        if not default:
+            return None  # Use cluster default
+        secure_runtime_type = default
+    else:
+        secure_runtime_type = (
+            request.secure_runtime
+            if isinstance(request.secure_runtime, str)
+            else request.secure_runtime.type
+        )
+
+    runtime_class = runtime_mapper.resolve(secure_runtime_type)
+
+    if not runtime_validator.validate_k8s_runtime_class(runtime_class):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "SECURE_RUNTIME_UNAVAILABLE",
+                "message": f"RuntimeClass '{runtime_class}' does not exist. "
+                           f"Please ensure the RuntimeClass is created by cluster administrator."
+            }
+        )
+
+    return runtime_class
 ```
 
-Generated BatchSandbox CR (when user specifies `secure_runtime="gvisor"`):
+#### BatchSandboxProvider
+
+Changes to `server/src/services/k8s/batchsandbox_provider.py`:
+
+- **CRD**: `sandbox.opensandbox.io/v1alpha1` BatchSandbox
+- **Pod spec path**: `spec.template.spec`
+- **Two creation paths**:
+  - Template mode: inject `runtimeClassName` into Pod spec before template merge
+  - Pool mode (`poolRef`): runtime is determined by the Pool's `runtimeClassName`, validate consistency only (see [Pooled Sandbox Handling](#pooled-sandbox-handling))
+
+```python
+class BatchSandboxProvider:
+    def create_workload(self, request: CreateSandboxRequest, ...):
+        # ... existing code ...
+
+        if pool_ref:
+            # Pool mode: runtime comes from pool, validate consistency
+            self._validate_pool_runtime_consistency(pool_runtime_class, request)
+        else:
+            # Template mode: inject runtimeClassName
+            runtime_class = _resolve_and_validate_runtime_class(
+                self.runtime_mapper, self.runtime_validator,
+                self.config.secure_runtimes, request,
+            )
+            if runtime_class:
+                # spec.template.spec.runtimeClassName
+                runtime_manifest["spec"]["template"]["spec"]["runtimeClassName"] = runtime_class
+        
+        # ... template merge ...
+```
+
+Generated BatchSandbox CR:
 
 ```yaml
 apiVersion: sandbox.opensandbox.io/v1alpha1
@@ -518,13 +605,143 @@ spec:
         image: python:3.11
 ```
 
+#### AgentSandboxProvider
+
+Changes to `server/src/services/k8s/agent_sandbox_provider.py`:
+
+- **CRD**: `agents.x-k8s.io/v1alpha1` Sandbox
+- **Pod spec path**: `spec.podTemplate.spec`
+- **No pool concept**: always inject directly into Pod spec
+
+```python
+class AgentSandboxProvider:
+    def create_workload(self, request: CreateSandboxRequest, ...):
+        # ... existing code ...
+
+        # Resolve secure runtime
+        runtime_class = _resolve_and_validate_runtime_class(
+            self.runtime_mapper, self.runtime_validator,
+            self.config.secure_runtimes, request,
+        )
+
+        pod_spec = self._build_pod_spec(request, ...)
+        if runtime_class:
+            pod_spec["runtimeClassName"] = runtime_class
+
+        # spec.podTemplate.spec
+        runtime_manifest["spec"]["podTemplate"]["spec"] = pod_spec
+
+        # ... template merge ...
+```
+
+Generated AgentSandbox CR:
+
+```yaml
+apiVersion: agents.x-k8s.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: sandbox-abc123
+spec:
+  podTemplate:
+    spec:
+      runtimeClassName: "gvisor"  # Injected by server
+      initContainers:
+      - name: execd-init
+        image: opensandbox/execd:v1.0.5
+      containers:
+      - name: sandbox-container
+        image: python:3.11
+```
+
+#### Provider Comparison
+
+| Aspect | BatchSandboxProvider | AgentSandboxProvider |
+|--------|---------------------|---------------------|
+| CRD Kind | `BatchSandbox` | `Sandbox` |
+| Pod Spec Path | `spec.template.spec` | `spec.podTemplate.spec` |
+| Pool Support | Yes (`poolRef`) | No |
+| Runtime Injection Point | Before template merge | Before template merge |
+| Pool Runtime Conflict | 409 Conflict on mismatch | N/A |
+
+#### Pooled Sandbox Handling
+
+In Kubernetes mode, when a sandbox uses a Pool (via `poolRef`), the runtime is determined by the Pool's `runtimeClassName`, not by the user's `secure_runtime` parameter. The server must validate consistency between the two.
+
+**Pool configuration by SRE administrator:**
+
+```yaml
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: gvisor-pool
+spec:
+  template:
+    spec:
+      runtimeClassName: "gvisor"  # Fixed at pool creation
+      containers:
+      - name: sandbox-container
+        image: python:3.11
+  capacitySpec:
+    bufferMax: 10
+    bufferMin: 2
+    poolMax: 20
+    poolMin: 5
+```
+
+**Server-side validation:**
+
+```python
+def _validate_pool_runtime_consistency(
+    self, pool_runtime_class: Optional[str], request: CreateSandboxRequest
+):
+    """
+    Validate that user's secure_runtime matches the pool's runtimeClassName.
+    
+    In pooled mode, pre-warmed Pods already have a fixed runtime.
+    The user's request must be compatible.
+    """
+    if not request.secure_runtime:
+        return  # No explicit preference, accept pool's runtime
+    
+    requested_type = (
+        request.secure_runtime
+        if isinstance(request.secure_runtime, str)
+        else request.secure_runtime.type
+    )
+    requested_class = self.runtime_mapper.resolve(requested_type)
+    
+    if pool_runtime_class and requested_class != pool_runtime_class:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "RUNTIME_POOL_MISMATCH",
+                "message": f"Requested secure runtime '{requested_type}' "
+                           f"(runtimeClass='{requested_class}') conflicts with "
+                           f"pool's runtimeClass='{pool_runtime_class}'. "
+                           f"Use a pool configured with the matching runtime, "
+                           f"or omit secure_runtime to accept the pool's default."
+            }
+        )
+```
+
+**Behavior matrix:**
+
+| User `secure_runtime` | Pool (`poolRef`) | Pool `runtimeClassName` | Result |
+|----------------------|-----------------|------------------------|--------|
+| Not specified | Yes | `gvisor` | OK - use pool's gVisor runtime |
+| `"gvisor"` | Yes | `gvisor` | OK - consistent |
+| `"kata"` | Yes | `gvisor` | **409 Conflict** - mismatch |
+| `"gvisor"` | Yes | Not set (runc) | **409 Conflict** - pre-warmed Pods use runc, cannot switch to gVisor |
+| `"gvisor"` | No | N/A | OK - non-pooled creation, inject runtimeClassName |
+| Not specified | No | N/A | OK - use server default (typically runc) |
+
 ### Compatibility Matrix
 
 | Secure Runtime | Local Docker | Kubernetes | Notes |
 |---------------|--------------|------------|-------|
-| gVisor (runsc) | Full support | Full support | Via RuntimeClass |
-| Firecracker | Partial | Full support | Docker requires containerd setup |
-| Kata Containers | Full support | Full support | Via RuntimeClass |
+| gVisor (runsc) | Full support | Full support | Docker `--runtime=runsc`; K8s via RuntimeClass |
+| Kata Containers | Full support | Full support | Docker `--runtime=kata-runtime`; K8s via RuntimeClass |
+| Firecracker | Not supported | Via Kata (`kata-fc`) | Not a Docker OCI runtime; use Kata with Firecracker hypervisor backend in K8s |
 | Custom runtimes | Via config | Via RuntimeClass | Requires pre-installation |
 
 ## Test Plan
@@ -543,9 +760,14 @@ spec:
 | Test Case | Description |
 |-----------|-------------|
 | Docker + gVisor | Create sandbox on Docker host with runsc configured |
+| Docker + Kata | Create sandbox on Docker host with kata-runtime configured |
 | Docker runtime unavailable | Verify clear error when runtime not installed |
-| K8s + RuntimeClass | Create sandbox in cluster with gVisor RuntimeClass |
+| Docker + Firecracker rejected | Verify clear error: Firecracker not supported in Docker mode |
+| K8s + gVisor RuntimeClass | Create sandbox in cluster with gVisor RuntimeClass |
+| K8s + kata-fc RuntimeClass | Create sandbox with `secure_runtime="firecracker"` maps to kata-fc |
 | K8s RuntimeClass missing | Verify clear error when RuntimeClass doesn't exist |
+| Pooled sandbox runtime match | Create sandbox with `secure_runtime` matching pool's runtimeClassName |
+| Pooled sandbox runtime mismatch | Verify 409 Conflict when `secure_runtime` conflicts with pool |
 
 ### E2E Tests
 
@@ -554,6 +776,7 @@ spec:
 | Python SDK full flow | Create sandbox with `secure_runtime="gvisor"`, execute code |
 | Runtime isolation verification | Verify syscall interception in gVisor sandbox |
 | Fallback behavior | Verify standard runc when no runtime specified |
+| execd injection under gVisor | Verify execd binary injection works within gVisor runtime |
 
 ## Drawbacks
 
@@ -585,13 +808,15 @@ spec:
 **Pros**:
 - Full control for users
 - Simpler server implementation
+- Aligns with what SRE administrators already use when configuring Pool CRDs
 
 **Cons**:
-- Leaks Kubernetes concepts into the API
-- Breaks abstraction between Docker and K8s modes
-- User code becomes deployment-specific
+- Leaks Kubernetes concepts into the SDK user-facing API
+- User code becomes deployment-specific (Docker mode has no `runtimeClassName`)
 
-**Decision**: Rejected. The abstraction layer is essential for deployment-agnostic user code.
+**Decision**: Rejected at the SDK/API layer. The abstraction (`secure_runtime` type) keeps user code deployment-agnostic.
+
+However, this abstraction only applies to the **SDK user layer**. At the **infrastructure layer** (K8s Pool CRD, Docker daemon config), platform-specific concepts like `runtimeClassName` are unavoidable. SRE administrators must set `runtimeClassName` directly when configuring Pool resources. The server is responsible for validating consistency between the user's `secure_runtime` request and the pool's `runtimeClassName` (see [Pooled Sandbox Handling](#pooled-sandbox-handling)).
 
 ### Alternative 3: Automatic Runtime Detection
 
@@ -612,9 +837,10 @@ spec:
 
 - **Testing Environments**:
   - Docker host with gVisor (runsc) configured
-  - Docker host with Kata Containers configured
-  - Kubernetes cluster with gVisor RuntimeClass
-  - Kubernetes cluster with Kata RuntimeClass
+  - Docker host with Kata Containers (kata-runtime) configured
+  - Kubernetes cluster with gVisor RuntimeClass (`runsc`)
+  - Kubernetes cluster with Kata QEMU RuntimeClass (`kata-qemu`)
+  - Kubernetes cluster with Kata + Firecracker RuntimeClass (`kata-fc`)
 
 - **CI/CD Updates**:
   - Add integration tests for secure runtime validation
