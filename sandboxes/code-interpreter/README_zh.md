@@ -142,7 +142,6 @@ source /opt/opensandbox/code-interpreter-env.sh go
 - **Java**：IJava 内核
 - **TypeScript/JavaScript**：tslab 内核
 - **Go**：gonb 内核
-- **Bash**：bash_kernel
 
 ### 启动 Jupyter
 

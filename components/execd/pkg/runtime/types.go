@@ -16,6 +16,7 @@ package runtime
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
@@ -79,4 +80,23 @@ type CreateContextRequest struct {
 type CodeContext struct {
 	ID       string   `json:"id,omitempty"`
 	Language Language `json:"language"`
+}
+
+// bashSessionConfig holds bash session configuration.
+type bashSessionConfig struct {
+	// StartupSource is a list of scripts sourced on startup.
+	StartupSource []string
+	// Session is the session identifier.
+	Session string
+	// StartupTimeout is the startup timeout.
+	StartupTimeout time.Duration
+}
+
+// bashSession represents a bash session.
+type bashSession struct {
+	config  *bashSessionConfig
+	mu      sync.Mutex
+	started bool
+	env     map[string]string
+	cwd     string
 }
