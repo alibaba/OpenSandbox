@@ -54,7 +54,7 @@ uv pip install opensandbox-server
 **从简单示例初始化配置**：
 ```bash
 # 运行 opensandbox-server -h 查看帮助
-opensandbox-server init-config ~/.sandbox.toml --example docker
+opensandbox-server init-config ~/.sandbox.toml --example docker-zh
 ```
 
 **创建 K8S 配置文件**
@@ -62,14 +62,14 @@ opensandbox-server init-config ~/.sandbox.toml --example docker
 需要在集群中部署 K8S 版本的 Sandbox Operator，参考 Kubernetes 目录。
 ```bash
 # 运行 opensandbox-server -h 查看帮助
-opensandbox-server init-config ~/.sandbox.toml --example k8s
+opensandbox-server init-config ~/.sandbox.toml --example k8s-zh
 ```
 
 **[可选] 编辑配置以适配您的环境**
 
 - 用于快速 e2e/demo：
   ```bash
-  opensandbox-server init-config ~/.sandbox.toml --example docker  # 或 docker-zh|k8s|k8s-zh
+  opensandbox-server init-config ~/.sandbox.toml --example docker-zh  # 或 docker-zh|k8s|k8s-zh
   # 已有文件需覆盖时加 --force
   ```
 - 省略 `--example` 时生成“配置框架”（无默认值，只有占位符）：
@@ -80,7 +80,7 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s
 
 **[可选] 编辑 `~/.sandbox.toml`** 适配您的环境
 
-在启动服务器前，编辑配置文件以适配您的环境。您也可以通过 `opensandbox-server init-config ~/.sandbox.toml` 生成一个新的空配置文件。
+在启动服务器前，编辑配置文件以适配您的环境。您也可以通过 `opensandbox-server init-config ~/.sandbox.toml` 生成一个新的完整配置模板。
 
 **Docker 运行时 + Host 网络模式**
    ```toml
@@ -92,7 +92,7 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s
 
    [runtime]
    type = "docker"
-   execd_image = "opensandbox/execd:v1.0.5"
+   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
 
    [docker]
    network_mode = "host"  # 容器共享宿主机网络，只能创建一个sandbox实例
@@ -108,7 +108,7 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s
 
    [runtime]
    type = "docker"
-   execd_image = "opensandbox/execd:v1.0.5"
+   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
 
    [docker]
    network_mode = "bridge"  # 容器隔离网络
@@ -133,10 +133,10 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s
 ```toml
 [runtime]
 type = "docker"
-execd_image = "opensandbox/execd:v1.0.5"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
 
 [egress]
-image = "opensandbox/egress:v1.0.0"
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.0"
 ```
 
 - 仅支持 Docker bridge 模式（`network_mode=host` 时会拒绝携带 `networkPolicy` 的请求，或当 `egress.image` 未配置时也会拒绝）。

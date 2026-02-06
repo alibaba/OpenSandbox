@@ -36,7 +36,7 @@ OpenSandbox 是一个面向 AI 应用场景设计的「通用沙箱平台」，�
 
 ```bash
 uv pip install opensandbox-server
-opensandbox-server init-config ~/.sandbox.toml --example docker
+opensandbox-server init-config ~/.sandbox.toml --example docker-zh
 ```
 
 > 如果需要开发或使用源码编译，可通过clone仓库进行开发。
