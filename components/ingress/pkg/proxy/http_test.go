@@ -49,7 +49,17 @@ func (m *mockProvider) Start(_ context.Context) error {
 	return nil
 }
 
-func Test_HTTPProxy_with_header_mode(t *testing.T) {
+func Test_HTTPProxy(t *testing.T) {
+	t.Run("with header mode", func(t *testing.T) {
+		httpProxyWithHeaderMode(t)
+	})
+
+	t.Run("with uri mode", func(t *testing.T) {
+		httpProxyWithURIMode(t)
+	})
+}
+
+func httpProxyWithHeaderMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(realBackendHTTPHandler))
 	defer server.Close()
 	serverPort := server.URL[len("http://127.0.0.1:"):]
@@ -65,12 +75,13 @@ func Test_HTTPProxy_with_header_mode(t *testing.T) {
 	Logger = logging.FromContext(ctx)
 	proxy := NewProxy(ctx, provider, ModeHeader)
 
-	http.Handle("/", proxy)
+	mux := http.NewServeMux()
+	mux.Handle("/", proxy)
 	port, err := findAvailablePort()
 	assert.Nil(t, err)
 
 	go func() {
-		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(port), nil))
+		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(port), mux))
 	}()
 
 	time.Sleep(2 * time.Second)
@@ -122,7 +133,7 @@ func Test_HTTPProxy_with_header_mode(t *testing.T) {
 	assert.Equal(t, http.StatusOK, response.StatusCode)
 }
 
-func Test_HTTPProxy_with_uri_mode(t *testing.T) {
+func httpProxyWithURIMode(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(realBackendHTTPHandler))
 	defer server.Close()
 	serverPort := server.URL[len("http://127.0.0.1:"):]
@@ -138,12 +149,13 @@ func Test_HTTPProxy_with_uri_mode(t *testing.T) {
 	Logger = logging.FromContext(ctx)
 	proxy := NewProxy(ctx, provider, ModeURI)
 
-	http.Handle("/", proxy)
+	mux := http.NewServeMux()
+	mux.Handle("/", proxy)
 	port, err := findAvailablePort()
 	assert.Nil(t, err)
 
 	go func() {
-		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(port), nil))
+		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(port), mux))
 	}()
 
 	time.Sleep(2 * time.Second)

@@ -29,7 +29,16 @@ import (
 	"knative.dev/pkg/logging"
 )
 
-func Test_WebSocketProxy_with_header_mode(t *testing.T) {
+func Test_WebSocketProxy(t *testing.T) {
+	t.Run("with header mode", func(t *testing.T) {
+		webSocketProxyWithHeaderMode(t)
+	})
+	t.Run("with uri mode", func(t *testing.T) {
+		webSocketProxyWithURIMode(t)
+	})
+}
+
+func webSocketProxyWithHeaderMode(t *testing.T) {
 	// Create mock provider
 	provider := &mockProvider{
 		endpoints: map[string]string{
@@ -41,13 +50,14 @@ func Test_WebSocketProxy_with_header_mode(t *testing.T) {
 	Logger = logging.FromContext(ctx)
 	proxy := NewProxy(ctx, provider, ModeHeader)
 
-	http.Handle("/", proxy)
+	mux := http.NewServeMux()
+	mux.Handle("/", proxy)
 	proxyPort, err := findAvailablePort()
 	proxyURL := "ws://127.0.0.1:" + strconv.Itoa(proxyPort)
 	assert.Nil(t, err)
 
 	go func() {
-		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(proxyPort), nil))
+		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(proxyPort), mux))
 	}()
 
 	time.Sleep(2 * time.Second)
@@ -120,7 +130,7 @@ func Test_WebSocketProxy_with_header_mode(t *testing.T) {
 	}
 }
 
-func Test_WebSocketProxy_with_uri_mode(t *testing.T) {
+func webSocketProxyWithURIMode(t *testing.T) {
 	// Create mock provider
 	provider := &mockProvider{
 		endpoints: map[string]string{
@@ -132,13 +142,14 @@ func Test_WebSocketProxy_with_uri_mode(t *testing.T) {
 	Logger = logging.FromContext(ctx)
 	proxy := NewProxy(ctx, provider, ModeURI)
 
-	http.Handle("/", proxy)
+	mux := http.NewServeMux()
+	mux.Handle("/", proxy)
 	proxyPort, err := findAvailablePort()
 	proxyURL := "ws://127.0.0.1:" + strconv.Itoa(proxyPort)
 	assert.Nil(t, err)
 
 	go func() {
-		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(proxyPort), nil))
+		assert.NoError(t, http.ListenAndServe(":"+strconv.Itoa(proxyPort), mux))
 	}()
 
 	time.Sleep(2 * time.Second)
