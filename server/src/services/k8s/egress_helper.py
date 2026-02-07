@@ -67,10 +67,14 @@ def build_egress_sidecar_container(
         )
         pod_spec["containers"].append(sidecar)
         
-        # Disable IPv6 at Pod level
+        # Disable IPv6 at Pod level (extends existing sysctls)
         if "securityContext" not in pod_spec:
             pod_spec["securityContext"] = {}
-        pod_spec["securityContext"]["sysctls"] = build_ipv6_disable_sysctls()
+        existing_sysctls = pod_spec["securityContext"].get("sysctls")
+        new_sysctls = build_ipv6_disable_sysctls()
+        pod_spec["securityContext"]["sysctls"] = _merge_sysctls(
+            existing_sysctls, new_sysctls
+        )
         ```
     """
     # Serialize network policy to JSON for environment variable
@@ -140,6 +144,43 @@ def build_security_context_for_sandbox_container(
     }
 
 
+def _merge_sysctls(
+    existing_sysctls: Optional[List[Dict[str, str]]],
+    new_sysctls: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
+    """
+    Merge new sysctls into existing sysctls, avoiding duplicates.
+    
+    If a sysctl with the same name already exists, the new value will
+    override the existing one (last write wins).
+    
+    Args:
+        existing_sysctls: Existing sysctls list or None
+        new_sysctls: New sysctls to merge in
+        
+    Returns:
+        Merged list of sysctls with no duplicate names
+    """
+    if not existing_sysctls:
+        return new_sysctls.copy()
+    
+    # Create a dict to track sysctls by name (for deduplication)
+    sysctls_dict: Dict[str, str] = {}
+    
+    # First, add existing sysctls
+    for sysctl in existing_sysctls:
+        if isinstance(sysctl, dict) and "name" in sysctl:
+            sysctls_dict[sysctl["name"]] = sysctl.get("value", "")
+    
+    # Then, add/override with new sysctls
+    for sysctl in new_sysctls:
+        if isinstance(sysctl, dict) and "name" in sysctl:
+            sysctls_dict[sysctl["name"]] = sysctl.get("value", "")
+    
+    # Convert back to list format
+    return [{"name": name, "value": value} for name, value in sysctls_dict.items()]
+
+
 def apply_egress_to_spec(
     pod_spec: Dict[str, Any],
     containers: List[Dict[str, Any]],
@@ -151,7 +192,7 @@ def apply_egress_to_spec(
     
     This function adds the egress sidecar container to the containers list
     and configures IPv6 disable sysctls at the Pod level when network policy
-    is provided.
+    is provided. Existing sysctls are preserved and merged with the new ones.
     
     Args:
         pod_spec: Pod specification dict (will be modified in place)
@@ -164,13 +205,18 @@ def apply_egress_to_spec(
         containers = [main_container_dict]
         pod_spec = {"containers": containers, ...}
         
-        apply_egress_sidecar_to_pod_spec(
+        apply_egress_to_spec(
             pod_spec=pod_spec,
             containers=containers,
             network_policy=network_policy,
             egress_image=egress_image,
         )
         ```
+        
+    Note:
+        This function extends existing sysctls rather than overwriting them.
+        If a sysctl with the same name already exists, the egress-related
+        sysctls will override it (last write wins).
     """
     if not network_policy or not egress_image:
         return
@@ -182,10 +228,15 @@ def apply_egress_to_spec(
     )
     containers.append(sidecar_container)
     
-    # Disable IPv6 at Pod level
+    # Disable IPv6 at Pod level, merging with existing sysctls
     if "securityContext" not in pod_spec:
         pod_spec["securityContext"] = {}
-    pod_spec["securityContext"]["sysctls"] = build_ipv6_disable_sysctls()
+    
+    existing_sysctls = pod_spec["securityContext"].get("sysctls")
+    new_sysctls = build_ipv6_disable_sysctls()
+    pod_spec["securityContext"]["sysctls"] = _merge_sysctls(
+        existing_sysctls, new_sysctls
+    )
 
 
 def build_security_context_from_dict(
@@ -195,7 +246,7 @@ def build_security_context_from_dict(
     Convert security context dict to V1SecurityContext object.
     
     This is a helper function to convert the dict returned by
-    build_security_context_for_main_container() into a Kubernetes
+    build_security_context_for_sandbox_container() into a Kubernetes
     V1SecurityContext object that can be used in V1Container.
     
     Args:
@@ -208,8 +259,8 @@ def build_security_context_from_dict(
         ```python
         from kubernetes.client import V1Container
         
-        security_context_dict = build_security_context_for_main_container(True)
-        security_context = build_v1_security_context_from_dict(security_context_dict)
+        security_context_dict = build_security_context_for_sandbox_container(True)
+        security_context = build_security_context_from_dict(security_context_dict)
         
         container = V1Container(
             name="sandbox",

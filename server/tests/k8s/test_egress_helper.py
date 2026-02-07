@@ -21,6 +21,7 @@ import json
 from src.api.schema import NetworkPolicy, NetworkRule
 from src.services.k8s.egress_helper import (
     EGRESS_RULES_ENV,
+    apply_egress_to_spec,
     build_egress_sidecar_container,
     build_security_context_for_sandbox_container,
     build_ipv6_disable_sysctls,
@@ -180,7 +181,7 @@ class TestBuildEgressSidecarContainer:
 
 
 class TestBuildSecurityContextForMainContainer:
-    """Tests for build_security_context_for_main_container function."""
+    """Tests for build_security_context_for_sandbox_container function."""
 
     def test_returns_empty_dict_when_no_network_policy(self):
         """Test that empty dict is returned when network policy is disabled."""
@@ -237,3 +238,126 @@ class TestBuildIpv6DisableSysctls:
             assert "value" in sysctl
             assert isinstance(sysctl["name"], str)
             assert isinstance(sysctl["value"], str)
+
+
+class TestApplyEgressToSpec:
+    """Tests for apply_egress_to_spec function."""
+
+    def test_adds_egress_sidecar_container(self):
+        """Test that egress sidecar container is added to containers list."""
+        pod_spec: dict = {}
+        containers: list = []
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+        egress_image = "opensandbox/egress:v1.0.0"
+
+        apply_egress_to_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=network_policy,
+            egress_image=egress_image,
+        )
+
+        assert len(containers) == 1
+        assert containers[0]["name"] == "egress"
+        assert containers[0]["image"] == egress_image
+
+    def test_adds_ipv6_disable_sysctls(self):
+        """Test that IPv6 disable sysctls are added to Pod spec."""
+        pod_spec: dict = {}
+        containers: list = []
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+        egress_image = "opensandbox/egress:v1.0.0"
+
+        apply_egress_to_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=network_policy,
+            egress_image=egress_image,
+        )
+
+        assert "securityContext" in pod_spec
+        assert "sysctls" in pod_spec["securityContext"]
+        sysctls = pod_spec["securityContext"]["sysctls"]
+        assert len(sysctls) == 3
+        sysctl_names = {s["name"] for s in sysctls}
+        assert "net.ipv6.conf.all.disable_ipv6" in sysctl_names
+
+    def test_extends_existing_sysctls(self):
+        """Test that existing sysctls are preserved and merged."""
+        pod_spec: dict = {
+            "securityContext": {
+                "sysctls": [
+                    {"name": "net.core.somaxconn", "value": "1024"},
+                    {"name": "net.ipv6.conf.all.disable_ipv6", "value": "0"},  # Will be overridden
+                ]
+            }
+        }
+        containers: list = []
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+        egress_image = "opensandbox/egress:v1.0.0"
+
+        apply_egress_to_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=network_policy,
+            egress_image=egress_image,
+        )
+
+        sysctls = pod_spec["securityContext"]["sysctls"]
+        sysctl_dict = {s["name"]: s["value"] for s in sysctls}
+        
+        # Verify existing sysctl is preserved
+        assert "net.core.somaxconn" in sysctl_dict
+        assert sysctl_dict["net.core.somaxconn"] == "1024"
+        
+        # Verify IPv6 sysctls are added/updated
+        assert "net.ipv6.conf.all.disable_ipv6" in sysctl_dict
+        assert sysctl_dict["net.ipv6.conf.all.disable_ipv6"] == "1"  # Overridden
+        assert "net.ipv6.conf.default.disable_ipv6" in sysctl_dict
+        assert "net.ipv6.conf.lo.disable_ipv6" in sysctl_dict
+        
+        # Verify total count (1 existing + 3 IPv6, but one was overridden, so 4 total)
+        assert len(sysctls) == 4
+
+    def test_no_op_when_no_network_policy(self):
+        """Test that function does nothing when network_policy is None."""
+        pod_spec: dict = {}
+        containers: list = []
+
+        apply_egress_to_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=None,
+            egress_image="opensandbox/egress:v1.0.0",
+        )
+
+        assert len(containers) == 0
+        assert "securityContext" not in pod_spec
+
+    def test_no_op_when_no_egress_image(self):
+        """Test that function does nothing when egress_image is None."""
+        pod_spec: dict = {}
+        containers: list = []
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        apply_egress_to_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=network_policy,
+            egress_image=None,
+        )
+
+        assert len(containers) == 0
+        assert "securityContext" not in pod_spec
