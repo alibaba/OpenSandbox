@@ -50,6 +50,7 @@
 - 通过进程组管理正确转发信号
 - 实时 stdout/stderr 流式输出
 - 支持上下文感知的中断
+- 可选按请求切换用户/UID（需容器/namespace 权限，见下文）
 
 ### 文件系统
 
@@ -166,6 +167,13 @@ export JUPYTER_TOKEN=your-token
 ```
 
 环境变量优先于默认值，但会被显式的 CLI 标志覆盖。
+
+### 用户切换（runCommand `user` 字段）
+
+- 命令 API 的 `user` 字段支持用户名或 UID。
+- 生效条件：进程需具备 **root** 或至少 **CAP_SETUID**、**CAP_SETGID**；在 user namespace 下还需有目标 UID/GID 的映射。
+- 若缺少上述能力/映射，启动命令会因权限不足失败。
+- 启用前请确保目标用户已在容器的 `/etc/passwd`（或 NSS）中存在。
 
 ## API 参考
 

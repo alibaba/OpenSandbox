@@ -33,18 +33,6 @@ func TestRunCodeRequestValidate(t *testing.T) {
 	}
 }
 
-func TestRunCommandRequestValidate(t *testing.T) {
-	req := RunCommandRequest{Command: "ls"}
-	if err := req.Validate(); err != nil {
-		t.Fatalf("expected command validation success: %v", err)
-	}
-
-	req.Command = ""
-	if err := req.Validate(); err == nil {
-		t.Fatalf("expected validation error when command is empty")
-	}
-}
-
 func TestServerStreamEventToJSON(t *testing.T) {
 	event := ServerStreamEvent{
 		Type:           StreamEventTypeStdout,

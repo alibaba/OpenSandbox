@@ -23,13 +23,14 @@ import (
 
 // CommandStatus describes the lifecycle state of a command.
 type CommandStatus struct {
-	Session    string     `json:"session"`
-	Running    bool       `json:"running"`
-	ExitCode   *int       `json:"exit_code,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	StartedAt  time.Time  `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
-	Content    string     `json:"content,omitempty"`
+	Session    string       `json:"session"`
+	Running    bool         `json:"running"`
+	ExitCode   *int         `json:"exit_code,omitempty"`
+	Error      string       `json:"error,omitempty"`
+	StartedAt  time.Time    `json:"started_at,omitempty"`
+	FinishedAt *time.Time   `json:"finished_at,omitempty"`
+	Content    string       `json:"content,omitempty"`
+	User       *CommandUser `json:"user,omitempty"`
 }
 
 // CommandOutput contains non-streamed stdout/stderr plus status.
@@ -67,6 +68,7 @@ func (c *Controller) GetCommandStatus(session string) (*CommandStatus, error) {
 		StartedAt:  kernel.startedAt,
 		FinishedAt: kernel.finishedAt,
 		Content:    kernel.content,
+		User:       kernel.user,
 	}
 	return status, nil
 }

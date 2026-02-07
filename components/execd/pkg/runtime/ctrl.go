@@ -63,6 +63,7 @@ type commandKernel struct {
 	running      bool
 	isBackground bool
 	content      string
+	user         *CommandUser
 }
 
 // NewController creates a runtime controller.
