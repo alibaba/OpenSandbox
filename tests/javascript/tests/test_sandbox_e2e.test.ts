@@ -138,7 +138,112 @@ test.skip("01a sandbox create with networkPolicy", async () => {
   }
 }, 3 * 60_000);
 
-test("01b sandbox manager: list + get", async () => {
+test("01b sandbox create with host volume mount (read-write)", async () => {
+  const connectionConfig = createConnectionConfig();
+  const hostDir = "/tmp/opensandbox-e2e/host-volume-test";
+  const containerMountPath = "/mnt/host-data";
+
+  const volumeSandbox = await Sandbox.create({
+    connectionConfig,
+    image: getSandboxImage(),
+    timeoutSeconds: 2 * 60,
+    readyTimeoutSeconds: 60,
+    volumes: [
+      {
+        name: "test-host-vol",
+        host: { path: hostDir },
+        mountPath: containerMountPath,
+        readOnly: false,
+      },
+    ],
+  });
+
+  try {
+    expect(await volumeSandbox.isHealthy()).toBe(true);
+
+    // Step 1: Verify the host marker file is visible inside the sandbox
+    const readMarker = await volumeSandbox.commands.run(
+      `cat ${containerMountPath}/marker.txt`
+    );
+    expect(readMarker.error).toBeUndefined();
+    expect(readMarker.logs.stdout).toHaveLength(1);
+    expect(readMarker.logs.stdout[0]?.text).toBe("opensandbox-e2e-marker");
+
+    // Step 2: Write a file from inside the sandbox to the mounted path
+    const writeResult = await volumeSandbox.commands.run(
+      `echo 'written-from-sandbox' > ${containerMountPath}/sandbox-output.txt`
+    );
+    expect(writeResult.error).toBeUndefined();
+
+    // Step 3: Verify the written file is readable
+    const readBack = await volumeSandbox.commands.run(
+      `cat ${containerMountPath}/sandbox-output.txt`
+    );
+    expect(readBack.error).toBeUndefined();
+    expect(readBack.logs.stdout).toHaveLength(1);
+    expect(readBack.logs.stdout[0]?.text).toBe("written-from-sandbox");
+
+    // Step 4: Verify the mount path is a proper directory
+    const dirCheck = await volumeSandbox.commands.run(
+      `test -d ${containerMountPath} && echo OK`
+    );
+    expect(dirCheck.error).toBeUndefined();
+    expect(dirCheck.logs.stdout[0]?.text).toBe("OK");
+  } finally {
+    try {
+      await volumeSandbox.kill();
+    } catch {
+      // ignore
+    }
+  }
+}, 3 * 60_000);
+
+test("01c sandbox create with host volume mount (read-only)", async () => {
+  const connectionConfig = createConnectionConfig();
+  const hostDir = "/tmp/opensandbox-e2e/host-volume-test";
+  const containerMountPath = "/mnt/host-data-ro";
+
+  const roSandbox = await Sandbox.create({
+    connectionConfig,
+    image: getSandboxImage(),
+    timeoutSeconds: 2 * 60,
+    readyTimeoutSeconds: 60,
+    volumes: [
+      {
+        name: "test-host-vol-ro",
+        host: { path: hostDir },
+        mountPath: containerMountPath,
+        readOnly: true,
+      },
+    ],
+  });
+
+  try {
+    expect(await roSandbox.isHealthy()).toBe(true);
+
+    // Step 1: Verify the host marker file is readable
+    const readMarker = await roSandbox.commands.run(
+      `cat ${containerMountPath}/marker.txt`
+    );
+    expect(readMarker.error).toBeUndefined();
+    expect(readMarker.logs.stdout).toHaveLength(1);
+    expect(readMarker.logs.stdout[0]?.text).toBe("opensandbox-e2e-marker");
+
+    // Step 2: Verify writing is denied on read-only mount
+    const writeResult = await roSandbox.commands.run(
+      `touch ${containerMountPath}/should-fail.txt`
+    );
+    expect(writeResult.error).toBeTruthy();
+  } finally {
+    try {
+      await roSandbox.kill();
+    } catch {
+      // ignore
+    }
+  }
+}, 3 * 60_000);
+
+test("01d sandbox manager: list + get", async () => {
   if (!sandbox) throw new Error("sandbox not created");
 
   const manager = SandboxManager.create({ connectionConfig: sandbox.connectionConfig });

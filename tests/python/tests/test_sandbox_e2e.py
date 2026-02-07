@@ -41,7 +41,7 @@ from opensandbox.models.filesystem import (
     SetPermissionEntry,
     WriteEntry,
 )
-from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule, SandboxImageSpec
+from opensandbox.models.sandboxes import Host, NetworkPolicy, NetworkRule, SandboxImageSpec, Volume
 
 from tests.base_e2e_test import create_connection_config, get_sandbox_image
 
@@ -310,6 +310,126 @@ class TestSandboxE2E:
             except Exception:
                 pass
             await sandbox.close()
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
+    async def test_01b_host_volume_mount(self):
+        """Test creating a sandbox with a host volume mount."""
+        logger.info("=" * 80)
+        logger.info("TEST 1b: Creating sandbox with host volume mount (async)")
+        logger.info("=" * 80)
+
+        host_dir = "/tmp/opensandbox-e2e/host-volume-test"
+        container_mount_path = "/mnt/host-data"
+
+        cfg = create_connection_config()
+        sandbox = await Sandbox.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            volumes=[
+                Volume(
+                    name="test-host-vol",
+                    host=Host(path=host_dir),
+                    mountPath=container_mount_path,
+                    readOnly=False,
+                ),
+            ],
+        )
+        try:
+            logger.info(f"✓ Sandbox with volume created: {sandbox.id}")
+
+            # Step 1: Verify the host marker file is visible inside the sandbox
+            logger.info("Step 1: Verify host marker file is readable inside the sandbox")
+            result = await sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
+            assert result.error is None, f"Failed to read marker file: {result.error}"
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "opensandbox-e2e-marker"
+            logger.info("✓ Host marker file read successfully inside sandbox")
+
+            # Step 2: Write a file from inside the sandbox to the mounted path (read-write)
+            logger.info("Step 2: Write a file from inside the sandbox to the mount path")
+            result = await sandbox.commands.run(
+                f"echo 'written-from-sandbox' > {container_mount_path}/sandbox-output.txt"
+            )
+            assert result.error is None, f"Failed to write file: {result.error}"
+
+            # Step 3: Verify the written file is readable
+            result = await sandbox.commands.run(f"cat {container_mount_path}/sandbox-output.txt")
+            assert result.error is None
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "written-from-sandbox"
+            logger.info("✓ File written and verified inside sandbox")
+
+            # Step 4: Verify the mount path is a proper directory
+            logger.info("Step 3: Verify mount path is a directory")
+            result = await sandbox.commands.run(f"test -d {container_mount_path} && echo OK")
+            assert result.error is None
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "OK"
+            logger.info("✓ Mount path is a valid directory")
+
+        finally:
+            try:
+                await sandbox.kill()
+            except Exception:
+                pass
+            await sandbox.close()
+
+        logger.info("TEST 1b PASSED: Host volume mount test completed successfully")
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
+    async def test_01c_host_volume_mount_readonly(self):
+        """Test creating a sandbox with a read-only host volume mount."""
+        logger.info("=" * 80)
+        logger.info("TEST 1c: Creating sandbox with read-only host volume mount (async)")
+        logger.info("=" * 80)
+
+        host_dir = "/tmp/opensandbox-e2e/host-volume-test"
+        container_mount_path = "/mnt/host-data-ro"
+
+        cfg = create_connection_config()
+        sandbox = await Sandbox.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            volumes=[
+                Volume(
+                    name="test-host-vol-ro",
+                    host=Host(path=host_dir),
+                    mountPath=container_mount_path,
+                    readOnly=True,
+                ),
+            ],
+        )
+        try:
+            logger.info(f"✓ Sandbox with read-only volume created: {sandbox.id}")
+
+            # Step 1: Verify the host marker file is readable
+            result = await sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
+            assert result.error is None, f"Failed to read marker file: {result.error}"
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "opensandbox-e2e-marker"
+            logger.info("✓ Host marker file read successfully in read-only mount")
+
+            # Step 2: Verify writing is denied on read-only mount
+            result = await sandbox.commands.run(
+                f"touch {container_mount_path}/should-fail.txt"
+            )
+            assert result.error is not None, "Write should fail on read-only mount"
+            logger.info("✓ Write correctly denied on read-only mount")
+
+        finally:
+            try:
+                await sandbox.kill()
+            except Exception:
+                pass
+            await sandbox.close()
+
+        logger.info("TEST 1c PASSED: Read-only host volume mount test completed successfully")
 
     @pytest.mark.timeout(120)
     @pytest.mark.order(2)

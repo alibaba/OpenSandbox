@@ -17,11 +17,9 @@ docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-int
 Start the local OpenSandbox server, logs will be visible in the terminal:
 
 ```shell
-git clone git@github.com:alibaba/OpenSandbox.git
-cd OpenSandbox/server
-cp example.config.toml ~/.sandbox.toml
-uv sync
-uv run python -m src.main
+uv pip install opensandbox-server
+opensandbox-server init-config ~/.sandbox.toml --example docker
+opensandbox-server
 ```
 
 ## Run the example

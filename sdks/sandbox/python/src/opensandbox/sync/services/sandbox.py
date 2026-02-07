@@ -109,13 +109,16 @@ class SandboxesSync(Protocol):
         """
         ...
 
-    def get_sandbox_endpoint(self, sandbox_id: str, port: int) -> SandboxEndpoint:
+    def get_sandbox_endpoint(
+        self, sandbox_id: str, port: int, use_server_proxy: bool = False
+    ) -> SandboxEndpoint:
         """
         Get sandbox endpoint for an exposed port.
 
         Args:
             sandbox_id: Sandbox id.
             port: Endpoint port number.
+            use_server_proxy: Whether to use server proxy for endpoint.
 
         Returns:
             Target sandbox endpoint.

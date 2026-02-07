@@ -7,11 +7,9 @@ Demonstrates running a basic RL training loop (CartPole + DQN) inside an isolate
 Start the local OpenSandbox server:
 
 ```shell
-git clone git@github.com:alibaba/OpenSandbox.git
-cd OpenSandbox/server
-cp example.config.toml ~/.sandbox.toml
-uv sync
-uv run python -m src.main
+uv pip install opensandbox-server
+opensandbox-server init-config ~/.sandbox.toml --example docker
+opensandbox-server
 ```
 
 ## Run the Example

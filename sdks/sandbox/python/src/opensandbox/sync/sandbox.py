@@ -189,7 +189,9 @@ class SandboxSync:
         Raises:
             SandboxException: if endpoint cannot be retrieved
         """
-        return self._sandbox_service.get_sandbox_endpoint(self.id, port)
+        return self._sandbox_service.get_sandbox_endpoint(
+            self.id, port, self.connection_config.use_server_proxy
+        )
 
     def get_metrics(self) -> SandboxMetrics:
         """
@@ -411,7 +413,9 @@ class SandboxSync:
                 volumes,
             )
             sandbox_id = response.id
-            execd_endpoint = sandbox_service.get_sandbox_endpoint(response.id, DEFAULT_EXECD_PORT)
+            execd_endpoint = sandbox_service.get_sandbox_endpoint(
+                response.id, DEFAULT_EXECD_PORT, config.use_server_proxy
+            )
 
             sandbox = cls(
                 sandbox_id=response.id,
@@ -488,7 +492,9 @@ class SandboxSync:
 
         try:
             sandbox_service = factory.create_sandbox_service()
-            execd_endpoint = sandbox_service.get_sandbox_endpoint(sandbox_id, DEFAULT_EXECD_PORT)
+            execd_endpoint = sandbox_service.get_sandbox_endpoint(
+                sandbox_id, DEFAULT_EXECD_PORT, config.use_server_proxy
+            )
 
             sandbox = cls(
                 sandbox_id=sandbox_id,
@@ -557,7 +563,9 @@ class SandboxSync:
             sandbox_service = factory.create_sandbox_service()
             sandbox_service.resume_sandbox(sandbox_id)
 
-            execd_endpoint = sandbox_service.get_sandbox_endpoint(sandbox_id, DEFAULT_EXECD_PORT)
+            execd_endpoint = sandbox_service.get_sandbox_endpoint(
+                sandbox_id, DEFAULT_EXECD_PORT, config.use_server_proxy
+            )
 
             sandbox = cls(
                 sandbox_id=sandbox_id,

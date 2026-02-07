@@ -75,6 +75,8 @@ jobs:
           image = "opensandbox/egress:latest"
           [docker]
           network_mode = "${{ matrix.network }}"
+          [storage]
+          allowed_host_paths = ["/tmp/opensandbox-e2e"]
           EOF
 
           # Start server in background

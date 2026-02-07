@@ -6,6 +6,7 @@ Examples for common OpenSandbox use cases. Each subdirectory contains runnable c
 - [**aio-sandbox**](aio-sandbox): All-in-one sandbox setup using OpenSandbox SDK and agent-sandbox
 - [**agent-sandbox**](agent-sandbox): Create a kubernetes-sigs/agent-sandbox instance and run a command
 - [**code-interpreter**](code-interpreter): Code Interpreter SDK singleton example
+- [**host-volume-mount**](host-volume-mount): Mount host directories into sandboxes (read-write, read-only, subpath)
 - [**rl-training**](rl-training): Reinforcement learning training loop inside a sandbox
 - [**claude-code**](claude-code): Call Claude (Anthropic) API/CLI within the sandbox
 - [**iflow-cli**](iflow-cli): CLI invocation template for iFlow/custom HTTP LLM services

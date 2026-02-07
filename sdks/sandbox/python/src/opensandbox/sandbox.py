@@ -183,7 +183,9 @@ class Sandbox:
         Raises:
             SandboxException: if endpoint cannot be retrieved
         """
-        return await self._sandbox_service.get_sandbox_endpoint(self.id, port)
+        return await self._sandbox_service.get_sandbox_endpoint(
+            self.id, port, self.connection_config.use_server_proxy
+        )
 
     async def get_metrics(self) -> SandboxMetrics:
         """
@@ -427,7 +429,7 @@ class Sandbox:
             sandbox_id = response.id
 
             execd_endpoint = await sandbox_service.get_sandbox_endpoint(
-                response.id, DEFAULT_EXECD_PORT
+                response.id, DEFAULT_EXECD_PORT, config.use_server_proxy
             )
 
             sandbox = cls(
@@ -515,7 +517,7 @@ class Sandbox:
         try:
             sandbox_service = factory.create_sandbox_service()
             execd_endpoint = await sandbox_service.get_sandbox_endpoint(
-                sandbox_id, DEFAULT_EXECD_PORT
+                sandbox_id, DEFAULT_EXECD_PORT, config.use_server_proxy
             )
 
             sandbox = cls(
@@ -586,7 +588,7 @@ class Sandbox:
             await sandbox_service.resume_sandbox(sandbox_id)
 
             execd_endpoint = await sandbox_service.get_sandbox_endpoint(
-                sandbox_id, DEFAULT_EXECD_PORT
+                sandbox_id, DEFAULT_EXECD_PORT, config.use_server_proxy
             )
 
             sandbox = cls(

@@ -40,39 +40,36 @@
 
 ### 安装步骤
 
-1. **克隆仓库**并进入 server 目录：
+1. **通过 PyPI 安装**（无需克隆仓库）：
 
 ```bash
-cd server
+uv pip install opensandbox-server
 ```
-
-2. **安装依赖**（使用 `uv`）：
-
-```bash
-uv sync
-```
+> 如需源码开发或贡献，可仍然克隆仓库并在 `server/` 下执行 `uv sync`。
 
 ### 配置指南
 
 服务端使用 TOML 配置文件来选择和配置底层运行时。
 
-**复制配置文件**：
-
+**从简单示例初始化配置**：
 ```bash
-cp example.config.zh.toml ~/.sandbox.toml
-```
-**[可选] 复制K8S版本配置文件：
-需要在集群中部署 K8S版本的Sandbox Operator，参考Kubernetes目录。
-```bash
-cp example.config.k8s.zh.toml ~/.sandbox.toml
-cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
+# 运行 opensandbox-server -h 查看帮助
+opensandbox-server init-config ~/.sandbox.toml --example docker-zh
 ```
 
-**通过 CLI 生成配置**：
+**创建 K8S 配置文件**
 
-- 拷贝打包示例（用于快速 e2e/demo，需要指定示例）：
+需要在集群中部署 K8S 版本的 Sandbox Operator，参考 Kubernetes 目录。
+```bash
+# 运行 opensandbox-server -h 查看帮助
+opensandbox-server init-config ~/.sandbox.toml --example k8s-zh
+```
+
+**[可选] 编辑配置以适配您的环境**
+
+- 用于快速 e2e/demo：
   ```bash
-  opensandbox-server init-config ~/.sandbox.toml --example docker  # 或 docker-zh|k8s|k8s-zh
+  opensandbox-server init-config ~/.sandbox.toml --example docker-zh  # 或 docker-zh|k8s|k8s-zh
   # 已有文件需覆盖时加 --force
   ```
 - 省略 `--example` 时生成“配置框架”（无默认值，只有占位符）：
@@ -81,54 +78,54 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
   # 已有文件需覆盖时加 --force
   ```
 
-**[可选] 编辑 `~/.sandbox.toml`** 适配您的环境：
+**[可选] 编辑 `~/.sandbox.toml`** 适配您的环境
 
+在启动服务器前，编辑配置文件以适配您的环境。您也可以通过 `opensandbox-server init-config ~/.sandbox.toml` 生成一个新的完整配置模板。
 
-**选项 A：Docker 运行时 + Host 网络模式**
-```toml
-[server]
-host = "0.0.0.0"
-port = 8080
-log_level = "INFO"
-api_key = "your-secret-api-key-change-this"
+**Docker 运行时 + Host 网络模式**
+   ```toml
+   [server]
+   host = "0.0.0.0"
+   port = 8080
+   log_level = "INFO"
+   api_key = "your-secret-api-key-change-this"
 
-[runtime]
-type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
+   [runtime]
+   type = "docker"
+   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
 
-[docker]
-network_mode = "host"  # 容器共享宿主机网络，只能创建一个sandbox实例
-```
+   [docker]
+   network_mode = "host"  # 容器共享宿主机网络，只能创建一个sandbox实例
+   ```
 
-**选项 B：Docker 运行时 + Bridge 网络模式**
-```toml
-[server]
-host = "0.0.0.0"
-port = 8080
-log_level = "INFO"
-api_key = "your-secret-api-key-change-this"
+**Docker 运行时 + Bridge 网络模式**
+   ```toml
+   [server]
+   host = "0.0.0.0"
+   port = 8080
+   log_level = "INFO"
+   api_key = "your-secret-api-key-change-this"
 
-[runtime]
-type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
+   [runtime]
+   type = "docker"
+   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
 
-[docker]
-network_mode = "bridge"  # 容器隔离网络
-```
+   [docker]
+   network_mode = "bridge"  # 容器隔离网络
+   ```
 
 **安全加固（适用于所有 Docker 模式）**
-```toml
-[docker]
-# 默认关闭危险能力、防止提权
-drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
-no_new_privileges = true
-# 当宿主机启用了 AppArmor 时，可指定策略名称（如 "docker-default"）；否则留空
-apparmor_profile = ""
-# 限制进程数量，可选的 seccomp/只读根文件系统
-pids_limit = 512             # 设为 null 可关闭
-seccomp_profile = ""        # 配置文件路径或名称；为空使用 Docker 默认
-```
-更多 Docker 安全参考：https://docs.docker.com/engine/security/
+   ```toml
+   [docker]
+   # 默认关闭危险能力、防止提权
+   drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+   no_new_privileges = true
+   apparmor_profile = ""        # 例如当 AppArmor 可用时使用 "docker-default"
+   # 限制进程数量
+   pids_limit = 512             # 设为 null 可关闭
+   seccomp_profile = ""        # 配置文件路径或名称；为空使用 Docker 默认
+   ```
+   更多 Docker 容器安全参考：https://docs.docker.com/engine/security/
 
 ### Egress sidecar 配置与使用
 
@@ -136,10 +133,10 @@ seccomp_profile = ""        # 配置文件路径或名称；为空使用 Docker 
 ```toml
 [runtime]
 type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.3"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
 
 [egress]
-image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:latest"
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.0"
 ```
 
 - 仅支持 Docker bridge 模式（`network_mode=host` 时会拒绝携带 `networkPolicy` 的请求，或当 `egress.image` 未配置时也会拒绝）。
@@ -166,10 +163,10 @@ image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:late
 
 ### 启动服务
 
-使用 `uv` 启动服务：
+使用安装后的 CLI 启动（默认读取 `~/.sandbox.toml`）：
 
 ```bash
-uv run python -m src.main
+opensandbox-server
 ```
 
 服务将在 `http://0.0.0.0:8080`（或您配置的主机/端口）启动。
@@ -202,7 +199,7 @@ curl http://localhost:8080/health
 
 ### API 认证
 
-仅当 `server.api_key` 设置为非空值时才启用鉴权；当该值为空或缺省时，中间件会跳过 API Key 校验（适合本地/开发调试）。生产环境请务必设置强随机的 `server.api_key`，并在请求头 `OPEN-SANDBOX-API-KEY` 中携带。
+仅当 `server.api_key` 设置为非空值时才启用鉴权；当该值为空或缺省时，中间件会跳过 API Key 校验（适合本地/开发调试）。生产环境请务必设置非空的 `server.api_key`，并通过 `OPEN-SANDBOX-API-KEY` 请求头发送。
 
 当鉴权开启时，除 `/health`、`/docs`、`/redoc` 外的 API 端点均需要通过 `OPEN-SANDBOX-API-KEY` 请求头进行认证：
 
@@ -216,6 +213,7 @@ curl http://localhost:8080/v1/sandboxes
 
 ```bash
 curl -X POST "http://localhost:8080/v1/sandboxes" \
+  -H "OPEN-SANDBOX-API-KEY: your-secret-api-key" \
   -H "Content-Type: application/json" \
   -d '{
     "image": {
@@ -245,7 +243,7 @@ curl -X POST "http://localhost:8080/v1/sandboxes" \
 响应：
 ```json
 {
-  "id": "<sandbox-id>",
+  "id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
   "status": {
     "state": "Pending",
     "reason": "CONTAINER_STARTING",
@@ -265,30 +263,34 @@ curl -X POST "http://localhost:8080/v1/sandboxes" \
 **获取沙箱详情**
 
 ```bash
-curl http://localhost:8080/v1/sandboxes/<sandbox-id>
+curl -H "OPEN-SANDBOX-API-KEY: your-secret-api-key" \
+  http://localhost:8080/v1/sandboxes/a1b2c3d4-5678-90ab-cdef-1234567890ab
 ```
 
 **获取服务端点**
 
 ```bash
 # 获取自定义服务端点
-curl http://localhost:8080/v1/sandboxes/<sandbox-id>/endpoints/8000
+curl -H "OPEN-SANDBOX-API-KEY: your-secret-api-key" \
+  http://localhost:8080/v1/sandboxes/a1b2c3d4-5678-90ab-cdef-1234567890ab/endpoints/8000
 
 # 获取OpenSandbox守护进程（execd）端点
-curl http://localhost:8080/v1/sandboxes/<sandbox-id>/endpoints/44772
+curl -H "OPEN-SANDBOX-API-KEY: your-secret-api-key" \
+  http://localhost:8080/v1/sandboxes/a1b2c3d4-5678-90ab-cdef-1234567890ab/endpoints/44772
 ```
 
 响应：
 ```json
 {
-  "endpoint": "sandbox.example.com/<sandbox-id>/8000"
+  "endpoint": "sandbox.example.com/a1b2c3d4-5678-90ab-cdef-1234567890ab/8000"
 }
 ```
 
 **续期沙箱**
 
 ```bash
-curl -X POST "http://localhost:8080/v1/sandboxes/<sandbox-id>/renew-expiration" \
+curl -X POST "http://localhost:8080/v1/sandboxes/a1b2c3d4-5678-90ab-cdef-1234567890ab/renew-expiration" \
+  -H "OPEN-SANDBOX-API-KEY: your-secret-api-key" \
   -H "Content-Type: application/json" \
   -d '{
     "expiresAt": "2024-01-15T12:30:00Z"
@@ -298,7 +300,9 @@ curl -X POST "http://localhost:8080/v1/sandboxes/<sandbox-id>/renew-expiration" 
 **删除沙箱**
 
 ```bash
-curl -X DELETE http://localhost:8080/v1/sandboxes/<sandbox-id>
+curl -X DELETE \
+  -H "OPEN-SANDBOX-API-KEY: your-secret-api-key" \
+  http://localhost:8080/v1/sandboxes/a1b2c3d4-5678-90ab-cdef-1234567890ab
 ```
 
 ## 系统架构
@@ -319,14 +323,12 @@ curl -X DELETE http://localhost:8080/v1/sandboxes/<sandbox-id>
           ▼
      ┌─────────┐
      │ Pending │────────────────────┐
-     │ 待处理   │                    │
      └────┬────┘                    │
           │                         │
-          │ (provisioning 供应中)    │
+          │ (provisioning)          │
           ▼                         │
      ┌─────────┐    pause()         │
      │ Running │───────────────┐    │
-     │ 运行中   │               │    │
      └────┬────┘               │    │
           │      resume()      │    │
           │   ┌────────────────┘    │
@@ -334,14 +336,12 @@ curl -X DELETE http://localhost:8080/v1/sandboxes/<sandbox-id>
           │   ▼                     │
           │ ┌────────┐              │
           ├─│ Paused │              │
-          │ │ 已暂停  │              │
           │ └────────┘              │
           │                         │
           │ delete() or expire()    │
           ▼                         │
      ┌──────────┐                   │
      │ Stopping │                   │
-     │ 停止中    │                   │
      └────┬─────┘                   │
           │                         │
           ├────────────────┬────────┘
@@ -349,7 +349,6 @@ curl -X DELETE http://localhost:8080/v1/sandboxes/<sandbox-id>
           ▼                ▼
      ┌────────────┐   ┌────────┐
      │ Terminated │   │ Failed │
-     │  已终止     │   │  失败   │
      └────────────┘   └────────┘
 ```
 

@@ -32,6 +32,14 @@ log_level = "INFO"
 type = "kubernetes"
 execd_image = "opensandbox/execd:v1.0.5"
 
+[storage]
+# Volume and storage configuration
+# -----------------------------------------------------------------
+# Allowlist of host path prefixes permitted for bind mounts.
+# If empty, all host paths are allowed (not recommended for production).
+# Example: allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
+allowed_host_paths = []
+
 [kubernetes]
 # Path to kubeconfig file. Leave as null to use in-cluster configuration
 # Replace with your path

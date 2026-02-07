@@ -32,20 +32,29 @@ OpenSandbox 是一个面向 AI 应用场景设计的「通用沙箱平台」，�
 - Docker（本地运行必需）
 - Python 3.10+（本地 runtime 和快速开始）
 
-#### 1. 克隆仓库
+#### 1. 安装并配置 Server
 
 ```bash
-git clone https://github.com/alibaba/OpenSandbox.git
-cd OpenSandbox
+uv pip install opensandbox-server
+opensandbox-server init-config ~/.sandbox.toml --example docker-zh
 ```
+
+> 如果需要开发或使用源码编译，可通过clone仓库进行开发。
+> 
+> ```bash
+> git clone https://github.com/alibaba/OpenSandbox.git
+> cd OpenSandbox/server
+> uv sync
+> cp example.config.toml ~/.sandbox.toml # Copy configuration file
+> uv run python -m src.main # Start the service
+> ```
 
 #### 2. 启动沙箱 Server
 
 ```bash
-cd server
-uv sync
-cp example.config.zh.toml ~/.sandbox.toml # 复制配置文件
-uv run python -m src.main # 启动服务
+opensandbox-server
+
+# opensandbox-server -h # Show help
 ```
 
 #### 3. 创建代码解释器，并在沙箱中执行命令

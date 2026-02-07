@@ -348,6 +348,12 @@ paths:
             type: integer
             minimum: 1
             maximum: 65535
+        - name: use_server_proxy
+          in: query
+          description: Whether to return a server-proxied URL
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: |

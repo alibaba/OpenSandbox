@@ -131,6 +131,19 @@ class AgentSandboxRuntimeConfig(BaseModel):
     )
 
 
+class StorageConfig(BaseModel):
+    """Volume and storage configuration for sandbox mounts."""
+
+    allowed_host_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allowlist of host path prefixes permitted for host bind mounts. "
+            "If empty, all host paths are allowed (not recommended for production). "
+            "Each entry must be an absolute path (e.g., '/data/opensandbox')."
+        ),
+    )
+
+
 class EgressConfig(BaseModel):
     """Egress sidecar configuration."""
 
@@ -210,6 +223,7 @@ class AppConfig(BaseModel):
     agent_sandbox: Optional["AgentSandboxRuntimeConfig"] = None
     router: Optional[RouterConfig] = None
     docker: DockerConfig = Field(default_factory=DockerConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
     egress: Optional[EgressConfig] = None
 
     @model_validator(mode="after")
@@ -322,6 +336,7 @@ __all__ = [
     "RuntimeConfig",
     "RouterConfig",
     "DockerConfig",
+    "StorageConfig",
     "KubernetesRuntimeConfig",
     "EgressConfig",
     "DEFAULT_CONFIG_PATH",

@@ -176,7 +176,9 @@ class SandboxesAdapterSync(SandboxesSync):
             logger.error("Failed to list sandboxes", exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
-    def get_sandbox_endpoint(self, sandbox_id: str, port: int) -> SandboxEndpoint:
+    def get_sandbox_endpoint(
+        self, sandbox_id: str, port: int, use_server_proxy: bool = False
+    ) -> SandboxEndpoint:
         try:
             from opensandbox.api.lifecycle.api.sandboxes import (
                 get_sandboxes_sandbox_id_endpoints_port,
@@ -187,6 +189,7 @@ class SandboxesAdapterSync(SandboxesSync):
                 sandbox_id=sandbox_id,
                 port=port,
                 client=self._get_client(),
+                use_server_proxy=use_server_proxy,
             )
             handle_api_error(response_obj, f"Get endpoint for sandbox {sandbox_id} port {port}")
             parsed = require_parsed(response_obj, ApiEndpoint, "Get endpoint")

@@ -218,7 +218,7 @@ class SandboxesAdapter(Sandboxes):
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
     async def get_sandbox_endpoint(
-        self, sandbox_id: str, port: int
+        self, sandbox_id: str, port: int, use_server_proxy: bool = False
     ) -> SandboxEndpoint:
         """Get network endpoint information for a sandbox service."""
         logger.debug(f"Retrieving sandbox endpoint: {sandbox_id}, port {port}")
@@ -234,6 +234,7 @@ class SandboxesAdapter(Sandboxes):
                     client=client,
                     sandbox_id=sandbox_id,
                     port=port,
+                    use_server_proxy=use_server_proxy,
                 )
             )
 

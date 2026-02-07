@@ -28,13 +28,11 @@ docker pull ghcr.io/agent-infra/sandbox:latest
 Then, start the OpenSandbox server, you can obtain stdout log from terminal.
 
 ```shell
-git clone git@github.com:alibaba/OpenSandbox.git
-cd OpenSandbox/server
-cp example.config.toml ~/.sandbox.toml
-uv sync && uv run python -m src.main
+uv pip install opensandbox-server
+opensandbox-server init-config ~/.sandbox.toml --example docker
+opensandbox-server
 ```
-> Note: `uv run python -m src.main` runs the server in the foreground and will keep the current terminal session busy.
-> Open a new terminal window/tab, `cd` into the project root (`OpenSandbox/`), then run the AIO sandbox creation steps below.
+> Note: `opensandbox-server` runs in the foreground and will keep the current terminal session busy. The example code lives in this repository—clone it and, in a new terminal window/tab, `cd` into the project root before running the AIO sandbox creation steps below.
 If you see errors like `FileNotFoundError: [Errno 2] No such file or directory` from `docker/transport/unixconn.py`, it usually means the Docker unix socket is missing / Docker daemon is not running.
 
 ## Create and Access the AIO Sandbox Instance

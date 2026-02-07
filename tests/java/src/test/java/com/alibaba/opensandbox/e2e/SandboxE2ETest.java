@@ -276,6 +276,162 @@ public class SandboxE2ETest extends BaseE2ETest {
         }
     }
 
+    @Test
+    @Order(2)
+    @DisplayName("Sandbox create with host volume mount (read-write)")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testSandboxCreateWithHostVolumeMount() {
+        String hostDir = "/tmp/opensandbox-e2e/host-volume-test";
+        String containerMountPath = "/mnt/host-data";
+
+        Volume volume =
+                Volume.builder()
+                        .name("test-host-vol")
+                        .host(Host.of(hostDir))
+                        .mountPath(containerMountPath)
+                        .readOnly(false)
+                        .build();
+
+        Sandbox volumeSandbox =
+                Sandbox.builder()
+                        .connectionConfig(sharedConnectionConfig)
+                        .image(getSandboxImage())
+                        .timeout(Duration.ofMinutes(2))
+                        .readyTimeout(Duration.ofSeconds(60))
+                        .volume(volume)
+                        .build();
+
+        try {
+            assertTrue(volumeSandbox.isHealthy(), "Volume sandbox should be healthy");
+
+            // Step 1: Verify the host marker file is visible inside the sandbox
+            Execution readMarker =
+                    volumeSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("cat " + containerMountPath + "/marker.txt")
+                                            .build());
+            assertNull(readMarker.getError(), "Failed to read marker file");
+            assertEquals(1, readMarker.getLogs().getStdout().size());
+            assertEquals(
+                    "opensandbox-e2e-marker",
+                    readMarker.getLogs().getStdout().get(0).getText());
+
+            // Step 2: Write a file from inside the sandbox to the mounted path
+            Execution writeResult =
+                    volumeSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "echo 'written-from-sandbox' > "
+                                                            + containerMountPath
+                                                            + "/sandbox-output.txt")
+                                            .build());
+            assertNull(writeResult.getError(), "Failed to write file");
+
+            // Step 3: Verify the written file is readable
+            Execution readBack =
+                    volumeSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "cat "
+                                                            + containerMountPath
+                                                            + "/sandbox-output.txt")
+                                            .build());
+            assertNull(readBack.getError());
+            assertEquals(1, readBack.getLogs().getStdout().size());
+            assertEquals(
+                    "written-from-sandbox", readBack.getLogs().getStdout().get(0).getText());
+
+            // Step 4: Verify the mount path is a proper directory
+            Execution dirCheck =
+                    volumeSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "test -d " + containerMountPath + " && echo OK")
+                                            .build());
+            assertNull(dirCheck.getError());
+            assertEquals(1, dirCheck.getLogs().getStdout().size());
+            assertEquals("OK", dirCheck.getLogs().getStdout().get(0).getText());
+        } finally {
+            try {
+                volumeSandbox.kill();
+            } catch (Exception ignored) {
+            }
+            volumeSandbox.close();
+        }
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("Sandbox create with host volume mount (read-only)")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testSandboxCreateWithHostVolumeMountReadOnly() {
+        String hostDir = "/tmp/opensandbox-e2e/host-volume-test";
+        String containerMountPath = "/mnt/host-data-ro";
+
+        Volume volume =
+                Volume.builder()
+                        .name("test-host-vol-ro")
+                        .host(Host.of(hostDir))
+                        .mountPath(containerMountPath)
+                        .readOnly(true)
+                        .build();
+
+        Sandbox roSandbox =
+                Sandbox.builder()
+                        .connectionConfig(sharedConnectionConfig)
+                        .image(getSandboxImage())
+                        .timeout(Duration.ofMinutes(2))
+                        .readyTimeout(Duration.ofSeconds(60))
+                        .volume(volume)
+                        .build();
+
+        try {
+            assertTrue(roSandbox.isHealthy(), "Read-only volume sandbox should be healthy");
+
+            // Step 1: Verify the host marker file is readable
+            Execution readMarker =
+                    roSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("cat " + containerMountPath + "/marker.txt")
+                                            .build());
+            assertNull(readMarker.getError(), "Failed to read marker file on read-only mount");
+            assertEquals(1, readMarker.getLogs().getStdout().size());
+            assertEquals(
+                    "opensandbox-e2e-marker",
+                    readMarker.getLogs().getStdout().get(0).getText());
+
+            // Step 2: Verify writing is denied on read-only mount
+            Execution writeResult =
+                    roSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "touch "
+                                                            + containerMountPath
+                                                            + "/should-fail.txt")
+                                            .build());
+            assertNotNull(
+                    writeResult.getError(), "Write should fail on read-only mount");
+        } finally {
+            try {
+                roSandbox.kill();
+            } catch (Exception ignored) {
+            }
+            roSandbox.close();
+        }
+    }
+
     // ==========================================
     // Command Execution Tests
     // ==========================================

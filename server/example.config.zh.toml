@@ -39,6 +39,15 @@ execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd
 # -----------------------------------------------------------------
 image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.0"
 
+[storage]
+# 卷存储配置
+# -----------------------------------------------------------------
+# 允许进行 bind mount 的宿主机路径前缀白名单。
+# 仅匹配这些前缀的路径才能被挂载到沙箱中。
+# 如果为空，则允许所有路径（不建议在生产环境使用）。
+# 示例：allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
+allowed_host_paths = []
+
 [docker]
 # Docker-specific knobs
 # -----------------------------------------------------------------
