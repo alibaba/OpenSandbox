@@ -30,7 +30,7 @@ import (
 	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
 
-// ErrorResponse represents a standard error response.
+// ErrorResponse represents a standard error response
 type ErrorResponse struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -60,27 +60,23 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body
 	var apiTask api.Task
 	if err := json.NewDecoder(r.Body).Decode(&apiTask); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 		return
 	}
 
-	// Validate task
 	if apiTask.Name == "" {
 		writeError(w, http.StatusBadRequest, "task name is required")
 		return
 	}
 
-	// Convert to internal model
 	task := h.convertAPIToInternalTask(&apiTask)
 	if task == nil {
 		writeError(w, http.StatusBadRequest, "failed to convert task")
 		return
 	}
 
-	// Create task
 	created, err := h.manager.Create(r.Context(), task)
 	if err != nil {
 		klog.ErrorS(err, "failed to create task", "name", apiTask.Name)
@@ -88,7 +84,6 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert back to API model
 	response := convertInternalToAPITask(created)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -104,18 +99,16 @@ func (h *Handler) SyncTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Parse request body - array of tasks
 	var apiTasks []api.Task
 	if err := json.NewDecoder(r.Body).Decode(&apiTasks); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
 		return
 	}
 
-	// Convert to internal model
 	desired := make([]*types.Task, 0, len(apiTasks))
 	for i := range apiTasks {
 		if apiTasks[i].Name == "" {
-			continue // Skip invalid tasks
+			continue
 		}
 		task := h.convertAPIToInternalTask(&apiTasks[i])
 		if task != nil {
@@ -123,7 +116,6 @@ func (h *Handler) SyncTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Sync tasks
 	current, err := h.manager.Sync(r.Context(), desired)
 	if err != nil {
 		klog.ErrorS(err, "failed to sync tasks")
@@ -131,7 +123,6 @@ func (h *Handler) SyncTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert back to API model
 	response := make([]api.Task, 0, len(current))
 	for _, task := range current {
 		if task != nil {
@@ -142,7 +133,7 @@ func (h *Handler) SyncTasks(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 
-	klog.InfoS("tasks synced via API", "count", len(response))
+	klog.V(1).InfoS("tasks synced via API", "count", len(response))
 }
 
 func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +149,6 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get task
 	task, err := h.manager.Get(r.Context(), taskID)
 	if err != nil {
 		klog.ErrorS(err, "failed to get task", "id", taskID)
@@ -166,7 +156,6 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to API model
 	response := convertInternalToAPITask(task)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -179,7 +168,6 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// List all tasks
 	tasks, err := h.manager.List(r.Context())
 	if err != nil {
 		klog.ErrorS(err, "failed to list tasks")
@@ -187,7 +175,6 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert to API model
 	response := make([]api.Task, 0, len(tasks))
 	for _, task := range tasks {
 		if task != nil {
@@ -199,7 +186,6 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-// Health returns the health status of the task executor
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	response := map[string]string{
 		"status": "healthy",
@@ -221,7 +207,6 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete task
 	err := h.manager.Delete(r.Context(), taskID)
 	if err != nil {
 		klog.ErrorS(err, "failed to delete task", "id", taskID)
@@ -233,7 +218,6 @@ func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {
 	klog.InfoS("task deleted via API", "id", taskID)
 }
 
-// writeError writes an error response in JSON format.
 func writeError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -243,7 +227,6 @@ func writeError(w http.ResponseWriter, code int, message string) {
 	})
 }
 
-// convertAPIToInternalTask converts api.Task to types.Task.
 func (h *Handler) convertAPIToInternalTask(apiTask *api.Task) *types.Task {
 	if apiTask == nil {
 		return nil
@@ -253,7 +236,6 @@ func (h *Handler) convertAPIToInternalTask(apiTask *api.Task) *types.Task {
 		Process:         apiTask.Process,
 		PodTemplateSpec: apiTask.PodTemplateSpec,
 	}
-	// Initialize default status
 	task.Status = types.Status{
 		State: types.TaskStatePending,
 	}
@@ -261,7 +243,6 @@ func (h *Handler) convertAPIToInternalTask(apiTask *api.Task) *types.Task {
 	return task
 }
 
-// convertInternalToAPITask converts types.Task to api.Task.
 func convertInternalToAPITask(task *types.Task) *api.Task {
 	if task == nil {
 		return nil
@@ -273,17 +254,15 @@ func convertInternalToAPITask(task *types.Task) *api.Task {
 		PodTemplateSpec: task.PodTemplateSpec,
 	}
 
-	// 1. Process Status Conversion
 	if task.Process != nil && len(task.Status.SubStatuses) > 0 {
 		sub := task.Status.SubStatuses[0]
 		apiStatus := &api.ProcessStatus{}
 
-		// Handle Timeout state - map to Terminated with exitCode 137
 		if task.Status.State == types.TaskStateTimeout {
 			term := &api.Terminated{
 				ExitCode: 137,
-				Reason:   sub.Reason,  // "TaskTimeout"
-				Message:  sub.Message, // "Task exceeded timeout of X seconds"
+				Reason:   sub.Reason,
+				Message:  sub.Message,
 			}
 			if sub.StartedAt != nil {
 				term.StartedAt = metav1.NewTime(*sub.StartedAt)
@@ -291,7 +270,6 @@ func convertInternalToAPITask(task *types.Task) *api.Task {
 			term.FinishedAt = metav1.Now()
 			apiStatus.Terminated = term
 		} else if sub.FinishedAt != nil {
-			// Terminated
 			term := &api.Terminated{
 				ExitCode: int32(sub.ExitCode),
 				Reason:   sub.Reason,
@@ -303,12 +281,10 @@ func convertInternalToAPITask(task *types.Task) *api.Task {
 			}
 			apiStatus.Terminated = term
 		} else if sub.StartedAt != nil {
-			// Running
 			apiStatus.Running = &api.Running{
 				StartedAt: metav1.NewTime(*sub.StartedAt),
 			}
 		} else {
-			// Waiting
 			apiStatus.Waiting = &api.Waiting{
 				Reason:  sub.Reason,
 				Message: sub.Message,
@@ -317,10 +293,8 @@ func convertInternalToAPITask(task *types.Task) *api.Task {
 		apiTask.ProcessStatus = apiStatus
 	}
 
-	// 2. Pod Status Conversion
 	if task.PodTemplateSpec != nil {
 		podStatus := &corev1.PodStatus{
-			// Default phase mapping
 			Phase: corev1.PodUnknown,
 		}
 

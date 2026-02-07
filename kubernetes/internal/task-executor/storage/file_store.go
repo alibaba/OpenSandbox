@@ -33,7 +33,6 @@ type fileStore struct {
 	locks   sync.Map // key: taskName, value: *sync.RWMutex
 }
 
-// NewFileStore creates a new file-based task store.
 func NewFileStore(dataDir string) (TaskStore, error) {
 	if dataDir == "" {
 		return nil, fmt.Errorf("dataDir cannot be empty")
@@ -56,13 +55,11 @@ func NewFileStore(dataDir string) (TaskStore, error) {
 	}, nil
 }
 
-// getTaskLock retrieves or creates a lock for a specific task.
 func (s *fileStore) getTaskLock(name string) *sync.RWMutex {
 	val, _ := s.locks.LoadOrStore(name, &sync.RWMutex{})
 	return val.(*sync.RWMutex)
 }
 
-// Create persists a new task to disk.
 func (s *fileStore) Create(ctx context.Context, task *types.Task) error {
 	if task == nil {
 		return fmt.Errorf("task cannot be nil")
@@ -97,7 +94,6 @@ func (s *fileStore) Create(ctx context.Context, task *types.Task) error {
 	return nil
 }
 
-// Update updates an existing task's runtime information.
 func (s *fileStore) Update(ctx context.Context, task *types.Task) error {
 	if task == nil {
 		return fmt.Errorf("task cannot be nil")
@@ -120,16 +116,14 @@ func (s *fileStore) Update(ctx context.Context, task *types.Task) error {
 		return fmt.Errorf("task %s does not exist", task.Name)
 	}
 
-	// Write task data
 	if err := s.writeTaskFile(taskDir, task); err != nil {
 		return err
 	}
 
-	klog.InfoS("updated task", "name", task.Name)
+	klog.V(2).InfoS("updated task", "name", task.Name, "state", task.Status.State)
 	return nil
 }
 
-// Get retrieves a task by name.
 func (s *fileStore) Get(ctx context.Context, name string) (*types.Task, error) {
 	if name == "" {
 		return nil, fmt.Errorf("task name cannot be empty")
@@ -152,11 +146,7 @@ func (s *fileStore) Get(ctx context.Context, name string) (*types.Task, error) {
 	return s.readTaskFile(taskDir, name)
 }
 
-// List returns all tasks in the store.
 func (s *fileStore) List(ctx context.Context) ([]*types.Task, error) {
-	// Read all task directories
-	// Note: We don't have a global lock, so the list of tasks might change during iteration.
-	// This is acceptable for a file-based store.
 	entries, err := os.ReadDir(s.dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read data directory: %w", err)
@@ -175,7 +165,6 @@ func (s *fileStore) List(ctx context.Context) ([]*types.Task, error) {
 			continue
 		}
 
-		// Acquire read lock for this specific task
 		mu := s.getTaskLock(taskName)
 		mu.RLock()
 		task, err := s.readTaskFile(taskDir, taskName)
@@ -192,7 +181,6 @@ func (s *fileStore) List(ctx context.Context) ([]*types.Task, error) {
 	return tasks, nil
 }
 
-// Delete removes a task from the store.
 func (s *fileStore) Delete(ctx context.Context, name string) error {
 	if name == "" {
 		return fmt.Errorf("task name cannot be empty")
@@ -213,7 +201,6 @@ func (s *fileStore) Delete(ctx context.Context, name string) error {
 		return nil
 	}
 
-	// Remove task directory
 	if err := os.RemoveAll(taskDir); err != nil {
 		return fmt.Errorf("failed to delete task %s: %w", name, err)
 	}
@@ -222,14 +209,12 @@ func (s *fileStore) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
-// getTaskFilePath returns the file path for a task's JSON file.
 func (s *fileStore) getTaskFilePath(taskDir string) string {
 	return filepath.Join(taskDir, "task.json")
 }
 
-// writeTaskFile writes task data to disk atomically using temp file + rename.
+// writeTaskFile writes task data to disk atomically
 func (s *fileStore) writeTaskFile(taskDir string, task *types.Task) error {
-	// Marshal to JSON
 	data, err := json.MarshalIndent(task, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal task: %w", err)
@@ -238,12 +223,10 @@ func (s *fileStore) writeTaskFile(taskDir string, task *types.Task) error {
 	taskFile := s.getTaskFilePath(taskDir)
 	tmpFile := taskFile + ".tmp"
 
-	// Write to temporary file
 	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
 		return fmt.Errorf("failed to write temp file: %w", err)
 	}
 
-	// Sync to ensure data is written to disk
 	f, err := os.Open(tmpFile)
 	if err != nil {
 		os.Remove(tmpFile)
@@ -256,7 +239,6 @@ func (s *fileStore) writeTaskFile(taskDir string, task *types.Task) error {
 	}
 	f.Close()
 
-	// Atomically rename temp file to final file
 	if err := os.Rename(tmpFile, taskFile); err != nil {
 		os.Remove(tmpFile)
 		return fmt.Errorf("failed to rename temp file: %w", err)
@@ -265,17 +247,14 @@ func (s *fileStore) writeTaskFile(taskDir string, task *types.Task) error {
 	return nil
 }
 
-// readTaskFile reads task data from disk.
 func (s *fileStore) readTaskFile(taskDir, taskName string) (*types.Task, error) {
 	taskFile := s.getTaskFilePath(taskDir)
 
-	// Read file
 	data, err := os.ReadFile(taskFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read task file: %w", err)
 	}
 
-	// Unmarshal JSON
 	var task types.Task
 	if err := json.Unmarshal(data, &task); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal task file: %w", err)

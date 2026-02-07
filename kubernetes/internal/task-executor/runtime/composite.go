@@ -29,19 +29,17 @@ func NewExecutor(cfg *config.Config) (Executor, error) {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
 
-	// 1. Initialize ProcessExecutor (Always available for Host/Sidecar modes)
 	procExec, err := NewProcessExecutor(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create process executor: %w", err)
 	}
-	klog.InfoS("process executor initialized.", "enableSidecar", cfg.EnableSidecarMode, "mainContainer", cfg.MainContainerName)
+	klog.InfoS("process executor initialized", "enableSidecar", cfg.EnableSidecarMode, "mainContainer", cfg.MainContainerName)
 
-	// 2. Initialize ContainerExecutor
 	containerExec, err := newContainerExecutor(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container executor: %w", err)
 	}
-	// 3. Return Composite
+
 	return &compositeExecutor{
 		processExec:   procExec,
 		containerExec: containerExec,

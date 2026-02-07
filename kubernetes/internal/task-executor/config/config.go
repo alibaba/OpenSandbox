@@ -16,8 +16,13 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
+	"path"
 	"time"
+
+	"gopkg.in/natefinch/lumberjack.v2"
+	"k8s.io/klog/v2"
 )
 
 type Config struct {
@@ -29,6 +34,10 @@ type Config struct {
 	ReconcileInterval time.Duration
 	EnableSidecarMode bool
 	MainContainerName string
+	LogMaxSize        int
+	LogMaxBackups     int
+	LogMaxAge         int
+	LogDir            string
 }
 
 func NewConfig() *Config {
@@ -41,6 +50,10 @@ func NewConfig() *Config {
 		ReconcileInterval: 500 * time.Millisecond,
 		EnableSidecarMode: false,
 		MainContainerName: "main",
+		LogMaxSize:        100,
+		LogMaxBackups:     10,
+		LogMaxAge:         7,
+		LogDir:            "logs",
 	}
 }
 
@@ -68,5 +81,31 @@ func (c *Config) LoadFromFlags() {
 	flag.StringVar(&c.CRISocket, "cri-socket", c.CRISocket, "CRI socket path for container runner mode")
 	flag.BoolVar(&c.EnableSidecarMode, "enable-sidecar-mode", c.EnableSidecarMode, "enable sidecar runner mode")
 	flag.StringVar(&c.MainContainerName, "main-container-name", c.MainContainerName, "main container name")
+	// set log flags
+	flag.IntVar(&c.LogMaxSize, "log-max-size", c.LogMaxSize, "maximum log file size in MB")
+	flag.IntVar(&c.LogMaxBackups, "log-max-backups", c.LogMaxBackups, "maximum number of log backup files")
+	flag.IntVar(&c.LogMaxAge, "log-max-age", c.LogMaxAge, "maximum number of days to keep log files")
+	flag.StringVar(&c.LogDir, "log-dir", c.LogDir, "log file directory")
 	flag.Parse()
+}
+
+func (c *Config) InitKlog() error {
+	if err := os.MkdirAll(c.LogDir, 0755); err != nil {
+		return fmt.Errorf("failed to create log directory: %w", err)
+	}
+	logFile := path.Join(c.LogDir, "task-executor.log")
+	fs := flag.NewFlagSet("klog", flag.ContinueOnError)
+	klog.InitFlags(fs)
+	fs.Set("logtostderr", "false")
+	fs.Set("alsologtostderr", "false")
+	fs.Set("stderrthreshold", "FATAL")
+	fs.Set("one_output", "true")
+	klog.SetOutput(&lumberjack.Logger{
+		Filename:   logFile,
+		MaxSize:    c.LogMaxSize,
+		MaxBackups: c.LogMaxBackups,
+		MaxAge:     c.LogMaxAge,
+		Compress:   true,
+	})
+	return nil
 }
