@@ -30,7 +30,8 @@ import re
 from src.services.constants import SandboxErrorCodes
 
 if TYPE_CHECKING:
-    from src.api.schema import Volume
+    from src.api.schema import NetworkPolicy, Volume
+    from src.config import EgressConfig
 
 
 def ensure_entrypoint(entrypoint: Sequence[str]) -> None:
@@ -377,6 +378,36 @@ def ensure_valid_pvc_name(claim_name: str) -> None:
         )
 
 
+def ensure_egress_configured(
+    network_policy: Optional["NetworkPolicy"],
+    egress_config: Optional["EgressConfig"],
+) -> None:
+    """
+    Validate that egress.image is configured when network policy is provided.
+    
+    This is a common validation shared by Docker and Kubernetes runtimes.
+    
+    Args:
+        network_policy: Optional network policy from the request.
+        egress_config: Optional egress configuration from app config.
+    
+    Raises:
+        HTTPException: When network_policy is provided but egress.image is not configured.
+    """
+    if not network_policy:
+        return
+    
+    egress_image = egress_config.image if egress_config else None
+    if not egress_image:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": "egress.image must be configured when networkPolicy is provided.",
+            },
+        )
+
+
 def ensure_volumes_valid(
     volumes: Optional[List["Volume"]],
     allowed_host_prefixes: Optional[List[str]] = None,
@@ -460,6 +491,7 @@ __all__ = [
     "ensure_future_expiration",
     "ensure_valid_port",
     "ensure_metadata_labels",
+    "ensure_egress_configured",
     "ensure_valid_volume_name",
     "ensure_valid_mount_path",
     "ensure_valid_sub_path",

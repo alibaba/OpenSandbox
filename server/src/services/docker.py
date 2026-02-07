@@ -70,7 +70,14 @@ from src.services.helpers import (
     parse_timestamp,
 )
 from src.services.sandbox_service import SandboxService
-from src.services.validators import ensure_entrypoint, ensure_future_expiration, ensure_metadata_labels, ensure_valid_host_path, ensure_volumes_valid
+from src.services.validators import (
+    ensure_entrypoint,
+    ensure_egress_configured,
+    ensure_future_expiration,
+    ensure_metadata_labels,
+    ensure_valid_host_path,
+    ensure_volumes_valid,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -872,9 +879,13 @@ class DockerSandboxService(SandboxService):
     def _ensure_network_policy_support(self, request: CreateSandboxRequest) -> None:
         """
         Validate that network policy can be honored under the current runtime config.
+        
+        This includes Docker-specific checks (network_mode) and common checks (egress.image).
         """
         if not request.network_policy:
             return
+        
+        # Docker-specific validation: network_mode must be bridge
         if self.network_mode == HOST_NETWORK_MODE:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -883,15 +894,9 @@ class DockerSandboxService(SandboxService):
                     "message": "networkPolicy is not supported when docker network_mode=host.",
                 },
             )
-        egress_image = self.app_config.egress.image if self.app_config.egress else None
-        if not egress_image:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": SandboxErrorCodes.INVALID_PARAMETER,
-                    "message": "egress.image must be configured when networkPolicy is provided.",
-                },
-            )
+        
+        # Common validation: egress.image must be configured
+        ensure_egress_configured(request.network_policy, self.app_config.egress)
 
     def _validate_volumes(self, request: CreateSandboxRequest) -> None:
         """

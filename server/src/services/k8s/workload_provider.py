@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from src.api.schema import ImageSpec
+from src.api.schema import ImageSpec, NetworkPolicy
 
 
 class WorkloadProvider(ABC):
@@ -44,6 +44,8 @@ class WorkloadProvider(ABC):
         expires_at: datetime,
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
+        network_policy: Optional[NetworkPolicy] = None,
+        egress_image: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a new workload resource.
@@ -60,6 +62,9 @@ class WorkloadProvider(ABC):
             execd_image: execd daemon image
             extensions: General extension field for passing additional configuration.
                 This is a flexible field for various use cases (e.g., ``poolRef`` for pool-based creation).
+            network_policy: Optional network policy for egress traffic control.
+                When provided, an egress sidecar container will be added to the Pod.
+            egress_image: Optional egress sidecar image. Required when network_policy is provided.
             
         Returns:
             Dict containing workload metadata (name, uid, etc.)
