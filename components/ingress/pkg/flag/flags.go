@@ -26,4 +26,7 @@ var (
 
 	// ProviderType specifies the sandbox provider type (e.g., batchsandbox).
 	ProviderType string
+
+	// Mode specifies the sandbox service discovery mode (e.g., header, uri).
+	Mode string
 )

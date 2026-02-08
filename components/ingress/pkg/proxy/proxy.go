@@ -22,18 +22,18 @@ import (
 	"net/http"
 	"strings"
 
-	"go.uber.org/zap"
-
 	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
 )
 
 type Proxy struct {
 	sandboxProvider sandbox.Provider
+	mode            Mode
 }
 
-func NewProxy(ctx context.Context, sandboxProvider sandbox.Provider) *Proxy {
+func NewProxy(_ context.Context, sandboxProvider sandbox.Provider, mode Mode) *Proxy {
 	proxy := &Proxy{
 		sandboxProvider: sandboxProvider,
+		mode:            mode,
 	}
 
 	return proxy
@@ -53,37 +53,28 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// parse sandbox metadata from Header 'OPEN-SANDBOX-INGRESS'
-	targetHost := r.Header.Get(SandboxIngress)
-	if targetHost == "" {
-		Logger.Warnw("Proxy: proxy target host from header 'OPEN-SANDBOX-INGRESS' is empty. Try parse from 'Host'", zap.String("host", r.Host))
-		targetHost = r.Host
-		if targetHost == "" {
-			Logger.Errorw("Proxy: proxy target host is empty", zap.Any("request", *r))
-			http.Error(w, "missing header 'OPEN-SANDBOX-INGRESS' or 'Host'", http.StatusBadRequest)
-			return
-		}
-	}
-
-	host, err := p.parseSandboxHost(targetHost)
-	if err != nil || host.ingressKey == "" || host.port == "" {
-		http.Error(w, fmt.Sprintf("Proxy: invalid host: %s", targetHost), http.StatusNotAcceptable)
-		return
-	}
-
-	targetHost, err, code := p.fetchRealHost(host)
+	host, err := p.getSandboxHostDefinition(r)
 	if err != nil {
-		Logger.Warnw("Proxy: failed to get sandbox endpoint", "ingressKey", host.ingressKey, "error", err)
-		http.Error(w, fmt.Sprintf("Proxy: %v", err), code)
+		http.Error(w, fmt.Sprintf("OpenSandbox Ingress: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	Logger.Infow("proxy requested", "target", targetHost, "client", p.getClientIP(r), "headers", r.Header, "uri", r.RequestURI, "method", r.Method)
+	targetHost, err, code := p.resolveRealHost(host)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("OpenSandbox Ingress: %v", err), code)
+		return
+	}
+
+	// modify if requestURI is not empty
+	if host.requestURI != "" {
+		r.URL.Path = host.requestURI
+	}
 
 	r.Host = targetHost
 	r.URL.Host = targetHost
 	r.Header.Del(SandboxIngress)
 
+	Logger.Infow("ingress requested", "target", targetHost, "client", p.getClientIP(r), "headers", r.Header, "uri", r.RequestURI, "method", r.Method)
 	p.serve(w, r)
 }
 
@@ -127,28 +118,7 @@ func (p *Proxy) isWebSocketRequest(r *http.Request) bool {
 	return true
 }
 
-type sandboxHost struct {
-	ingressKey string
-	port       string
-}
-
-func (p *Proxy) parseSandboxHost(s string) (sandboxHost, error) {
-	domain := strings.Split(strings.TrimPrefix(strings.TrimPrefix(s, "https://"), "http://"), ".")
-	if len(domain) < 1 {
-		return sandboxHost{}, fmt.Errorf("invalid host: %s", s)
-	}
-
-	ingressAndPort := strings.Split(domain[0], "-")
-	if len(ingressAndPort) <= 1 || ingressAndPort[0] == "" {
-		return sandboxHost{}, fmt.Errorf("invalid host: %s", s)
-	}
-
-	port := ingressAndPort[len(ingressAndPort)-1]
-	ingress := strings.Join(ingressAndPort[:len(ingressAndPort)-1], "-")
-	return sandboxHost{ingress, port}, nil
-}
-
-func (p *Proxy) fetchRealHost(host sandboxHost) (string, error, int) {
+func (p *Proxy) resolveRealHost(host *sandboxHost) (string, error, int) {
 	// Get endpoint IP from sandbox provider
 	endpointIP, err := p.sandboxProvider.GetEndpoint(host.ingressKey)
 	if err != nil {
@@ -164,7 +134,7 @@ func (p *Proxy) fetchRealHost(host sandboxHost) (string, error, int) {
 	}
 
 	// Construct target host with port
-	targetHost := endpointIP + ":" + host.port
+	targetHost := fmt.Sprintf("%s:%d", endpointIP, host.port)
 	return targetHost, nil, 0
 }
 

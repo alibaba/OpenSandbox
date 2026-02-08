@@ -51,12 +51,12 @@ func TestParseSandboxHost(t *testing.T) {
 	host, err := proxy.parseSandboxHost("sandbox-1234.example.com")
 	assert.NoError(t, err)
 	assert.Equal(t, "sandbox", host.ingressKey)
-	assert.Equal(t, "1234", host.port)
+	assert.Equal(t, 1234, host.port)
 
 	host, err = proxy.parseSandboxHost("https://alpha-beta-8080.sandbox.test")
 	assert.NoError(t, err)
 	assert.Equal(t, "alpha-beta", host.ingressKey)
-	assert.Equal(t, "8080", host.port)
+	assert.Equal(t, 8080, host.port)
 
 	_, err = proxy.parseSandboxHost("invalidhost")
 	assert.Error(t, err)
