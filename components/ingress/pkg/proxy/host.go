@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -47,7 +48,7 @@ func (p *Proxy) getSandboxHostDefinition(r *http.Request) (*sandboxHost, error) 
 		}
 
 		host, err := p.parseSandboxHost(targetHost)
-		if err != nil || host.ingressKey == "" || host.port == "" {
+		if err != nil || host.ingressKey == "" || host.port == 0 {
 			return nil, fmt.Errorf("invalid host: %s", targetHost)
 		}
 		return host, nil
@@ -60,8 +61,8 @@ func (p *Proxy) getSandboxHostDefinition(r *http.Request) (*sandboxHost, error) 
 
 type sandboxHost struct {
 	ingressKey string
-	port       string
-	requestURI *string
+	port       int
+	requestURI string
 }
 
 func (p *Proxy) parseSandboxHost(s string) (*sandboxHost, error) {
@@ -75,9 +76,12 @@ func (p *Proxy) parseSandboxHost(s string) (*sandboxHost, error) {
 		return &sandboxHost{}, fmt.Errorf("invalid host: %s", s)
 	}
 
-	port := ingressAndPort[len(ingressAndPort)-1]
 	ingress := strings.Join(ingressAndPort[:len(ingressAndPort)-1], "-")
-	return &sandboxHost{ingress, port, nil}, nil
+	port, err := strconv.Atoi(ingressAndPort[len(ingressAndPort)-1])
+	if err != nil {
+		return &sandboxHost{}, fmt.Errorf("invalid port format: %w", err)
+	}
+	return &sandboxHost{ingress, port, ""}, nil
 }
 
 func (p *Proxy) parseSandboxURI(r *http.Request) (*sandboxHost, error) {
@@ -94,8 +98,11 @@ func (p *Proxy) parseSandboxURI(r *http.Request) (*sandboxHost, error) {
 	}
 
 	sandboxID := parts[0]
-	port := parts[1]
-	if sandboxID == "" || port == "" {
+	port, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("invalid port format: %w", err)
+	}
+	if sandboxID == "" || port <= 0 {
 		return nil, errors.New("missing sandbox-id or sandbox-port in URI path")
 	}
 
@@ -110,6 +117,6 @@ func (p *Proxy) parseSandboxURI(r *http.Request) (*sandboxHost, error) {
 	return &sandboxHost{
 		ingressKey: sandboxID,
 		port:       port,
-		requestURI: &requestURI,
+		requestURI: requestURI,
 	}, nil
 }

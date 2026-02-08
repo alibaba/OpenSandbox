@@ -170,7 +170,7 @@ func httpProxyWithURIMode(t *testing.T) {
 	t.Log(string(bytes))
 
 	// no sandbox backend
-	request, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v/non-existent-xxx/yyy/hello", port), nil)
+	request, err = http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%v/non-existent-xxx/80/hello", port), nil)
 	response, err = http.DefaultClient.Do(request)
 	assert.Nil(t, err)
 	assert.Equal(t, http.StatusNotFound, response.StatusCode) // ErrSandboxNotFound -> 404

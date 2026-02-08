@@ -66,8 +66,8 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// modify if requestURI is not empty
-	if host.requestURI != nil {
-		r.URL.Path = *host.requestURI
+	if host.requestURI != "" {
+		r.URL.Path = host.requestURI
 	}
 
 	r.Host = targetHost
@@ -134,7 +134,7 @@ func (p *Proxy) resolveRealHost(host *sandboxHost) (string, error, int) {
 	}
 
 	// Construct target host with port
-	targetHost := endpointIP + ":" + host.port
+	targetHost := fmt.Sprintf("%s:%d", endpointIP, host.port)
 	return targetHost, nil, 0
 }
 
