@@ -50,3 +50,9 @@ jobs:
         run: |
           chmod +x tests/smoke-nft.sh
           ./tests/smoke-nft.sh
+
+      - name: Run dynamic ip test
+        working-directory: components/egress
+        run: |
+          chmod +x tests/smoke-dynamic-ip.sh
+          ./tests/smoke-dynamic-ip.sh

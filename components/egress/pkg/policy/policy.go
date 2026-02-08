@@ -143,6 +143,26 @@ func normalizePolicy(p *NetworkPolicy) error {
 	return nil
 }
 
+// WithExtraAllowIPs returns a copy of the policy with additional allow rules for each IP.
+// Used at startup to whitelist system nameservers so client DNS and proxy upstream work with private DNS.
+func (p *NetworkPolicy) WithExtraAllowIPs(ips []netip.Addr) *NetworkPolicy {
+	if p == nil || len(ips) == 0 {
+		return p
+	}
+	out := *p
+	out.Egress = make([]EgressRule, len(p.Egress), len(p.Egress)+len(ips))
+	copy(out.Egress, p.Egress)
+	for _, ip := range ips {
+		out.Egress = append(out.Egress, EgressRule{
+			Action:     ActionAllow,
+			Target:     ip.String(),
+			targetKind: targetIP,
+			ip:         ip,
+		})
+	}
+	return &out
+}
+
 // StaticIPSets splits static IP/CIDR rules into allow/deny IPv4/IPv6 buckets.
 // Empty or nil policy returns empty slices.
 func (p *NetworkPolicy) StaticIPSets() (allowV4, allowV6, denyV4, denyV6 []string) {

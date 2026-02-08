@@ -23,10 +23,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
+	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
 
@@ -40,18 +42,21 @@ type enforcementReporter interface {
 	EnforcementMode() string
 }
 
-// nftApplier is a narrow interface for applying static IP/CIDR rules.
+// nftApplier applies static policy and optional dynamic DNS-learned IPs to nftables.
 type nftApplier interface {
 	ApplyStatic(context.Context, *policy.NetworkPolicy) error
+	AddResolvedIPs(context.Context, []nftables.ResolvedIP) error
 }
 
 // startPolicyServer launches a lightweight HTTP API for updating the egress policy at runtime.
 // Supported endpoints:
 //   - GET  /policy : returns the currently enforced policy.
 //   - POST /policy : replace the policy; empty body resets to default deny-all.
-func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier, enforcementMode string, addr string, token string) error {
+//
+// nameserverIPs are merged into every applied policy so system DNS stays allowed (e.g. private DNS).
+func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier, enforcementMode string, addr string, token string, nameserverIPs []netip.Addr) error {
 	mux := http.NewServeMux()
-	handler := &policyServer{proxy: proxy, nft: nft, token: token, enforcementMode: enforcementMode}
+	handler := &policyServer{proxy: proxy, nft: nft, token: token, enforcementMode: enforcementMode, nameserverIPs: nameserverIPs}
 	mux.HandleFunc("/policy", handler.handlePolicy)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -98,6 +103,7 @@ type policyServer struct {
 	server          *http.Server
 	token           string
 	enforcementMode string
+	nameserverIPs   []netip.Addr
 }
 
 func (s *policyServer) handlePolicy(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +142,15 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	raw := strings.TrimSpace(string(body))
 	if raw == "" {
-		s.proxy.UpdatePolicy(policy.DefaultDenyPolicy())
+		def := policy.DefaultDenyPolicy()
+		if s.nft != nil {
+			defWithNS := def.WithExtraAllowIPs(s.nameserverIPs)
+			if err := s.nft.ApplyStatic(r.Context(), defWithNS); err != nil {
+				http.Error(w, fmt.Sprintf("failed to apply nftables: %v", err), http.StatusInternalServerError)
+				return
+			}
+		}
+		s.proxy.UpdatePolicy(def)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "ok",
 			"mode":   "deny_all",
@@ -151,7 +165,8 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.nft != nil {
-		if err := s.nft.ApplyStatic(r.Context(), pol); err != nil {
+		polWithNS := pol.WithExtraAllowIPs(s.nameserverIPs)
+		if err := s.nft.ApplyStatic(r.Context(), polWithNS); err != nil {
 			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)
 			return
 		}

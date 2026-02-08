@@ -19,12 +19,14 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 
+	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
 
@@ -36,6 +38,9 @@ type Proxy struct {
 	listenAddr string
 	upstream   string // single upstream for MVP
 	servers    []*dns.Server
+
+	// optional; called in goroutine when A/AAAA are present
+	onResolved func(domain string, ips []nftables.ResolvedIP)
 }
 
 // New builds a proxy with resolved upstream; listenAddr can be empty for default.
@@ -118,7 +123,21 @@ func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 		_ = w.WriteMsg(fail)
 		return
 	}
+	p.maybeNotifyResolved(domain, resp)
 	_ = w.WriteMsg(resp)
+}
+
+// maybeNotifyResolved calls onResolved synchronously when resp contains A/AAAA,
+// so that IPs are in nft before the client receives the DNS response and connects.
+func (p *Proxy) maybeNotifyResolved(domain string, resp *dns.Msg) {
+	if p.onResolved == nil {
+		return
+	}
+	ips := extractResolvedIPs(resp)
+	if len(ips) == 0 {
+		return
+	}
+	p.onResolved(domain, ips)
 }
 
 func (p *Proxy) forward(r *dns.Msg) (*dns.Msg, error) {
@@ -154,14 +173,80 @@ func (p *Proxy) CurrentPolicy() *policy.NetworkPolicy {
 	return p.policy
 }
 
+// SetOnResolved sets the callback invoked when an allowed domain resolves to A/AAAA.
+// Called in a goroutine; pass nil to disable. Only used when L2 dynamic IP is enabled (e.g. dns+nft mode).
+func (p *Proxy) SetOnResolved(fn func(domain string, ips []nftables.ResolvedIP)) {
+	p.onResolved = fn
+}
+
+// extractResolvedIPs parses A and AAAA records from resp.Answer into ResolvedIP slice.
+func extractResolvedIPs(resp *dns.Msg) []nftables.ResolvedIP {
+	if resp == nil || len(resp.Answer) == 0 {
+		return nil
+	}
+
+	var out []nftables.ResolvedIP
+	for _, rr := range resp.Answer {
+		switch v := rr.(type) {
+		case *dns.A:
+			if v.A == nil {
+				continue
+			}
+			addr, err := netip.ParseAddr(v.A.String())
+			if err != nil {
+				continue
+			}
+			out = append(out, nftables.ResolvedIP{Addr: addr, TTL: time.Duration(v.Hdr.Ttl) * time.Second})
+		case *dns.AAAA:
+			if v.AAAA == nil {
+				continue
+			}
+			addr, err := netip.ParseAddr(v.AAAA.String())
+			if err != nil {
+				continue
+			}
+			out = append(out, nftables.ResolvedIP{Addr: addr, TTL: time.Duration(v.Hdr.Ttl) * time.Second})
+		}
+	}
+	return out
+}
+
+const fallbackUpstream = "8.8.8.8:53"
+
 func discoverUpstream() (string, error) {
 	cfg, err := dns.ClientConfigFromFile("/etc/resolv.conf")
-	if err == nil && len(cfg.Servers) > 0 {
-		return net.JoinHostPort(cfg.Servers[0], cfg.Port), nil
+	if err != nil || len(cfg.Servers) == 0 {
+		if err != nil {
+			log.Printf("[dns] fallback upstream resolver due to error: %v", err)
+		}
+		return fallbackUpstream, nil
 	}
-	// fallback to public resolver; comment to explain deterministic behavior
-	log.Printf("[dns] fallback upstream resolver due to error: %v", err)
-	return "8.8.8.8:53", nil
+	first := cfg.Servers[0]
+	// Loopback nameserver (e.g. Docker 127.0.0.11) is unreachable from inside the container;
+	// client traffic to it is whitelisted and redirected to us, but we must use a reachable upstream.
+	if ip := net.ParseIP(first); ip != nil && ip.IsLoopback() {
+		log.Printf("[dns] resolv.conf nameserver %s is loopback; using fallback %s for proxy upstream", first, fallbackUpstream)
+		return fallbackUpstream, nil
+	}
+	return net.JoinHostPort(first, cfg.Port), nil
+}
+
+// ResolvNameserverIPs reads nameserver lines from resolvPath and returns parsed IPv4/IPv6 addresses.
+// Used at startup to whitelist the system DNS so client traffic to it is allowed and proxy can use it as upstream.
+func ResolvNameserverIPs(resolvPath string) ([]netip.Addr, error) {
+	cfg, err := dns.ClientConfigFromFile(resolvPath)
+	if err != nil || len(cfg.Servers) == 0 {
+		return nil, nil
+	}
+	var out []netip.Addr
+	for _, s := range cfg.Servers {
+		ip, err := netip.ParseAddr(s)
+		if err != nil {
+			continue
+		}
+		out = append(out, ip)
+	}
+	return out, nil
 }
 
 // LoadPolicyFromEnvVar reads the given env var and parses a policy; empty falls back to default deny-all.

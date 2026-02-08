@@ -1,7 +1,7 @@
 # Egress Sidecar TODO (Linux MVP → Full OSEP-0001)
 
-- Layer 2 still partial: static IP/CIDR now pushed to nftables, DoH/DoT blocking added (853 + optional 443 blocklist). DNS-learned IPs/dynamic isolation intentionally NOT targeted (see No goals).
-- Policy surface: IP/CIDR parsing/validation done; `require_full_isolation` and richer validation messages are out of scope (see No goals). Dynamic IP learn/apply is out of scope (see No goals).
+- Layer 2 still partial: static IP/CIDR now pushed to nftables, DoH/DoT blocking added (853 + optional 443 blocklist). DNS-learned IPs/dynamic isolation planned (see Short-term priorities).
+- Policy surface: IP/CIDR parsing/validation done; `require_full_isolation` and richer validation messages are out of scope (see No goals).
 - Observability missing: no violation logs.
 - Capability probing missing: no CAP_NET_ADMIN/nftables detection; hostNetwork 已由 server 侧阻断。 Capability detection + mode exposure moved to No goals.
 - Platform integration completed: specs/SDK/server wiring done; NET_ADMIN only on sidecar.
