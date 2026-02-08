@@ -74,7 +74,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Host = targetHost
 	r.Header.Del(SandboxIngress)
 
-	Logger.Infow("ingress requested", "target", targetHost, "client", p.getClientIP(r), "headers", r.Header, "uri", r.RequestURI, "method", r.Method)
+	Logger.Infow("ingress requested", "target", targetHost, "client", p.getClientIP(r), "uri", r.RequestURI, "method", r.Method)
 	p.serve(w, r)
 }
 
