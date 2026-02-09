@@ -126,17 +126,20 @@ func (c *CodeInterpretingController) GetBackgroundCommandOutput() {
 }
 
 func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.RunCommandRequest) *runtime.ExecuteCodeRequest {
+	timeout := time.Duration(request.TimeoutMs) * time.Millisecond
 	if request.Background {
 		return &runtime.ExecuteCodeRequest{
 			Language: runtime.BackgroundCommand,
 			Code:     request.Command,
 			Cwd:      request.Cwd,
+			Timeout:  timeout,
 		}
 	} else {
 		return &runtime.ExecuteCodeRequest{
 			Language: runtime.Command,
 			Code:     request.Command,
 			Cwd:      request.Cwd,
+			Timeout:  timeout,
 		}
 	}
 }

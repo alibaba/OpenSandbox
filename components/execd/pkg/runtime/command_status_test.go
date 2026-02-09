@@ -44,7 +44,8 @@ func TestGetCommandStatus_Running(t *testing.T) {
 		},
 	}
 
-	if err := c.runBackgroundCommand(context.Background(), req); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := c.runBackgroundCommand(ctx, cancel, req); err != nil {
 		t.Fatalf("runBackgroundCommand error: %v", err)
 	}
 	if session == "" {
@@ -142,7 +143,8 @@ func TestSeekBackgroundCommandOutput_WithRunBackgroundCommand(t *testing.T) {
 		},
 	}
 
-	if err := c.runBackgroundCommand(context.Background(), req); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := c.runBackgroundCommand(ctx, cancel, req); err != nil {
 		t.Fatalf("runBackgroundCommand error: %v", err)
 	}
 	if session == "" {

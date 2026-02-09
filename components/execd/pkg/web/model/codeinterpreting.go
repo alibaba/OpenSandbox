@@ -49,6 +49,8 @@ type RunCommandRequest struct {
 	Command    string `json:"command" validate:"required"`
 	Cwd        string `json:"cwd,omitempty"`
 	Background bool   `json:"background,omitempty"`
+	// TimeoutMs caps execution duration; 0 uses server default.
+	TimeoutMs int64 `json:"timeout,omitempty" validate:"omitempty,gte=1"`
 }
 
 func (r *RunCommandRequest) Validate() error {

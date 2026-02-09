@@ -149,12 +149,13 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 }
 
 // runBackgroundCommand executes shell commands in detached mode.
-func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCodeRequest) error {
+func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.CancelFunc, request *ExecuteCodeRequest) error {
 	session := c.newContextID()
 	request.Hooks.OnExecuteInit(session)
 
 	pipe, err := c.combinedOutputDescriptor(session)
 	if err != nil {
+		cancel()
 		return fmt.Errorf("failed to get combined output descriptor: %w", err)
 	}
 	stdoutPath := c.combinedOutputFileName(session)
@@ -167,7 +168,7 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 
 	startAt := time.Now()
 	log.Info("received command: %v", request.Code)
-	cmd := exec.CommandContext(context.Background(), "bash", "-c", request.Code)
+	cmd := exec.CommandContext(ctx, "bash", "-c", request.Code)
 
 	cmd.Dir = request.Cwd
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -178,33 +179,34 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 	// use DevNull as stdin so interactive programs exit immediately.
 	cmd.Stdin = os.NewFile(uintptr(syscall.Stdin), os.DevNull)
 
+	err = cmd.Start()
+	kernel := &commandKernel{
+		pid:          -1,
+		stdoutPath:   stdoutPath,
+		stderrPath:   stderrPath,
+		startedAt:    startAt,
+		running:      true,
+		content:      request.Code,
+		isBackground: true,
+	}
+	if err != nil {
+		cancel()
+		log.Error("CommandExecError: error starting commands: %v", err)
+		kernel.running = false
+		c.storeCommandKernel(session, kernel)
+		c.markCommandFinished(session, 255, err.Error())
+		return fmt.Errorf("failed to start commands: %w", err)
+	}
+
 	safego.Go(func() {
 		defer pipe.Close()
-
-		err := cmd.Start()
-		kernel := &commandKernel{
-			pid:          -1,
-			stdoutPath:   stdoutPath,
-			stderrPath:   stderrPath,
-			startedAt:    startAt,
-			running:      true,
-			content:      request.Code,
-			isBackground: true,
-		}
-
-		if err != nil {
-			log.Error("CommandExecError: error starting commands: %v", err)
-			kernel.running = false
-			c.storeCommandKernel(session, kernel)
-			c.markCommandFinished(session, 255, err.Error())
-			return
-		}
 
 		kernel.running = true
 		kernel.pid = cmd.Process.Pid
 		c.storeCommandKernel(session, kernel)
 
 		err = cmd.Wait()
+		cancel()
 		if err != nil {
 			log.Error("CommandExecError: error running commands: %v", err)
 			exitCode := 1
@@ -216,6 +218,14 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 			return
 		}
 		c.markCommandFinished(session, 0, "")
+	})
+
+	// ensure we kill the whole process group if the context is cancelled (e.g., timeout).
+	safego.Go(func() {
+		<-ctx.Done()
+		if cmd.Process != nil {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) // best-effort
+		}
 	})
 
 	request.Hooks.OnExecuteComplete(time.Since(startAt))

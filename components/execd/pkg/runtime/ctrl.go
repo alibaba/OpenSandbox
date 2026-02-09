@@ -86,18 +86,21 @@ func (c *Controller) Execute(request *ExecuteCodeRequest) error {
 	} else {
 		ctx, cancel = context.WithCancel(context.Background())
 	}
-	defer cancel()
 
 	switch request.Language {
 	case Command:
+		defer cancel()
 		return c.runCommand(ctx, request)
 	case BackgroundCommand:
-		return c.runBackgroundCommand(ctx, request)
+		return c.runBackgroundCommand(ctx, cancel, request)
 	case Bash, Python, Java, JavaScript, TypeScript, Go:
+		defer cancel()
 		return c.runJupyter(ctx, request)
 	case SQL:
+		defer cancel()
 		return c.runSQL(ctx, request)
 	default:
+		defer cancel()
 		return fmt.Errorf("unknown language: %s", request.Language)
 	}
 }
