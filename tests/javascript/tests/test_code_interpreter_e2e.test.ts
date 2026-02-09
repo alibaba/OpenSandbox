@@ -267,3 +267,58 @@ test("07 interrupt code execution + fake id", async () => {
 
   await expect(ci0.codes.interrupt(`fake-${Date.now()}`)).rejects.toBeTruthy();
 });
+
+test("08 bash env propagation across sequential executions", async () => {
+  if (!ci) throw new Error("not initialized");
+
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const errors: string[] = [];
+
+  const handlers: ExecutionHandlers = {
+    onStdout: (m) => {
+      if (m.text) stdout.push(m.text.trim());
+    },
+    onStderr: (m) => {
+      if (m.text) stderr.push(m.text.trim());
+    },
+    onError: (e) => {
+      errors.push(e.name);
+    },
+  };
+
+  const code1 = "export FOO=hello\nexport BAR=world\n";
+  const code2 = 'printf "step1:$FOO:$BAR\\n"\n';
+  const code3 =
+    "export FOO=${FOO}_next\n" +
+    'printf "step2:$FOO:$BAR\\n"\n' +
+    "export BAR=${BAR}_next\n" +
+    'printf "step3:$FOO:$BAR\\n"\n';
+
+  const r1 = await ci.codes.run(code1, {
+    language: SupportedLanguages.BASH,
+    handlers,
+  });
+  expect(r1.id).toBeTruthy();
+  expect(r1.error).toBeUndefined();
+
+  const r2 = await ci.codes.run(code2, {
+    language: SupportedLanguages.BASH,
+    handlers,
+  });
+  expect(r2.id).toBeTruthy();
+  expect(r2.error).toBeUndefined();
+
+  const r3 = await ci.codes.run(code3, {
+    language: SupportedLanguages.BASH,
+    handlers,
+  });
+  expect(r3.id).toBeTruthy();
+  expect(r3.error).toBeUndefined();
+
+  expect(stdout).toContain("step1:hello:world");
+  expect(stdout).toContain("step2:hello_next:world");
+  expect(stdout).toContain("step3:hello_next:world_next");
+  expect(errors).toHaveLength(0);
+  expect(stderr.filter((s) => s.length > 0)).toHaveLength(0);
+});

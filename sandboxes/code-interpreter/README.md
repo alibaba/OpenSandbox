@@ -144,7 +144,6 @@ The image comes with pre-configured Jupyter kernels for all supported languages:
 - **Java**: IJava kernel
 - **TypeScript/JavaScript**: tslab kernel
 - **Go**: gonb kernel
-- **Bash**: bash_kernel
 
 ### Starting Jupyter
 

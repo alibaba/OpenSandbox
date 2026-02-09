@@ -29,9 +29,8 @@ func (c *Controller) runJupyter(ctx context.Context, request *ExecuteCodeRequest
 		return errors.New("language runtime server not configured, please check your image runtime")
 	}
 	if request.Context == "" {
-		if _, exists := c.defaultLanguageJupyterSessions[request.Language]; !exists {
-			err := c.createDefaultLanguageContext(request.Language)
-			if err != nil {
+		if c.getDefaultLanguageSession(request.Language) == "" {
+			if err := c.createDefaultLanguageJupyterContext(request.Language); err != nil {
 				return err
 			}
 		}
@@ -39,7 +38,7 @@ func (c *Controller) runJupyter(ctx context.Context, request *ExecuteCodeRequest
 
 	var targetSessionID string
 	if request.Context == "" {
-		targetSessionID = c.defaultLanguageJupyterSessions[request.Language]
+		targetSessionID = c.getDefaultLanguageSession(request.Language)
 	} else {
 		targetSessionID = request.Context
 	}
@@ -135,10 +134,12 @@ func (c *Controller) setWorkingDir(_ *jupyterKernel, _ *CreateContextRequest) er
 
 // getJupyterKernel retrieves a kernel connection from the session map.
 func (c *Controller) getJupyterKernel(sessionID string) *jupyterKernel {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	return c.jupyterClientMap[sessionID]
+	if v, ok := c.jupyterClientMap.Load(sessionID); ok {
+		if kernel, ok := v.(*jupyterKernel); ok {
+			return kernel
+		}
+	}
+	return nil
 }
 
 // searchKernel finds a kernel spec name for the given language.

@@ -41,6 +41,8 @@ jobs:
           chmod -R 755 /tmp/opensandbox-e2e
 
       - name: Run tests
+        env:
+          OPENSANDBOX_SANDBOX_DEFAULT_IMAGE: opensandbox/code-interpreter:latest
         run: |
           set -e
 

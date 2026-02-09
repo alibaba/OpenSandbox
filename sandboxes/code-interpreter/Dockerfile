@@ -24,7 +24,7 @@ RUN set -euo pipefail \
         echo "Setting up ipykernel for Python $version" \
         && . /opt/opensandbox/code-interpreter-env.sh python $version \
         && python3 --version \
-        && python3 -m pip install ipykernel jupyter bash_kernel --break-system-packages; \
+        && python3 -m pip install ipykernel jupyter --break-system-packages; \
     done \
     && echo "Setting up ipykernel complete"
 

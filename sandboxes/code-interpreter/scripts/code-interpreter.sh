@@ -93,12 +93,6 @@ setup_go() {
 	}
 }
 
-setup_bash() {
-	time {
-		python3 -m bash_kernel.install
-	}
-}
-
 # export go bin path
 export PATH="$(go env GOPATH)/bin:$PATH"
 if [ -n "${EXECD_ENVS:-}" ]; then
@@ -113,8 +107,6 @@ pids+=($!)
 setup_node &
 pids+=($!)
 setup_go &
-pids+=($!)
-setup_bash &
 pids+=($!)
 
 jupyter notebook --ip=127.0.0.1 --port="${JUPYTER_PORT:-44771}" --allow-root --no-browser --NotebookApp.token="${JUPYTER_TOKEN:-opensandboxcodeinterpreterjupyter}" >/opt/opensandbox/jupyter.log
