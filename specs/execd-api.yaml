@@ -289,6 +289,8 @@ paths:
         Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
         The command can run in foreground or background mode. The response includes stdout, stderr,
         execution status, and completion events.
+        Optionally specify `timeout` (milliseconds) to enforce a maximum runtime; the server will
+        terminate the process when the timeout is reached.
       operationId: runCommand
       tags:
         - Command
@@ -305,12 +307,14 @@ paths:
                   command: ls -la /workspace
                   cwd: /workspace
                   background: false
+                  timeout: 30000
               background:
                 summary: Background command
                 value:
                   command: python server.py
                   cwd: /app
                   background: true
+                  timeout: 120000
       responses:
         "200":
           description: Stream of command execution events
@@ -929,6 +933,11 @@ components:
           description: Whether to run command in detached mode
           default: false
           example: false
+        timeout:
+          type: integer
+          format: int64
+          description: Maximum allowed execution time in milliseconds before the command is forcefully terminated. If omitted, the server default is used.
+          example: 60000
         user:
           type: object
           properties:
