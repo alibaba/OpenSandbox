@@ -288,8 +288,7 @@ paths:
       description: |
         Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
         The command can run in foreground or background mode. The response includes stdout, stderr,
-        execution status, and completion events. Use the optional `user` field to run the command as
-        a specific system user when supported by the sandbox.
+        execution status, and completion events.
       operationId: runCommand
       tags:
         - Command
@@ -305,16 +304,12 @@ paths:
                 value:
                   command: ls -la /workspace
                   cwd: /workspace
-                  user:
-                    name: sandbox
                   background: false
               background:
                 summary: Background command
                 value:
                   command: python server.py
                   cwd: /app
-                  user:
-                    uid: 1001
                   background: true
       responses:
         "200":

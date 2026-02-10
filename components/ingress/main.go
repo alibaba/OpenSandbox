@@ -67,7 +67,7 @@ func main() {
 	}
 
 	// Create reverse proxy with sandbox provider
-	reverseProxy := proxy.NewProxy(ctx, sandboxProvider)
+	reverseProxy := proxy.NewProxy(ctx, sandboxProvider, proxy.Mode(flag.Mode))
 	http.Handle("/", reverseProxy)
 	http.HandleFunc("/status.ok", proxy.Healthz)
 

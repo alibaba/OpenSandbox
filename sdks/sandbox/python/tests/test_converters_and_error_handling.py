@@ -144,6 +144,7 @@ def test_sandbox_model_converter_to_api_create_request_and_renew_tz() -> None:
             egress=[NetworkRule(action="allow", target="pypi.org")],
         ),
         extensions={},
+        volumes=None,
     )
     d = req.to_dict()
     assert d["image"]["uri"] == "python:3.11"

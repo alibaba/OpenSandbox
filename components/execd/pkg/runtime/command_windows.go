@@ -103,7 +103,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 }
 
 // runBackgroundCommand executes shell commands in detached mode on Windows.
-func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCodeRequest) error {
+func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.CancelFunc, request *ExecuteCodeRequest) error {
 	session := c.newContextID()
 	request.Hooks.OnExecuteInit(session)
 
@@ -116,7 +116,7 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 
 	startAt := time.Now()
 	log.Info("received command: %v", request.Code)
-	cmd := exec.CommandContext(context.Background(), "cmd", "/C", request.Code)
+	cmd := exec.CommandContext(ctx, "cmd", "/C", request.Code)
 
 	cmd.Dir = request.Cwd
 	cmd.Stdout = pipe
@@ -131,6 +131,7 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 		if err != nil {
 			log.Error("CommandExecError: error starting commands: %v", err)
 			pipe.Close() // best-effort
+			cancel()
 			return
 		}
 
@@ -145,7 +146,15 @@ func (c *Controller) runBackgroundCommand(_ context.Context, request *ExecuteCod
 		}
 		c.storeCommandKernel(session, kernel)
 
+		safego.Go(func() {
+			<-ctx.Done()
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill() // best-effort
+			}
+		})
+
 		err = cmd.Wait()
+		cancel()
 		pipe.Close()    // best-effort
 		devNull.Close() // best-effort
 

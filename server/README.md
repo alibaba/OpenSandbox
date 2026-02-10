@@ -40,34 +40,48 @@ A production-grade, FastAPI-based service for managing the lifecycle of containe
 
 ### Installation
 
-1. **Clone the repository** and navigate to the server directory:
+1. **Install from PyPI**:
+   > For source development or contributions, you can still clone the repo and run `uv sync` inside `server/`.
    ```bash
-   cd server
-   ```
-
-2. **Install dependencies** using `uv`:
-   ```bash
-   uv sync
+   uv pip install opensandbox-server
    ```
 
 ### Configuration
 
 The server uses a TOML configuration file to select and configure the underlying runtime.
 
-**Create configuration file**:
+**Init configuration from simple example**:
 ```bash
-cp example.config.toml ~/.sandbox.toml
+# run opensandbox-server -h for help
+opensandbox-server init-config ~/.sandbox.toml --example docker
 ```
-**[optional] Create K8S configuration file：
+
+**Create K8S configuration file**
+
 The K8S version of the Sandbox Operator needs to be deployed in the cluster, refer to the Kubernetes directory.
 ```bash
-cp example.config.k8s.toml ~/.sandbox.toml
-cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
+# run opensandbox-server -h for help
+opensandbox-server init-config ~/.sandbox.toml --example k8s
 ```
 
-**[optional] Edit `~/.sandbox.toml`** for your environment:
+**[optional] Edit configuration for your environment**
 
-**Option A: Docker runtime + host networking (default)**
+- For quick e2e/demo (specify which one):
+  ```bash
+  opensandbox-server init-config ~/.sandbox.toml --example docker  # or docker-zh|k8s|k8s-zh
+  # add --force to overwrite existing file
+  ```
+- Render the full schema-driven skeleton (no defaults, just placeholders) by omitting --example:
+  ```bash
+  opensandbox-server init-config ~/.sandbox.toml
+  # add --force to overwrite existing file
+  ```
+
+**[optional] Edit `~/.sandbox.toml` for your environment**
+
+Before you start the server, edit the configuration file to suit your environment. You could also generate a new empty configuration file by `opensandbox-server init-config ~/.sandbox.toml`.
+
+**Docker runtime + host networking**
    ```toml
    [server]
    host = "0.0.0.0"
@@ -83,7 +97,7 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
    network_mode = "host"  # Containers share host network; only one sandbox instance at a time
    ```
 
-**Option B: Docker runtime + bridge networking**
+**Docker runtime + bridge networking**
    ```toml
    [server]
    host = "0.0.0.0"
@@ -112,16 +126,18 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
    ```
    Further reading on Docker container security: https://docs.docker.com/engine/security/
 
-### (Optional) Egress sidecar for `networkPolicy`
+### Egress sidecar for `networkPolicy`
 
-- Configure the sidecar image (used only when requests include `networkPolicy`):
+- **Required when using `networkPolicy`**: Configure the sidecar image. The `egress.image` setting is mandatory when requests include `networkPolicy`:
    ```toml
    [runtime]
    type = "docker"
-   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.3"
-   egress_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:latest"
+   execd_image = "opensandbox/execd:v1.0.5"
+   
+   [egress]
+   image = "opensandbox/egress:v1.0.0"
    ```
-- Supported only in Docker bridge mode; requests with `networkPolicy` are rejected when `network_mode=host`.
+- Supported only in Docker bridge mode; requests with `networkPolicy` are rejected when `network_mode=host` or when `egress.image` is not configured.
 - Main container shares the sidecar netns and explicitly drops `NET_ADMIN`; the sidecar keeps `NET_ADMIN` to manage iptables.
 - IPv6 is disabled in the shared namespace when the egress sidecar is injected to keep policy enforcement consistent.
 - Sidecar image is pulled before start; delete/expire/failure paths attempt to clean up the sidecar as well.
@@ -145,10 +161,10 @@ cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
 
 ### Run the server
 
-Start the server using `uv`:
+Start the server using the installed CLI (reads `~/.sandbox.toml` by default):
 
 ```bash
-uv run python -m src.main
+opensandbox-server
 ```
 
 The server will start at `http://0.0.0.0:8080` (or your configured host/port).
@@ -160,7 +176,6 @@ After installing the package (wheel or PyPI), you can use the CLI entrypoint:
 ```bash
 opensandbox-server --config ~/.sandbox.toml
 ```
-
 
 **Health check**
 
@@ -353,7 +368,12 @@ curl -X DELETE \
 |------------------------|--------|----------|-------------------------------------------------------|
 | `runtime.type`         | string | Yes      | Runtime implementation (`"docker"` or `"kubernetes"`) |
 | `runtime.execd_image`  | string | Yes      | Container image with execd binary                     |
-| `runtime.egress_image` | string | No       | Container image with egress binary                    |
+
+### Egress configuration
+
+| Key           | Type   | Required | Description                    |
+|---------------|--------|----------|--------------------------------|
+| `egress.image` | string | **Required when using `networkPolicy`** | Container image with egress binary. Must be configured when `networkPolicy` is provided in sandbox creation requests. |
 
 ### Docker configuration
 

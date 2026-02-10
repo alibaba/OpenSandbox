@@ -12,6 +12,8 @@ concurrency:
 
 jobs:
   test:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -23,16 +25,16 @@ jobs:
           go-version: '1.24.0'
 
       - name: Run golint
+        working-directory: components/ingress
         run: |
-          cd components/ingress
           make golint
 
       - name: Run Build
+        working-directory: components/ingress
         run: |
-          cd components/ingress
           make build
 
       - name: Run tests
+        working-directory: components/ingress
         run: |
-          cd components/ingress
           make test

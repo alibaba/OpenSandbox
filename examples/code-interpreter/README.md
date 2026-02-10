@@ -18,11 +18,9 @@ docker pull sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-int
 Start the local OpenSandbox server:
 
 ```shell
-git clone git@github.com:alibaba/OpenSandbox.git
-cd OpenSandbox/server
-cp example.config.toml ~/.sandbox.toml
-uv sync
-uv run python -m src.main
+uv pip install opensandbox-server
+opensandbox-server init-config ~/.sandbox.toml --example docker
+opensandbox-server
 ```
 
 ## Create and access the Code Interpreter Sandbox
@@ -149,15 +147,13 @@ spec:
 Start the k8s OpenSandbox server:
 
 ```shell
-git clone git@github.com:alibaba/OpenSandbox.git
-cd OpenSandbox/server
+uv pip install opensandbox-server
 
 # replace with your k8s cluster config, kubeconfig etc.
-cp example.config.k8s.toml ~/.sandbox.toml
-cp example.batchsandbox-template.yaml ~/batchsandbox-template.yaml
+opensandbox-server init-config ~/.sandbox.toml --example k8s
+curl -o ~/batchsandbox-template.yaml https://raw.githubusercontent.com/alibaba/OpenSandbox/main/server/example.batchsandbox-template.yaml
 
-uv sync
-uv run python -m src.main
+opensandbox-server
 ```
 
 ## Create and access the Code Interpreter Sandbox

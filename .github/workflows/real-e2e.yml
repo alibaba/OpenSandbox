@@ -1,5 +1,8 @@
 name: Real E2E Tests
 
+permissions:
+  contents: read
+
 on:
   pull_request:
     branches: [ main ]
@@ -48,16 +51,27 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
-          egress_image = "opensandbox/egress:latest"
+          [egress]
+          image = "opensandbox/egress:latest"
           [docker]
           network_mode = "bridge"
+          [storage]
+          allowed_host_paths = ["/tmp/opensandbox-e2e"]
           EOF
 
           ./scripts/python-e2e.sh
 
-      - name: Eval logs
+      - name: Eval server logs
         if: ${{ always() }}
         run: cat server/server.log
+
+      - name: Upload execd logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execd-log-for-python-e2e
+          path: /tmp/opensandbox-e2e/logs/
+          retention-days: 5
 
   java-e2e:
     name: Java E2E (docker bridge)
@@ -97,14 +111,17 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
-          egress_image = "opensandbox/egress:latest"
+          [egress]
+          image = "opensandbox/egress:latest"
           [docker]
           network_mode = "bridge"
+          [storage]
+          allowed_host_paths = ["/tmp/opensandbox-e2e"]
           EOF
 
           bash ./scripts/java-e2e.sh
 
-      - name: Eval logs
+      - name: Eval server logs
         if: ${{ always() }}
         run: cat server/server.log
 
@@ -114,6 +131,13 @@ jobs:
         with:
           name: java-test-report
           path: tests/java/build/reports/tests/test/
+          retention-days: 5
+      - name: Upload execd logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execd-log-for-java-e2e
+          path: /tmp/opensandbox-e2e/logs/
           retention-days: 5
 
   javascript-e2e:
@@ -150,14 +174,17 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
-          egress_image = "opensandbox/egress:latest"
+          [egress]
+          image = "opensandbox/egress:latest"
           [docker]
           network_mode = "bridge"
+          [storage]
+          allowed_host_paths = ["/tmp/opensandbox-e2e"]
           EOF
 
           bash ./scripts/javascript-e2e.sh
 
-      - name: Eval logs
+      - name: Eval server logs
         if: ${{ always() }}
         run: cat server/server.log
 
@@ -167,4 +194,12 @@ jobs:
         with:
           name: javascript-test-report
           path: tests/javascript/build/test-results/junit.xml
+          retention-days: 5
+
+      - name: Upload execd logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execd-log-for-js-e2e
+          path: /tmp/opensandbox-e2e/logs/
           retention-days: 5

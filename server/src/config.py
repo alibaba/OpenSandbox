@@ -131,6 +131,29 @@ class AgentSandboxRuntimeConfig(BaseModel):
     )
 
 
+class StorageConfig(BaseModel):
+    """Volume and storage configuration for sandbox mounts."""
+
+    allowed_host_paths: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Allowlist of host path prefixes permitted for host bind mounts. "
+            "If empty, all host paths are allowed (not recommended for production). "
+            "Each entry must be an absolute path (e.g., '/data/opensandbox')."
+        ),
+    )
+
+
+class EgressConfig(BaseModel):
+    """Egress sidecar configuration."""
+
+    image: Optional[str] = Field(
+        default=None,
+        description="Container image for the egress sidecar (used when network policy is requested).",
+        min_length=1,
+    )
+
+
 class RuntimeConfig(BaseModel):
     """Runtime selection (docker, kubernetes, etc.)."""
 
@@ -141,11 +164,6 @@ class RuntimeConfig(BaseModel):
     execd_image: str = Field(
         ...,
         description="Container image that contains the execd binary for sandbox initialization.",
-        min_length=1,
-    )
-    egress_image: Optional[str] = Field(
-        default=None,
-        description="Container image for the egress sidecar (used when network policy is requested).",
         min_length=1,
     )
 
@@ -205,6 +223,8 @@ class AppConfig(BaseModel):
     agent_sandbox: Optional["AgentSandboxRuntimeConfig"] = None
     router: Optional[RouterConfig] = None
     docker: DockerConfig = Field(default_factory=DockerConfig)
+    storage: StorageConfig = Field(default_factory=StorageConfig)
+    egress: Optional[EgressConfig] = None
 
     @model_validator(mode="after")
     def validate_runtime_blocks(self) -> "AppConfig":
@@ -316,7 +336,9 @@ __all__ = [
     "RuntimeConfig",
     "RouterConfig",
     "DockerConfig",
+    "StorageConfig",
     "KubernetesRuntimeConfig",
+    "EgressConfig",
     "DEFAULT_CONFIG_PATH",
     "CONFIG_ENV_VAR",
     "get_config",

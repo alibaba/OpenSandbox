@@ -47,8 +47,17 @@ beforeAll(async () => {
       JAVA_VERSION: "21",
       NODE_VERSION: "22",
       PYTHON_VERSION: "3.12",
+      EXECD_LOG_FILE: "/tmp/opensandbox-e2e/logs/execd.log"
     },
     healthCheckPollingInterval: 200,
+    volumes: [
+        {
+            name: "execd-log",
+            host: { path: "/tmp/opensandbox-e2e/logs" },
+            mountPath: "/tmp/opensandbox-e2e/logs",
+            readOnly: false,
+        },
+    ],
   });
 
   ci = await CodeInterpreter.create(sandbox);

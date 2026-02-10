@@ -36,6 +36,7 @@ import type {
   RenewSandboxExpirationResponse,
   SandboxId,
   SandboxInfo,
+  Volume,
 } from "./models/sandboxes.js";
 import { SandboxReadyTimeoutException } from "./core/exceptions.js";
 
@@ -73,6 +74,11 @@ export interface SandboxCreateOptions {
    * If provided without defaultAction, defaults to "deny".
    */
   networkPolicy?: NetworkPolicy;
+  /**
+   * Optional list of volume mounts for persistent storage.
+   * Each volume specifies a backend (host path or PVC) and mount configuration.
+   */
+  volumes?: Volume[];
   /**
    * Opaque extension parameters passed through to the server as-is.
    */
@@ -231,6 +237,23 @@ export class Sandbox {
       throw err;
     }
 
+    // Validate volumes: exactly one backend must be specified per volume
+    if (opts.volumes) {
+      for (const vol of opts.volumes) {
+        const backendsSpecified = [vol.host, vol.pvc].filter((b) => b !== undefined).length;
+        if (backendsSpecified === 0) {
+          throw new Error(
+            `Volume '${vol.name}' must specify exactly one backend (host, pvc), but none was provided.`
+          );
+        }
+        if (backendsSpecified > 1) {
+          throw new Error(
+            `Volume '${vol.name}' must specify exactly one backend (host, pvc), but multiple were provided.`
+          );
+        }
+      }
+    }
+
     const req: CreateSandboxRequest = {
       image: toImageSpec(opts.image),
       entrypoint: opts.entrypoint ?? DEFAULT_ENTRYPOINT,
@@ -244,6 +267,7 @@ export class Sandbox {
             defaultAction: opts.networkPolicy.defaultAction ?? "deny",
           }
         : undefined,
+      volumes: opts.volumes,
       extensions: opts.extensions ?? {},
     };
 

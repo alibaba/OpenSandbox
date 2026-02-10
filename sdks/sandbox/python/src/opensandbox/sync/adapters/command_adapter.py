@@ -32,7 +32,12 @@ from opensandbox.adapters.converter.execution_converter import (
 from opensandbox.adapters.converter.response_handler import handle_api_error
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.exceptions import InvalidArgumentException, SandboxApiException
-from opensandbox.models.execd import Execution, RunCommandOpts
+from opensandbox.models.execd import (
+    CommandLogs,
+    CommandStatus,
+    Execution,
+    RunCommandOpts,
+)
 from opensandbox.models.execd_sync import ExecutionHandlersSync
 from opensandbox.models.sandboxes import SandboxEndpoint
 from opensandbox.sync.adapters.converter.execution_event_dispatcher import (
@@ -162,4 +167,53 @@ class CommandsAdapterSync(CommandsSync):
             handle_api_error(response_obj, "Interrupt command")
         except Exception as e:
             logger.error("Failed to interrupt command", exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
+    def get_command_status(self, execution_id: str) -> CommandStatus:
+        """Get the current running status for a command."""
+        try:
+            from opensandbox.adapters.converter.command_model_converter import (
+                to_command_status,
+            )
+            from opensandbox.adapters.converter.response_handler import require_parsed
+            from opensandbox.api.execd.api.command import get_command_status
+            from opensandbox.api.execd.models import CommandStatusResponse
+
+            response_obj = get_command_status.sync_detailed(
+                client=self._client,
+                id=execution_id,
+            )
+            handle_api_error(response_obj, "Get command status")
+            parsed = require_parsed(response_obj, CommandStatusResponse, "Get command status")
+            return to_command_status(parsed)
+        except Exception as e:
+            logger.error("Failed to get command status", exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
+    def get_background_command_logs(
+        self, execution_id: str, cursor: int | None = None
+    ) -> CommandLogs:
+        """Get background command logs (non-streamed)."""
+        try:
+            from opensandbox.adapters.converter.response_handler import require_parsed
+            from opensandbox.api.execd.api.command import get_background_command_logs
+            from opensandbox.api.execd.types import UNSET
+
+            response_obj = get_background_command_logs.sync_detailed(
+                client=self._client,
+                id=execution_id,
+                cursor=cursor if cursor is not None else UNSET,
+            )
+            handle_api_error(response_obj, "Get command logs")
+            content = require_parsed(response_obj, str, "Get command logs")
+            cursor_header = response_obj.headers.get("EXECD-COMMANDS-TAIL-CURSOR")
+            next_cursor = None
+            if cursor_header:
+                try:
+                    next_cursor = int(cursor_header)
+                except ValueError:
+                    next_cursor = None
+            return CommandLogs(content=content, cursor=next_cursor)
+        except Exception as e:
+            logger.error("Failed to get command logs", exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e

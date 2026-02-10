@@ -40,6 +40,7 @@ from opensandbox.models.sandboxes import (
     SandboxInfo,
     SandboxMetrics,
     SandboxRenewResponse,
+    Volume,
 )
 from opensandbox.services import (
     Commands,
@@ -182,7 +183,9 @@ class Sandbox:
         Raises:
             SandboxException: if endpoint cannot be retrieved
         """
-        return await self._sandbox_service.get_sandbox_endpoint(self.id, port)
+        return await self._sandbox_service.get_sandbox_endpoint(
+            self.id, port, self.connection_config.use_server_proxy
+        )
 
     async def get_metrics(self) -> SandboxMetrics:
         """
@@ -360,6 +363,7 @@ class Sandbox:
         network_policy: NetworkPolicy | None = None,
         extensions: dict[str, str] | None = None,
         entrypoint: list[str] | None = None,
+        volumes: list[Volume] | None = None,
         connection_config: ConnectionConfig | None = None,
         health_check: Callable[["Sandbox"], Awaitable[bool]] | None = None,
         health_check_polling_interval: timedelta = timedelta(milliseconds=200),
@@ -379,6 +383,8 @@ class Sandbox:
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
             entrypoint: Command to run as entrypoint
+            volumes: Optional list of volume mounts for persistent storage.
+                Each volume specifies a backend (host path or PVC) and mount configuration.
             connection_config: Connection configuration
             health_check: Custom async health check function
             health_check_polling_interval: Time between health check attempts
@@ -418,11 +424,12 @@ class Sandbox:
                 resource,
                 network_policy,
                 extensions,
+                volumes,
             )
             sandbox_id = response.id
 
             execd_endpoint = await sandbox_service.get_sandbox_endpoint(
-                response.id, DEFAULT_EXECD_PORT
+                response.id, DEFAULT_EXECD_PORT, config.use_server_proxy
             )
 
             sandbox = cls(
@@ -510,7 +517,7 @@ class Sandbox:
         try:
             sandbox_service = factory.create_sandbox_service()
             execd_endpoint = await sandbox_service.get_sandbox_endpoint(
-                sandbox_id, DEFAULT_EXECD_PORT
+                sandbox_id, DEFAULT_EXECD_PORT, config.use_server_proxy
             )
 
             sandbox = cls(
@@ -581,7 +588,7 @@ class Sandbox:
             await sandbox_service.resume_sandbox(sandbox_id)
 
             execd_endpoint = await sandbox_service.get_sandbox_endpoint(
-                sandbox_id, DEFAULT_EXECD_PORT
+                sandbox_id, DEFAULT_EXECD_PORT, config.use_server_proxy
             )
 
             sandbox = cls(

@@ -65,3 +65,41 @@ func TestParsePolicy_EmptyEgressDefaultsDeny(t *testing.T) {
 		t.Fatalf("expected evaluation deny for empty egress, got %s", got)
 	}
 }
+
+func TestParsePolicy_IPAndCIDRSupported(t *testing.T) {
+	raw := `{
+		"defaultAction":"deny",
+		"egress":[
+			{"action":"allow","target":"1.1.1.1"},
+			{"action":"allow","target":"2.2.0.0/16"},
+			{"action":"deny","target":"2001:db8::/32"},
+			{"action":"deny","target":"2001:db8::1"}
+		]
+	}`
+	p, err := ParsePolicy(raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	allowV4, allowV6, denyV4, denyV6 := p.StaticIPSets()
+	if len(allowV4) != 2 || allowV4[0] != "1.1.1.1" || allowV4[1] != "2.2.0.0/16" {
+		t.Fatalf("allowV4 unexpected: %+v", allowV4)
+	}
+	if len(denyV6) != 2 {
+		t.Fatalf("expected 2 denyV6 entries, got %+v", denyV6)
+	}
+	if len(allowV6) != 0 || len(denyV4) != 0 {
+		t.Fatalf("allowV6/denyV4 should be empty, got %v / %v", allowV6, denyV4)
+	}
+}
+
+func TestParsePolicy_InvalidAction(t *testing.T) {
+	if _, err := ParsePolicy(`{"egress":[{"action":"foo","target":"example.com"}]}`); err == nil {
+		t.Fatalf("expected error for invalid action")
+	}
+}
+
+func TestParsePolicy_EmptyTargetError(t *testing.T) {
+	if _, err := ParsePolicy(`{"egress":[{"action":"allow","target":""}]}`); err == nil {
+		t.Fatalf("expected error for empty target")
+	}
+}

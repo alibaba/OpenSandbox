@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/alibaba/opensandbox/egress/pkg/constants"
 )
 
 // dialerWithMark sets SO_MARK so iptables can RETURN marked packets (bypass
@@ -32,7 +34,7 @@ func (p *Proxy) dialerWithMark() *net.Dialer {
 		Control: func(network, address string, c syscall.RawConn) error {
 			var opErr error
 			if err := c.Control(func(fd uintptr) {
-				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, 0x1)
+				opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, constants.MarkValue)
 			}); err != nil {
 				return err
 			}

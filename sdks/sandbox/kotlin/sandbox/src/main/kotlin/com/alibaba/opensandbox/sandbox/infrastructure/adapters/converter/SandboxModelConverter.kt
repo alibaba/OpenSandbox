@@ -26,8 +26,10 @@ import com.alibaba.opensandbox.sandbox.api.models.ListSandboxesResponse
 import com.alibaba.opensandbox.sandbox.api.models.RenewSandboxExpirationRequest
 import com.alibaba.opensandbox.sandbox.api.models.RenewSandboxExpirationResponse
 import com.alibaba.opensandbox.sandbox.api.models.execd.Metrics
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Host
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PVC
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PaginationInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxCreateResponse
@@ -37,13 +39,17 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxMetrics
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
 import java.time.Duration
 import java.time.OffsetDateTime
+import com.alibaba.opensandbox.sandbox.api.models.Host as ApiHost
 import com.alibaba.opensandbox.sandbox.api.models.NetworkPolicy as ApiNetworkPolicy
 import com.alibaba.opensandbox.sandbox.api.models.NetworkRule as ApiNetworkRule
+import com.alibaba.opensandbox.sandbox.api.models.PVC as ApiPVC
 import com.alibaba.opensandbox.sandbox.api.models.PaginationInfo as ApiPaginationInfo
 import com.alibaba.opensandbox.sandbox.api.models.Sandbox as ApiSandbox
 import com.alibaba.opensandbox.sandbox.api.models.SandboxStatus as ApiSandboxStatus
+import com.alibaba.opensandbox.sandbox.api.models.Volume as ApiVolume
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxStatus as DomainSandboxStatus
 
 internal object SandboxModelConverter {
@@ -100,6 +106,34 @@ internal object SandboxModelConverter {
         )
     }
 
+    /**
+     * Converts Domain Host -> API Host
+     */
+    fun Host.toApiHost(): ApiHost {
+        return ApiHost(path = this.path)
+    }
+
+    /**
+     * Converts Domain PVC -> API PVC
+     */
+    fun PVC.toApiPVC(): ApiPVC {
+        return ApiPVC(claimName = this.claimName)
+    }
+
+    /**
+     * Converts Domain Volume -> API Volume
+     */
+    fun Volume.toApiVolume(): ApiVolume {
+        return ApiVolume(
+            name = this.name,
+            mountPath = this.mountPath,
+            readOnly = this.readOnly,
+            host = this.host?.toApiHost(),
+            pvc = this.pvc?.toApiPVC(),
+            subPath = this.subPath,
+        )
+    }
+
     fun toApiCreateSandboxRequest(
         spec: SandboxImageSpec,
         entrypoint: List<String>,
@@ -109,6 +143,7 @@ internal object SandboxModelConverter {
         resource: Map<String, String>,
         networkPolicy: NetworkPolicy?,
         extensions: Map<String, String>,
+        volumes: List<Volume>?,
     ): CreateSandboxRequest {
         return CreateSandboxRequest(
             image = spec.toApiImageSpec(),
@@ -119,6 +154,7 @@ internal object SandboxModelConverter {
             resourceLimits = resource,
             networkPolicy = networkPolicy?.toApiNetworkPolicy(),
             extensions = extensions,
+            volumes = volumes?.map { it.toApiVolume() },
         )
     }
 

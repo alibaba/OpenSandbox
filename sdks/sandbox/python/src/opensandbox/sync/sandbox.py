@@ -38,6 +38,7 @@ from opensandbox.models.sandboxes import (
     SandboxInfo,
     SandboxMetrics,
     SandboxRenewResponse,
+    Volume,
 )
 from opensandbox.sync.adapters.factory import AdapterFactorySync
 from opensandbox.sync.services import (
@@ -188,7 +189,9 @@ class SandboxSync:
         Raises:
             SandboxException: if endpoint cannot be retrieved
         """
-        return self._sandbox_service.get_sandbox_endpoint(self.id, port)
+        return self._sandbox_service.get_sandbox_endpoint(
+            self.id, port, self.connection_config.use_server_proxy
+        )
 
     def get_metrics(self) -> SandboxMetrics:
         """
@@ -345,6 +348,7 @@ class SandboxSync:
         network_policy: NetworkPolicy | None = None,
         extensions: dict[str, str] | None = None,
         entrypoint: list[str] | None = None,
+        volumes: list[Volume] | None = None,
         connection_config: ConnectionConfigSync | None = None,
         health_check: Callable[["SandboxSync"], bool] | None = None,
         health_check_polling_interval: timedelta = timedelta(milliseconds=200),
@@ -364,6 +368,7 @@ class SandboxSync:
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
             entrypoint: Command to run as entrypoint
+            volumes: Optional list of volumes to mount in the sandbox.
             connection_config: Connection configuration
             health_check: Custom sync health check function
             health_check_polling_interval: Time between health check attempts
@@ -405,9 +410,12 @@ class SandboxSync:
                 resource,
                 network_policy,
                 extensions,
+                volumes,
             )
             sandbox_id = response.id
-            execd_endpoint = sandbox_service.get_sandbox_endpoint(response.id, DEFAULT_EXECD_PORT)
+            execd_endpoint = sandbox_service.get_sandbox_endpoint(
+                response.id, DEFAULT_EXECD_PORT, config.use_server_proxy
+            )
 
             sandbox = cls(
                 sandbox_id=response.id,
@@ -484,7 +492,9 @@ class SandboxSync:
 
         try:
             sandbox_service = factory.create_sandbox_service()
-            execd_endpoint = sandbox_service.get_sandbox_endpoint(sandbox_id, DEFAULT_EXECD_PORT)
+            execd_endpoint = sandbox_service.get_sandbox_endpoint(
+                sandbox_id, DEFAULT_EXECD_PORT, config.use_server_proxy
+            )
 
             sandbox = cls(
                 sandbox_id=sandbox_id,
@@ -553,7 +563,9 @@ class SandboxSync:
             sandbox_service = factory.create_sandbox_service()
             sandbox_service.resume_sandbox(sandbox_id)
 
-            execd_endpoint = sandbox_service.get_sandbox_endpoint(sandbox_id, DEFAULT_EXECD_PORT)
+            execd_endpoint = sandbox_service.get_sandbox_endpoint(
+                sandbox_id, DEFAULT_EXECD_PORT, config.use_server_proxy
+            )
 
             sandbox = cls(
                 sandbox_id=sandbox_id,

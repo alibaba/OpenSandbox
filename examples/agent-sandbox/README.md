@@ -11,11 +11,11 @@ executes `echo hello world` via the OpenSandbox Python SDK.
 
 ## Start OpenSandbox server
 
-1. Copy the example config and edit it for agent-sandbox:
+1. Install the server package and fetch the example config for agent-sandbox:
 
 ```shell
-cd server
-cp example.config.toml ~/.sandbox.toml
+uv pip install opensandbox-server
+opensandbox-server init-config ~/.sandbox.toml --example docker
 ```
 
 2. Update `~/.sandbox.toml` with the following sections:
@@ -37,8 +37,7 @@ shutdown_policy = "Delete"
 3. Start the server:
 
 ```shell
-cd server
-uv sync && uv run python -m src.main
+opensandbox-server
 ```
 
 ## Run the example

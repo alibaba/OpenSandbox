@@ -47,6 +47,7 @@ from src.services.helpers import matches_filter
 from src.services.sandbox_service import SandboxService
 from src.services.validators import (
     ensure_entrypoint,
+    ensure_egress_configured,
     ensure_future_expiration,
     ensure_metadata_labels,
 )
@@ -220,6 +221,15 @@ class KubernetesSandboxService(SandboxService):
             },
         )
     
+    def _ensure_network_policy_support(self, request: CreateSandboxRequest) -> None:
+        """
+        Validate that network policy can be honored under the current runtime config.
+        
+        This validates that egress.image is configured when network_policy is provided.
+        """
+        # Common validation: egress.image must be configured
+        ensure_egress_configured(request.network_policy, self.app_config.egress)
+    
     def create_sandbox(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
         """
         Create a new sandbox using Kubernetes Pod.
@@ -238,6 +248,7 @@ class KubernetesSandboxService(SandboxService):
         # Validate request
         ensure_entrypoint(request.entrypoint)
         ensure_metadata_labels(request.metadata)
+        self._ensure_network_policy_support(request)
         
         # Generate sandbox ID
         sandbox_id = self.generate_sandbox_id()
@@ -261,6 +272,11 @@ class KubernetesSandboxService(SandboxService):
             resource_limits = request.resource_limits.root
         
         try:
+            # Get egress image if network policy is provided
+            egress_image = None
+            if request.network_policy:
+                egress_image = self.app_config.egress.image if self.app_config.egress else None
+            
             # Create workload
             workload_info = self.workload_provider.create_workload(
                 sandbox_id=sandbox_id,
@@ -273,6 +289,8 @@ class KubernetesSandboxService(SandboxService):
                 expires_at=expires_at,
                 execd_image=self.execd_image,
                 extensions=request.extensions,
+                network_policy=request.network_policy,
+                egress_image=egress_image,
             )
             
             logger.info(

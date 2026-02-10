@@ -29,9 +29,15 @@ from kubernetes.client import (
     ApiException,
 )
 
-from src.api.schema import ImageSpec
+from src.api.schema import ImageSpec, NetworkPolicy
 from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 from src.services.k8s.client import K8sClient
+from src.services.k8s.egress_helper import (
+    apply_egress_to_spec,
+    build_security_context_for_sandbox_container,
+    build_security_context_from_dict,
+    serialize_security_context_to_dict,
+)
 from src.services.k8s.workload_provider import WorkloadProvider
 
 logger = logging.getLogger(__name__)
@@ -76,6 +82,8 @@ class BatchSandboxProvider(WorkloadProvider):
         expires_at: datetime,
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
+        network_policy: Optional[NetworkPolicy] = None,
+        egress_image: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create a BatchSandbox workload.
@@ -97,6 +105,8 @@ class BatchSandboxProvider(WorkloadProvider):
             execd_image: execd daemon image (not used in pool mode)
             extensions: General extension field for additional configuration.
                 When contains 'poolRef', enables pool-based creation.
+            network_policy: Optional network policy for egress traffic control.
+                When provided, an egress sidecar container will be added to the Pod.
         
         Returns:
             Dict with 'name' and 'uid' of created BatchSandbox
@@ -128,15 +138,31 @@ class BatchSandboxProvider(WorkloadProvider):
             entrypoint=entrypoint,
             env=env,
             resource_limits=resource_limits,
+            has_network_policy=network_policy is not None,
         )
         
-        # Build shared volume for execd
-        volumes = [
-            {
-                "name": "opensandbox-bin",
-                "emptyDir": {}
-            }
-        ]
+        # Build containers list
+        containers = [self._container_to_dict(main_container)]
+        
+        # Build base pod spec
+        pod_spec: Dict[str, Any] = {
+            "initContainers": [self._container_to_dict(init_container)],
+            "containers": containers,
+            "volumes": [
+                {
+                    "name": "opensandbox-bin",
+                    "emptyDir": {}
+                }
+            ],
+        }
+        
+        # Add egress sidecar if network policy is provided
+        apply_egress_to_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=network_policy,
+            egress_image=egress_image,
+        )
         
         # Build runtime-generated BatchSandbox manifest
         # This contains only the essential runtime fields
@@ -152,11 +178,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 "replicas": 1,
                 "expireTime": expires_at.isoformat(),
                 "template": {
-                    "spec": {
-                        "initContainers": [self._container_to_dict(init_container)],
-                        "containers": [self._container_to_dict(main_container)],
-                        "volumes": volumes,
-                    }
+                    "spec": pod_spec,
                 },
             },
         }
@@ -410,6 +432,7 @@ class BatchSandboxProvider(WorkloadProvider):
         entrypoint: List[str],
         env: Dict[str, str],
         resource_limits: Dict[str, str],
+        has_network_policy: bool = False,
     ) -> V1Container:
         """
         Build main container spec with execd support.
@@ -422,6 +445,7 @@ class BatchSandboxProvider(WorkloadProvider):
             entrypoint: Container entrypoint command
             env: Environment variables
             resource_limits: Resource limits
+            has_network_policy: Whether network policy is enabled for this sandbox
             
         Returns:
             V1Container: Main container spec
@@ -442,6 +466,12 @@ class BatchSandboxProvider(WorkloadProvider):
         # Wrap entrypoint with bootstrap script to start execd
         wrapped_command = ["/opt/opensandbox/bin/bootstrap.sh"] + entrypoint
         
+        # Apply security context when network policy is enabled
+        security_context = None
+        if has_network_policy:
+            security_context_dict = build_security_context_for_sandbox_container(True)
+            security_context = build_security_context_from_dict(security_context_dict)
+        
         return V1Container(
             name="sandbox",
             image=image_spec.uri,
@@ -454,6 +484,7 @@ class BatchSandboxProvider(WorkloadProvider):
                     mount_path="/opt/opensandbox/bin"
                 )
             ],
+            security_context=security_context,
         )
     
     def _container_to_dict(self, container: V1Container) -> Dict[str, Any]:
@@ -495,6 +526,11 @@ class BatchSandboxProvider(WorkloadProvider):
                 {"name": vm.name, "mountPath": vm.mount_path}
                 for vm in container.volume_mounts
             ]
+        
+        if container.security_context:
+            security_context_dict = serialize_security_context_to_dict(container.security_context)
+            if security_context_dict:
+                result["securityContext"] = security_context_dict
         
         return result
     

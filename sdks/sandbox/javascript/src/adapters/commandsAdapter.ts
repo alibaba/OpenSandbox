@@ -16,7 +16,13 @@ import type { ExecdClient } from "../openapi/execdClient.js";
 import { throwOnOpenApiFetchError } from "./openapiError.js";
 import { parseJsonEventStream } from "./sse.js";
 import type { paths as ExecdPaths } from "../api/execd.js";
-import type { CommandExecution, RunCommandOpts, ServerStreamEvent } from "../models/execd.js";
+import type {
+  CommandExecution,
+  CommandLogs,
+  CommandStatus,
+  RunCommandOpts,
+  ServerStreamEvent,
+} from "../models/execd.js";
 import type { ExecdCommands } from "../services/execdCommands.js";
 import type { ExecutionHandlers } from "../models/execution.js";
 import { ExecutionEventDispatcher } from "../models/executionEventDispatcher.js";
@@ -29,6 +35,10 @@ function joinUrl(baseUrl: string, pathname: string): string {
 
 type ApiRunCommandRequest =
   ExecdPaths["/command"]["post"]["requestBody"]["content"]["application/json"];
+type ApiCommandStatusOk =
+  ExecdPaths["/command/status/{id}"]["get"]["responses"][200]["content"]["application/json"];
+type ApiCommandLogsOk =
+  ExecdPaths["/command/{id}/logs"]["get"]["responses"][200]["content"]["text/plain"];
 
 function toRunCommandRequest(command: string, opts?: RunCommandOpts): ApiRunCommandRequest {
   return {
@@ -36,6 +46,19 @@ function toRunCommandRequest(command: string, opts?: RunCommandOpts): ApiRunComm
     cwd: opts?.workingDirectory,
     background: !!opts?.background,
   };
+}
+
+function parseOptionalDate(value: unknown, field: string): Date | undefined {
+  if (value == null) return undefined;
+  if (value instanceof Date) return value;
+  if (typeof value !== "string") {
+    throw new Error(`Invalid ${field}: expected ISO string, got ${typeof value}`);
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(`Invalid ${field}: ${value}`);
+  }
+  return parsed;
 }
 
 export interface CommandsAdapterOptions {
@@ -62,6 +85,44 @@ export class CommandsAdapter implements ExecdCommands {
       params: { query: { id: sessionId } },
     });
     throwOnOpenApiFetchError({ error, response }, "Interrupt command failed");
+  }
+
+  async getCommandStatus(commandId: string): Promise<CommandStatus> {
+    const { data, error, response } = await this.client.GET("/command/status/{id}", {
+      params: { path: { id: commandId } },
+    });
+    throwOnOpenApiFetchError({ error, response }, "Get command status failed");
+    const ok = data as ApiCommandStatusOk | undefined;
+    if (!ok || typeof ok !== "object") {
+      throw new Error("Get command status failed: unexpected response shape");
+    }
+    return {
+      id: ok.id,
+      content: ok.content,
+      running: ok.running,
+      exitCode: ok.exit_code ?? null,
+      error: ok.error,
+      startedAt: parseOptionalDate(ok.started_at, "startedAt"),
+      finishedAt: parseOptionalDate(ok.finished_at, "finishedAt") ?? null,
+    };
+  }
+
+  async getBackgroundCommandLogs(commandId: string, cursor?: number): Promise<CommandLogs> {
+    const { data, error, response } = await this.client.GET("/command/{id}/logs", {
+      params: { path: { id: commandId }, query: cursor == null ? {} : { cursor } },
+      parseAs: "text",
+    });
+    throwOnOpenApiFetchError({ error, response }, "Get command logs failed");
+    const ok = data as ApiCommandLogsOk | undefined;
+    if (typeof ok !== "string") {
+      throw new Error("Get command logs failed: unexpected response shape");
+    }
+    const cursorHeader = response.headers.get("EXECD-COMMANDS-TAIL-CURSOR");
+    const parsedCursor = (cursorHeader != null && cursorHeader !== "") ? Number(cursorHeader) : undefined;
+    return {
+      content: ok,
+      cursor: Number.isFinite(parsedCursor ?? NaN) ? parsedCursor : undefined,
+    };
   }
 
   async *runStream(

@@ -23,9 +23,17 @@ cd ../..
 
 # prepare required images from registry
 docker pull opensandbox/code-interpreter:${TAG}
+echo "-------- Eval test images --------"
+docker images
+
+# prepare hostpath volume for e2e test
+mkdir -p /tmp/opensandbox-e2e/host-volume-test
+mkdir -p /tmp/opensandbox-e2e/logs
+echo "opensandbox-e2e-marker" > /tmp/opensandbox-e2e/host-volume-test/marker.txt
+chmod -R 755 /tmp/opensandbox-e2e
+echo "-------- JAVASCRIPT E2E test logs for execd --------" > /tmp/opensandbox-e2e/logs/execd.log
 
 # setup server
-echo "-------- Eval test images --------"
 cd server
 uv sync && uv run python -m src.main > server.log 2>&1 &
 cd ..

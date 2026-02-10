@@ -16,6 +16,8 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 
@@ -73,4 +75,33 @@ type ServerStreamEvent struct {
 func (s ServerStreamEvent) ToJSON() []byte {
 	bytes, _ := json.Marshal(s)
 	return bytes
+}
+
+// Summary renders a lightweight, log-friendly string without JSON.
+func (s ServerStreamEvent) Summary() string {
+	parts := []string{fmt.Sprintf("type=%s", s.Type)}
+	if s.Text != "" {
+		parts = append(parts, fmt.Sprintf("text=%s", truncateString(s.Text, 100)))
+	}
+	if s.ExecutionTime > 0 {
+		parts = append(parts, fmt.Sprintf("elapsed_ms=%d", s.ExecutionTime))
+	}
+	if len(s.Results) > 0 {
+		parts = append(parts, fmt.Sprintf("results=%d", len(s.Results)))
+	}
+	if s.Error != nil {
+		errLabel := s.Error.EName
+		if errLabel == "" {
+			errLabel = "error"
+		}
+		parts = append(parts, fmt.Sprintf("error=%s: %s", errLabel, truncateString(s.Error.EValue, 80)))
+	}
+	return strings.Join(parts, " ")
+}
+
+func truncateString(value string, maxCount int) string {
+	if maxCount <= 0 || len(value) <= maxCount {
+		return value
+	}
+	return value[:maxCount] + "..."
 }

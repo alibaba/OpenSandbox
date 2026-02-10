@@ -22,6 +22,7 @@ import com.alibaba.opensandbox.codeinterpreter.CodeInterpreter;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.CodeContext;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.RunCodeRequest;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.SupportedLanguage;
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.*;
 import com.alibaba.opensandbox.sandbox.Sandbox;
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.*;
 import java.time.Duration;
@@ -81,6 +82,13 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
 
     @BeforeAll
     void setup() {
+        Volume volume =
+                Volume.builder()
+                        .name("execd-logs")
+                        .host(Host.of("/tmp/opensandbox-e2e/logs"))
+                        .mountPath("/tmp/opensandbox-e2e/logs")
+                        .readOnly(false)
+                        .build();
         sandbox =
                 Sandbox.builder()
                         .connectionConfig(sharedConnectionConfig)
@@ -95,7 +103,9 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                         .env("JAVA_VERSION", "21")
                         .env("NODE_VERSION", "22")
                         .env("PYTHON_VERSION", "3.12")
+                        .env("EXECD_LOG_FILE", "/tmp/opensandbox-e2e/logs/execd.log")
                         .healthCheckPollingInterval(Duration.ofMillis(500))
+                        .volume(volume)
                         .build();
         codeInterpreter = CodeInterpreter.builder().fromSandbox(sandbox).build();
         assertNotNull(codeInterpreter);

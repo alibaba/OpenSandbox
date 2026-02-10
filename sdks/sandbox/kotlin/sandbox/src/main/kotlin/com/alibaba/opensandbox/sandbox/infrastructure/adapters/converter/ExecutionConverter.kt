@@ -16,7 +16,9 @@
 
 package com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter
 
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.CommandStatus
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommandRequest
+import com.alibaba.opensandbox.sandbox.api.models.execd.CommandStatusResponse as ApiCommandStatusResponse
 import com.alibaba.opensandbox.sandbox.api.models.execd.RunCommandRequest as ApiRunCommandRequest
 
 object ExecutionConverter {
@@ -25,6 +27,18 @@ object ExecutionConverter {
             command = command,
             background = background,
             cwd = workingDirectory,
+        )
+    }
+
+    fun ApiCommandStatusResponse.toCommandStatus(): CommandStatus {
+        return CommandStatus(
+            id = id,
+            content = content,
+            running = running,
+            exitCode = exitCode,
+            error = error,
+            startedAt = startedAt,
+            finishedAt = finishedAt,
         )
     }
 }

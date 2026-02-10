@@ -47,6 +47,7 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
     SandboxInfo,
     SandboxRenewResponse,
+    Volume,
 )
 from opensandbox.services.sandbox import Sandboxes
 
@@ -117,6 +118,7 @@ class SandboxesAdapter(Sandboxes):
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
+        volumes: list[Volume] | None,
     ) -> SandboxCreateResponse:
         """Create a new sandbox instance with the specified configuration."""
         logger.info(f"Creating sandbox with image: {spec.image}")
@@ -133,6 +135,7 @@ class SandboxesAdapter(Sandboxes):
                 resource=resource,
                 network_policy=network_policy,
                 extensions=extensions,
+                volumes=volumes,
             )
 
             client = await self._get_client()
@@ -215,7 +218,7 @@ class SandboxesAdapter(Sandboxes):
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
     async def get_sandbox_endpoint(
-        self, sandbox_id: str, port: int
+        self, sandbox_id: str, port: int, use_server_proxy: bool = False
     ) -> SandboxEndpoint:
         """Get network endpoint information for a sandbox service."""
         logger.debug(f"Retrieving sandbox endpoint: {sandbox_id}, port {port}")
@@ -231,6 +234,7 @@ class SandboxesAdapter(Sandboxes):
                     client=client,
                     sandbox_id=sandbox_id,
                     port=port,
+                    use_server_proxy=use_server_proxy,
                 )
             )
 

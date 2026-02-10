@@ -42,7 +42,7 @@ from opensandbox.models.filesystem import (
     SetPermissionEntry,
     WriteEntry,
 )
-from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule, SandboxImageSpec
+from opensandbox.models.sandboxes import Host, NetworkPolicy, NetworkRule, SandboxImageSpec, Volume
 
 from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 
@@ -279,6 +279,131 @@ class TestSandboxE2ESync:
                 pass
 
     @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
+    def test_01b_host_volume_mount(self) -> None:
+        """Test creating a sandbox with a host volume mount (sync)."""
+        logger.info("=" * 80)
+        logger.info("TEST 1b: Creating sandbox with host volume mount (sync)")
+        logger.info("=" * 80)
+
+        host_dir = "/tmp/opensandbox-e2e/host-volume-test"
+        container_mount_path = "/mnt/host-data"
+
+        cfg = create_connection_config_sync()
+        sandbox = SandboxSync.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            volumes=[
+                Volume(
+                    name="test-host-vol",
+                    host=Host(path=host_dir),
+                    mountPath=container_mount_path,
+                    readOnly=False,
+                ),
+            ],
+        )
+        try:
+            logger.info("✓ Sandbox with volume created: %s", sandbox.id)
+
+            # Step 1: Verify the host marker file is visible inside the sandbox
+            result = sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
+            assert result.error is None, f"Failed to read marker file: {result.error}"
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "opensandbox-e2e-marker"
+            logger.info("✓ Host marker file read successfully inside sandbox")
+
+            # Step 2: Write a file from inside the sandbox to the mounted path (read-write)
+            result = sandbox.commands.run(
+                f"echo 'written-from-sandbox' > {container_mount_path}/sandbox-output.txt"
+            )
+            assert result.error is None, f"Failed to write file: {result.error}"
+
+            # Step 3: Verify the written file is readable
+            result = sandbox.commands.run(f"cat {container_mount_path}/sandbox-output.txt")
+            assert result.error is None
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "written-from-sandbox"
+            logger.info("✓ File written and verified inside sandbox")
+
+            # Step 4: Verify the mount path is a proper directory
+            result = sandbox.commands.run(f"test -d {container_mount_path} && echo OK")
+            assert result.error is None
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "OK"
+            logger.info("✓ Mount path is a valid directory")
+
+        finally:
+            try:
+                sandbox.kill()
+            except Exception:
+                pass
+            sandbox.close()
+            try:
+                cfg.transport.close()
+            except Exception:
+                pass
+
+        logger.info("TEST 1b PASSED: Host volume mount test completed successfully")
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
+    def test_01c_host_volume_mount_readonly(self) -> None:
+        """Test creating a sandbox with a read-only host volume mount (sync)."""
+        logger.info("=" * 80)
+        logger.info("TEST 1c: Creating sandbox with read-only host volume mount (sync)")
+        logger.info("=" * 80)
+
+        host_dir = "/tmp/opensandbox-e2e/host-volume-test"
+        container_mount_path = "/mnt/host-data-ro"
+
+        cfg = create_connection_config_sync()
+        sandbox = SandboxSync.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            volumes=[
+                Volume(
+                    name="test-host-vol-ro",
+                    host=Host(path=host_dir),
+                    mountPath=container_mount_path,
+                    readOnly=True,
+                ),
+            ],
+        )
+        try:
+            logger.info("✓ Sandbox with read-only volume created: %s", sandbox.id)
+
+            # Step 1: Verify the host marker file is readable
+            result = sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
+            assert result.error is None, f"Failed to read marker file: {result.error}"
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "opensandbox-e2e-marker"
+            logger.info("✓ Host marker file read successfully in read-only mount")
+
+            # Step 2: Verify writing is denied on read-only mount
+            result = sandbox.commands.run(
+                f"touch {container_mount_path}/should-fail.txt"
+            )
+            assert result.error is not None, "Write should fail on read-only mount"
+            logger.info("✓ Write correctly denied on read-only mount")
+
+        finally:
+            try:
+                sandbox.kill()
+            except Exception:
+                pass
+            sandbox.close()
+            try:
+                cfg.transport.close()
+            except Exception:
+                pass
+
+        logger.info("TEST 1c PASSED: Read-only host volume mount test completed successfully")
+
+    @pytest.mark.timeout(120)
     @pytest.mark.order(2)
     def test_02_basic_command_execution(self) -> None:
         """Test basic command execution."""
@@ -405,6 +530,38 @@ class TestSandboxE2ESync:
 
     @pytest.mark.timeout(120)
     @pytest.mark.order(3)
+    def test_02a_command_status_and_logs(self) -> None:
+        """Test command status + background logs (sync)."""
+        TestSandboxE2ESync._ensure_sandbox_created()
+        sandbox = TestSandboxE2ESync.sandbox
+        assert sandbox is not None
+
+        exec_result = sandbox.commands.run(
+            "sh -c 'echo log-line-1; echo log-line-2; sleep 2'",
+            opts=RunCommandOpts(background=True),
+        )
+        assert exec_result.id is not None
+        command_id = exec_result.id
+
+        status = sandbox.commands.get_command_status(command_id)
+        assert status.id == command_id
+        assert isinstance(status.running, bool)
+
+        logs_text = ""
+        cursor = None
+        for _ in range(20):
+            logs = sandbox.commands.get_background_command_logs(command_id, cursor=cursor)
+            logs_text += logs.content
+            cursor = logs.cursor if logs.cursor is not None else cursor
+            if "log-line-2" in logs_text:
+                break
+            time.sleep(1.0)
+
+        assert "log-line-1" in logs_text
+        assert "log-line-2" in logs_text
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(4)
     def test_03_basic_filesystem_operations(self) -> None:
         """Test basic filesystem operations."""
         TestSandboxE2ESync._ensure_sandbox_created()
@@ -590,7 +747,7 @@ class TestSandboxE2ESync:
         assert verify_dirs_deleted.logs.stdout[0].text == "OK"
 
     @pytest.mark.timeout(360)
-    @pytest.mark.order(4)
+    @pytest.mark.order(5)
     def test_04_interrupt_command(self) -> None:
         """Test interrupting a long-running command."""
         TestSandboxE2ESync._ensure_sandbox_created()
@@ -655,7 +812,7 @@ class TestSandboxE2ESync:
             _assert_recent_timestamp_ms(execution.error.timestamp, tolerance_ms=180_000)
 
     @pytest.mark.timeout(600)
-    @pytest.mark.order(5)
+    @pytest.mark.order(6)
     def test_05_sandbox_pause(self) -> None:
         """Test sandbox pause operation."""
         TestSandboxE2ESync._ensure_sandbox_created()
@@ -697,7 +854,7 @@ class TestSandboxE2ESync:
         assert healthy is False, "Sandbox should be unhealthy after pause"
 
     @pytest.mark.timeout(120)
-    @pytest.mark.order(6)
+    @pytest.mark.order(7)
     def test_06_sandbox_resume(self) -> None:
         """Test sandbox resume operation."""
         TestSandboxE2ESync._ensure_sandbox_created()

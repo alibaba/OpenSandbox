@@ -20,11 +20,14 @@ ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 
-COPY go.mod go.sum ./
+COPY kubernetes ./kubernetes
+COPY components/ingress/go.mod components/ingress/go.sum ./components/ingress/
+
+WORKDIR /build/components/ingress
 
 RUN go mod download
 
-COPY . .
+COPY components/ingress/. .
 
 RUN CGO_ENABLED=0 go build \
     -ldflags "-X 'github.com/alibaba/opensandbox/ingress/version.Version=${VERSION}' \

@@ -28,9 +28,15 @@ from kubernetes.client import (
     ApiException,
 )
 
-from src.api.schema import ImageSpec
+from src.api.schema import ImageSpec, NetworkPolicy
 from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from src.services.k8s.client import K8sClient
+from src.services.k8s.egress_helper import (
+    apply_egress_to_spec,
+    build_security_context_for_sandbox_container,
+    build_security_context_from_dict,
+    serialize_security_context_to_dict,
+)
 from src.services.k8s.workload_provider import WorkloadProvider
 
 logger = logging.getLogger(__name__)
@@ -72,6 +78,8 @@ class AgentSandboxProvider(WorkloadProvider):
         expires_at: datetime,
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
+        network_policy: Optional[NetworkPolicy] = None,
+        egress_image: Optional[str] = None,
     ) -> Dict[str, Any]:
         pod_spec = self._build_pod_spec(
             image_spec=image_spec,
@@ -79,6 +87,8 @@ class AgentSandboxProvider(WorkloadProvider):
             env=env,
             resource_limits=resource_limits,
             execd_image=execd_image,
+            network_policy=network_policy,
+            egress_image=egress_image,
         )
 
         if self.service_account:
@@ -127,6 +137,8 @@ class AgentSandboxProvider(WorkloadProvider):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         execd_image: str,
+        network_policy: Optional[NetworkPolicy] = None,
+        egress_image: Optional[str] = None,
     ) -> Dict[str, Any]:
         init_container = self._build_execd_init_container(execd_image)
         main_container = self._build_main_container(
@@ -135,10 +147,15 @@ class AgentSandboxProvider(WorkloadProvider):
             env=env,
             resource_limits=resource_limits,
             include_execd_volume=True,
+            has_network_policy=network_policy is not None,
         )
-        return {
+        
+        containers = [self._container_to_dict(main_container)]
+        
+        # Build base pod spec
+        pod_spec: Dict[str, Any] = {
             "initContainers": [self._container_to_dict(init_container)],
-            "containers": [self._container_to_dict(main_container)],
+            "containers": containers,
             "volumes": [
                 {
                     "name": "opensandbox-bin",
@@ -146,6 +163,16 @@ class AgentSandboxProvider(WorkloadProvider):
                 }
             ],
         }
+        
+        # Add egress sidecar if network policy is provided
+        apply_egress_to_spec(
+            pod_spec=pod_spec,
+            containers=containers,
+            network_policy=network_policy,
+            egress_image=egress_image,
+        )
+        
+        return pod_spec
 
     def _build_execd_init_container(self, execd_image: str) -> V1Container:
         script = (
@@ -175,6 +202,7 @@ class AgentSandboxProvider(WorkloadProvider):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         include_execd_volume: bool,
+        has_network_policy: bool = False,
     ) -> V1Container:
         env_vars = [V1EnvVar(name=k, value=v) for k, v in env.items()]
         env_vars.append(V1EnvVar(name="EXECD", value="/opt/opensandbox/bin/execd"))
@@ -197,6 +225,12 @@ class AgentSandboxProvider(WorkloadProvider):
                 )
             ]
 
+        # Apply security context when network policy is enabled
+        security_context = None
+        if has_network_policy:
+            security_context_dict = build_security_context_for_sandbox_container(True)
+            security_context = build_security_context_from_dict(security_context_dict)
+
         return V1Container(
             name="sandbox",
             image=image_spec.uri,
@@ -204,6 +238,7 @@ class AgentSandboxProvider(WorkloadProvider):
             env=env_vars if env_vars else None,
             resources=resources,
             volume_mounts=volume_mounts,
+            security_context=security_context,
         )
 
     def _container_to_dict(self, container: V1Container) -> Dict[str, Any]:
@@ -229,6 +264,10 @@ class AgentSandboxProvider(WorkloadProvider):
                 {"name": vm.name, "mountPath": vm.mount_path}
                 for vm in container.volume_mounts
             ]
+        if container.security_context:
+            security_context_dict = serialize_security_context_to_dict(container.security_context)
+            if security_context_dict:
+                result["securityContext"] = security_context_dict
 
         return result
 

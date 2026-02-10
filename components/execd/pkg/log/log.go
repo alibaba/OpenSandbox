@@ -33,6 +33,11 @@ var (
 func init() {
 	cfg := zap.NewProductionConfig()
 	cfg.Level = atomicLevel
+	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	cfg.EncoderConfig.CallerKey = ""
+	cfg.DisableCaller = true
+	cfg.DisableStacktrace = true
+	cfg.EncoderConfig.StacktraceKey = ""
 
 	logFile := os.Getenv(logFileEnvKey)
 	if logFile != "" {

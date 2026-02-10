@@ -28,10 +28,9 @@ docker pull opensandbox/chrome:latest
 Start the OpenSandbox server and tail stdout from the terminal:
 
 ```shell
-git clone git@github.com:alibaba/OpenSandbox.git
-cd OpenSandbox/server
-cp example.config.toml ~/.sandbox.toml
-uv sync && uv run python -m src.main
+uv pip install opensandbox-server
+opensandbox-server init-config ~/.sandbox.toml --example docker
+opensandbox-server
 ```
 
 ## Create and access a Chrome sandbox

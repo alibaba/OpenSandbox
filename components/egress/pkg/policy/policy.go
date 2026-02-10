@@ -16,12 +16,23 @@ package policy
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/netip"
 	"strings"
 )
 
 const (
 	ActionAllow = "allow"
 	ActionDeny  = "deny"
+)
+
+type targetKind int
+
+const (
+	targetUnknown targetKind = iota
+	targetDomain
+	targetIP
+	targetCIDR
 )
 
 // DefaultDenyPolicy returns a new policy that denies all traffic.
@@ -39,6 +50,10 @@ type NetworkPolicy struct {
 type EgressRule struct {
 	Action string `json:"action"`
 	Target string `json:"target"`
+
+	targetKind targetKind
+	ip         netip.Addr
+	prefix     netip.Prefix
 }
 
 // ParsePolicy parses JSON from env/config into a NetworkPolicy.
@@ -53,6 +68,9 @@ func ParsePolicy(raw string) (*NetworkPolicy, error) {
 	if err := json.Unmarshal([]byte(trimmed), &p); err != nil {
 		return nil, err
 	}
+	if err := normalizePolicy(&p); err != nil {
+		return nil, err
+	}
 	return ensureDefaults(&p), nil
 }
 
@@ -63,6 +81,9 @@ func (p *NetworkPolicy) Evaluate(domain string) string {
 	}
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
 	for _, r := range p.Egress {
+		if r.targetKind != targetDomain {
+			continue
+		}
 		if r.matchesDomain(domain) {
 			if r.Action == "" {
 				return ActionDeny
@@ -85,6 +106,88 @@ func ensureDefaults(p *NetworkPolicy) *NetworkPolicy {
 		p.DefaultAction = ActionDeny
 	}
 	return p
+}
+
+func normalizePolicy(p *NetworkPolicy) error {
+	p.DefaultAction = strings.ToLower(strings.TrimSpace(p.DefaultAction))
+	if p.DefaultAction == "" {
+		p.DefaultAction = ActionDeny
+	}
+
+	for i := range p.Egress {
+		r := &p.Egress[i]
+		r.Action = strings.ToLower(strings.TrimSpace(r.Action))
+		if r.Action == "" {
+			r.Action = ActionDeny
+		}
+		if r.Action != ActionAllow && r.Action != ActionDeny {
+			return fmt.Errorf("unsupported action %q", r.Action)
+		}
+
+		r.Target = strings.TrimSpace(r.Target)
+		if r.Target == "" {
+			return fmt.Errorf("egress target cannot be empty")
+		}
+		if ip, err := netip.ParseAddr(r.Target); err == nil {
+			r.targetKind = targetIP
+			r.ip = ip
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(r.Target); err == nil {
+			r.targetKind = targetCIDR
+			r.prefix = prefix
+			continue
+		}
+		r.targetKind = targetDomain
+	}
+	return nil
+}
+
+// StaticIPSets splits static IP/CIDR rules into allow/deny IPv4/IPv6 buckets.
+// Empty or nil policy returns empty slices.
+func (p *NetworkPolicy) StaticIPSets() (allowV4, allowV6, denyV4, denyV6 []string) {
+	if p == nil {
+		return
+	}
+	for _, r := range p.Egress {
+		switch r.targetKind {
+		case targetIP:
+			addr := r.ip
+			target := addr.String()
+			if r.Action == ActionAllow {
+				if addr.Is4() {
+					allowV4 = append(allowV4, target)
+				} else if addr.Is6() {
+					allowV6 = append(allowV6, target)
+				}
+			} else {
+				if addr.Is4() {
+					denyV4 = append(denyV4, target)
+				} else if addr.Is6() {
+					denyV6 = append(denyV6, target)
+				}
+			}
+		case targetCIDR:
+			pfx := r.prefix
+			target := pfx.String()
+			if r.Action == ActionAllow {
+				if pfx.Addr().Is4() {
+					allowV4 = append(allowV4, target)
+				} else if pfx.Addr().Is6() {
+					allowV6 = append(allowV6, target)
+				}
+			} else {
+				if pfx.Addr().Is4() {
+					denyV4 = append(denyV4, target)
+				} else if pfx.Addr().Is6() {
+					denyV6 = append(denyV6, target)
+				}
+			}
+		default:
+			continue
+		}
+	}
+	return
 }
 
 func (r *EgressRule) matchesDomain(domain string) bool {

@@ -13,7 +13,13 @@
 // limitations under the License.
 
 import type { ExecutionHandlers } from "../models/execution.js";
-import type { CommandExecution, RunCommandOpts, ServerStreamEvent } from "../models/execd.js";
+import type {
+  CommandExecution,
+  CommandLogs,
+  CommandStatus,
+  RunCommandOpts,
+  ServerStreamEvent,
+} from "../models/execd.js";
 
 export interface ExecdCommands {
   /**
@@ -32,4 +38,14 @@ export interface ExecdCommands {
    * Note: Execd spec uses `DELETE /command?id=<sessionId>`.
    */
   interrupt(sessionId: string): Promise<void>;
+
+  /**
+   * Get the current running status for a command id.
+   */
+  getCommandStatus(commandId: string): Promise<CommandStatus>;
+
+  /**
+   * Get background command logs (non-streamed).
+   */
+  getBackgroundCommandLogs(commandId: string, cursor?: number): Promise<CommandLogs>;
 }

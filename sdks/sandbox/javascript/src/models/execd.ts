@@ -66,6 +66,21 @@ export interface RunCommandOpts {
   background?: boolean;
 }
 
+export interface CommandStatus {
+  id?: string;
+  content?: string;
+  running?: boolean;
+  exitCode?: number | null;
+  error?: string;
+  startedAt?: Date;
+  finishedAt?: Date | null;
+}
+
+export interface CommandLogs {
+  content: string;
+  cursor?: number;
+}
+
 export type CommandExecution = Execution;
 
 export interface Metrics extends Record<string, unknown> {

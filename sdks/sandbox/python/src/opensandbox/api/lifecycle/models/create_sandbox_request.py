@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from ..models.image_spec import ImageSpec
     from ..models.network_policy import NetworkPolicy
     from ..models.resource_limits import ResourceLimits
+    from ..models.volume import Volume
 
 
 T = TypeVar("T", bound="CreateSandboxRequest")
@@ -80,6 +81,10 @@ class CreateSandboxRequest:
             network_policy (NetworkPolicy | Unset): Egress network policy matching the sidecar `/policy` request body.
                 If `defaultAction` is omitted, the sidecar defaults to "deny"; passing an empty
                 object or null results in allow-all behavior at startup.
+            volumes (list[Volume] | Unset): Storage mounts for the sandbox. Each volume entry specifies a named backend-
+                specific
+                storage source and common mount settings. Exactly one backend type must be specified
+                per volume entry.
             extensions (CreateSandboxRequestExtensions | Unset): Opaque container for provider-specific or transient
                 parameters not supported by the core API.
 
@@ -98,6 +103,7 @@ class CreateSandboxRequest:
     env: CreateSandboxRequestEnv | Unset = UNSET
     metadata: CreateSandboxRequestMetadata | Unset = UNSET
     network_policy: NetworkPolicy | Unset = UNSET
+    volumes: list[Volume] | Unset = UNSET
     extensions: CreateSandboxRequestExtensions | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -122,6 +128,13 @@ class CreateSandboxRequest:
         if not isinstance(self.network_policy, Unset):
             network_policy = self.network_policy.to_dict()
 
+        volumes: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.volumes, Unset):
+            volumes = []
+            for volumes_item_data in self.volumes:
+                volumes_item = volumes_item_data.to_dict()
+                volumes.append(volumes_item)
+
         extensions: dict[str, Any] | Unset = UNSET
         if not isinstance(self.extensions, Unset):
             extensions = self.extensions.to_dict()
@@ -142,6 +155,8 @@ class CreateSandboxRequest:
             field_dict["metadata"] = metadata
         if network_policy is not UNSET:
             field_dict["networkPolicy"] = network_policy
+        if volumes is not UNSET:
+            field_dict["volumes"] = volumes
         if extensions is not UNSET:
             field_dict["extensions"] = extensions
 
@@ -155,6 +170,7 @@ class CreateSandboxRequest:
         from ..models.image_spec import ImageSpec
         from ..models.network_policy import NetworkPolicy
         from ..models.resource_limits import ResourceLimits
+        from ..models.volume import Volume
 
         d = dict(src_dict)
         image = ImageSpec.from_dict(d.pop("image"))
@@ -186,6 +202,15 @@ class CreateSandboxRequest:
         else:
             network_policy = NetworkPolicy.from_dict(_network_policy)
 
+        _volumes = d.pop("volumes", UNSET)
+        volumes: list[Volume] | Unset = UNSET
+        if _volumes is not UNSET:
+            volumes = []
+            for volumes_item_data in _volumes:
+                volumes_item = Volume.from_dict(volumes_item_data)
+
+                volumes.append(volumes_item)
+
         _extensions = d.pop("extensions", UNSET)
         extensions: CreateSandboxRequestExtensions | Unset
         if isinstance(_extensions, Unset):
@@ -201,6 +226,7 @@ class CreateSandboxRequest:
             env=env,
             metadata=metadata,
             network_policy=network_policy,
+            volumes=volumes,
             extensions=extensions,
         )
 

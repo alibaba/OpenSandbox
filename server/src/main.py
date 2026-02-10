@@ -21,8 +21,10 @@ and configuration for the sandbox lifecycle management service.
 
 import copy
 import logging.config
+from contextlib import asynccontextmanager
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -63,6 +65,14 @@ logging.getLogger().setLevel(
 from src.api.lifecycle import router  # noqa: E402
 from src.middleware.auth import AuthMiddleware  # noqa: E402
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.http_client = httpx.AsyncClient(timeout=180.0)
+    yield
+    await app.state.http_client.aclose()
+
+
 # Initialize FastAPI application
 app = FastAPI(
     title="OpenSandbox Lifecycle API",
@@ -71,6 +81,7 @@ app = FastAPI(
                 "executed, paused, resumed, and finally disposed.",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # Add CORS middleware

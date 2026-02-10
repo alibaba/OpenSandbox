@@ -22,7 +22,7 @@ Models for sandbox creation, configuration, status, and lifecycle management.
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class SandboxImageAuth(BaseModel):
@@ -130,6 +130,138 @@ class NetworkPolicy(BaseModel):
     )
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+# ============================================================================
+# Volume Models
+# ============================================================================
+
+
+class Host(BaseModel):
+    """
+    Host path bind mount backend.
+
+    Maps a directory on the host filesystem into the container.
+    Only available when the runtime supports host mounts.
+    """
+
+    path: str = Field(
+        description="Absolute path on the host filesystem to mount."
+    )
+
+    @field_validator("path")
+    @classmethod
+    def path_must_be_absolute(cls, v: str) -> str:
+        if not v.startswith("/"):
+            raise ValueError("Host path must be an absolute path starting with '/'")
+        return v
+
+
+class PVC(BaseModel):
+    """
+    Kubernetes PersistentVolumeClaim mount backend.
+
+    References an existing PVC in the same namespace as the sandbox pod.
+    Only available in Kubernetes runtime.
+    """
+
+    claim_name: str = Field(
+        description="Name of the PersistentVolumeClaim in the same namespace.",
+        alias="claimName",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("claim_name")
+    @classmethod
+    def claim_name_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("PVC claim name cannot be blank")
+        return v
+
+
+class Volume(BaseModel):
+    """
+    Storage mount definition for a sandbox.
+
+    Each volume entry contains:
+    - A unique name identifier
+    - Exactly one backend (host, pvc) with backend-specific fields
+    - Common mount settings (mount_path, read_only, sub_path)
+
+    Usage:
+        # Host path mount (read-write by default)
+        volume = Volume(
+            name="workdir",
+            host=Host(path="/data/opensandbox"),
+            mount_path="/mnt/work",
+        )
+
+        # PVC mount (read-only)
+        volume = Volume(
+            name="models",
+            pvc=PVC(claim_name="shared-models-pvc"),
+            mount_path="/mnt/models",
+            read_only=True,
+        )
+    """
+
+    name: str = Field(
+        description="Unique identifier for the volume within the sandbox."
+    )
+    host: Host | None = Field(
+        default=None,
+        description="Host path bind mount backend.",
+    )
+    pvc: PVC | None = Field(
+        default=None,
+        description="Kubernetes PersistentVolumeClaim mount backend.",
+    )
+    mount_path: str = Field(
+        description="Absolute path inside the container where the volume is mounted.",
+        alias="mountPath",
+    )
+    read_only: bool = Field(
+        default=False,
+        description="If true, the volume is mounted as read-only. Defaults to false (read-write).",
+        alias="readOnly",
+    )
+    sub_path: str | None = Field(
+        default=None,
+        description="Optional subdirectory under the backend path to mount.",
+        alias="subPath",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Volume name cannot be blank")
+        return v
+
+    @field_validator("mount_path")
+    @classmethod
+    def mount_path_must_be_absolute(cls, v: str) -> str:
+        if not v.startswith("/"):
+            raise ValueError("Mount path must be an absolute path starting with '/'")
+        return v
+
+    @model_validator(mode="after")
+    def validate_exactly_one_backend(self) -> "Volume":
+        """Ensure exactly one backend (host or pvc) is specified."""
+        backends = [self.host, self.pvc]
+        specified = [b for b in backends if b is not None]
+        if len(specified) == 0:
+            raise ValueError(
+                "Exactly one backend (host, pvc) must be specified, but none was provided."
+            )
+        if len(specified) > 1:
+            raise ValueError(
+                "Exactly one backend (host, pvc) must be specified, but multiple were provided."
+            )
+        return self
 
 
 class SandboxStatus(BaseModel):

@@ -33,7 +33,19 @@ api_key = ""
 # -----------------------------------------------------------------
 type = "docker"
 execd_image = "opensandbox/execd:v1.0.5"
-egress_image = "opensandbox/egress:v1.0.0"
+
+[egress]
+# Egress configuration
+# -----------------------------------------------------------------
+image = "opensandbox/egress:v1.0.0"
+
+[storage]
+# Volume and storage configuration
+# -----------------------------------------------------------------
+# Allowlist of host path prefixes permitted for bind mounts.
+# If empty, all host paths are allowed (not recommended for production).
+# Example: allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
+allowed_host_paths = []
 
 [docker]
 # Docker-specific knobs

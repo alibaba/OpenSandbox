@@ -109,6 +109,7 @@ async def test_create_sandbox_success(monkeypatch: pytest.MonkeyPatch) -> None:
             egress=[NetworkRule(action="allow", target="pypi.org")],
         ),
         extensions={"storage.id": "abc123", "debug": "true"},
+        volumes=None,
     )
     assert isinstance(out.id, str)
     assert "image" in called["body"].to_dict()
@@ -138,7 +139,8 @@ async def test_create_sandbox_empty_response_raises(monkeypatch: pytest.MonkeyPa
             timeout=timedelta(seconds=1),
             resource={"cpu": "100m"},
             extensions={"debug": "true"},
-            network_policy=NetworkPolicy()
+            network_policy=NetworkPolicy(),
+            volumes=None,
         )
 
 

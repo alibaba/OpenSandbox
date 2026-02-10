@@ -33,15 +33,18 @@ export type {
   CreateSandboxRequest,
   CreateSandboxResponse,
   Endpoint,
+  Host,
   ListSandboxesParams,
   ListSandboxesResponse,
   NetworkPolicy,
   NetworkRule,
   NetworkRuleAction,
+  PVC,
   RenewSandboxExpirationRequest,
   RenewSandboxExpirationResponse,
   SandboxId,
   SandboxInfo,
+  Volume,
 } from "./models/sandboxes.js";
 
 export type { Sandboxes } from "./services/sandboxes.js";
@@ -63,6 +66,8 @@ export type {
 
 export type {
   CommandExecution,
+  CommandLogs,
+  CommandStatus,
   RunCommandOpts,
   RunCommandRequest,
   ServerStreamEvent,

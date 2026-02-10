@@ -18,9 +18,9 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
-)
 
-const bypassMark = "0x1"
+	"github.com/alibaba/opensandbox/egress/pkg/constants"
+)
 
 // SetupRedirect installs OUTPUT nat redirect for DNS (udp/tcp 53 -> port).
 // Packets carrying mark bypassMark will RETURN (used by the proxy's own upstream
@@ -30,14 +30,14 @@ func SetupRedirect(port int) error {
 
 	rules := [][]string{
 		// Bypass packets marked by the proxy itself (see dnsproxy dialer).
-		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", bypassMark, "-j", "RETURN"},
-		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", bypassMark, "-j", "RETURN"},
+		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
+		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
 		// Redirect all other DNS traffic to local proxy port.
 		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
 		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
 		// IPv6 equivalents (ip6tables)
-		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", bypassMark, "-j", "RETURN"},
-		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", bypassMark, "-j", "RETURN"},
+		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
+		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
 		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
 		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
 	}

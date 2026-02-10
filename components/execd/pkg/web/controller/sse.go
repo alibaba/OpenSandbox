@@ -49,13 +49,13 @@ func (c *basicController) setupSSEResponse() {
 func (c *CodeInterpretingController) setServerEventsHandler(ctx context.Context) runtime.ExecuteResultHook {
 	return runtime.ExecuteResultHook{
 		OnExecuteInit: func(session string) {
-			payload := model.ServerStreamEvent{
+			event := model.ServerStreamEvent{
 				Type:      model.StreamEventTypeInit,
 				Text:      session,
 				Timestamp: time.Now().UnixMilli(),
-			}.ToJSON()
-
-			c.writeSingleEvent("OnExecuteInit", payload, true)
+			}
+			payload := event.ToJSON()
+			c.writeSingleEvent("OnExecuteInit", payload, true, event.Summary())
 
 			safego.Go(func() { c.ping(ctx) })
 		},
@@ -74,84 +74,86 @@ func (c *CodeInterpretingController) setServerEventsHandler(ctx context.Context)
 			}
 
 			if count > 0 {
-				payload := model.ServerStreamEvent{
+				event := model.ServerStreamEvent{
 					Type:           model.StreamEventTypeCount,
 					ExecutionCount: count,
 					Timestamp:      time.Now().UnixMilli(),
-				}.ToJSON()
-				c.writeSingleEvent("OnExecuteResult", payload, true)
+				}
+				payload := event.ToJSON()
+				c.writeSingleEvent("OnExecuteResult", payload, true, event.Summary())
 			}
 			if len(mutated) > 0 {
-				payload := model.ServerStreamEvent{
+				event := model.ServerStreamEvent{
 					Type:      model.StreamEventTypeResult,
 					Results:   mutated,
 					Timestamp: time.Now().UnixMilli(),
-				}.ToJSON()
-				c.writeSingleEvent("OnExecuteResult", payload, true)
+				}
+				payload := event.ToJSON()
+				c.writeSingleEvent("OnExecuteResult", payload, true, event.Summary())
 			}
 		},
 		OnExecuteComplete: func(executionTime time.Duration) {
-			payload := model.ServerStreamEvent{
+			event := model.ServerStreamEvent{
 				Type:          model.StreamEventTypeComplete,
 				ExecutionTime: executionTime.Milliseconds(),
 				Timestamp:     time.Now().UnixMilli(),
-			}.ToJSON()
-
-			c.writeSingleEvent("OnExecuteComplete", payload, true)
+			}
+			payload := event.ToJSON()
+			c.writeSingleEvent("OnExecuteComplete", payload, true, event.Summary())
 		},
 		OnExecuteError: func(err *execute.ErrorOutput) {
 			if err == nil {
 				return
 			}
 
-			payload := model.ServerStreamEvent{
+			event := model.ServerStreamEvent{
 				Type:      model.StreamEventTypeError,
 				Error:     err,
 				Timestamp: time.Now().UnixMilli(),
-			}.ToJSON()
-
-			c.writeSingleEvent("OnExecuteError", payload, true)
+			}
+			payload := event.ToJSON()
+			c.writeSingleEvent("OnExecuteError", payload, true, event.Summary())
 		},
 		OnExecuteStatus: func(status string) {
-			payload := model.ServerStreamEvent{
+			event := model.ServerStreamEvent{
 				Type:      model.StreamEventTypeStatus,
 				Text:      status,
 				Timestamp: time.Now().UnixMilli(),
-			}.ToJSON()
-
-			c.writeSingleEvent("OnExecuteStatus", payload, true)
+			}
+			payload := event.ToJSON()
+			c.writeSingleEvent("OnExecuteStatus", payload, true, event.Summary())
 		},
 		OnExecuteStdout: func(text string) {
 			if text == "" {
 				return
 			}
 
-			payload := model.ServerStreamEvent{
+			event := model.ServerStreamEvent{
 				Type:      model.StreamEventTypeStdout,
 				Text:      text,
 				Timestamp: time.Now().UnixMilli(),
-			}.ToJSON()
-
-			c.writeSingleEvent("OnExecuteStdout", payload, true)
+			}
+			payload := event.ToJSON()
+			c.writeSingleEvent("OnExecuteStdout", payload, true, event.Summary())
 		},
 		OnExecuteStderr: func(text string) {
 			if text == "" {
 				return
 			}
 
-			payload := model.ServerStreamEvent{
+			event := model.ServerStreamEvent{
 				Type:      model.StreamEventTypeStderr,
 				Text:      text,
 				Timestamp: time.Now().UnixMilli(),
-			}.ToJSON()
-
-			c.writeSingleEvent("OnExecuteStderr", payload, true)
+			}
+			payload := event.ToJSON()
+			c.writeSingleEvent("OnExecuteStderr", payload, true, event.Summary())
 		},
 	}
 }
 
 // writeSingleEvent serializes one SSE frame.
-func (c *CodeInterpretingController) writeSingleEvent(handler string, data []byte, verbose bool) {
+func (c *CodeInterpretingController) writeSingleEvent(handler string, data []byte, verbose bool, summary string) {
 	if c == nil || c.ctx == nil || c.ctx.Writer == nil {
 		return
 	}
@@ -178,10 +180,10 @@ func (c *CodeInterpretingController) writeSingleEvent(handler string, data []byt
 	}
 
 	if err != nil {
-		log.Error("StreamEvent.%s write data %s error: %v", handler, string(data), err)
+		log.Error("StreamEvent.%s write data %s error: %v", handler, summary, err)
 	} else {
 		if verbose {
-			log.Info("StreamEvent.%s write data %s", handler, string(data))
+			log.Info("StreamEvent.%s write data %s", handler, summary)
 		}
 	}
 }
@@ -192,11 +194,12 @@ func (c *CodeInterpretingController) ping(ctx context.Context) {
 		if c.ctx.Writer == nil {
 			return
 		}
-		payload := model.ServerStreamEvent{
+		event := model.ServerStreamEvent{
 			Type:      model.StreamEventTypePing,
 			Text:      "pong",
 			Timestamp: time.Now().UnixMilli(),
-		}.ToJSON()
-		c.writeSingleEvent("Ping", payload, false)
+		}
+		payload := event.ToJSON()
+		c.writeSingleEvent("Ping", payload, false, event.Summary())
 	}, 3*time.Second, ctx.Done())
 }

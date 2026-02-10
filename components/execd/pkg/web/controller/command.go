@@ -127,12 +127,14 @@ func (c *CodeInterpretingController) GetBackgroundCommandOutput() {
 }
 
 func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.RunCommandRequest) *runtime.ExecuteCodeRequest {
+	timeout := time.Duration(request.TimeoutMs) * time.Millisecond
 	if request.Background {
 		return &runtime.ExecuteCodeRequest{
 			Language: runtime.BackgroundCommand,
 			Code:     request.Command,
 			Cwd:      request.Cwd,
 			User:     request.User.ToRuntime(),
+			Timeout:  timeout,
 		}
 	} else {
 		return &runtime.ExecuteCodeRequest{
@@ -140,6 +142,7 @@ func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.Ru
 			Code:     request.Command,
 			Cwd:      request.Cwd,
 			User:     request.User.ToRuntime(),
+			Timeout:  timeout,
 		}
 	}
 }

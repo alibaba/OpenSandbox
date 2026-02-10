@@ -6,6 +6,9 @@ on:
     paths:
       - 'server/**'
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -71,9 +74,12 @@ jobs:
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:latest"
-          egress_image = "opensandbox/egress:latest"
+          [egress]
+          image = "opensandbox/egress:latest"
           [docker]
           network_mode = "${{ matrix.network }}"
+          [storage]
+          allowed_host_paths = ["/tmp/opensandbox-e2e"]
           EOF
 
           # Start server in background

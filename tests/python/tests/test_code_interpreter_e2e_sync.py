@@ -39,7 +39,7 @@ from opensandbox.models.execd import (
     OutputMessage,
 )
 from opensandbox.models.execd_sync import ExecutionHandlersSync
-from opensandbox.models.sandboxes import SandboxImageSpec
+from opensandbox.models.sandboxes import Host, SandboxImageSpec, Volume
 
 from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 
@@ -174,8 +174,17 @@ class TestCodeInterpreterE2ESync:
                 "JAVA_VERSION": "21",
                 "NODE_VERSION": "22",
                 "PYTHON_VERSION": "3.12",
+                "EXECD_LOG_FILE": "/tmp/opensandbox-e2e/logs/execd.log",
             },
             health_check_polling_interval=timedelta(milliseconds=500),
+            volumes=[
+                Volume(
+                    name="execd-log",
+                    host=Host(path="/tmp/opensandbox-e2e/logs"),
+                    mountPath="/tmp/opensandbox-e2e/logs",
+                    readOnly=False,
+                ),
+            ],
         )
 
         cls.code_interpreter = CodeInterpreterSync.create(sandbox=cls.sandbox)

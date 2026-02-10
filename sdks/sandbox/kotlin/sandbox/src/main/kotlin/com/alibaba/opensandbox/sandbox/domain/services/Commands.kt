@@ -16,6 +16,8 @@
 
 package com.alibaba.opensandbox.sandbox.domain.services
 
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.CommandLogs
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.CommandStatus
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.Execution
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommandRequest
 
@@ -58,4 +60,24 @@ interface Commands {
      * @param executionId Unique identifier of the execution to interrupt
      */
     fun interrupt(executionId: String)
+
+    /**
+     * Get the current running status for a command.
+     *
+     * @param executionId Unique identifier of the execution to query
+     * @return Command status information
+     */
+    fun getCommandStatus(executionId: String): CommandStatus
+
+    /**
+     * Get background command logs (non-streamed).
+     *
+     * @param executionId Unique identifier of the execution to query
+     * @param cursor Optional line cursor for incremental reads
+     * @return Command logs content and tail cursor
+     */
+    fun getBackgroundCommandLogs(
+        executionId: String,
+        cursor: Long? = null,
+    ): CommandLogs
 }

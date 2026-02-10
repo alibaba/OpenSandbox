@@ -16,7 +16,10 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 )
 
 func TestRunCodeRequestValidate(t *testing.T) {
@@ -47,5 +50,48 @@ func TestServerStreamEventToJSON(t *testing.T) {
 	}
 	if decoded.Type != event.Type || decoded.Text != event.Text || decoded.ExecutionCount != event.ExecutionCount {
 		t.Fatalf("unexpected decoded event: %#v", decoded)
+	}
+}
+
+func TestServerStreamEventSummary(t *testing.T) {
+	longText := strings.Repeat("a", 120)
+	tests := []struct {
+		name     string
+		event    ServerStreamEvent
+		contains []string
+	}{
+		{
+			name: "basic stdout",
+			event: ServerStreamEvent{
+				Type:           StreamEventTypeStdout,
+				Text:           "hello",
+				ExecutionCount: 2,
+			},
+			contains: []string{"type=stdout", "text=hello"},
+		},
+		{
+			name: "truncated text and error",
+			event: ServerStreamEvent{
+				Type:  StreamEventTypeError,
+				Text:  longText,
+				Error: &execute.ErrorOutput{EName: "ValueError", EValue: "boom"},
+			},
+			contains: []string{
+				"type=error",
+				"text=" + strings.Repeat("a", 100) + "...",
+				"error=ValueError: boom",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			summary := tt.event.Summary()
+			for _, want := range tt.contains {
+				if !strings.Contains(summary, want) {
+					t.Fatalf("summary missing %q, got: %s", want, summary)
+				}
+			}
+		})
 	}
 }

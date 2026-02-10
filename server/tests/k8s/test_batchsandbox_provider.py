@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from kubernetes.client import ApiException
 
-from src.api.schema import ImageSpec
+from src.api.schema import ImageSpec, NetworkPolicy, NetworkRule
 from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
 
 
@@ -1037,3 +1037,372 @@ spec:
         
         # Verify no template field (pool-based doesn't use template)
         assert "template" not in body["spec"]
+
+
+class TestBatchSandboxProviderEgress:
+    """BatchSandboxProvider egress sidecar tests"""
+
+    def test_create_workload_without_network_policy_no_sidecar(self, mock_k8s_client):
+        """
+        Test case: Verify no sidecar is added when network_policy is None
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            network_policy=None,
+            egress_image=None,
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        containers = pod_spec["containers"]
+        
+        # Should only have main container
+        assert len(containers) == 1
+        assert containers[0]["name"] == "sandbox"
+        # Should not have securityContext with sysctls
+        assert "securityContext" not in pod_spec or "sysctls" not in pod_spec.get("securityContext", {})
+
+    def test_create_workload_with_network_policy_adds_sidecar(self, mock_k8s_client):
+        """
+        Test case: Verify egress sidecar is added when network_policy is provided
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="pypi.org")],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image="opensandbox/egress:v1.0.0",
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        containers = pod_spec["containers"]
+        
+        # Should have both main container and sidecar
+        assert len(containers) == 2
+        
+        # Find sidecar container
+        sidecar = next((c for c in containers if c["name"] == "egress"), None)
+        assert sidecar is not None
+        assert sidecar["image"] == "opensandbox/egress:v1.0.0"
+        
+        # Verify sidecar has environment variable
+        env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
+        assert "OPENSANDBOX_EGRESS_RULES" in env_vars
+        
+        # Verify sidecar has NET_ADMIN capability
+        assert "securityContext" in sidecar
+        assert "capabilities" in sidecar["securityContext"]
+        assert "add" in sidecar["securityContext"]["capabilities"]
+        assert "NET_ADMIN" in sidecar["securityContext"]["capabilities"]["add"]
+
+    def test_create_workload_with_network_policy_adds_ipv6_disable_sysctls(self, mock_k8s_client):
+        """
+        Test case: Verify IPv6 disable sysctls are added to Pod spec
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image="opensandbox/egress:v1.0.0",
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        
+        # Verify securityContext with sysctls exists
+        assert "securityContext" in pod_spec
+        assert "sysctls" in pod_spec["securityContext"]
+        
+        sysctls = pod_spec["securityContext"]["sysctls"]
+        sysctl_names = {s["name"] for s in sysctls}
+        
+        # Verify all IPv6 disable sysctls are present
+        assert "net.ipv6.conf.all.disable_ipv6" in sysctl_names
+        assert "net.ipv6.conf.default.disable_ipv6" in sysctl_names
+        assert "net.ipv6.conf.lo.disable_ipv6" in sysctl_names
+        
+        # Verify all values are "1"
+        for sysctl in sysctls:
+            assert sysctl["value"] == "1"
+
+    def test_create_workload_with_network_policy_drops_net_admin_from_main_container(self, mock_k8s_client):
+        """
+        Test case: Verify main container drops NET_ADMIN when network_policy is enabled
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image="opensandbox/egress:v1.0.0",
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        containers = pod_spec["containers"]
+        
+        # Find main container
+        main_container = next((c for c in containers if c["name"] == "sandbox"), None)
+        assert main_container is not None
+        
+        # Verify main container has securityContext
+        assert "securityContext" in main_container
+        assert "capabilities" in main_container["securityContext"]
+        assert "drop" in main_container["securityContext"]["capabilities"]
+        assert "NET_ADMIN" in main_container["securityContext"]["capabilities"]["drop"]
+
+    def test_create_workload_without_egress_image_no_sidecar(self, mock_k8s_client):
+        """
+        Test case: Verify no sidecar is added when egress_image is None even if network_policy exists
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image=None,
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        containers = pod_spec["containers"]
+        
+        # Should only have main container
+        assert len(containers) == 1
+        assert containers[0]["name"] == "sandbox"
+
+    def test_egress_sidecar_contains_network_policy_in_env(self, mock_k8s_client):
+        """
+        Test case: Verify sidecar environment variable contains serialized network policy
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[
+                NetworkRule(action="allow", target="pypi.org"),
+                NetworkRule(action="deny", target="*.malicious.com"),
+            ],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image="opensandbox/egress:v1.0.0",
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        containers = pod_spec["containers"]
+        
+        sidecar = next((c for c in containers if c["name"] == "egress"), None)
+        assert sidecar is not None
+        
+        env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
+        assert "OPENSANDBOX_EGRESS_RULES" in env_vars
+        
+        # Verify the environment variable contains valid JSON with network policy
+        import json
+        policy_json = json.loads(env_vars["OPENSANDBOX_EGRESS_RULES"])
+        assert policy_json["defaultAction"] == "deny"
+        assert len(policy_json["egress"]) == 2
+        assert policy_json["egress"][0]["action"] == "allow"
+        assert policy_json["egress"][0]["target"] == "pypi.org"
+
+    def test_main_container_no_security_context_without_network_policy(self, mock_k8s_client):
+        """
+        Test case: Verify main container has no securityContext when network_policy is None
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            network_policy=None,
+            egress_image=None,
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        containers = pod_spec["containers"]
+        
+        main_container = containers[0]
+        # Main container should not have securityContext when no network policy
+        assert "securityContext" not in main_container
+
+    def test_create_workload_with_network_policy_works_with_template(self, mock_k8s_client, tmp_path):
+        """
+        Test case: Verify egress sidecar works correctly when template is provided
+        """
+        template_file = tmp_path / "template.yaml"
+        template_file.write_text(
+            """
+spec:
+  template:
+    spec:
+      volumes:
+        - name: sandbox-shared-data
+          emptyDir: {}
+"""
+        )
+        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image="opensandbox/egress:v1.0.0",
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        containers = pod_spec["containers"]
+        
+        # Should have both main container and sidecar
+        assert len(containers) == 2
+        
+        # Verify sidecar exists
+        sidecar = next((c for c in containers if c["name"] == "egress"), None)
+        assert sidecar is not None
+        
+        # Verify IPv6 sysctls are present
+        assert "securityContext" in pod_spec
+        assert "sysctls" in pod_spec["securityContext"]
+        
+        # Verify template volumes are still merged
+        volume_names = [v["name"] for v in pod_spec["volumes"]]
+        assert "sandbox-shared-data" in volume_names
+        assert "opensandbox-bin" in volume_names

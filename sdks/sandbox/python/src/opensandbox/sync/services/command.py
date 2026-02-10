@@ -22,7 +22,12 @@ This is the sync counterpart of :mod:`opensandbox.services.command`.
 
 from typing import Protocol
 
-from opensandbox.models.execd import Execution, RunCommandOpts
+from opensandbox.models.execd import (
+    CommandLogs,
+    CommandStatus,
+    Execution,
+    RunCommandOpts,
+)
 from opensandbox.models.execd_sync import ExecutionHandlersSync
 
 
@@ -73,6 +78,39 @@ class CommandsSync(Protocol):
 
         Args:
             execution_id: Unique identifier of the execution to interrupt.
+
+        Raises:
+            SandboxException: If the operation fails.
+        """
+        ...
+
+    def get_command_status(self, execution_id: str) -> CommandStatus:
+        """
+        Get the current running status for a command.
+
+        Args:
+            execution_id: Unique identifier of the execution to query
+
+        Returns:
+            CommandStatus describing running state and exit code if available
+
+        Raises:
+            SandboxException: If the operation fails.
+        """
+        ...
+
+    def get_background_command_logs(
+        self, execution_id: str, cursor: int | None = None
+    ) -> CommandLogs:
+        """
+        Get background command logs (non-streamed).
+
+        Args:
+            execution_id: Unique identifier of the execution to query
+            cursor: Optional line cursor for incremental reads
+
+        Returns:
+            CommandLogs containing raw output and latest cursor
 
         Raises:
             SandboxException: If the operation fails.
