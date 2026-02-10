@@ -220,6 +220,13 @@ class BatchSandboxProvider(WorkloadProvider):
             body=batchsandbox,
         )
         
+        informer = self._get_informer(namespace)
+        if informer:
+            try:
+                informer.update_cache(created)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to update informer cache for %s: %s", sandbox_id, exc)
+
         return {
             "name": created["metadata"]["name"],
             "uid": created["metadata"]["uid"],
