@@ -30,7 +30,7 @@ log_level = "INFO"
 
 [runtime]
 type = "kubernetes"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.6"
 
 [storage]
 # 卷存储配置

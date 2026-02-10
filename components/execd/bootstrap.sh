@@ -30,7 +30,7 @@ if ! touch "$EXECD_ENVS" 2>/dev/null; then
 fi
 export EXECD_ENVS
 
-echo "starting OpenSandbox execd daemon at $EXECD with version v1.0.5. https://github.com/alibaba/OpenSandbox/releases/tag/docker%2Fexecd%2Fv1.0.5"
+echo "starting OpenSandbox execd daemon at $EXECD with version v1.0.6. https://github.com/alibaba/OpenSandbox/releases/tag/docker%2Fexecd%2Fv1.0.6"
 $EXECD &
 
 # Allow chained shell commands (e.g., /test1.sh && /test2.sh)
