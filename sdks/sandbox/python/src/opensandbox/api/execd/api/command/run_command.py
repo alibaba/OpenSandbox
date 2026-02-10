@@ -91,6 +91,8 @@ def sync_detailed(
      Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
     The command can run in foreground or background mode. The response includes stdout, stderr,
     execution status, and completion events.
+    Optionally specify `timeout` (milliseconds) to enforce a maximum runtime; the server will
+    terminate the process when the timeout is reached.
 
     Args:
         body (RunCommandRequest): Request to execute a shell command
@@ -124,6 +126,8 @@ def sync(
      Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
     The command can run in foreground or background mode. The response includes stdout, stderr,
     execution status, and completion events.
+    Optionally specify `timeout` (milliseconds) to enforce a maximum runtime; the server will
+    terminate the process when the timeout is reached.
 
     Args:
         body (RunCommandRequest): Request to execute a shell command
@@ -152,6 +156,8 @@ async def asyncio_detailed(
      Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
     The command can run in foreground or background mode. The response includes stdout, stderr,
     execution status, and completion events.
+    Optionally specify `timeout` (milliseconds) to enforce a maximum runtime; the server will
+    terminate the process when the timeout is reached.
 
     Args:
         body (RunCommandRequest): Request to execute a shell command
@@ -183,6 +189,8 @@ async def asyncio(
      Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
     The command can run in foreground or background mode. The response includes stdout, stderr,
     execution status, and completion events.
+    Optionally specify `timeout` (milliseconds) to enforce a maximum runtime; the server will
+    terminate the process when the timeout is reached.
 
     Args:
         body (RunCommandRequest): Request to execute a shell command
