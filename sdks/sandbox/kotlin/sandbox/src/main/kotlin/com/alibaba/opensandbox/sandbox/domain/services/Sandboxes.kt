@@ -90,6 +90,20 @@ interface Sandboxes {
     ): SandboxEndpoint
 
     /**
+     * Get sandbox endpoint
+     *
+     * @param sandboxId sandbox id
+     * @param port endpoint port number
+     * @param useServerProxy whether to use server proxy for endpoint (default false)
+     * @return Target sandbox endpoint
+     */
+    fun getSandboxEndpoint(
+        sandboxId: String,
+        port: Int,
+        useServerProxy: Boolean,
+    ): SandboxEndpoint
+
+    /**
      * Pauses a running sandbox, preserving its state.
      *
      * @param sandboxId Unique identifier of the sandbox

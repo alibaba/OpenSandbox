@@ -38,5 +38,9 @@ export interface Sandboxes {
     req: RenewSandboxExpirationRequest,
   ): Promise<RenewSandboxExpirationResponse>;
 
-  getSandboxEndpoint(sandboxId: SandboxId, port: number): Promise<Endpoint>;
+  getSandboxEndpoint(
+    sandboxId: SandboxId,
+    port: number,
+    useServerProxy?: boolean
+  ): Promise<Endpoint>;
 }

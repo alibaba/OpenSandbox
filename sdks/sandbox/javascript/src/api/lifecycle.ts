@@ -394,7 +394,10 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    /** @description Whether to return a server-proxied URL */
+                    use_server_proxy?: boolean;
+                };
                 header?: never;
                 path: {
                     /** @description Unique sandbox identifier */
@@ -721,6 +724,10 @@ export interface components {
              *     Example: endpoint.opensandbox.io/sandboxes/abc123/port/8080
              */
             endpoint: string;
+            /** @description Requests targeting the sandbox must include the corresponding header(s). */
+            headers?: {
+                [key: string]: string;
+            };
         };
         /**
          * @description Egress network policy matching the sidecar `/policy` request body.

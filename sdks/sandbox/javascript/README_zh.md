@@ -177,6 +177,7 @@ console.log(list.items.map((s) => s.id));
 | `requestTimeoutSeconds` | SDK HTTP 请求超时（秒） | `30` | - |
 | `debug` | 是否开启基础 HTTP 调试日志 | `false` | - |
 | `headers` | 每次请求附加的 Header | `{}` | - |
+| `useServerProxy` | 是否通过沙箱服务代理访问 execd/endpoint（适用于客户端无法直连沙箱的场景） | `false` | - |
 
 ```ts
 import { ConnectionConfig } from "@alibaba-group/opensandbox";

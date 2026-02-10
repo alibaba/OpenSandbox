@@ -189,7 +189,12 @@ class Sandbox internal constructor(
 
                 val sandboxId = initResult.id
 
-                val execdEndpoint = sandboxService.getSandboxEndpoint(sandboxId, DEFAULT_EXECD_PORT)
+                val execdEndpoint =
+                    sandboxService.getSandboxEndpoint(
+                        sandboxId,
+                        DEFAULT_EXECD_PORT,
+                        connectionConfig.useServerProxy,
+                    )
                 val fileSystemService = factory.createFilesystem(execdEndpoint)
                 val commandService = factory.createCommands(execdEndpoint)
                 val metricsService = factory.createMetrics(execdEndpoint)
@@ -392,7 +397,7 @@ class Sandbox internal constructor(
      * @throws SandboxException if status cannot be retrieved
      */
     fun getEndpoint(port: Int): SandboxEndpoint {
-        return sandboxService.getSandboxEndpoint(id, port)
+        return sandboxService.getSandboxEndpoint(id, port, httpClientProvider.config.useServerProxy)
     }
 
     /**

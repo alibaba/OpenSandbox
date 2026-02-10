@@ -41,11 +41,9 @@ from opensandbox.api.lifecycle.models import (
 from opensandbox.api.lifecycle.models.create_sandbox_request import CreateSandboxRequest
 from opensandbox.api.lifecycle.models.image_spec import ImageSpec
 from opensandbox.models.sandboxes import (
-    Host,
     NetworkPolicy,
     PagedSandboxInfos,
     PaginationInfo,
-    PVC,
     SandboxCreateResponse,
     SandboxEndpoint,
     SandboxImageSpec,

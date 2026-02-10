@@ -23,6 +23,7 @@ from .create_sandbox_request_metadata import CreateSandboxRequestMetadata
 from .create_sandbox_response import CreateSandboxResponse
 from .create_sandbox_response_metadata import CreateSandboxResponseMetadata
 from .endpoint import Endpoint
+from .endpoint_headers import EndpointHeaders
 from .error_response import ErrorResponse
 from .host import Host
 from .image_spec import ImageSpec
@@ -50,6 +51,7 @@ __all__ = (
     "CreateSandboxResponse",
     "CreateSandboxResponseMetadata",
     "Endpoint",
+    "EndpointHeaders",
     "ErrorResponse",
     "Host",
     "ImageSpec",

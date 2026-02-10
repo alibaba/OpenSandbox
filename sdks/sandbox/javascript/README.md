@@ -179,6 +179,7 @@ Runtime notes:
 | `requestTimeoutSeconds` | Request timeout applied to SDK HTTP calls | `30` | - |
 | `debug` | Enable basic HTTP debug logging | `false` | - |
 | `headers` | Extra headers applied to every request | `{}` | - |
+| `useServerProxy` | Use sandbox server as proxy for execd/endpoint requests (e.g. when client cannot reach the sandbox directly) | `false` | - |
 
 ```ts
 import { ConnectionConfig } from "@alibaba-group/opensandbox";

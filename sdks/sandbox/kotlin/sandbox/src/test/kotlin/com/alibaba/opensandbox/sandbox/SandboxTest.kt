@@ -16,6 +16,7 @@
 
 package com.alibaba.opensandbox.sandbox
 
+import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxReadyTimeoutException
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
@@ -115,12 +116,14 @@ class SandboxTest {
     fun `getEndpoint should delegate to sandboxService`() {
         val port = 8080
         val expectedEndpoint = mockk<SandboxEndpoint>()
-        every { sandboxService.getSandboxEndpoint(sandboxId, port) } returns expectedEndpoint
+        val connectionConfig = ConnectionConfig.builder().build()
+        every { httpClientProvider.config } returns connectionConfig
+        every { sandboxService.getSandboxEndpoint(sandboxId, port, false) } returns expectedEndpoint
 
         val result = sandbox.getEndpoint(port)
 
         assertSame(expectedEndpoint, result)
-        verify { sandboxService.getSandboxEndpoint(sandboxId, port) }
+        verify { sandboxService.getSandboxEndpoint(sandboxId, port, false) }
     }
 
     @Test

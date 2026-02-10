@@ -21,8 +21,8 @@ import pytest
 
 from opensandbox.models.filesystem import MoveEntry, WriteEntry
 from opensandbox.models.sandboxes import (
-    Host,
     PVC,
+    Host,
     SandboxFilter,
     SandboxImageAuth,
     SandboxImageSpec,

@@ -45,6 +45,11 @@ export interface ConnectionConfigOptions {
    * Enable basic debug logging for HTTP requests (best-effort).
    */
   debug?: boolean;
+  /**
+   * Use sandbox server as proxy for process execd requests.
+   * Useful when the client SDK cannot access the created sandbox directly.
+   */
+  useServerProxy?: boolean;
 }
 
 function isNodeRuntime(): boolean {
@@ -253,6 +258,10 @@ export class ConnectionConfig {
   readonly requestTimeoutSeconds: number;
   readonly debug: boolean;
   readonly userAgent: string = DEFAULT_USER_AGENT;
+  /**
+   * Use sandbox server as proxy for endpoint requests (default false).
+   */
+  readonly useServerProxy: boolean;
   private _closeTransport: () => Promise<void>;
   private _closePromise: Promise<void> | null = null;
   private _transportInitialized = false;
@@ -280,6 +289,7 @@ export class ConnectionConfig {
         ? opts.requestTimeoutSeconds
         : 30;
     this.debug = !!opts.debug;
+    this.useServerProxy = !!opts.useServerProxy;
 
     const headers: Record<string, string> = { ...(opts.headers ?? {}) };
     // Attach API key via header unless the user already provided one.
@@ -363,6 +373,7 @@ export class ConnectionConfig {
       headers: { ...this.headers },
       requestTimeoutSeconds: this.requestTimeoutSeconds,
       debug: this.debug,
+      useServerProxy: this.useServerProxy,
     });
     clone.initializeTransport();
     return clone;

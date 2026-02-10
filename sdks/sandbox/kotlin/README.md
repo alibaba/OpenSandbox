@@ -218,6 +218,7 @@ The `ConnectionConfig` class manages API server connection settings.
 | `debug`          | Enable debug logging for HTTP requests     | `false`                      | -                      |
 | `headers`        | Custom HTTP headers                        | Empty                        | -                      |
 | `connectionPool` | Shared OKHttp ConnectionPool               | SDK-created per instance     | -                      |
+| `useServerProxy` | Use sandbox server as proxy for execd/endpoint requests (e.g. when client cannot reach the sandbox directly) | `false` | -                      |
 
 ```java
 // 1. Basic configuration
