@@ -4,9 +4,9 @@ go 1.24.0
 
 require (
 	github.com/alibaba/OpenSandbox/sandbox-k8s v0.0.0
+	github.com/alibaba/opensandbox/internal v0.0.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/stretchr/testify v1.11.1
-	go.uber.org/zap v1.27.1
 	k8s.io/apimachinery v0.34.3
 	k8s.io/client-go v0.34.3
 	knative.dev/pkg v0.0.0-20260120122510-4a022ed9999a
@@ -45,6 +45,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.39.0 // indirect
 	go.opentelemetry.io/otel/trace v1.39.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/zap v1.27.1 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/net v0.49.0 // indirect
@@ -71,3 +72,5 @@ require (
 )
 
 replace github.com/alibaba/OpenSandbox/sandbox-k8s => ../../kubernetes
+
+replace github.com/alibaba/opensandbox/internal => ../internal

@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"strings"
 
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 	"github.com/gorilla/websocket"
 )
 
@@ -142,13 +143,13 @@ func (w *WebSocketProxy) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	// together with the Forwarded headers we prepared above.
 	connBackend, resp, err := dialer.Dial(backendURL.String(), requestHeader)
 	if err != nil {
-		Logger.Errorw("WebSocketProxy: couldn't dial to remote backend", "error", err)
+		Logger.With(slogger.Field{Key: "error", Value: err}).Errorf("WebSocketProxy: couldn't dial to remote backend")
 		if resp != nil {
 			// If the WebSocket handshake fails, ErrBadHandshake is returned
 			// along with a non-nil *http.Response so that callers can handle
 			// redirects, authentication, etcetera.
 			if err := copyResponse(rw, resp); err != nil {
-				Logger.Errorw("WebSocketProxy: couldn't write response after failed remote backend handshake", "error", err)
+				Logger.With(slogger.Field{Key: "error", Value: err}).Errorf("WebSocketProxy: couldn't write response after failed remote backend handshake")
 			}
 		} else {
 			http.Error(rw, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
@@ -175,7 +176,7 @@ func (w *WebSocketProxy) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	// Also pass the header that we gathered from the Dial handshake.
 	connPub, err := upgrader.Upgrade(rw, r, upgradeHeader)
 	if err != nil {
-		Logger.Errorw("WebSocketProxy: couldn't upgrade websocket connection", "error", err)
+		Logger.With(slogger.Field{Key: "error", Value: err}).Errorf("WebSocketProxy: couldn't upgrade websocket connection")
 		return
 	}
 	defer connPub.Close()
@@ -216,7 +217,7 @@ func (w *WebSocketProxy) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	}
 	if e, ok := err.(*websocket.CloseError); !ok || e.Code == websocket.CloseAbnormalClosure { //nolint:errorlint
-		Logger.Errorw(message, "error", err)
+		Logger.With(slogger.Field{Key: "error", Value: err}).Errorf(message, err)
 	}
 }
 
