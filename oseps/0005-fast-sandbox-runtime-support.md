@@ -92,16 +92,16 @@ fast-sandbox achieves millisecond-scale cold start through three key design inno
 **Comparison: OpenSandbox Pool vs fast-sandbox**
 
 
-| Aspect                          | OpenSandbox BatchSandbox Pool                        | fast-sandbox                                |
-| ------------------------------- | ---------------------------------------------------- | ------------------------------------------- |
-| **Allocation mechanism**        | K8s API write → Controller watch → Task assignment | gRPC → in-memory Registry → Agent HTTP    |
-| **Latency (with cached image)** | ~1 second (measured)                                 | <50ms Fast, ~50 + API write (Strong)        |
-| **Scheduling**                  | K8s Scheduler places pool pods (one-time)            | In-memory Registry with image affinity      |
-| **Image awareness**             | Pool pods have fixed image                           | Registry scores by image cache availability |
-| **Customization**               | entrypoint, env only                                 | entrypoint, env, image, ports per request   |
-| **Container creation**          | Kubelet via CRI (~100-500ms)                         | Direct containerd socket (~5-10ms)          |
-| **Consistency**                 | Strong (K8s etcd)                                    | Fast (eventual) or Strong (K8s etcd)        |
-| **Failure recovery**            | K8s Controller reconciliation                        | Node Janitor + AutoRecreate policy          |
+| Aspect                          | OpenSandbox BatchSandbox Pool                      | fast-sandbox                                |
+| ------------------------------- |----------------------------------------------------|---------------------------------------------|
+| **Allocation mechanism**        | K8s API write → Controller watch → Task assignment | gRPC → in-memory Registry → Agent HTTP      |
+| **Latency (with cached image)** | ~1 second (measured)                               | <50ms Fast, ~50 + API write (Strong)        |
+| **Scheduling**                  | K8s Scheduler places pool pods (one-time)          | In-memory Registry with image affinity      |
+| **Image awareness**             | Pool pods have fixed image                         | Registry scores by image cache availability |
+| **Customization**               | entrypoint, env only                               | entrypoint, env, image, ports per request   |
+| **Container creation**          | pre-warmed                                         | Direct containerd socket                    |
+| **Consistency**                 | Strong (K8s etcd)                                  | Fast (eventual) or Strong (K8s etcd)        |
+| **Failure recovery**            | K8s Controller reconciliation                      | Node Janitor + AutoRecreate policy          |
 
 Both approaches use pre-provisioned resource pools to eliminate cold start overhead. fast-sandbox's key advantage is bypassing the K8s API path for container creation while maintaining visibility through async CRD writes.
 
