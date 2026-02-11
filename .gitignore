@@ -222,6 +222,9 @@ secrets/
 
 # Generated API documentation
 docs/generated/
+docs/.vitepress/generated/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
 apidocs/
 
 # Test results
