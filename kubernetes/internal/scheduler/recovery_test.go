@@ -110,7 +110,7 @@ func Test_recoverOneTaskNode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			recoverOneTaskNode(tt.args.tNode, tt.args.currentTask, tt.args.ip, tt.args.podName)
+			recoverOneTaskNode(tt.args.tNode, tt.args.currentTask, tt.args.ip, tt.args.podName, testLogger)
 			if tt.expectTaskNode != nil {
 				if !reflect.DeepEqual(tt.expectTaskNode, tt.args.tNode) {
 					t.Errorf("recoverOneTaskNode, want %+v, got %+v", tt.expectTaskNode, tt.args.tNode)
@@ -272,6 +272,7 @@ func Test_defaultTaskScheduler_recoverTaskNodesStatus(t *testing.T) {
 				taskNodeByNameIndex: tt.fields.taskNodeByNameIndex,
 				maxConcurrency:      tt.fields.maxConcurrency,
 				taskStatusCollector: tt.fields.taskStatusCollector,
+				logger:              testLogger,
 			}
 			if err := sch.recoverTaskNodesStatus(); (err != nil) != tt.wantErr {
 				t.Errorf("defaultTaskScheduler.recoverTaskNodesStatus() error = %v, wantErr %v", err, tt.wantErr)

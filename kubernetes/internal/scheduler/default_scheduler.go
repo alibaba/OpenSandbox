@@ -20,9 +20,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/klog/v2"
 	"k8s.io/utils/ptr"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
@@ -81,7 +81,7 @@ func (t *taskNode) isTaskDeleted() bool {
 	return t.Status == nil
 }
 
-func (t *taskNode) transSchState(to string) {
+func (t *taskNode) transSchState(to string, log logr.Logger) {
 	if t.sState == to {
 		return
 	}
@@ -93,10 +93,10 @@ func (t *taskNode) transSchState(to string) {
 		lat = now.Sub(*t.sStateLastTransTime)
 	}
 	t.sStateLastTransTime = ptr.To[time.Time](now)
-	klog.Infof("task node %s trans sch state %s -> %s, latency=%dms", klog.KObj(t), from, to, lat.Milliseconds())
+	log.Info("task node trans sch state", "name", t.Name, "namespace", t.Namespace, "from", from, "to", to, "latencyMs", lat.Milliseconds())
 }
 
-func (t *taskNode) transTaskState(to TaskState) {
+func (t *taskNode) transTaskState(to TaskState, log logr.Logger) {
 	if t.tState == to {
 		return
 	}
@@ -108,7 +108,7 @@ func (t *taskNode) transTaskState(to TaskState) {
 		lat = now.Sub(*t.tStateLastTransTime)
 	}
 	t.tStateLastTransTime = ptr.To[time.Time](now)
-	klog.Infof("task node %s trans task state %s -> %s, latency=%dms", klog.KObj(t), from, to, lat.Milliseconds())
+	log.Info("task node trans task state", "name", t.Name, "namespace", t.Namespace, "from", from, "to", to, "latencyMs", lat.Milliseconds())
 }
 
 const (
@@ -168,16 +168,18 @@ type defaultTaskScheduler struct {
 	taskClientCreator         taskClientCreator
 	resPolicyWhenTaskComplete sandboxv1alpha1.TaskResourcePolicy
 	name                      string
+	logger                    logr.Logger
 }
 
-func newTaskScheduler(name string, tasks []*api.Task, pods []*corev1.Pod, resPolicyWhenTaskComplete sandboxv1alpha1.TaskResourcePolicy) (*defaultTaskScheduler, error) {
+func newTaskScheduler(name string, tasks []*api.Task, pods []*corev1.Pod, resPolicyWhenTaskComplete sandboxv1alpha1.TaskResourcePolicy, logger logr.Logger) (*defaultTaskScheduler, error) {
 	sch := &defaultTaskScheduler{
 		allPods:                   pods,
 		maxConcurrency:            defaultSchConcurrency,
 		taskClientCreator:         newTaskClient,
-		taskStatusCollector:       newTaskStatusCollector(newTaskClient),
+		taskStatusCollector:       newTaskStatusCollector(newTaskClient, logger),
 		resPolicyWhenTaskComplete: resPolicyWhenTaskComplete,
 		name:                      name,
+		logger:                    logger,
 	}
 	taskNodes, err := initTaskNodes(tasks)
 	if err != nil {
@@ -185,13 +187,13 @@ func newTaskScheduler(name string, tasks []*api.Task, pods []*corev1.Pod, resPol
 	}
 	sch.taskNodes = taskNodes
 	sch.taskNodeByNameIndex = indexByName(taskNodes)
-	klog.Infof("task scheduler %s successfully init task nodes, size=%d", name, len(taskNodes))
+	logger.Info("successfully init task nodes", "scheduler", name, "size", len(taskNodes))
 	// TODO: Optimization – skip recovery for a brand-new scheduler.
 	// Recovery is unnecessary in this case and incurs significant overhead.
 	if err := sch.recover(); err != nil {
 		return nil, fmt.Errorf("scheduler: failed to recover, err %w", err)
 	}
-	klog.Infof("task scheduler %s successfully recover", name)
+	logger.Info("successfully recover", "scheduler", name)
 	return sch, nil
 }
 
@@ -270,7 +272,7 @@ func (sch *defaultTaskScheduler) collectTaskStatus(taskNodes []*taskNode) {
 		task, ok := tasks[tNode.IP]
 		tNode.Status = task
 		if ok && task != nil {
-			tNode.transTaskState(parseTaskState(task))
+			tNode.transTaskState(parseTaskState(task), sch.logger)
 		}
 	}
 }
@@ -313,7 +315,7 @@ func parsePodTaskState(status *corev1.PodStatus) TaskState {
 }
 
 func (sch *defaultTaskScheduler) scheduleTaskNodes() error {
-	sch.freePods = assignTaskNodes(sch.taskNodes, sch.freePods)
+	sch.freePods = assignTaskNodes(sch.taskNodes, sch.freePods, sch.logger)
 	semaphore := make(chan struct{}, sch.maxConcurrency)
 	var wg sync.WaitGroup
 	for idx := range sch.taskNodes {
@@ -325,7 +327,7 @@ func (sch *defaultTaskScheduler) scheduleTaskNodes() error {
 				<-semaphore
 				wg.Done()
 			}()
-			scheduleSingleTaskNode(node, sch.taskClientCreator, sch.resPolicyWhenTaskComplete)
+			scheduleSingleTaskNode(node, sch.taskClientCreator, sch.resPolicyWhenTaskComplete, sch.logger)
 		}(tNode)
 	}
 	wg.Wait()
@@ -354,7 +356,7 @@ func (sch *defaultTaskScheduler) refreshFreePods() {
 }
 
 // assignTaskNodes handles all unassigned tasks in batch
-func assignTaskNodes(taskNodes []*taskNode, freePods []*corev1.Pod) []*corev1.Pod {
+func assignTaskNodes(taskNodes []*taskNode, freePods []*corev1.Pod, log logr.Logger) []*corev1.Pod {
 	for _, tNode := range taskNodes {
 		if len(freePods) == 0 {
 			break
@@ -363,7 +365,7 @@ func assignTaskNodes(taskNodes []*taskNode, freePods []*corev1.Pod) []*corev1.Po
 			continue
 		}
 		pod := freePods[0]
-		klog.Infof("assign Pod %s:%s to task node %s", klog.KObj(pod), pod.Status.PodIP, tNode.Name)
+		log.Info("assign Pod to task node", "podName", pod.Name, "podNamespace", pod.Namespace, "podIP", pod.Status.PodIP, "taskName", tNode.Name)
 		tNode.IP = pod.Status.PodIP
 		tNode.PodName = pod.Name
 		freePods = freePods[1:]
@@ -382,16 +384,16 @@ func needRelease(tNode *taskNode, policy sandboxv1alpha1.TaskResourcePolicy) boo
 }
 
 // scheduleSingleTaskNode handles scheduling for a single task node based on its state
-func scheduleSingleTaskNode(tNode *taskNode, taskClientCreator func(endpoint string) taskClient, resPolicyWhenTaskComplete sandboxv1alpha1.TaskResourcePolicy) {
+func scheduleSingleTaskNode(tNode *taskNode, taskClientCreator func(endpoint string) taskClient, resPolicyWhenTaskComplete sandboxv1alpha1.TaskResourcePolicy, log logr.Logger) {
 	// pending
 	if tNode.IP == "" {
 		if tNode.DeletionTimestamp != nil {
-			tNode.transSchState(stateReleased)
+			tNode.transSchState(stateReleased, log)
 		}
 	} else {
 		// assigned
 		if needRelease(tNode, resPolicyWhenTaskComplete) {
-			tNode.transSchState(stateReleasing)
+			tNode.transSchState(stateReleasing, log)
 		} else {
 			// no need to setTask if task is completed to avoid unnecessary network overhead
 			if !tNode.isTaskCompleted() {
@@ -400,32 +402,33 @@ func scheduleSingleTaskNode(tNode *taskNode, taskClientCreator func(endpoint str
 					Process:         tNode.Spec.Process,
 					PodTemplateSpec: tNode.Spec.PodTemplateSpec,
 				}
-				_, err := setTask(taskClientCreator(tNode.IP), task)
+				_, err := setTask(taskClientCreator(tNode.IP), task, log)
 				if err != nil {
-					klog.Errorf("Failed to set task %s, endpoint %s, err %v", klog.KObj(tNode), tNode.IP, err)
+					log.Error(err, "Failed to set task", "taskName", tNode.Name, "endpoint", tNode.IP)
 				}
 			}
 		}
 	}
 	if tNode.sState == stateReleasing {
 		if tNode.isTaskDeleted() {
-			tNode.transSchState(stateReleased)
+			tNode.transSchState(stateReleased, log)
 		} else {
-			_, err := setTask(taskClientCreator(tNode.IP), nil)
+			_, err := setTask(taskClientCreator(tNode.IP), nil, log)
 			if err != nil {
-				klog.Errorf("Failed to notify executor about releasing task %s, endpoint %s, err %v", klog.KObj(tNode), tNode.IP, err)
+				log.Error(err, "Failed to notify executor about releasing task", "taskName", tNode.Name, "endpoint", tNode.IP)
 			} else {
-				klog.Infof("Successfully to notify client to release task %s, endpoint %s", klog.KObj(tNode), tNode.IP)
+				log.Info("Successfully to notify client to release task", "taskName", tNode.Name, "endpoint", tNode.IP)
 			}
 		}
 	}
 }
 
-func setTask(client taskClient, task *api.Task) (*api.Task, error) {
+func setTask(client taskClient, task *api.Task, log logr.Logger) (*api.Task, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultTimeout)
 	defer cancel()
-	if klog.V(3).Enabled() {
-		klog.Infof("client set task %s", utils.DumpJSON(task))
+	verboseLog := log.V(3)
+	if verboseLog.Enabled() {
+		verboseLog.Info("client set task", "task", utils.DumpJSON(task))
 	}
 	return client.Set(ctx, task)
 }
