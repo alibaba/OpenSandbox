@@ -123,8 +123,8 @@ class Host(BaseModel):
 
     path: str = Field(
         ...,
-        description="Absolute path on the host filesystem to mount. Must start with '/'.",
-        pattern=r"^/.*",
+        description="Absolute path on the host filesystem to mount.",
+        pattern=r"^(/|[A-Za-z]:[\\/])",
     )
 
 

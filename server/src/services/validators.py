@@ -21,6 +21,7 @@ enforce the same preconditions before performing runtime-specific work.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
@@ -296,17 +297,23 @@ def ensure_valid_host_path(
             },
         )
 
-    if not path.startswith("/"):
+    if not os.path.isabs(path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": SandboxErrorCodes.INVALID_HOST_PATH,
-                "message": f"Host path '{path}' must be an absolute path starting with '/'.",
+                "message": f"Host path '{path}' must be an absolute path.",
             },
         )
 
+    # Normalize separators to forward slashes for consistent security checks.
+    # Strip the drive prefix (e.g. "C:") so that "C:/" is not mis-detected as
+    # containing "//".
+    _drive, _tail = os.path.splitdrive(path)
+    _tail_fwd = _tail.replace("\\", "/")
+
     # Reject path traversal components
-    if "/.." in path or path == "/..":
+    if "/.." in _tail_fwd or _tail_fwd == "/..":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -316,7 +323,7 @@ def ensure_valid_host_path(
         )
 
     # Reject non-normalized paths (double slashes, trailing slashes except root)
-    if "//" in path or (len(path) > 1 and path.endswith("/")):
+    if "//" in _tail_fwd or (len(_tail_fwd) > 1 and _tail_fwd.endswith("/")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -327,9 +334,10 @@ def ensure_valid_host_path(
 
     # Check against allowed prefixes if provided
     if allowed_prefixes is not None:
+        norm_path = os.path.normpath(path)
         is_allowed = any(
-            path == prefix.rstrip("/")
-            or path.startswith(prefix.rstrip("/") + "/")
+            norm_path == os.path.normpath(prefix)
+            or norm_path.startswith(os.path.normpath(prefix) + os.sep)
             for prefix in allowed_prefixes
         )
         if not is_allowed:

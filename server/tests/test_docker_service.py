@@ -582,7 +582,9 @@ class TestBuildVolumeBinds:
             sub_path="task-001",
         )
         binds = DockerSandboxService._build_volume_binds([volume])
-        assert binds == ["/data/opensandbox/user-a/task-001:/mnt/work:rw"]
+        import os
+        expected_host = os.path.normpath("/data/opensandbox/user-a/task-001")
+        assert binds == [f"{expected_host}:/mnt/work:rw"]
 
     def test_multiple_host_volumes(self):
         """Multiple host volumes should produce multiple bind strings."""
