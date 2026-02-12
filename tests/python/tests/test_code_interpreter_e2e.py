@@ -213,11 +213,16 @@ async def managed_ctx(code_interpreter: CodeInterpreter, language: str):
     try:
         yield ctx
     finally:
-        # Best-effort cleanup with retry
+        # Best-effort cleanup with retry and a hard timeout so that an
+        # unreachable sandbox (dead container / network gone) cannot block
+        # the test suite indefinitely.
         for cleanup_attempt in range(2):
             try:
                 if ctx.id:
-                    await code_interpreter.codes.delete_context(ctx.id)
+                    await asyncio.wait_for(
+                        code_interpreter.codes.delete_context(ctx.id),
+                        timeout=10.0,
+                    )
                 break
             except Exception:
                 if cleanup_attempt == 0:
