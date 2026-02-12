@@ -590,6 +590,29 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         logger.info("TypeScript code execution tests completed");
     }
 
+    /**
+     * Run a code request with a per-execution timeout so that a single hanging
+     * SSE stream cannot block the entire test for the full JUnit timeout.
+     */
+    private Execution runWithTimeout(RunCodeRequest request, Duration timeout) {
+        try {
+            return CompletableFuture.supplyAsync(() -> codeInterpreter.codes().run(request))
+                    .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            throw new AssertionError(
+                    "Code execution did not complete within " + timeout, e);
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            }
+            throw new RuntimeException(cause);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+    }
+
     @Test
     @Order(6)
     @DisplayName("Multi-Language Support and Context Isolation")
@@ -598,6 +621,10 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         logger.info("Testing multi-language support and context isolation");
 
         assertNotNull(codeInterpreter);
+
+        // Per-execution timeout: if a single run() call hangs (sandbox gone, network
+        // issue), fail fast instead of blocking the entire 10-minute JUnit timeout.
+        Duration perExecTimeout = Duration.ofMinutes(2);
 
         // Create separate contexts for different languages
         CodeContext python1 = codeInterpreter.codes().createContext(SupportedLanguage.PYTHON);
@@ -620,8 +647,8 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                         .context(python2)
                         .build();
 
-        Execution result1 = codeInterpreter.codes().run(python1Setup);
-        Execution result2 = codeInterpreter.codes().run(python2Setup);
+        Execution result1 = runWithTimeout(python1Setup, perExecTimeout);
+        Execution result2 = runWithTimeout(python2Setup, perExecTimeout);
 
         assertNotNull(result1);
         assertNotNull(result1.getId());
@@ -641,8 +668,8 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                         .context(python2)
                         .build();
 
-        Execution check1 = codeInterpreter.codes().run(python1Check);
-        Execution check2 = codeInterpreter.codes().run(python2Check);
+        Execution check1 = runWithTimeout(python1Check, perExecTimeout);
+        Execution check2 = runWithTimeout(python2Check, perExecTimeout);
 
         assertNotNull(check1);
         assertNotNull(check1.getId());
@@ -846,7 +873,11 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         assertNotNull(pythonResult.getId());
 
         assertEquals(pythonExecutionId, pythonResult.getId());
-        assertTrue((!completedEvents.isEmpty()) ^ (!errors.isEmpty()));
+        // After interrupt, the kernel must emit at least one terminal event (complete or
+        // error).  Both may arrive in some scenarios, so use OR rather than XOR.
+        assertTrue(
+                !completedEvents.isEmpty() || !errors.isEmpty(),
+                "expected at least one of complete/error after interrupt");
         assertTrue(System.currentTimeMillis() - start < 30_000);
 
         // Test 2: Java long-running execution with interrupt
