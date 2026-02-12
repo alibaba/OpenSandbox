@@ -873,10 +873,10 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
             pythonResult = pythonFuture.get(60, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             pythonFuture.cancel(true);
-            logger.warning("Python execution did not complete within 60s after interrupt");
+            logger.warn("Python execution did not complete within 60s after interrupt");
         } catch (ExecutionException e) {
             // SSE stream broken by interrupt — acceptable
-            logger.warning("Python execution raised after interrupt: {}", e.getCause().getMessage());
+            logger.warn("Python execution raised after interrupt: {}", e.getCause().getMessage());
         }
         executor.shutdown();
 
@@ -945,9 +945,9 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
             javaResult = javaFuture.get(60, TimeUnit.SECONDS);
         } catch (TimeoutException e) {
             javaFuture.cancel(true);
-            logger.warning("Java execution did not complete within 60s after interrupt");
+            logger.warn("Java execution did not complete within 60s after interrupt");
         } catch (ExecutionException e) {
-            logger.warning("Java execution raised after interrupt: {}", e.getCause().getMessage());
+            logger.warn("Java execution raised after interrupt: {}", e.getCause().getMessage());
         }
         javaExecutor.shutdown();
 
