@@ -90,25 +90,44 @@ jobs:
 
   java-e2e:
     name: Java E2E (docker bridge)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    env:
+      UV_BIN: /home/admin/.local/bin
+      JAVA_VERSION: "17.0.14+7"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+      - name: Set up uv PATH and verify
+        run: |
+          echo "${UV_BIN}" >> "$GITHUB_PATH"
+          export PATH="${UV_BIN}:${PATH}"
+          uv --version
+          uv run python --version
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-          cache: gradle
+      - name: Set up JDK
+        run: |
+          # Adoptium Temurin JDK 17 for Linux x64
+          JAVA_MAJOR="${JAVA_VERSION%%.*}"
+          JAVA_URL_VERSION=$(echo "${JAVA_VERSION}" | sed 's/+/%2B/')
+          JAVA_DIR="/home/admin/.local/jdk-${JAVA_VERSION}"
+          if [ -x "${JAVA_DIR}/bin/java" ]; then
+            echo "JDK ${JAVA_VERSION} already cached"
+          else
+            echo "Downloading Temurin JDK ${JAVA_VERSION}..."
+            mkdir -p /home/admin/.local
+            curl -fsSL "https://api.adoptium.net/v3/binary/version/jdk-${JAVA_URL_VERSION}/linux/x64/jdk/hotspot/normal/eclipse?project=jdk" \
+              | tar -xzf - -C /home/admin/.local/
+          fi
+          echo "${JAVA_DIR}/bin" >> "$GITHUB_PATH"
+          echo "JAVA_HOME=${JAVA_DIR}" >> "$GITHUB_ENV"
+          export PATH="${JAVA_DIR}/bin:${PATH}"
+          java -version
 
-      - name: Install uv
-        run: pip install uv
+      - name: Clean up previous E2E resources
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          rm -rf /tmp/opensandbox-e2e/logs/*
 
       - name: Run tests
         env:
@@ -147,6 +166,7 @@ jobs:
           name: java-test-report
           path: tests/java/build/reports/tests/test/
           retention-days: 5
+
       - name: Upload execd logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -154,6 +174,12 @@ jobs:
           name: execd-log-for-java-e2e
           path: /tmp/opensandbox-e2e/logs/
           retention-days: 5
+
+      - name: Clean up after E2E
+        if: always()
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          pkill -f "python -m src.main" || true
 
   javascript-e2e:
     name: JavaScript E2E (docker bridge)
