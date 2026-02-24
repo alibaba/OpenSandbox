@@ -180,6 +180,9 @@ func (p *Proxy) SetOnResolved(fn func(domain string, ips []nftables.ResolvedIP))
 }
 
 // extractResolvedIPs parses A and AAAA records from resp.Answer into ResolvedIP slice.
+//
+// Uses netip.ParseAddr(v.A.String()) which allocates a temporary string per record; typically
+// one or a few records per resolution, so the cost is small compared to DNS RTT and nft writes.
 func extractResolvedIPs(resp *dns.Msg) []nftables.ResolvedIP {
 	if resp == nil || len(resp.Answer) == 0 {
 		return nil

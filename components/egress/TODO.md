@@ -19,7 +19,6 @@
 7) IPv6 & tests  
    - Handle IPv6 support or explicit non-support.  
    - Unit/integration tests: interception, graceful degrade, nftables, DoH blocking, hostNetwork rejection.
-8) Dynamic IP insertion from DNS answers (TTL-learned) and dynamic L2 isolation.
 
 ## No goals (explicitly excluded)
 - Capability probing & mode exposure (CAP_NET_ADMIN/nft detection, mode surfacing).
