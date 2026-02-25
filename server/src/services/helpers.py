@@ -181,7 +181,8 @@ def format_ingress_endpoint(
 
     if route_mode == GATEWAY_ROUTE_MODE_HEADER:
         # TODO(Pangjiping): Header mode intentionally not emitted until Endpoint schema supports headers.
-        raise RuntimeError(f"Unsupported route mode: {route_mode}")
+        # Return None (skip header mode) until the Endpoint schema supports headers.
+        return None
 
     return None
 
@@ -193,3 +194,4 @@ __all__ = [
     "format_ingress_endpoint",
     "matches_filter",
 ]
+
