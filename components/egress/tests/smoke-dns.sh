@@ -61,11 +61,11 @@ run_in_app() {
 pass() { info "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-info "Test: denied domain should fail (example.com)"
-if run_in_app -I https://example.com --max-time 5 >/dev/null 2>&1; then
-  fail "example.com should be blocked"
+info "Test: denied domain should fail (google.com)"
+if run_in_app -I https://google.com --max-time 5 >/dev/null 2>&1; then
+  fail "google.com should be blocked"
 else
-  pass "example.com blocked"
+  pass "google.com blocked"
 fi
 
 info "Test: allowed domain should succeed (api.github.com)"

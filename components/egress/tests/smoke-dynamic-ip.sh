@@ -51,9 +51,9 @@ for i in $(seq 1 50); do
   sleep 0.5
 done
 
-info "Pushing policy (default deny; allow example.com only)"
+info "Pushing policy (default deny; allow google.com only)"
 curl -sSf -XPOST "http://127.0.0.1:${POLICY_PORT}/policy" \
-  -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"example.com"}]}'
+  -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"google.com"}]}'
 
 run_in_app() {
   docker run --rm --network container:"${containerName}" curlimages/curl "$@"
@@ -62,9 +62,9 @@ run_in_app() {
 pass() { info "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-info "Test: allowed domain (example.com) should succeed via dynamic IP"
-run_in_app -I https://example.com --max-time 15 >/dev/null 2>&1 || fail "example.com should succeed (DNS allow + dynamic IP in nft)"
-pass "example.com allowed"
+info "Test: allowed domain (google.com) should succeed via dynamic IP"
+run_in_app -I https://google.com --max-time 15 >/dev/null 2>&1 || fail "google.com should succeed (DNS allow + dynamic IP in nft)"
+pass "google.com allowed"
 
 info "Test: denied domain (api.github.com) should fail"
 if run_in_app -I https://api.github.com --max-time 8 >/dev/null 2>&1; then
