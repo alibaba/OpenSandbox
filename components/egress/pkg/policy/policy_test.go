@@ -14,7 +14,10 @@
 
 package policy
 
-import "testing"
+import (
+	"net/netip"
+	"testing"
+)
 
 func TestParsePolicy_EmptyOrNullDefaultsDeny(t *testing.T) {
 	cases := []string{
@@ -101,5 +104,37 @@ func TestParsePolicy_InvalidAction(t *testing.T) {
 func TestParsePolicy_EmptyTargetError(t *testing.T) {
 	if _, err := ParsePolicy(`{"egress":[{"action":"allow","target":""}]}`); err == nil {
 		t.Fatalf("expected error for empty target")
+	}
+}
+
+func TestWithExtraAllowIPs(t *testing.T) {
+	p, _ := ParsePolicy(`{"defaultAction":"deny","egress":[{"action":"allow","target":"example.com"}]}`)
+	allowV4, allowV6, _, _ := p.StaticIPSets()
+	if len(allowV4) != 0 || len(allowV6) != 0 {
+		t.Fatalf("domain-only policy should have no static allow IPs, got allowV4=%v allowV6=%v", allowV4, allowV6)
+	}
+
+	ips := []netip.Addr{
+		netip.MustParseAddr("192.168.65.7"),
+		netip.MustParseAddr("2001:db8::1"),
+	}
+	merged := p.WithExtraAllowIPs(ips)
+	if merged == p {
+		t.Fatalf("expected new policy instance")
+	}
+	allowV4, allowV6, _, _ = merged.StaticIPSets()
+	if len(allowV4) != 1 || allowV4[0] != "192.168.65.7" {
+		t.Fatalf("allowV4 expected [192.168.65.7], got %v", allowV4)
+	}
+	if len(allowV6) != 1 || allowV6[0] != "2001:db8::1" {
+		t.Fatalf("allowV6 expected [2001:db8::1], got %v", allowV6)
+	}
+
+	// nil/empty ips returns same policy
+	if got := p.WithExtraAllowIPs(nil); got != p {
+		t.Fatalf("WithExtraAllowIPs(nil) should return same policy")
+	}
+	if got := p.WithExtraAllowIPs([]netip.Addr{}); got != p {
+		t.Fatalf("WithExtraAllowIPs([]) should return same policy")
 	}
 }

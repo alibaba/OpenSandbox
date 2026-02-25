@@ -10,6 +10,7 @@ The **Egress Sidecar** is a core component of OpenSandbox that provides **FQDN-b
 - **FQDN-based Allowlist**: Control outbound traffic by domain name (e.g., `api.github.com`).
 - **Wildcard Support**: Allow subdomains using wildcards (e.g., `*.pypi.org`).
 - **Transparent Interception**: Uses transparent DNS proxying; no application configuration required.
+- **Dynamic DNS (dns+nft mode)**: When a domain is allowed and the proxy resolves it, the resolved A/AAAA IPs are added to nftables with TTL so that default-deny + domain-allow is enforced at the network layer.
 - **Privilege Isolation**: Requires `CAP_NET_ADMIN` only for the sidecar; the application container runs unprivileged.
 - **Graceful Degradation**: If `CAP_NET_ADMIN` is missing, it warns and disables enforcement instead of crashing.
 
@@ -23,8 +24,9 @@ The egress control is implemented as a **Sidecar** that shares the network names
     - Filters queries based on the allowlist.
     - Returns `NXDOMAIN` for denied domains.
 
-2.  **Network Filter (Layer 2)** (Roadmap):
-    - Will use `nftables` to enforce IP-level restrictions based on resolved domains.
+2.  **Network Filter (Layer 2)** (when `OPENSANDBOX_EGRESS_MODE=dns+nft`):
+    - Uses `nftables` to enforce IP-level allow/deny. Resolved IPs for allowed domains are added to dynamic allow sets with TTL (dynamic DNS).
+    - At startup, the sidecar whitelists **127.0.0.1** (redirect target for the proxy) and **nameserver IPs** from `/etc/resolv.conf` so DNS resolution and proxy upstream work (including private DNS). Nameserver count is capped and invalid IPs are filtered; see [Configuration](#configuration).
 
 ## Requirements
 
@@ -43,6 +45,11 @@ The egress control is implemented as a **Sidecar** that shares the network names
 - Mode (`OPENSANDBOX_EGRESS_MODE`, default `dns`):
   - `dns`: DNS proxy only, no nftables (IP/CIDR rules have no effect at L2).
   - `dns+nft`: enable nftables; if nft apply fails, fallback to `dns`. IP/CIDR enforcement and DoH/DoT blocking require this mode.
+- **DNS and nft mode (nameserver whitelist)**  
+  In `dns+nft` mode, the sidecar automatically allows:
+  - **127.0.0.1** — so packets redirected by iptables to the proxy (127.0.0.1:15353) are accepted by nft.
+  - **Nameserver IPs** from `/etc/resolv.conf` — so client DNS and proxy upstream work (e.g. private DNS).  
+  Nameserver IPs are validated (unspecified and loopback are skipped) and capped. Use `OPENSANDBOX_EGRESS_MAX_NS` (default `3`; `0` = no cap, `1`–`10` = cap). See [SECURITY-RISKS.md](SECURITY-RISKS.md) for trust and scope of this whitelist.
 - DoH/DoT blocking:
   - DoT (tcp/udp 853) blocked by default.
   - Optional DoH over 443: `OPENSANDBOX_EGRESS_BLOCK_DOH_443=true`. If enabled without blocklist, all 443 is dropped.
@@ -139,15 +146,30 @@ To test the sidecar with a sandbox application:
 - **Key Packages**:
     - `pkg/dnsproxy`: DNS server and policy matching logic.
     - `pkg/iptables`: `iptables` rule management.
+    - `pkg/nftables`: nftables static/dynamic rules and DNS-resolved IP sets.
     - `pkg/policy`: Policy parsing and definition.
+- **Main (egress)**:
+    - `nameserver.go`: Builds the list of IPs to whitelist for DNS in nft mode (127.0.0.1 + validated/capped nameservers from resolv.conf).
 
 ```bash
 # Run tests
 go test ./...
 ```
 
+### E2E benchmark: dns vs dns+nft (sync dynamic IP write)
+
+An end-to-end benchmark compares **dns** (pass-through, no nft write) and **dns+nft** (sync `AddResolvedIPs` before each DNS reply) under real conditions: sidecar in Docker, iptables redirect, real DNS + HTTPS from a client container.
+
+```bash
+./tests/bench-dns-nft.sh
+```
+
+More details in [docs/benchmark.md](docs/benchmark.md).
+
 ## Troubleshooting
 
 - **"iptables setup failed"**: Ensure the sidecar container has `--cap-add=NET_ADMIN`.
-- **DNS resolution fails for all domains**: Check if the upstream DNS (from `/etc/resolv.conf`) is reachable.
-- **Traffic not blocked**: If nftables应用失败会回退为 DNS-only；检查日志、`nft list table inet opensandbox`、以及 `CAP_NET_ADMIN` 权限。
+- **DNS resolution fails for all domains**:  
+  - Check if the upstream DNS (from `/etc/resolv.conf`) is reachable.  
+  - In `dns+nft` mode, the sidecar whitelists nameserver IPs from resolv.conf at startup; check logs for `[dns] whitelisting proxy listen + N nameserver(s)` and ensure `/etc/resolv.conf` is readable and contains valid, reachable nameservers. The proxy prefers the first non-loopback nameserver from resolv.conf; if only loopback exists (e.g. Docker 127.0.0.11), it is used (proxy upstream traffic bypasses the redirect). Fallback to 8.8.8.8 only when resolv.conf is empty or unreadable.
+- **Traffic not blocked**: If nftables apply fails, the sidecar falls back to dns; check logs, `nft list table inet opensandbox`, and `CAP_NET_ADMIN`.
