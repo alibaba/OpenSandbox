@@ -30,9 +30,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
+	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/google/uuid"
 )
 
 const (
@@ -272,14 +272,34 @@ func (s *bashSession) run(request *ExecuteCodeRequest) error {
 	}
 	s.mu.Unlock()
 
-	if request.Hooks.OnExecuteComplete != nil {
-		request.Hooks.OnExecuteComplete(time.Since(startAt))
-	}
-
-	// Maintain previous behavior: non-zero exit codes do not surface as errors.
 	var exitErr *exec.ExitError
 	if waitErr != nil && !errors.As(waitErr, &exitErr) {
 		return waitErr
+	}
+
+	userExitCode := 0
+	if exitCode != nil {
+		userExitCode = *exitCode
+	}
+
+	if userExitCode != 0 {
+		errMsg := fmt.Sprintf("command exited with code %d", userExitCode)
+		if waitErr != nil {
+			errMsg = waitErr.Error()
+		}
+		if request.Hooks.OnExecuteError != nil {
+			request.Hooks.OnExecuteError(&execute.ErrorOutput{
+				EName:     "CommandExecError",
+				EValue:    strconv.Itoa(userExitCode),
+				Traceback: []string{errMsg},
+			})
+		}
+		log.Error("CommandExecError: %s", errMsg)
+		return nil
+	}
+
+	if request.Hooks.OnExecuteComplete != nil {
+		request.Hooks.OnExecuteComplete(time.Since(startAt))
 	}
 
 	return nil

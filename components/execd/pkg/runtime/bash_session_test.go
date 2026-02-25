@@ -18,12 +18,80 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 )
+
+func TestBashSession_NonZeroExitEmitsError(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found in PATH")
+	}
+
+	c := NewController("", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		sessionID  string
+		stdoutLine string
+		errCh      = make(chan *execute.ErrorOutput, 1)
+		completeCh = make(chan struct{}, 1)
+	)
+
+	req := &ExecuteCodeRequest{
+		Language: Bash,
+		Code:     `echo "before"; exit 7`,
+		Cwd:      t.TempDir(),
+		Timeout:  5 * time.Second,
+		Hooks: ExecuteResultHook{
+			OnExecuteInit:   func(s string) { sessionID = s },
+			OnExecuteStdout: func(s string) { stdoutLine = s },
+			OnExecuteError:  func(err *execute.ErrorOutput) { errCh <- err },
+			OnExecuteComplete: func(_ time.Duration) {
+				completeCh <- struct{}{}
+			},
+		},
+	}
+
+	if err := c.runBashSession(ctx, req); err != nil {
+		t.Fatalf("runBashSession returned error: %v", err)
+	}
+
+	var gotErr *execute.ErrorOutput
+	select {
+	case gotErr = <-errCh:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("expected error hook to be called")
+	}
+
+	if gotErr == nil {
+		t.Fatalf("expected non-nil error output")
+	}
+	if gotErr.EName != "CommandExecError" || gotErr.EValue != "7" {
+		t.Fatalf("unexpected error payload: %+v", gotErr)
+	}
+
+	if sessionID == "" {
+		t.Fatalf("expected session id to be set")
+	}
+	if stdoutLine != "before" {
+		t.Fatalf("unexpected stdout: %q", stdoutLine)
+	}
+
+	select {
+	case <-completeCh:
+		t.Fatalf("did not expect completion hook on non-zero exit")
+	default:
+	}
+}
 
 func TestBashSession_envAndExitCode(t *testing.T) {
 	session := newBashSession(nil)
