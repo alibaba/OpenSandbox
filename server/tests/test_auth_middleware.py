@@ -53,3 +53,64 @@ def test_auth_middleware_accepts_valid_key():
     response = client.get("/secured", headers={"OPEN-SANDBOX-API-KEY": "secret-key"})
     assert response.status_code == 200
     assert response.json() == {"ok": True}
+
+
+def test_auth_middleware_skips_validation_for_proxy_to_sandbox():
+    """Proxy-to-sandbox paths must not require API key; server only forwards to sandbox."""
+    app = _build_test_app()
+
+    @app.get("/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}")
+    def proxy_echo(sandbox_id: str, port: int, full_path: str):
+        return {"proxied": True, "sandbox_id": sandbox_id, "port": port, "path": full_path}
+
+    client = TestClient(app)
+    # No OPEN-SANDBOX-API-KEY header; should still succeed for proxy path
+    response = client.get("/sandboxes/abc-123/proxy/8080/foo/bar")
+    assert response.status_code == 200
+    assert response.json()["proxied"] is True
+    assert response.json()["sandbox_id"] == "abc-123"
+    assert response.json()["port"] == 8080
+    assert response.json()["path"] == "foo/bar"
+
+
+def test_auth_middleware_v1_proxy_path_exempt():
+    """V1 prefix proxy path is also exempt."""
+    app = _build_test_app()
+
+    @app.get("/v1/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}")
+    def proxy_echo(sandbox_id: str, port: int, full_path: str):
+        return {"proxied": True}
+
+    client = TestClient(app)
+    response = client.get("/v1/sandboxes/sid/proxy/443/")
+    assert response.status_code == 200
+    assert response.json()["proxied"] is True
+
+
+def test_auth_middleware_requires_key_for_non_proxy_paths_containing_proxy_and_sandboxes():
+    """Paths that contain both 'proxy' and 'sandboxes' but not in proxy-route shape still require auth."""
+    app = _build_test_app()
+
+    @app.get("/proxy/sandboxes/anything")
+    def fake_proxy():
+        return {"reached": True}
+
+    client = TestClient(app)
+    response = client.get("/proxy/sandboxes/anything")
+    assert response.status_code == 401
+    assert response.json()["code"] == "MISSING_API_KEY"
+
+
+def test_auth_middleware_is_proxy_path_rejects_traversal():
+    """Paths containing '..' are never considered proxy (no auth bypass)."""
+    assert AuthMiddleware._is_proxy_path("/sandboxes/abc/proxy/8080/../other") is False
+    assert AuthMiddleware._is_proxy_path("/sandboxes/../admin/proxy/8080") is False
+
+
+def test_auth_middleware_is_proxy_path_accepts_valid_shapes():
+    """Only exact proxy route shape is accepted."""
+    assert AuthMiddleware._is_proxy_path("/sandboxes/id/proxy/8080") is True
+    assert AuthMiddleware._is_proxy_path("/sandboxes/id/proxy/8080/") is True
+    assert AuthMiddleware._is_proxy_path("/v1/sandboxes/id/proxy/443/path") is True
+    assert AuthMiddleware._is_proxy_path("/proxy/sandboxes/x") is False
+    assert AuthMiddleware._is_proxy_path("/foo/sandboxes/id/proxy/8080") is False
