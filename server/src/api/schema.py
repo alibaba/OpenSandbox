@@ -448,6 +448,10 @@ class Endpoint(BaseModel):
         ...,
         description="Public endpoint string (host[:port]/path) exposed for the sandbox service",
     )
+    headers: Optional[dict[str, str]] = Field(
+        default=None,
+        description="Optional headers required when accessing the endpoint (e.g., for header-based routing).",
+    )
 
 
 # ============================================================================

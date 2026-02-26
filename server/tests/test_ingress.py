@@ -20,6 +20,7 @@ from src.config import (
     INGRESS_MODE_DIRECT,
     INGRESS_MODE_GATEWAY,
 )
+from src.services.constants import OPEN_SANDBOX_INGRESS_HEADER
 from src.services.helpers import format_ingress_endpoint
 
 
@@ -37,7 +38,10 @@ def test_format_ingress_endpoint_wildcard():
             route=GatewayRouteModeConfig(mode="wildcard"),
         ),
     )
-    assert format_ingress_endpoint(cfg, "sid", 8080) == "sid-8080.example.com"
+    endpoint = format_ingress_endpoint(cfg, "sid", 8080)
+    assert endpoint is not None
+    assert endpoint.endpoint == "sid-8080.example.com"
+    assert endpoint.headers is None
 
 
 def test_format_ingress_endpoint_uri():
@@ -48,4 +52,21 @@ def test_format_ingress_endpoint_uri():
             route=GatewayRouteModeConfig(mode="uri"),
         ),
     )
-    assert format_ingress_endpoint(cfg, "sid", 9000) == "gateway.example.com/sid/9000"
+    endpoint = format_ingress_endpoint(cfg, "sid", 9000)
+    assert endpoint is not None
+    assert endpoint.endpoint == "gateway.example.com/sid/9000"
+    assert endpoint.headers is None
+
+
+def test_format_ingress_endpoint_header():
+    cfg = IngressConfig(
+        mode=INGRESS_MODE_GATEWAY,
+        gateway=GatewayConfig(
+            address="gateway.example.com",
+            route=GatewayRouteModeConfig(mode="header"),
+        ),
+    )
+    endpoint = format_ingress_endpoint(cfg, "sid", 8080)
+    assert endpoint is not None
+    assert endpoint.endpoint == "gateway.example.com"
+    assert endpoint.headers == {OPEN_SANDBOX_INGRESS_HEADER: "sid-8080"}

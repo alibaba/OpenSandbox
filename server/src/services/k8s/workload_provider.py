@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from src.api.schema import ImageSpec, NetworkPolicy
+from src.api.schema import Endpoint, ImageSpec, NetworkPolicy
 
 
 class WorkloadProvider(ABC):
@@ -158,7 +158,7 @@ class WorkloadProvider(ABC):
         pass
     
     @abstractmethod
-    def get_endpoint_info(self, workload: Any, port: int, sandbox_id: str) -> Optional[str]:
+    def get_endpoint_info(self, workload: Any, port: int, sandbox_id: str) -> Optional[Endpoint]:
         """
         Get endpoint information from workload.
         
@@ -168,7 +168,7 @@ class WorkloadProvider(ABC):
             sandbox_id: Sandbox identifier for ingress-based endpoints
             
         Returns:
-            Endpoint string (e.g., "10.244.0.5:8080") or None if not available
+            Endpoint object (including optional headers) or None if not available
         """
         pass
 

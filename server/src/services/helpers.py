@@ -26,7 +26,8 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from src.api.schema import Sandbox, SandboxFilter
+from src.api.schema import Endpoint, Sandbox, SandboxFilter
+from src.services.constants import OPEN_SANDBOX_INGRESS_HEADER
 from src.config import (
     GATEWAY_ROUTE_MODE_HEADER,
     GATEWAY_ROUTE_MODE_URI,
@@ -155,13 +156,11 @@ def format_ingress_endpoint(
     ingress_config: Optional[IngressConfig],
     sandbox_id: str,
     port: int,
-) -> Optional[str]:
+) -> Optional[Endpoint]:
     """
     Build an ingress-based endpoint string for a sandbox.
 
-    Returns None when ingress is not in gateway mode or when the route mode is
-    not supported (e.g., header mode is intentionally skipped until Endpoint
-    schema can carry headers).
+    Returns None when ingress is not in gateway mode.
     """
     if not ingress_config or ingress_config.mode != INGRESS_MODE_GATEWAY:
         return None
@@ -174,16 +173,19 @@ def format_ingress_endpoint(
 
     if route_mode == GATEWAY_ROUTE_MODE_WILDCARD:
         base = address[2:] if address.startswith("*.") else address
-        return f"{sandbox_id}-{port}.{base}"
+        return Endpoint(endpoint=f"{sandbox_id}-{port}.{base}")
 
     if route_mode == GATEWAY_ROUTE_MODE_URI:
-        return f"{address}/{sandbox_id}/{port}"
+        return Endpoint(endpoint=f"{address}/{sandbox_id}/{port}")
 
     if route_mode == GATEWAY_ROUTE_MODE_HEADER:
-        # TODO(Pangjiping): Header mode intentionally not emitted until Endpoint schema supports headers.
-        raise RuntimeError(f"Unsupported route mode: {route_mode}")
+        header_value = f"{sandbox_id}-{port}"
+        return Endpoint(
+            endpoint=address,
+            headers={OPEN_SANDBOX_INGRESS_HEADER: header_value},
+        )
 
-    return None
+    raise RuntimeError(f"Unsupported route mode: {route_mode}")
 
 
 __all__ = [
