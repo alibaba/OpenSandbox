@@ -23,6 +23,7 @@ import (
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
+	"github.com/alibaba/opensandbox/egress/pkg/metrics"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
@@ -43,12 +44,16 @@ func setupNft(ctx context.Context, nftMgr nftApplier, initialPolicy *policy.Netw
 	}
 	policyWithNS := initialPolicy.WithExtraAllowIPs(nameserverIPs)
 	if err := nftMgr.ApplyStatic(ctx, policyWithNS); err != nil {
+		metrics.NftApplyTotal.WithLabelValues(metrics.ResultFailure).Inc()
 		log.Fatalf("nftables static apply failed: %v", err)
 	}
+	metrics.NftApplyTotal.WithLabelValues(metrics.ResultSuccess).Inc()
 	log.Printf("nftables static policy applied (table inet opensandbox)")
 	proxy.SetOnResolved(func(domain string, ips []nftables.ResolvedIP) {
 		if err := nftMgr.AddResolvedIPs(ctx, ips); err != nil {
 			log.Printf("[dns] add resolved IPs to nft failed: %v", err)
+		} else {
+			metrics.NftResolvedIPsAddedTotal.Add(float64(len(ips)))
 		}
 	})
 }

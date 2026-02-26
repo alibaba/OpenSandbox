@@ -25,6 +25,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
+	"github.com/alibaba/opensandbox/egress/pkg/metrics"
 )
 
 func main() {
@@ -39,11 +40,13 @@ func main() {
 	allowIPs := AllowIPsForNft("/etc/resolv.conf")
 
 	mode := parseMode()
+	metrics.SetEnforcementMode(mode)
 	nftMgr := createNftManager(mode)
 	proxy, err := dnsproxy.New(initialRules, "")
 	if err != nil {
 		log.Fatalf("failed to init dns proxy: %v", err)
 	}
+	metrics.SetPolicyRuleCount(initialRules.DefaultAction, len(initialRules.Egress))
 	if err := proxy.Start(ctx); err != nil {
 		log.Fatalf("failed to start dns proxy: %v", err)
 	}

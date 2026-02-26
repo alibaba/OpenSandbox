@@ -81,3 +81,5 @@ else
 fi
 
 info "All smoke tests (dynamic IP) passed."
+info "Fetching metrics..."
+curl -sf "http://127.0.0.1:${POLICY_PORT}/metrics" || true

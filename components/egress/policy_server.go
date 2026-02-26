@@ -28,8 +28,10 @@ import (
 	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
+	"github.com/alibaba/opensandbox/egress/pkg/metrics"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type policyUpdater interface {
@@ -58,6 +60,7 @@ func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier,
 	mux := http.NewServeMux()
 	handler := &policyServer{proxy: proxy, nft: nft, token: token, enforcementMode: enforcementMode, nameserverIPs: nameserverIPs}
 	mux.HandleFunc("/policy", handler.handlePolicy)
+	mux.HandleFunc("/metrics", promhttp.Handler().ServeHTTP)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -146,11 +149,15 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 		if s.nft != nil {
 			defWithNS := def.WithExtraAllowIPs(s.nameserverIPs)
 			if err := s.nft.ApplyStatic(r.Context(), defWithNS); err != nil {
+				metrics.NftApplyTotal.WithLabelValues(metrics.ResultFailure).Inc()
 				http.Error(w, fmt.Sprintf("failed to apply nftables: %v", err), http.StatusInternalServerError)
 				return
 			}
+			metrics.NftApplyTotal.WithLabelValues(metrics.ResultSuccess).Inc()
 		}
 		s.proxy.UpdatePolicy(def)
+		metrics.PolicyUpdatesTotal.Inc()
+		metrics.SetPolicyRuleCount(def.DefaultAction, len(def.Egress))
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "ok",
 			"mode":   "deny_all",
@@ -167,11 +174,15 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	if s.nft != nil {
 		polWithNS := pol.WithExtraAllowIPs(s.nameserverIPs)
 		if err := s.nft.ApplyStatic(r.Context(), polWithNS); err != nil {
+			metrics.NftApplyTotal.WithLabelValues(metrics.ResultFailure).Inc()
 			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)
 			return
 		}
+		metrics.NftApplyTotal.WithLabelValues(metrics.ResultSuccess).Inc()
 	}
 	s.proxy.UpdatePolicy(pol)
+	metrics.PolicyUpdatesTotal.Inc()
+	metrics.SetPolicyRuleCount(pol.DefaultAction, len(pol.Egress))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":          "ok",
 		"mode":            modeFromPolicy(pol),
