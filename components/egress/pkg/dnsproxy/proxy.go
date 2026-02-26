@@ -26,6 +26,7 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/alibaba/opensandbox/egress/pkg/metrics"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
@@ -109,20 +110,26 @@ func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	currentPolicy := p.policy
 	p.policyMu.RUnlock()
 	if currentPolicy != nil && currentPolicy.Evaluate(domain) == policy.ActionDeny {
+		metrics.DNSQueriesTotal.WithLabelValues(metrics.ResultDenied).Inc()
+		metrics.ViolationsTotal.WithLabelValues(metrics.ViolationTypeDNSDeny).Inc()
 		resp := new(dns.Msg)
 		resp.SetRcode(r, dns.RcodeNameError)
 		_ = w.WriteMsg(resp)
 		return
 	}
 
+	start := time.Now()
 	resp, err := p.forward(r)
+	metrics.DNSForwardDurationSeconds.Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DNSQueriesTotal.WithLabelValues(metrics.ResultForwardError).Inc()
 		log.Printf("[dns] forward error for %s: %v", domain, err)
 		fail := new(dns.Msg)
 		fail.SetRcode(r, dns.RcodeServerFailure)
 		_ = w.WriteMsg(fail)
 		return
 	}
+	metrics.DNSQueriesTotal.WithLabelValues(metrics.ResultAllowed).Inc()
 	p.maybeNotifyResolved(domain, resp)
 	_ = w.WriteMsg(resp)
 }

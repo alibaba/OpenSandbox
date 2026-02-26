@@ -73,3 +73,5 @@ run_in_app -I https://api.github.com --max-time 10 >/dev/null 2>&1 || fail "api.
 pass "api.github.com allowed"
 
 info "All smoke tests passed."
+info "Fetching metrics..."
+curl -sf "http://127.0.0.1:${POLICY_PORT}/metrics" || true
