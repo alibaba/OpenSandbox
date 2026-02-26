@@ -16,6 +16,9 @@
 set -ex
 
 TAG=${TAG:-latest}
+VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")}
+GIT_COMMIT=${GIT_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo "unknown")}
+BUILD_TIME=${BUILD_TIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
@@ -30,7 +33,10 @@ docker buildx ls
 docker buildx build \
   -t opensandbox/execd:${TAG} \
   -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:${TAG} \
+  -f components/execd/Dockerfile \
+  --build-arg VERSION="${VERSION}" \
+  --build-arg GIT_COMMIT="${GIT_COMMIT}" \
+  --build-arg BUILD_TIME="${BUILD_TIME}" \
   --platform linux/amd64,linux/arm64 \
   --push \
-  -f components/execd/Dockerfile \
   "${REPO_ROOT}"

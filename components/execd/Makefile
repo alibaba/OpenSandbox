@@ -26,9 +26,17 @@ install-golint:
 golint: fmt install-golint
 	golangci-lint run -v --fix ./...
 
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+LDFLAGS := -X 'github.com/alibaba/opensandbox/internal/version.Version=$(VERSION)' \
+	-X 'github.com/alibaba/opensandbox/internal/version.BuildTime=$(BUILD_TIME)' \
+	-X 'github.com/alibaba/opensandbox/internal/version.GitCommit=$(GIT_COMMIT)'
+
 .PHONY: build
 build: vet ## Build the binary.
-	go build -o bin/execd main.go
+	@mkdir -p bin
+	go build -ldflags "$(LDFLAGS)" -o bin/execd main.go
 
 .PHONY: multi-build
 multi-build: vet ## Cross-compile for linux/windows/darwin amd64/arm64.
@@ -38,6 +46,6 @@ multi-build: vet ## Cross-compile for linux/windows/darwin amd64/arm64.
 			out=bin/execd-$${os}-$${arch}; \
 			[ "$${os}" = "windows" ] && out="$${out}.exe"; \
 			echo ">> building $${os}/$${arch} -> $${out}"; \
-			GOOS=$${os} GOARCH=$${arch} CGO_ENABLED=0 go build -o "$${out}" main.go || exit $$?; \
+			GOOS=$${os} GOARCH=$${arch} CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o "$${out}" main.go || exit $$?; \
 		done; \
 	done
