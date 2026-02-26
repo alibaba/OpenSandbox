@@ -16,6 +16,10 @@ FROM golang:1.24-bookworm AS builder
 
 WORKDIR /workspace
 
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
+
 # Copy only go mod/sum first for better caching
 COPY components/egress/go.mod components/egress/go.sum ./components/egress/
 # Bring internal module so replace ../internal works during download/build
@@ -28,8 +32,12 @@ ENV CGO_ENABLED=0
 RUN go mod download
 
 # Copy the rest of the egress sources
-COPY components/egress ./ 
-RUN go build -o /out/egress .
+COPY components/egress ./
+RUN CGO_ENABLED=0 go build \
+    -ldflags "-X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
+              -X 'github.com/alibaba/opensandbox/internal/version.BuildTime=${BUILD_TIME}' \
+              -X 'github.com/alibaba/opensandbox/internal/version.GitCommit=${GIT_COMMIT}'" \
+    -o /out/egress .
 
 FROM debian:bookworm-slim
 
