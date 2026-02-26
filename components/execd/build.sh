@@ -20,7 +20,8 @@ VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "d
 GIT_COMMIT=${GIT_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo "unknown")}
 BUILD_TIME=${BUILD_TIME:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}
 
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || realpath "$(dirname "$0")/../..")
+cd "${REPO_ROOT}"
 
 docker buildx rm execd-builder || true
 
@@ -39,4 +40,4 @@ docker buildx build \
   --build-arg BUILD_TIME="${BUILD_TIME}" \
   --platform linux/amd64,linux/arm64 \
   --push \
-  "${REPO_ROOT}"
+  .
