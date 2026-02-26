@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
+	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
 
@@ -84,6 +85,9 @@ func (m *Manager) ApplyStatic(ctx context.Context, p *policy.NetworkPolicy) erro
 	if p == nil {
 		p = policy.DefaultDenyPolicy()
 	}
+	allowV4, allowV6, denyV4, denyV6 := p.StaticIPSets()
+	log.Infof("nftables: applying static policy: default=%s, allow_v4=%d, allow_v6=%d, deny_v4=%d, deny_v6=%d",
+		p.DefaultAction, len(allowV4), len(allowV6), len(denyV4), len(denyV6))
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	script := buildRuleset(p, m.opts)
@@ -99,6 +103,7 @@ func (m *Manager) ApplyStatic(ctx context.Context, p *policy.NetworkPolicy) erro
 		}
 		return err
 	}
+	log.Infof("nftables: static policy applied successfully")
 	return nil
 }
 
@@ -115,6 +120,7 @@ func (m *Manager) AddResolvedIPs(ctx context.Context, ips []ResolvedIP) error {
 	if script == "" {
 		return nil
 	}
+	log.Infof("nftables: adding %d resolved IP(s) to dynamic allow sets with script statement %s", len(ips), script)
 	_, err := m.run(ctx, script)
 	return err
 }

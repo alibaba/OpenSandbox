@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -25,11 +24,16 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
+	"github.com/alibaba/opensandbox/egress/pkg/log"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 )
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+
+	ctx = withLogger(ctx)
+	defer log.Logger.Sync()
 
 	initialRules, err := dnsproxy.LoadPolicyFromEnvVar(constants.EnvEgressRules)
 	if err != nil {
@@ -39,6 +43,7 @@ func main() {
 	allowIPs := AllowIPsForNft("/etc/resolv.conf")
 
 	mode := parseMode()
+	log.Infof("enforcement mode: %s", mode)
 	nftMgr := createNftManager(mode)
 	proxy, err := dnsproxy.New(initialRules, "")
 	if err != nil {
@@ -47,12 +52,12 @@ func main() {
 	if err := proxy.Start(ctx); err != nil {
 		log.Fatalf("failed to start dns proxy: %v", err)
 	}
-	log.Println("dns proxy started on 127.0.0.1:15353")
+	log.Infof("dns proxy started on 127.0.0.1:15353")
 
 	if err := iptables.SetupRedirect(15353); err != nil {
 		log.Fatalf("failed to install iptables redirect: %v", err)
 	}
-	log.Printf("iptables redirect configured (OUTPUT 53 -> 15353) with SO_MARK bypass for proxy upstream traffic")
+	log.Infof("iptables redirect configured (OUTPUT 53 -> 15353) with SO_MARK bypass for proxy upstream traffic")
 
 	setupNft(ctx, nftMgr, initialRules, proxy, allowIPs)
 
@@ -61,11 +66,17 @@ func main() {
 	if err = startPolicyServer(ctx, proxy, nftMgr, mode, httpAddr, os.Getenv(constants.EnvEgressToken), allowIPs); err != nil {
 		log.Fatalf("failed to start policy server: %v", err)
 	}
-	log.Printf("policy server listening on %s (POST /policy)", httpAddr)
+	log.Infof("policy server listening on %s (POST /policy)", httpAddr)
 
 	<-ctx.Done()
-	log.Println("received shutdown signal; exiting")
+	log.Infof("received shutdown signal; exiting")
 	_ = os.Stderr.Sync()
+}
+
+func withLogger(ctx context.Context) context.Context {
+	level := envOrDefault(constants.EnvEgressLogLevel, "info")
+	logger := slogger.MustNew(slogger.Config{Level: level}).Named("opensandbox.egress")
+	return log.WithLogger(ctx, logger)
 }
 
 func envOrDefault(key, defaultVal string) string {
@@ -92,7 +103,7 @@ func parseMode() string {
 	case constants.PolicyDnsNft:
 		return constants.PolicyDnsNft
 	default:
-		log.Printf("invalid %s=%s, falling back to dns", constants.EnvEgressMode, mode)
+		log.Warnf("invalid %s=%s, falling back to dns", constants.EnvEgressMode, mode)
 		return constants.PolicyDnsOnly
 	}
 }

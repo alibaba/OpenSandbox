@@ -17,7 +17,6 @@ package dnsproxy
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/netip"
 	"os"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
@@ -117,7 +117,7 @@ func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 	resp, err := p.forward(r)
 	if err != nil {
-		log.Printf("[dns] forward error for %s: %v", domain, err)
+		log.Warnf("[dns] forward error for %s: %v", domain, err)
 		fail := new(dns.Msg)
 		fail.SetRcode(r, dns.RcodeServerFailure)
 		_ = w.WriteMsg(fail)
@@ -220,7 +220,7 @@ func discoverUpstream() (string, error) {
 	cfg, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 	if err != nil || len(cfg.Servers) == 0 {
 		if err != nil {
-			log.Printf("[dns] fallback upstream resolver due to error: %v", err)
+			log.Warnf("[dns] fallback upstream resolver due to error: %v", err)
 		}
 		return fallbackUpstream, nil
 	}

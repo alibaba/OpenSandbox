@@ -643,9 +643,8 @@ class KubernetesSandboxService(SandboxService):
                     },
                 )
             
-            endpoint_str = self.workload_provider.get_endpoint_info(workload, port, sandbox_id)
-            
-            if not endpoint_str:
+            endpoint = self.workload_provider.get_endpoint_info(workload, port, sandbox_id)
+            if not endpoint:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail={
@@ -653,8 +652,7 @@ class KubernetesSandboxService(SandboxService):
                         "message": "Pod IP is not yet available. The Pod may still be starting.",
                     },
                 )
-            
-            return Endpoint(endpoint=endpoint_str)
+            return endpoint
             
         except HTTPException:
             raise

@@ -14,15 +14,21 @@
 
 FROM golang:1.24-bookworm AS builder
 
-WORKDIR /app
+WORKDIR /workspace
 
-COPY go.mod go.sum ./
+# Copy only go mod/sum first for better caching
+COPY components/egress/go.mod components/egress/go.sum ./components/egress/
+# Bring internal module so replace ../internal works during download/build
+COPY components/internal ./components/internal
+
+WORKDIR /workspace/components/egress
 
 # Static-ish build (no cgo) to simplify runtime deps
 ENV CGO_ENABLED=0
 RUN go mod download
 
-COPY . .
+# Copy the rest of the egress sources
+COPY components/egress ./ 
 RUN go build -o /out/egress .
 
 FROM debian:bookworm-slim

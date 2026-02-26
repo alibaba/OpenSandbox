@@ -32,7 +32,7 @@ from kubernetes.client import (
 
 from src.config import IngressConfig, INGRESS_MODE_GATEWAY
 from src.services.helpers import format_ingress_endpoint
-from src.api.schema import ImageSpec, NetworkPolicy
+from src.api.schema import Endpoint, ImageSpec, NetworkPolicy
 from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.egress_helper import (
@@ -790,7 +790,7 @@ class BatchSandboxProvider(WorkloadProvider):
             "last_transition_at": creation_timestamp,
         }
     
-    def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[str]:
+    def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[Endpoint]:
         """
         Get endpoint information from BatchSandbox.
         - gateway mode: use ingress config to format endpoint
@@ -814,7 +814,7 @@ class BatchSandboxProvider(WorkloadProvider):
             if endpoints and len(endpoints) > 0:
                 # Use the first IP
                 pod_ip = endpoints[0]
-                return f"{pod_ip}:{port}"
+                return Endpoint(endpoint=f"{pod_ip}:{port}")
         except (json.JSONDecodeError, IndexError, TypeError):
             return None
 

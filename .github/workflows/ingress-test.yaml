@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'components/ingress/**'
+      - 'components/internal/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

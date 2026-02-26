@@ -15,13 +15,13 @@
 package main
 
 import (
-	"log"
 	"net/netip"
 	"os"
 	"strconv"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
+	"github.com/alibaba/opensandbox/egress/pkg/log"
 )
 
 // AllowIPsForNft returns the list of IPs to merge into the nft allow set for DNS in dns+nft mode:
@@ -49,9 +49,9 @@ func AllowIPsForNft(resolvPath string) []netip.Addr {
 	out = append(out, validated...)
 
 	if len(out) > 1 {
-		log.Printf("[dns] whitelisting proxy listen + %d nameserver(s) for nft: %v", len(validated), formatIPs(out))
+		log.Infof("[dns] whitelisting proxy listen + %d nameserver(s) for nft: %v", len(validated), formatIPs(out))
 	} else {
-		log.Printf("[dns] whitelisting proxy listen (127.0.0.1); no valid nameserver IPs from %s", resolvPath)
+		log.Infof("[dns] whitelisting proxy listen (127.0.0.1); no valid nameserver IPs from %s", resolvPath)
 	}
 	return out
 }

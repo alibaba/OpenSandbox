@@ -357,7 +357,8 @@ class TestAgentSandboxProvider:
 
         endpoint = provider.get_endpoint_info(workload, 8080, "sandbox-123")
 
-        assert endpoint == "10.0.0.9:8080"
+        assert endpoint.endpoint == "10.0.0.9:8080"
+        assert endpoint.headers is None
 
     def test_get_endpoint_info_falls_back_to_service_fqdn(self, mock_k8s_client):
         """
@@ -373,7 +374,8 @@ class TestAgentSandboxProvider:
 
         endpoint = provider.get_endpoint_info(workload, 9000, "sandbox-123")
 
-        assert endpoint == "svc.example.com:9000"
+        assert endpoint.endpoint == "svc.example.com:9000"
+        assert endpoint.headers is None
 
 
 class TestAgentSandboxProviderEgress:

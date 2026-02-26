@@ -20,6 +20,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# tests/ is two levels under repo root: components/egress/tests -> climb 3 levels.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+
 IMG="opensandbox/egress:local"
 containerName="egress-smoke-dynamic-ip"
 POLICY_PORT=18080
@@ -32,7 +36,7 @@ cleanup() {
 trap cleanup EXIT
 
 info "Building image ${IMG}"
-docker build -t "${IMG}" .
+docker build -t "${IMG}" -f "${REPO_ROOT}/components/egress/Dockerfile" "${REPO_ROOT}"
 
 info "Starting sidecar (dns+nft)"
 docker run -d --name "${containerName}" \

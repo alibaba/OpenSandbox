@@ -15,11 +15,14 @@
 package logger
 
 import (
+	"os"
 	"strings"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
+
+const envLogOutput = "OPENSANDBOX_LOG_OUTPUT"
 
 // Config is the minimal configuration to align execd/ingress defaults.
 // - JSON encoding, ISO8601 time
@@ -34,6 +37,8 @@ type Config struct {
 
 // New creates a zap-backed Logger with the provided config.
 func New(cfg Config) (Logger, error) {
+	cfg = applyEnvOutputs(cfg)
+
 	zapCfg := zap.NewProductionConfig()
 	zapCfg.Level = zap.NewAtomicLevelAt(parseLevel(cfg.Level))
 	zapCfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
@@ -42,16 +47,8 @@ func New(cfg Config) (Logger, error) {
 	zapCfg.DisableStacktrace = true
 	zapCfg.EncoderConfig.StacktraceKey = ""
 
-	if len(cfg.OutputPaths) == 0 {
-		zapCfg.OutputPaths = []string{"stdout"}
-	} else {
-		zapCfg.OutputPaths = cfg.OutputPaths
-	}
-	if len(cfg.ErrorOutputPaths) == 0 {
-		zapCfg.ErrorOutputPaths = zapCfg.OutputPaths
-	} else {
-		zapCfg.ErrorOutputPaths = cfg.ErrorOutputPaths
-	}
+	zapCfg.OutputPaths = cfg.OutputPaths
+	zapCfg.ErrorOutputPaths = cfg.ErrorOutputPaths
 
 	base, err := zapCfg.Build()
 	if err != nil {
@@ -133,4 +130,31 @@ func parseLevel(level string) zapcore.Level {
 	default:
 		return zapcore.InfoLevel
 	}
+}
+
+func applyEnvOutputs(cfg Config) Config {
+	envVal := strings.TrimSpace(os.Getenv(envLogOutput))
+	if len(cfg.OutputPaths) == 0 {
+		if envVal != "" {
+			cfg.OutputPaths = splitAndTrim(envVal)
+		} else {
+			cfg.OutputPaths = []string{"stdout"}
+		}
+	}
+	if len(cfg.ErrorOutputPaths) == 0 {
+		// Default error output matches output paths.
+		cfg.ErrorOutputPaths = cfg.OutputPaths
+	}
+	return cfg
+}
+
+func splitAndTrim(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
