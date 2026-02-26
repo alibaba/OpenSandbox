@@ -13,6 +13,9 @@
 // limitations under the License.
 
 using OpenSandbox.CodeInterpreter.Factory;
+using OpenSandbox.Core;
+using OpenSandbox;
+using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
 namespace OpenSandbox.CodeInterpreter.Tests;
@@ -33,20 +36,23 @@ public class FactoryTests
     {
         var factory = DefaultCodeInterpreterAdapterFactory.Create();
 
-        Assert.Throws<ArgumentNullException>(() => factory.CreateCodes(null!));
+        Assert.Throws<InvalidArgumentException>(() => factory.CreateCodes(null!));
     }
 
     [Fact]
-    public void DefaultCodeInterpreterAdapterFactory_CreateCodes_ThrowsOnNullSandbox()
+    public void DefaultCodeInterpreterAdapterFactory_CreateCodes_ThrowsOnNullConnectionConfig()
     {
         var factory = DefaultCodeInterpreterAdapterFactory.Create();
         var options = new CreateCodesStackOptions
         {
-            Sandbox = null!,
-            ExecdBaseUrl = "http://localhost:44772"
+            ConnectionConfig = null!,
+            ExecdBaseUrl = "http://localhost:44772",
+            ExecdHeaders = new Dictionary<string, string>(),
+            HttpClientProvider = new HttpClientProvider(new OpenSandbox.Config.ConnectionConfig(), NullLoggerFactory.Instance),
+            LoggerFactory = NullLoggerFactory.Instance
         };
 
-        Assert.Throws<ArgumentNullException>(() => factory.CreateCodes(options));
+        Assert.Throws<InvalidArgumentException>(() => factory.CreateCodes(options));
     }
 
     [Fact]
@@ -54,16 +60,16 @@ public class FactoryTests
     {
         var factory = DefaultCodeInterpreterAdapterFactory.Create();
 
-        // We can't easily create a mock Sandbox, so we test the null/empty URL case
-        // by checking that the factory validates its inputs
         var options = new CreateCodesStackOptions
         {
-            Sandbox = null!,
-            ExecdBaseUrl = ""
+            ConnectionConfig = new OpenSandbox.Config.ConnectionConfig(),
+            ExecdBaseUrl = "",
+            ExecdHeaders = new Dictionary<string, string>(),
+            HttpClientProvider = new HttpClientProvider(new OpenSandbox.Config.ConnectionConfig(), NullLoggerFactory.Instance),
+            LoggerFactory = NullLoggerFactory.Instance
         };
 
-        // Should throw for null sandbox first
-        Assert.Throws<ArgumentNullException>(() => factory.CreateCodes(options));
+        Assert.Throws<InvalidArgumentException>(() => factory.CreateCodes(options));
     }
 
     [Fact]
@@ -71,11 +77,17 @@ public class FactoryTests
     {
         var options = new CreateCodesStackOptions
         {
-            Sandbox = null!,
-            ExecdBaseUrl = "http://test:8080"
+            ConnectionConfig = new OpenSandbox.Config.ConnectionConfig(),
+            ExecdBaseUrl = "http://test:8080",
+            ExecdHeaders = new Dictionary<string, string> { ["X-Test"] = "value" },
+            HttpClientProvider = new HttpClientProvider(new OpenSandbox.Config.ConnectionConfig(), NullLoggerFactory.Instance),
+            LoggerFactory = NullLoggerFactory.Instance
         };
 
-        Assert.Null(options.Sandbox);
+        Assert.NotNull(options.ConnectionConfig);
         Assert.Equal("http://test:8080", options.ExecdBaseUrl);
+        Assert.Equal("value", options.ExecdHeaders["X-Test"]);
+        Assert.NotNull(options.HttpClientProvider);
+        Assert.NotNull(options.LoggerFactory);
     }
 }

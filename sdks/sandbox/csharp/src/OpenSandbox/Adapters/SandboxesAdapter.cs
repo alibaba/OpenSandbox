@@ -59,32 +59,36 @@ internal sealed class SandboxesAdapter : ISandboxes
         ListSandboxesParams? @params = null,
         CancellationToken cancellationToken = default)
     {
-        var queryParams = new Dictionary<string, string?>();
+        var queryParts = new List<string>();
 
         if (@params?.States != null && @params.States.Count > 0)
         {
-            // The API supports multiple state query params
-            queryParams["state"] = string.Join(",", @params.States);
+            // The API expects repeated query params: ?state=Running&state=Paused
+            queryParts.AddRange(@params.States.Select(state => $"state={Uri.EscapeDataString(state)}"));
         }
 
         if (@params?.Metadata != null && @params.Metadata.Count > 0)
         {
             // Encode metadata as k=v&k2=v2
             var metadataStr = string.Join("&", @params.Metadata.Select(kv => $"{kv.Key}={kv.Value}"));
-            queryParams["metadata"] = metadataStr;
+            queryParts.Add($"metadata={Uri.EscapeDataString(metadataStr)}");
         }
 
         if (@params?.Page.HasValue == true)
         {
-            queryParams["page"] = @params.Page.Value.ToString();
+            queryParts.Add($"page={@params.Page.Value}");
         }
 
         if (@params?.PageSize.HasValue == true)
         {
-            queryParams["pageSize"] = @params.PageSize.Value.ToString();
+            queryParts.Add($"pageSize={@params.PageSize.Value}");
         }
 
-        var response = await _client.GetAsync<JsonElement>("/sandboxes", queryParams, cancellationToken).ConfigureAwait(false);
+        var path = queryParts.Count > 0
+            ? $"/sandboxes?{string.Join("&", queryParts)}"
+            : "/sandboxes";
+
+        var response = await _client.GetAsync<JsonElement>(path, cancellationToken: cancellationToken).ConfigureAwait(false);
         return ParseListSandboxesResponse(response);
     }
 
@@ -125,15 +129,25 @@ internal sealed class SandboxesAdapter : ISandboxes
     public async Task<Endpoint> GetSandboxEndpointAsync(
         string sandboxId,
         int port,
+        bool useServerProxy = false,
         CancellationToken cancellationToken = default)
     {
+        var queryParams = new Dictionary<string, string?>
+        {
+            ["use_server_proxy"] = useServerProxy ? "true" : "false"
+        };
+
         var response = await _client.GetAsync<JsonElement>(
             $"/sandboxes/{Uri.EscapeDataString(sandboxId)}/endpoints/{port}",
+            queryParams,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
         return new Endpoint
         {
-            EndpointAddress = response.GetProperty("endpoint").GetString() ?? throw new SandboxApiException("Missing endpoint in response")
+            EndpointAddress = response.GetProperty("endpoint").GetString() ?? throw new SandboxApiException("Missing endpoint in response"),
+            Headers = response.TryGetProperty("headers", out var headersElement) && headersElement.ValueKind == JsonValueKind.Object
+                ? headersElement.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString() ?? string.Empty)
+                : new Dictionary<string, string>()
         };
     }
 

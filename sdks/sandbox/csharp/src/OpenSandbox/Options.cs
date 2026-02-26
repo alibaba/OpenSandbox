@@ -29,6 +29,11 @@ public class SandboxCreateOptions
     public ConnectionConfig? ConnectionConfig { get; set; }
 
     /// <summary>
+    /// Gets or sets diagnostics options such as logging.
+    /// </summary>
+    public SdkDiagnosticsOptions? Diagnostics { get; set; }
+
+    /// <summary>
     /// Gets or sets the adapter factory for advanced customization.
     /// </summary>
     public IAdapterFactory? AdapterFactory { get; set; }
@@ -64,6 +69,11 @@ public class SandboxCreateOptions
     /// Gets or sets the network policy for the sandbox.
     /// </summary>
     public NetworkPolicy? NetworkPolicy { get; set; }
+
+    /// <summary>
+    /// Gets or sets storage volumes mounted into the sandbox.
+    /// </summary>
+    public IReadOnlyList<Volume>? Volumes { get; set; }
 
     /// <summary>
     /// Gets or sets the extension parameters.
@@ -110,6 +120,11 @@ public class SandboxConnectOptions
     /// Gets or sets the connection configuration.
     /// </summary>
     public ConnectionConfig? ConnectionConfig { get; set; }
+
+    /// <summary>
+    /// Gets or sets diagnostics options such as logging.
+    /// </summary>
+    public SdkDiagnosticsOptions? Diagnostics { get; set; }
 
     /// <summary>
     /// Gets or sets the adapter factory for advanced customization.
@@ -193,6 +208,11 @@ public class SandboxManagerOptions
     /// Gets or sets the connection configuration.
     /// </summary>
     public ConnectionConfig? ConnectionConfig { get; set; }
+
+    /// <summary>
+    /// Gets or sets diagnostics options such as logging.
+    /// </summary>
+    public SdkDiagnosticsOptions? Diagnostics { get; set; }
 
     /// <summary>
     /// Gets or sets the adapter factory for advanced customization.

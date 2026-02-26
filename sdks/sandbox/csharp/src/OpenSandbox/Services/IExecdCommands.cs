@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using OpenSandbox.Models;
+using OpenSandbox.Core;
 
 namespace OpenSandbox.Services;
 
@@ -29,6 +30,8 @@ public interface IExecdCommands
     /// <param name="options">Optional command options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async enumerable of server stream events.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     IAsyncEnumerable<ServerStreamEvent> RunStreamAsync(
         string command,
         RunCommandOptions? options = null,
@@ -42,6 +45,8 @@ public interface IExecdCommands
     /// <param name="handlers">Optional event handlers for real-time processing.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The command execution result.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task<Execution> RunAsync(
         string command,
         RunCommandOptions? options = null,
@@ -53,7 +58,35 @@ public interface IExecdCommands
     /// </summary>
     /// <param name="sessionId">The session ID to interrupt.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sessionId"/> is null or empty.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task InterruptAsync(
         string sessionId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets the current running status of a command.
+    /// </summary>
+    /// <param name="executionId">The command execution ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The command status.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="executionId"/> is null or empty.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
+    Task<CommandStatus> GetCommandStatusAsync(
+        string executionId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets logs for a background command.
+    /// </summary>
+    /// <param name="executionId">The command execution ID.</param>
+    /// <param name="cursor">Optional line cursor for incremental reads.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Background command logs and latest cursor.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="executionId"/> is null or empty.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
+    Task<CommandLogs> GetBackgroundCommandLogsAsync(
+        string executionId,
+        long? cursor = null,
         CancellationToken cancellationToken = default);
 }

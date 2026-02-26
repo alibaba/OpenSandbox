@@ -79,6 +79,18 @@ var resumed = await sandbox.ResumeAsync();
 await resumed.RenewAsync(30 * 60);
 ```
 
+### Connect to an Existing Sandbox
+
+Use `ConnectAsync` when you already have a sandbox ID and need a new SDK instance bound to it.
+
+```csharp
+var connected = await Sandbox.ConnectAsync(new SandboxConnectOptions
+{
+    SandboxId = "existing-sandbox-id",
+    ConnectionConfig = config
+});
+```
+
 ### 2. Custom Health Check
 
 Define custom logic to determine whether the sandbox is ready/healthy.
@@ -117,6 +129,22 @@ await sandbox.Commands.RunAsync(
 );
 ```
 
+For background commands, you can poll status and incremental logs:
+
+```csharp
+var execution = await sandbox.Commands.RunAsync(
+    "python /app/server.py",
+    options: new RunCommandOptions
+    {
+        Background = true,
+        TimeoutSeconds = 120,
+    });
+
+var status = await sandbox.Commands.GetCommandStatusAsync(execution.Id!);
+var logs = await sandbox.Commands.GetBackgroundCommandLogsAsync(execution.Id!, cursor: 0);
+Console.WriteLine($"running={status.Running}, cursor={logs.Cursor}");
+```
+
 ### 4. Comprehensive File Operations
 
 Manage files and directories, including read, write, list/search, and delete.
@@ -124,12 +152,12 @@ Manage files and directories, including read, write, list/search, and delete.
 ```csharp
 await sandbox.Files.CreateDirectoriesAsync(new[]
 {
-    new CreateDirectoryEntry { Path = "/tmp/demo", Mode = 493 } // 0o755
+    new CreateDirectoryEntry { Path = "/tmp/demo", Mode = 755 }
 });
 
 await sandbox.Files.WriteFilesAsync(new[]
 {
-    new WriteEntry { Path = "/tmp/demo/hello.txt", Data = "Hello World", Mode = 420 } // 0o644
+    new WriteEntry { Path = "/tmp/demo/hello.txt", Data = "Hello World", Mode = 644 }
 });
 
 var content = await sandbox.Files.ReadFileAsync("/tmp/demo/hello.txt");
@@ -142,6 +170,9 @@ foreach (var file in files)
 }
 
 await sandbox.Files.DeleteDirectoriesAsync(new[] { "/tmp/demo" });
+
+// Delete one or more files directly.
+await sandbox.Files.DeleteFilesAsync(new[] { "/tmp/demo/hello.txt" });
 ```
 
 ### 5. Endpoints
@@ -168,7 +199,7 @@ await using var manager = SandboxManager.Create(new SandboxManagerOptions
 
 var list = await manager.ListSandboxInfosAsync(new SandboxFilter
 {
-    States = new[] { "Running" },
+    States = new[] { SandboxStates.Running },
     PageSize = 10
 });
 
@@ -190,7 +221,7 @@ The `ConnectionConfig` class manages API server connection settings.
 | `Domain` | Sandbox service domain (`host[:port]`) | `localhost:8080` | `OPEN_SANDBOX_DOMAIN` |
 | `Protocol` | HTTP protocol (`Http`/`Https`) | `Http` | - |
 | `RequestTimeoutSeconds` | Request timeout applied to SDK HTTP calls | `30` | - |
-| `Debug` | Enable basic HTTP debug logging | `false` | - |
+| `UseServerProxy` | Request server-proxied sandbox endpoint URLs | `false` | - |
 | `Headers` | Extra headers applied to every request | `{}` | - |
 
 ```csharp
@@ -202,6 +233,7 @@ var config = new ConnectionConfig(new ConnectionConfigOptions
     Domain = "api.opensandbox.io",
     ApiKey = "your-key",
     RequestTimeoutSeconds = 60,
+    // UseServerProxy = true, // Useful when the client cannot access sandbox endpoint directly
 });
 
 // 2. Advanced: custom headers
@@ -216,7 +248,32 @@ var config2 = new ConnectionConfig(new ConnectionConfigOptions
 });
 ```
 
-### 2. Sandbox Creation Configuration
+### 2. Diagnostics and Logging
+
+The SDK uses `Microsoft.Extensions.Logging` abstractions.
+
+```csharp
+using Microsoft.Extensions.Logging;
+using OpenSandbox.Config;
+
+using var loggerFactory = LoggerFactory.Create(builder =>
+{
+    builder.SetMinimumLevel(LogLevel.Debug);
+    builder.AddConsole();
+});
+
+var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+{
+    Image = "python:3.11",
+    ConnectionConfig = new ConnectionConfig(),
+    Diagnostics = new SdkDiagnosticsOptions
+    {
+        LoggerFactory = loggerFactory
+    }
+});
+```
+
+### 3. Sandbox Creation Configuration
 
 `Sandbox.CreateAsync()` allows configuring the sandbox environment.
 
@@ -229,6 +286,7 @@ var config2 = new ConnectionConfig(new ConnectionConfigOptions
 | `Env` | Environment variables | `{}` |
 | `Metadata` | Custom metadata tags | `{}` |
 | `NetworkPolicy` | Optional outbound network policy (egress) | - |
+| `Volumes` | Optional storage mounts (`Host` / `PVC`, supports `ReadOnly` and `SubPath`) | - |
 | `Extensions` | Extra server-defined fields | `{}` |
 | `SkipHealthCheck` | Skip readiness checks (`Running` + health check) | `false` |
 | `HealthCheck` | Custom readiness check | - |
@@ -248,10 +306,28 @@ var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
             new() { Action = NetworkRuleAction.Allow, Target = "pypi.org" }
         }
     },
+    Volumes = new[]
+    {
+        new Volume
+        {
+            Name = "workspace",
+            Host = new Host { Path = "/tmp/opensandbox-e2e/host-volume-test" },
+            MountPath = "/workspace",
+            ReadOnly = false
+        }
+    }
 });
 ```
 
-### 3. Resource Cleanup
+### 4. Timeout and Retry Behavior
+
+- `ConnectionConfig.RequestTimeoutSeconds` controls timeout for SDK HTTP calls.
+- `RunCommandOptions.TimeoutSeconds` controls command execution timeout for command runs.
+- `SandboxCreateOptions.TimeoutSeconds` controls sandbox server-side TTL.
+- `ReadyTimeoutSeconds` controls how long `CreateAsync` / `ConnectAsync` waits for readiness.
+- The SDK does not automatically retry failed API requests; implement retries in caller code where appropriate.
+
+### 5. Resource Cleanup
 
 Both `Sandbox` and `SandboxManager` implement `IAsyncDisposable`. Use `await using` or call `DisposeAsync()` when done.
 
@@ -259,6 +335,31 @@ Both `Sandbox` and `SandboxManager` implement `IAsyncDisposable`. Use `await usi
 await using var sandbox = await Sandbox.CreateAsync(options);
 // ... use sandbox ...
 // Automatically disposed when leaving scope
+```
+
+## Error Handling
+
+The SDK throws `SandboxException` (and derived exceptions such as `SandboxApiException`,
+`SandboxReadyTimeoutException`, and `InvalidArgumentException`) when operations fail.
+
+```csharp
+try
+{
+    var execution = await sandbox.Commands.RunAsync("echo 'Hello Sandbox!'");
+    Console.WriteLine(execution.Logs.Stdout.FirstOrDefault()?.Text);
+}
+catch (SandboxReadyTimeoutException)
+{
+    Console.Error.WriteLine("Sandbox did not become ready before the configured timeout.");
+}
+catch (SandboxApiException ex)
+{
+    Console.Error.WriteLine($"API Error: status={ex.StatusCode}, requestId={ex.RequestId}, message={ex.Message}");
+}
+catch (SandboxException ex)
+{
+    Console.Error.WriteLine($"Sandbox Error: [{ex.Error.Code}] {ex.Error.Message}");
+}
 ```
 
 ## Supported Frameworks

@@ -15,6 +15,8 @@
 using System.Text;
 using System.Text.Json;
 using OpenSandbox.Core;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace OpenSandbox.Internal;
 
@@ -26,6 +28,7 @@ internal sealed class HttpClientWrapper
     private readonly HttpClient _httpClient;
     private readonly string _baseUrl;
     private readonly IReadOnlyDictionary<string, string> _defaultHeaders;
+    private readonly ILogger _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -34,11 +37,16 @@ internal sealed class HttpClientWrapper
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    public HttpClientWrapper(HttpClient httpClient, string baseUrl, IReadOnlyDictionary<string, string>? defaultHeaders = null)
+    public HttpClientWrapper(
+        HttpClient httpClient,
+        string baseUrl,
+        IReadOnlyDictionary<string, string>? defaultHeaders = null,
+        ILogger? logger = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _baseUrl = baseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(baseUrl));
         _defaultHeaders = defaultHeaders ?? new Dictionary<string, string>();
+        _logger = logger ?? NullLogger.Instance;
     }
 
     public string BaseUrl => _baseUrl;
@@ -49,6 +57,7 @@ internal sealed class HttpClientWrapper
         CancellationToken cancellationToken = default)
     {
         var url = BuildUrl(path, queryParams);
+        _logger.LogDebug("HTTP GET {Url}", url);
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyDefaultHeaders(request);
 
@@ -62,6 +71,7 @@ internal sealed class HttpClientWrapper
         CancellationToken cancellationToken = default)
     {
         var url = BuildUrl(path, queryParams);
+        _logger.LogDebug("HTTP GET {Url}", url);
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyDefaultHeaders(request);
 
@@ -75,6 +85,7 @@ internal sealed class HttpClientWrapper
         CancellationToken cancellationToken = default)
     {
         var url = BuildUrl(path);
+        _logger.LogDebug("HTTP POST {Url}", url);
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         ApplyDefaultHeaders(request);
 
@@ -94,6 +105,7 @@ internal sealed class HttpClientWrapper
         CancellationToken cancellationToken = default)
     {
         var url = BuildUrl(path);
+        _logger.LogDebug("HTTP POST {Url}", url);
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
         ApplyDefaultHeaders(request);
 
@@ -113,6 +125,7 @@ internal sealed class HttpClientWrapper
         CancellationToken cancellationToken = default)
     {
         var url = BuildUrl(path, queryParams);
+        _logger.LogDebug("HTTP DELETE {Url}", url);
         using var request = new HttpRequestMessage(HttpMethod.Delete, url);
         ApplyDefaultHeaders(request);
 
@@ -126,6 +139,7 @@ internal sealed class HttpClientWrapper
         CancellationToken cancellationToken = default)
     {
         var url = BuildUrl(path, queryParams);
+        _logger.LogDebug("HTTP DELETE {Url}", url);
         using var request = new HttpRequestMessage(HttpMethod.Delete, url);
         ApplyDefaultHeaders(request);
 
@@ -137,6 +151,7 @@ internal sealed class HttpClientWrapper
         HttpRequestMessage request,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug("HTTP {Method} {Url}", request.Method, request.RequestUri);
         ApplyDefaultHeaders(request);
         return await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
     }
@@ -219,12 +234,17 @@ internal sealed class HttpClientWrapper
 
         if (!response.IsSuccessStatusCode)
         {
+            LogHttpFailure(response);
             ThrowApiException(response, content);
         }
 
         if (string.IsNullOrEmpty(content))
         {
-            return default!;
+            throw new SandboxApiException(
+                message: "Unexpected empty response body",
+                statusCode: (int)response.StatusCode,
+                error: new SandboxError(SandboxErrorCodes.UnexpectedResponse, "Unexpected empty response body"),
+                rawBody: content);
         }
 
         try
@@ -246,8 +266,24 @@ internal sealed class HttpClientWrapper
         if (!response.IsSuccessStatusCode)
         {
             var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            LogHttpFailure(response);
             ThrowApiException(response, content);
         }
+    }
+
+    private void LogHttpFailure(HttpResponseMessage response)
+    {
+        var request = response.RequestMessage;
+        var requestId = response.Headers.TryGetValues(Constants.RequestIdHeader, out var values)
+            ? values.FirstOrDefault()
+            : null;
+
+        _logger.LogError(
+            "HTTP request failed: method={Method}, url={Url}, status={StatusCode}, requestId={RequestId}",
+            request?.Method.Method ?? "UNKNOWN",
+            request?.RequestUri?.ToString() ?? "UNKNOWN",
+            (int)response.StatusCode,
+            requestId ?? string.Empty);
     }
 
     private static void ThrowApiException(HttpResponseMessage response, string content)

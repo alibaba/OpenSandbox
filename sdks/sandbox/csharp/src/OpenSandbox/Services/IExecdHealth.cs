@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using OpenSandbox.Core;
+
 namespace OpenSandbox.Services;
 
 /// <summary>
@@ -24,5 +26,6 @@ public interface IExecdHealth
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>True if the service is healthy, false otherwise.</returns>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task<bool> PingAsync(CancellationToken cancellationToken = default);
 }

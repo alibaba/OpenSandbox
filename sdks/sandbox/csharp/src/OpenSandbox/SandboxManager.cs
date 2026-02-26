@@ -16,22 +16,37 @@ using OpenSandbox.Config;
 using OpenSandbox.Factory;
 using OpenSandbox.Models;
 using OpenSandbox.Services;
+using OpenSandbox.Core;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace OpenSandbox;
 
 /// <summary>
 /// Administrative interface for managing sandboxes.
 /// </summary>
+/// <remarks>
+/// This type is intended for administrative lifecycle operations (list, inspect, pause, resume, kill, renew).
+/// Dispose the manager when finished to release local SDK resources.
+/// </remarks>
 public sealed class SandboxManager : IAsyncDisposable
 {
     private readonly ISandboxes _sandboxes;
     private readonly ConnectionConfig _connectionConfig;
+    private readonly HttpClientProvider _httpClientProvider;
+    private readonly ILogger _logger;
     private bool _disposed;
 
-    private SandboxManager(ISandboxes sandboxes, ConnectionConfig connectionConfig)
+    private SandboxManager(
+        ISandboxes sandboxes,
+        ConnectionConfig connectionConfig,
+        HttpClientProvider httpClientProvider,
+        ILoggerFactory loggerFactory)
     {
         _sandboxes = sandboxes;
         _connectionConfig = connectionConfig;
+        _httpClientProvider = httpClientProvider;
+        _logger = (loggerFactory ?? NullLoggerFactory.Instance).CreateLogger("OpenSandbox.SandboxManager");
     }
 
     /// <summary>
@@ -39,19 +54,35 @@ public sealed class SandboxManager : IAsyncDisposable
     /// </summary>
     /// <param name="options">Optional configuration options.</param>
     /// <returns>A new sandbox manager instance.</returns>
+    /// <exception cref="SandboxException">Thrown when manager initialization fails.</exception>
     public static SandboxManager Create(SandboxManagerOptions? options = null)
     {
         var connectionConfig = options?.ConnectionConfig ?? new ConnectionConfig();
         var lifecycleBaseUrl = connectionConfig.GetBaseUrl();
         var adapterFactory = options?.AdapterFactory ?? DefaultAdapterFactory.Create();
+        var loggerFactory = options?.Diagnostics?.LoggerFactory ?? NullLoggerFactory.Instance;
+        var httpClientProvider = new HttpClientProvider(connectionConfig, loggerFactory);
+        var logger = loggerFactory.CreateLogger("OpenSandbox.SandboxManager");
+        logger.LogInformation("Creating sandbox manager");
 
-        var lifecycleStack = adapterFactory.CreateLifecycleStack(new CreateLifecycleStackOptions
+        try
         {
-            ConnectionConfig = connectionConfig,
-            LifecycleBaseUrl = lifecycleBaseUrl
-        });
+            var lifecycleStack = adapterFactory.CreateLifecycleStack(new CreateLifecycleStackOptions
+            {
+                ConnectionConfig = connectionConfig,
+                LifecycleBaseUrl = lifecycleBaseUrl,
+                HttpClientProvider = httpClientProvider,
+                LoggerFactory = loggerFactory
+            });
 
-        return new SandboxManager(lifecycleStack.Sandboxes, connectionConfig);
+            return new SandboxManager(lifecycleStack.Sandboxes, connectionConfig, httpClientProvider, loggerFactory);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to create sandbox manager");
+            httpClientProvider.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -60,6 +91,7 @@ public sealed class SandboxManager : IAsyncDisposable
     /// <param name="filter">Optional filter criteria.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The list of sandboxes.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task<ListSandboxesResponse> ListSandboxInfosAsync(
         SandboxFilter? filter = null,
         CancellationToken cancellationToken = default)
@@ -79,10 +111,13 @@ public sealed class SandboxManager : IAsyncDisposable
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The sandbox information.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task<SandboxInfo> GetSandboxInfoAsync(
         string sandboxId,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug("Fetching sandbox info: {SandboxId}", sandboxId);
         return _sandboxes.GetSandboxAsync(sandboxId, cancellationToken);
     }
 
@@ -91,10 +126,13 @@ public sealed class SandboxManager : IAsyncDisposable
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task KillSandboxAsync(
         string sandboxId,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Killing sandbox: {SandboxId}", sandboxId);
         return _sandboxes.DeleteSandboxAsync(sandboxId, cancellationToken);
     }
 
@@ -103,10 +141,13 @@ public sealed class SandboxManager : IAsyncDisposable
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task PauseSandboxAsync(
         string sandboxId,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Pausing sandbox: {SandboxId}", sandboxId);
         return _sandboxes.PauseSandboxAsync(sandboxId, cancellationToken);
     }
 
@@ -115,10 +156,13 @@ public sealed class SandboxManager : IAsyncDisposable
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task ResumeSandboxAsync(
         string sandboxId,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Resuming sandbox: {SandboxId}", sandboxId);
         return _sandboxes.ResumeSandboxAsync(sandboxId, cancellationToken);
     }
 
@@ -128,11 +172,14 @@ public sealed class SandboxManager : IAsyncDisposable
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="timeoutSeconds">The new timeout in seconds from now.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when arguments are invalid.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public async Task RenewSandboxAsync(
         string sandboxId,
         int timeoutSeconds,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Renewing sandbox expiration: {SandboxId} (timeoutSeconds={TimeoutSeconds})", sandboxId, timeoutSeconds);
         var expiresAt = DateTime.UtcNow.AddSeconds(timeoutSeconds).ToString("O");
         await _sandboxes.RenewSandboxExpirationAsync(sandboxId, new RenewSandboxExpirationRequest
         {
@@ -151,6 +198,8 @@ public sealed class SandboxManager : IAsyncDisposable
         }
 
         _disposed = true;
+        _logger.LogDebug("Disposing sandbox manager resources");
+        _httpClientProvider.Dispose();
         return default;
     }
 }

@@ -15,9 +15,11 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using OpenSandbox.Core;
 using OpenSandbox.Internal;
 using OpenSandbox.Models;
 using OpenSandbox.Services;
+using Microsoft.Extensions.Logging;
 
 namespace OpenSandbox.Adapters;
 
@@ -30,6 +32,7 @@ internal sealed class CommandsAdapter : IExecdCommands
     private readonly HttpClient _sseHttpClient;
     private readonly string _baseUrl;
     private readonly IReadOnlyDictionary<string, string> _headers;
+    private readonly ILogger _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -41,12 +44,14 @@ internal sealed class CommandsAdapter : IExecdCommands
         HttpClientWrapper client,
         HttpClient sseHttpClient,
         string baseUrl,
-        IReadOnlyDictionary<string, string> headers)
+        IReadOnlyDictionary<string, string> headers,
+        ILogger logger)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _sseHttpClient = sseHttpClient ?? throw new ArgumentNullException(nameof(sseHttpClient));
         _baseUrl = baseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(baseUrl));
         _headers = headers ?? new Dictionary<string, string>();
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     public async IAsyncEnumerable<ServerStreamEvent> RunStreamAsync(
@@ -55,11 +60,13 @@ internal sealed class CommandsAdapter : IExecdCommands
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var url = $"{_baseUrl}/command";
+        _logger.LogDebug("Running command stream (commandLength={CommandLength})", command.Length);
         var requestBody = new RunCommandRequest
         {
             Command = command,
             Cwd = options?.WorkingDirectory,
-            Background = options?.Background
+            Background = options?.Background,
+            Timeout = options?.TimeoutSeconds.HasValue == true ? options.TimeoutSeconds.Value * 1000L : null
         };
 
         var json = JsonSerializer.Serialize(requestBody, JsonOptions);
@@ -75,7 +82,7 @@ internal sealed class CommandsAdapter : IExecdCommands
             request.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
 
-        var response = await _sseHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        using var response = await _sseHttpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 
         await foreach (var ev in SseParser.ParseJsonEventStreamAsync<ServerStreamEvent>(response, "Run command failed", cancellationToken).ConfigureAwait(false))
         {
@@ -89,6 +96,7 @@ internal sealed class CommandsAdapter : IExecdCommands
         ExecutionHandlers? handlers = null,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug("Running command (commandLength={CommandLength})", command.Length);
         var execution = new Execution();
         var dispatcher = new ExecutionEventDispatcher(execution, handlers);
 
@@ -108,7 +116,99 @@ internal sealed class CommandsAdapter : IExecdCommands
 
     public async Task InterruptAsync(string sessionId, CancellationToken cancellationToken = default)
     {
+        _logger.LogInformation("Interrupting execution: {ExecutionId}", sessionId);
         var queryParams = new Dictionary<string, string?> { ["id"] = sessionId };
         await _client.DeleteAsync("/command", queryParams, cancellationToken).ConfigureAwait(false);
+    }
+
+    public Task<CommandStatus> GetCommandStatusAsync(string executionId, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(executionId))
+        {
+            throw new InvalidArgumentException("executionId cannot be empty");
+        }
+
+        _logger.LogDebug("Fetching command status: {ExecutionId}", executionId);
+        return _client.GetAsync<CommandStatus>($"/command/status/{Uri.EscapeDataString(executionId)}", cancellationToken: cancellationToken);
+    }
+
+    public async Task<CommandLogs> GetBackgroundCommandLogsAsync(
+        string executionId,
+        long? cursor = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(executionId))
+        {
+            throw new InvalidArgumentException("executionId cannot be empty");
+        }
+
+        _logger.LogDebug("Fetching command logs: {ExecutionId} (cursor={Cursor})", executionId, cursor);
+        var path = $"/command/{Uri.EscapeDataString(executionId)}/logs";
+        var query = cursor.HasValue ? $"?cursor={cursor.Value}" : string.Empty;
+        var url = $"{_baseUrl}{path}{query}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw CreateApiException(response, content);
+        }
+
+        var cursorHeader = response.Headers.TryGetValues("EXECD-COMMANDS-TAIL-CURSOR", out var values)
+            ? values.FirstOrDefault()
+            : null;
+        var parsedCursor = long.TryParse(cursorHeader, out var c) ? c : (long?)null;
+
+        return new CommandLogs
+        {
+            Content = content,
+            Cursor = parsedCursor
+        };
+    }
+
+    private static SandboxApiException CreateApiException(HttpResponseMessage response, string content)
+    {
+        var requestId = response.Headers.TryGetValues(Constants.RequestIdHeader, out var values)
+            ? values.FirstOrDefault()
+            : null;
+
+        string? errorMessage = null;
+        string? errorCode = null;
+        object? rawBody = content;
+
+        if (!string.IsNullOrEmpty(content))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(content, JsonOptions);
+                if (parsed != null)
+                {
+                    rawBody = parsed;
+                    if (parsed.TryGetValue("message", out var msg))
+                    {
+                        errorMessage = msg.GetString();
+                    }
+
+                    if (parsed.TryGetValue("code", out var code))
+                    {
+                        errorCode = code.GetString();
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore JSON parse errors and fallback to raw body.
+            }
+        }
+
+        var message = errorMessage ?? $"Request failed with status code {(int)response.StatusCode}";
+        return new SandboxApiException(
+            message: message,
+            statusCode: (int)response.StatusCode,
+            requestId: requestId,
+            rawBody: rawBody,
+            error: new SandboxError(errorCode ?? SandboxErrorCodes.UnexpectedResponse, errorMessage ?? message));
     }
 }

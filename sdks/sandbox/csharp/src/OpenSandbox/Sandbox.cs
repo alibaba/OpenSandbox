@@ -17,12 +17,18 @@ using OpenSandbox.Core;
 using OpenSandbox.Factory;
 using OpenSandbox.Models;
 using OpenSandbox.Services;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace OpenSandbox;
 
 /// <summary>
 /// Main entry point for interacting with a sandbox.
 /// </summary>
+/// <remarks>
+/// <see cref="DisposeAsync"/> releases local SDK resources (HTTP clients and adapters) only.
+/// To terminate the remote sandbox instance, call <see cref="KillAsync"/>.
+/// </remarks>
 public sealed class Sandbox : IAsyncDisposable
 {
     /// <summary>
@@ -59,7 +65,13 @@ public sealed class Sandbox : IAsyncDisposable
     private readonly IAdapterFactory _adapterFactory;
     private readonly string _lifecycleBaseUrl;
     private readonly string _execdBaseUrl;
+    private readonly HttpClientProvider _httpClientProvider;
+    private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger _logger;
     private bool _disposed;
+
+    internal HttpClientProvider SharedHttpClientProvider => _httpClientProvider;
+    internal ILoggerFactory SharedLoggerFactory => _loggerFactory;
 
     private Sandbox(
         string id,
@@ -67,6 +79,8 @@ public sealed class Sandbox : IAsyncDisposable
         IAdapterFactory adapterFactory,
         string lifecycleBaseUrl,
         string execdBaseUrl,
+        ILoggerFactory loggerFactory,
+        HttpClientProvider httpClientProvider,
         ISandboxes sandboxes,
         IExecdCommands commands,
         ISandboxFiles files,
@@ -78,6 +92,9 @@ public sealed class Sandbox : IAsyncDisposable
         _adapterFactory = adapterFactory;
         _lifecycleBaseUrl = lifecycleBaseUrl;
         _execdBaseUrl = execdBaseUrl;
+        _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _httpClientProvider = httpClientProvider;
+        _logger = _loggerFactory.CreateLogger("OpenSandbox.Sandbox");
         _sandboxes = sandboxes;
         Commands = commands;
         Files = files;
@@ -91,26 +108,38 @@ public sealed class Sandbox : IAsyncDisposable
     /// <param name="options">The creation options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created sandbox.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request options are invalid.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
+    /// <exception cref="SandboxReadyTimeoutException">Thrown when readiness checks exceed timeout.</exception>
+    /// <exception cref="SandboxException">Thrown when sandbox creation fails.</exception>
     public static async Task<Sandbox> CreateAsync(
         SandboxCreateOptions options,
         CancellationToken cancellationToken = default)
     {
         var connectionConfig = options.ConnectionConfig ?? new ConnectionConfig();
+        var loggerFactory = options.Diagnostics?.LoggerFactory ?? NullLoggerFactory.Instance;
+        var logger = loggerFactory.CreateLogger("OpenSandbox.Sandbox");
         var lifecycleBaseUrl = connectionConfig.GetBaseUrl();
         var adapterFactory = options.AdapterFactory ?? DefaultAdapterFactory.Create();
+        var httpClientProvider = new HttpClientProvider(connectionConfig, loggerFactory);
 
         ISandboxes sandboxes;
+        logger.LogInformation("Creating sandbox (image={Image}, useServerProxy={UseServerProxy})", options.Image, connectionConfig.UseServerProxy);
         try
         {
             var lifecycleStack = adapterFactory.CreateLifecycleStack(new CreateLifecycleStackOptions
             {
                 ConnectionConfig = connectionConfig,
-                LifecycleBaseUrl = lifecycleBaseUrl
+                LifecycleBaseUrl = lifecycleBaseUrl,
+                HttpClientProvider = httpClientProvider,
+                LoggerFactory = loggerFactory
             });
             sandboxes = lifecycleStack.Sandboxes;
         }
         catch
         {
+            logger.LogError("Failed to initialize lifecycle adapters while creating sandbox");
+            httpClientProvider.Dispose();
             throw;
         }
 
@@ -133,6 +162,7 @@ public sealed class Sandbox : IAsyncDisposable
                     Egress = options.NetworkPolicy.Egress
                 }
                 : null,
+            Volumes = options.Volumes,
             Extensions = options.Extensions?.ToDictionary(kv => kv.Key, kv => (object)kv.Value)
         };
 
@@ -141,15 +171,24 @@ public sealed class Sandbox : IAsyncDisposable
         {
             var created = await sandboxes.CreateSandboxAsync(request, cancellationToken).ConfigureAwait(false);
             sandboxId = created.Id;
+            logger.LogInformation("Sandbox created: {SandboxId}", sandboxId);
 
-            var endpoint = await sandboxes.GetSandboxEndpointAsync(sandboxId, Constants.DefaultExecdPort, cancellationToken).ConfigureAwait(false);
+            var endpoint = await sandboxes.GetSandboxEndpointAsync(
+                sandboxId,
+                Constants.DefaultExecdPort,
+                connectionConfig.UseServerProxy,
+                cancellationToken).ConfigureAwait(false);
             var protocol = connectionConfig.Protocol == ConnectionProtocol.Https ? "https" : "http";
             var execdBaseUrl = $"{protocol}://{endpoint.EndpointAddress}";
+            var execdHeaders = MergeHeaders(connectionConfig.Headers, endpoint.Headers);
 
             var execdStack = adapterFactory.CreateExecdStack(new CreateExecdStackOptions
             {
                 ConnectionConfig = connectionConfig,
-                ExecdBaseUrl = execdBaseUrl
+                ExecdBaseUrl = execdBaseUrl,
+                ExecdHeaders = execdHeaders,
+                HttpClientProvider = httpClientProvider,
+                LoggerFactory = loggerFactory
             });
 
             var sandbox = new Sandbox(
@@ -158,6 +197,116 @@ public sealed class Sandbox : IAsyncDisposable
                 adapterFactory,
                 lifecycleBaseUrl,
                 execdBaseUrl,
+                loggerFactory,
+                httpClientProvider,
+                sandboxes,
+                execdStack.Commands,
+                execdStack.Files,
+                execdStack.Health,
+                execdStack.Metrics);
+
+            if (!options.SkipHealthCheck)
+            {
+                logger.LogDebug("Waiting for sandbox readiness: {SandboxId}", sandboxId);
+                await sandbox.WaitUntilReadyAsync(new WaitUntilReadyOptions
+                {
+                    ReadyTimeoutSeconds = options.ReadyTimeoutSeconds ?? Constants.DefaultReadyTimeoutSeconds,
+                    PollingIntervalMillis = options.HealthCheckPollingInterval ?? Constants.DefaultHealthCheckPollingIntervalMillis,
+                    HealthCheck = options.HealthCheck
+                }, cancellationToken).ConfigureAwait(false);
+            }
+
+            return sandbox;
+        }
+        catch (Exception ex)
+        {
+            if (sandboxId != null)
+            {
+                try
+                {
+                    await sandboxes.DeleteSandboxAsync(sandboxId, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Ignore cleanup failure; surface original error
+                }
+            }
+
+            httpClientProvider.Dispose();
+            logger.LogError(ex, "Sandbox create flow failed");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Connects to an existing sandbox.
+    /// </summary>
+    /// <param name="options">The connection options.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The connected sandbox.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request options are invalid.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
+    /// <exception cref="SandboxReadyTimeoutException">Thrown when readiness checks exceed timeout.</exception>
+    /// <exception cref="SandboxException">Thrown when sandbox connection fails.</exception>
+    public static async Task<Sandbox> ConnectAsync(
+        SandboxConnectOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        var connectionConfig = options.ConnectionConfig ?? new ConnectionConfig();
+        var loggerFactory = options.Diagnostics?.LoggerFactory ?? NullLoggerFactory.Instance;
+        var logger = loggerFactory.CreateLogger("OpenSandbox.Sandbox");
+        var lifecycleBaseUrl = connectionConfig.GetBaseUrl();
+        var adapterFactory = options.AdapterFactory ?? DefaultAdapterFactory.Create();
+        var httpClientProvider = new HttpClientProvider(connectionConfig, loggerFactory);
+        logger.LogInformation("Connecting to sandbox: {SandboxId}", options.SandboxId);
+
+        ISandboxes sandboxes;
+        try
+        {
+            var lifecycleStack = adapterFactory.CreateLifecycleStack(new CreateLifecycleStackOptions
+            {
+                ConnectionConfig = connectionConfig,
+                LifecycleBaseUrl = lifecycleBaseUrl,
+                HttpClientProvider = httpClientProvider,
+                LoggerFactory = loggerFactory
+            });
+            sandboxes = lifecycleStack.Sandboxes;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to initialize lifecycle adapters while connecting sandbox");
+            httpClientProvider.Dispose();
+            throw;
+        }
+
+        try
+        {
+            var endpoint = await sandboxes.GetSandboxEndpointAsync(
+                options.SandboxId,
+                Constants.DefaultExecdPort,
+                connectionConfig.UseServerProxy,
+                cancellationToken).ConfigureAwait(false);
+            var protocol = connectionConfig.Protocol == ConnectionProtocol.Https ? "https" : "http";
+            var execdBaseUrl = $"{protocol}://{endpoint.EndpointAddress}";
+            var execdHeaders = MergeHeaders(connectionConfig.Headers, endpoint.Headers);
+
+            var execdStack = adapterFactory.CreateExecdStack(new CreateExecdStackOptions
+            {
+                ConnectionConfig = connectionConfig,
+                ExecdBaseUrl = execdBaseUrl,
+                ExecdHeaders = execdHeaders,
+                HttpClientProvider = httpClientProvider,
+                LoggerFactory = loggerFactory
+            });
+
+            var sandbox = new Sandbox(
+                options.SandboxId,
+                connectionConfig,
+                adapterFactory,
+                lifecycleBaseUrl,
+                execdBaseUrl,
+                loggerFactory,
+                httpClientProvider,
                 sandboxes,
                 execdStack.Commands,
                 execdStack.Files,
@@ -176,77 +325,12 @@ public sealed class Sandbox : IAsyncDisposable
 
             return sandbox;
         }
-        catch
+        catch (Exception ex)
         {
-            if (sandboxId != null)
-            {
-                try
-                {
-                    await sandboxes.DeleteSandboxAsync(sandboxId, CancellationToken.None).ConfigureAwait(false);
-                }
-                catch
-                {
-                    // Ignore cleanup failure; surface original error
-                }
-            }
+            logger.LogError(ex, "Sandbox connect flow failed: {SandboxId}", options.SandboxId);
+            httpClientProvider.Dispose();
             throw;
         }
-    }
-
-    /// <summary>
-    /// Connects to an existing sandbox.
-    /// </summary>
-    /// <param name="options">The connection options.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The connected sandbox.</returns>
-    public static async Task<Sandbox> ConnectAsync(
-        SandboxConnectOptions options,
-        CancellationToken cancellationToken = default)
-    {
-        var connectionConfig = options.ConnectionConfig ?? new ConnectionConfig();
-        var lifecycleBaseUrl = connectionConfig.GetBaseUrl();
-        var adapterFactory = options.AdapterFactory ?? DefaultAdapterFactory.Create();
-
-        var lifecycleStack = adapterFactory.CreateLifecycleStack(new CreateLifecycleStackOptions
-        {
-            ConnectionConfig = connectionConfig,
-            LifecycleBaseUrl = lifecycleBaseUrl
-        });
-        var sandboxes = lifecycleStack.Sandboxes;
-
-        var endpoint = await sandboxes.GetSandboxEndpointAsync(options.SandboxId, Constants.DefaultExecdPort, cancellationToken).ConfigureAwait(false);
-        var protocol = connectionConfig.Protocol == ConnectionProtocol.Https ? "https" : "http";
-        var execdBaseUrl = $"{protocol}://{endpoint.EndpointAddress}";
-
-        var execdStack = adapterFactory.CreateExecdStack(new CreateExecdStackOptions
-        {
-            ConnectionConfig = connectionConfig,
-            ExecdBaseUrl = execdBaseUrl
-        });
-
-        var sandbox = new Sandbox(
-            options.SandboxId,
-            connectionConfig,
-            adapterFactory,
-            lifecycleBaseUrl,
-            execdBaseUrl,
-            sandboxes,
-            execdStack.Commands,
-            execdStack.Files,
-            execdStack.Health,
-            execdStack.Metrics);
-
-        if (!options.SkipHealthCheck)
-        {
-            await sandbox.WaitUntilReadyAsync(new WaitUntilReadyOptions
-            {
-                ReadyTimeoutSeconds = options.ReadyTimeoutSeconds ?? Constants.DefaultReadyTimeoutSeconds,
-                PollingIntervalMillis = options.HealthCheckPollingInterval ?? Constants.DefaultHealthCheckPollingIntervalMillis,
-                HealthCheck = options.HealthCheck
-            }, cancellationToken).ConfigureAwait(false);
-        }
-
-        return sandbox;
     }
 
     /// <summary>
@@ -255,23 +339,39 @@ public sealed class Sandbox : IAsyncDisposable
     /// <param name="options">The connection options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The resumed sandbox.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request options are invalid.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
+    /// <exception cref="SandboxReadyTimeoutException">Thrown when readiness checks exceed timeout.</exception>
+    /// <exception cref="SandboxException">Thrown when sandbox resume fails.</exception>
     public static async Task<Sandbox> ResumeAsync(
         SandboxConnectOptions options,
         CancellationToken cancellationToken = default)
     {
         var connectionConfig = options.ConnectionConfig ?? new ConnectionConfig();
+        var loggerFactory = options.Diagnostics?.LoggerFactory ?? NullLoggerFactory.Instance;
+        var logger = loggerFactory.CreateLogger("OpenSandbox.Sandbox");
         var lifecycleBaseUrl = connectionConfig.GetBaseUrl();
         var adapterFactory = options.AdapterFactory ?? DefaultAdapterFactory.Create();
+        var httpClientProvider = new HttpClientProvider(connectionConfig, loggerFactory);
+        logger.LogInformation("Resuming sandbox: {SandboxId}", options.SandboxId);
 
-        var lifecycleStack = adapterFactory.CreateLifecycleStack(new CreateLifecycleStackOptions
+        try
         {
-            ConnectionConfig = connectionConfig,
-            LifecycleBaseUrl = lifecycleBaseUrl
-        });
+            var lifecycleStack = adapterFactory.CreateLifecycleStack(new CreateLifecycleStackOptions
+            {
+                ConnectionConfig = connectionConfig,
+                LifecycleBaseUrl = lifecycleBaseUrl,
+                HttpClientProvider = httpClientProvider,
+                LoggerFactory = loggerFactory
+            });
 
-        await lifecycleStack.Sandboxes.ResumeSandboxAsync(options.SandboxId, cancellationToken).ConfigureAwait(false);
-
-        return await ConnectAsync(options, cancellationToken).ConfigureAwait(false);
+            await lifecycleStack.Sandboxes.ResumeSandboxAsync(options.SandboxId, cancellationToken).ConfigureAwait(false);
+            return await ConnectAsync(options, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            httpClientProvider.Dispose();
+        }
     }
 
     /// <summary>
@@ -279,6 +379,7 @@ public sealed class Sandbox : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The sandbox information.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task<SandboxInfo> GetInfoAsync(CancellationToken cancellationToken = default)
     {
         return _sandboxes.GetSandboxAsync(Id, cancellationToken);
@@ -295,8 +396,9 @@ public sealed class Sandbox : IAsyncDisposable
         {
             return await Health.PingAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogDebug(ex, "Health check failed for sandbox {SandboxId}", Id);
             return false;
         }
     }
@@ -306,6 +408,7 @@ public sealed class Sandbox : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The sandbox metrics.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task<SandboxMetrics> GetMetricsAsync(CancellationToken cancellationToken = default)
     {
         return Metrics.GetMetricsAsync(cancellationToken);
@@ -315,6 +418,7 @@ public sealed class Sandbox : IAsyncDisposable
     /// Pauses the sandbox.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task PauseAsync(CancellationToken cancellationToken = default)
     {
         return _sandboxes.PauseSandboxAsync(Id, cancellationToken);
@@ -326,6 +430,9 @@ public sealed class Sandbox : IAsyncDisposable
     /// <param name="options">Optional resume options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A new sandbox instance with refreshed connections.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
+    /// <exception cref="SandboxReadyTimeoutException">Thrown when readiness checks exceed timeout.</exception>
+    /// <exception cref="SandboxException">Thrown when sandbox resume fails.</exception>
     public async Task<Sandbox> ResumeAsync(
         SandboxResumeOptions? options = null,
         CancellationToken cancellationToken = default)
@@ -336,6 +443,10 @@ public sealed class Sandbox : IAsyncDisposable
         {
             SandboxId = Id,
             ConnectionConfig = ConnectionConfig,
+            Diagnostics = new SdkDiagnosticsOptions
+            {
+                LoggerFactory = _loggerFactory
+            },
             AdapterFactory = _adapterFactory,
             SkipHealthCheck = options?.SkipHealthCheck ?? false,
             ReadyTimeoutSeconds = options?.ReadyTimeoutSeconds,
@@ -347,6 +458,7 @@ public sealed class Sandbox : IAsyncDisposable
     /// Terminates the sandbox.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task KillAsync(CancellationToken cancellationToken = default)
     {
         return _sandboxes.DeleteSandboxAsync(Id, cancellationToken);
@@ -358,6 +470,7 @@ public sealed class Sandbox : IAsyncDisposable
     /// <param name="timeoutSeconds">The new timeout in seconds from now.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The renewal response.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task<RenewSandboxExpirationResponse> RenewAsync(
         int timeoutSeconds,
         CancellationToken cancellationToken = default)
@@ -375,9 +488,10 @@ public sealed class Sandbox : IAsyncDisposable
     /// <param name="port">The port number.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The endpoint information.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public Task<Endpoint> GetEndpointAsync(int port, CancellationToken cancellationToken = default)
     {
-        return _sandboxes.GetSandboxEndpointAsync(Id, port, cancellationToken);
+        return _sandboxes.GetSandboxEndpointAsync(Id, port, ConnectionConfig.UseServerProxy, cancellationToken);
     }
 
     /// <summary>
@@ -386,6 +500,7 @@ public sealed class Sandbox : IAsyncDisposable
     /// <param name="port">The port number.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The endpoint URL.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
     public async Task<string> GetEndpointUrlAsync(int port, CancellationToken cancellationToken = default)
     {
         var endpoint = await GetEndpointAsync(port, cancellationToken).ConfigureAwait(false);
@@ -398,10 +513,13 @@ public sealed class Sandbox : IAsyncDisposable
     /// </summary>
     /// <param name="options">The wait options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="SandboxReadyTimeoutException">Thrown when readiness checks exceed timeout.</exception>
+    /// <exception cref="OperationCanceledException">Thrown when <paramref name="cancellationToken"/> is canceled.</exception>
     public async Task WaitUntilReadyAsync(
         WaitUntilReadyOptions options,
         CancellationToken cancellationToken = default)
     {
+        _logger.LogDebug("Start readiness check for sandbox {SandboxId} (timeoutSeconds={TimeoutSeconds})", Id, options.ReadyTimeoutSeconds);
         var deadline = DateTime.UtcNow.AddSeconds(options.ReadyTimeoutSeconds);
 
         while (true)
@@ -428,12 +546,13 @@ public sealed class Sandbox : IAsyncDisposable
 
                 if (isReady)
                 {
+                    _logger.LogInformation("Sandbox is ready: {SandboxId}", Id);
                     return;
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore and retry
+                _logger.LogDebug(ex, "Readiness probe failed for sandbox {SandboxId}", Id);
             }
 
             await Task.Delay(options.PollingIntervalMillis, cancellationToken).ConfigureAwait(false);
@@ -451,8 +570,24 @@ public sealed class Sandbox : IAsyncDisposable
         }
 
         _disposed = true;
-        // Note: HttpClient instances are managed by the ConnectionConfig
-        // and may be shared, so we don't dispose them here
+        _logger.LogDebug("Disposing sandbox resources: {SandboxId}", Id);
+        _httpClientProvider.Dispose();
         return default;
+    }
+
+    private static IReadOnlyDictionary<string, string> MergeHeaders(
+        IReadOnlyDictionary<string, string> baseHeaders,
+        IReadOnlyDictionary<string, string>? overrideHeaders)
+    {
+        var merged = baseHeaders.ToDictionary(header => header.Key, header => header.Value);
+        if (overrideHeaders != null)
+        {
+            foreach (var header in overrideHeaders)
+            {
+                merged[header.Key] = header.Value;
+            }
+        }
+
+        return merged;
     }
 }

@@ -130,7 +130,7 @@ public class WriteEntry
 
     /// <summary>
     /// Gets or sets the file data.
-    /// Supports: string, byte[], Stream, IAsyncEnumerable&lt;byte[]&gt;
+    /// Supports: string, byte[], Stream.
     /// </summary>
     public object? Data { get; set; }
 

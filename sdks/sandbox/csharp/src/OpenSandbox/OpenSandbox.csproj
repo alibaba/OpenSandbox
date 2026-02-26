@@ -26,17 +26,19 @@
     <!-- Build Settings -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <!-- Expose internals to test project and code interpreter SDK -->
   <ItemGroup>
     <InternalsVisibleTo Include="OpenSandbox.Tests" />
     <InternalsVisibleTo Include="OpenSandbox.CodeInterpreter" />
+    <InternalsVisibleTo Include="OpenSandbox.CodeInterpreter.Tests" />
   </ItemGroup>
 
   <!-- Common Dependencies -->
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
     <PackageReference Include="PolySharp" Version="1.14.1">
       <PrivateAssets>all</PrivateAssets>

@@ -114,6 +114,73 @@ public class NetworkPolicy
 }
 
 /// <summary>
+/// Host path bind mount backend for a volume.
+/// </summary>
+public class Host
+{
+    /// <summary>
+    /// Gets or sets the absolute host path.
+    /// </summary>
+    [JsonPropertyName("path")]
+    public required string Path { get; set; }
+}
+
+/// <summary>
+/// Platform-managed named volume backend (PVC in k8s, named volume in Docker).
+/// </summary>
+public class PVC
+{
+    /// <summary>
+    /// Gets or sets the target claim/volume name.
+    /// </summary>
+    [JsonPropertyName("claimName")]
+    public required string ClaimName { get; set; }
+}
+
+/// <summary>
+/// Storage mount definition for sandbox creation.
+/// Exactly one backend (Host or PVC) should be provided per volume.
+/// </summary>
+public class Volume
+{
+    /// <summary>
+    /// Gets or sets the unique volume name within this sandbox request.
+    /// </summary>
+    [JsonPropertyName("name")]
+    public required string Name { get; set; }
+
+    /// <summary>
+    /// Gets or sets the host-path backend configuration.
+    /// </summary>
+    [JsonPropertyName("host")]
+    public Host? Host { get; set; }
+
+    /// <summary>
+    /// Gets or sets the PVC/named-volume backend configuration.
+    /// </summary>
+    [JsonPropertyName("pvc")]
+    public PVC? Pvc { get; set; }
+
+    /// <summary>
+    /// Gets or sets the absolute mount path inside the container.
+    /// </summary>
+    [JsonPropertyName("mountPath")]
+    public required string MountPath { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether this volume is mounted read-only.
+    /// </summary>
+    [JsonPropertyName("readOnly")]
+    public bool? ReadOnly { get; set; }
+
+    /// <summary>
+    /// Gets or sets the optional relative subpath under the volume backend.
+    /// </summary>
+    [JsonPropertyName("subPath")]
+    public string? SubPath { get; set; }
+}
+
+/// <summary>
 /// Status of a sandbox.
 /// </summary>
 public class SandboxStatus
@@ -231,6 +298,12 @@ public class CreateSandboxRequest
     /// </summary>
     [JsonPropertyName("networkPolicy")]
     public NetworkPolicy? NetworkPolicy { get; set; }
+
+    /// <summary>
+    /// Gets or sets storage volumes to mount into the sandbox.
+    /// </summary>
+    [JsonPropertyName("volumes")]
+    public IReadOnlyList<Volume>? Volumes { get; set; }
 
     /// <summary>
     /// Gets or sets the extension parameters.
@@ -395,6 +468,12 @@ public class Endpoint
     /// </summary>
     [JsonPropertyName("endpoint")]
     public required string EndpointAddress { get; set; }
+
+    /// <summary>
+    /// Gets or sets headers that must be included when calling this endpoint.
+    /// </summary>
+    [JsonPropertyName("headers")]
+    public IReadOnlyDictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
 }
 
 /// <summary>

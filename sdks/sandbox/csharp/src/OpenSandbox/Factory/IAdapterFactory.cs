@@ -14,6 +14,8 @@
 
 using OpenSandbox.Config;
 using OpenSandbox.Services;
+using OpenSandbox;
+using Microsoft.Extensions.Logging;
 
 namespace OpenSandbox.Factory;
 
@@ -31,6 +33,16 @@ public class CreateLifecycleStackOptions
     /// Gets or sets the lifecycle API base URL.
     /// </summary>
     public required string LifecycleBaseUrl { get; set; }
+
+    /// <summary>
+    /// Gets or sets the HTTP client provider for this SDK instance.
+    /// </summary>
+    public required HttpClientProvider HttpClientProvider { get; set; }
+
+    /// <summary>
+    /// Gets or sets the logger factory for this SDK instance.
+    /// </summary>
+    public required ILoggerFactory LoggerFactory { get; set; }
 }
 
 /// <summary>
@@ -47,6 +59,22 @@ public class CreateExecdStackOptions
     /// Gets or sets the execd API base URL.
     /// </summary>
     public required string ExecdBaseUrl { get; set; }
+
+    /// <summary>
+    /// Gets or sets headers to apply to execd requests.
+    /// If null, <see cref="ConnectionConfig.Headers"/> is used.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? ExecdHeaders { get; set; }
+
+    /// <summary>
+    /// Gets or sets the HTTP client provider for this SDK instance.
+    /// </summary>
+    public required HttpClientProvider HttpClientProvider { get; set; }
+
+    /// <summary>
+    /// Gets or sets the logger factory for this SDK instance.
+    /// </summary>
+    public required ILoggerFactory LoggerFactory { get; set; }
 }
 
 /// <summary>

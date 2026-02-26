@@ -22,7 +22,7 @@ Install-Package Alibaba.OpenSandbox
 
 以下示例展示如何创建沙箱并执行 shell 命令。
 
-> **注意**：运行此示例之前，请确保 OpenSandbox 服务正在运行。有关启动说明，请参阅根目录的 [README.md](../../../README.md)。
+> **注意**：运行此示例之前，请确保 OpenSandbox 服务正在运行。有关启动说明，请参阅根目录的 [README_zh.md](../../../docs/README_zh.md)。
 
 ```csharp
 using OpenSandbox;
@@ -117,6 +117,22 @@ await sandbox.Commands.RunAsync(
 );
 ```
 
+对于后台命令，可以轮询状态和增量日志：
+
+```csharp
+var execution = await sandbox.Commands.RunAsync(
+    "python /app/server.py",
+    options: new RunCommandOptions
+    {
+        Background = true,
+        TimeoutSeconds = 120,
+    });
+
+var status = await sandbox.Commands.GetCommandStatusAsync(execution.Id!);
+var logs = await sandbox.Commands.GetBackgroundCommandLogsAsync(execution.Id!, cursor: 0);
+Console.WriteLine($"running={status.Running}, cursor={logs.Cursor}");
+```
+
 ### 4. 全面的文件操作
 
 管理文件和目录，包括读取、写入、列出/搜索和删除。
@@ -124,12 +140,12 @@ await sandbox.Commands.RunAsync(
 ```csharp
 await sandbox.Files.CreateDirectoriesAsync(new[]
 {
-    new CreateDirectoryEntry { Path = "/tmp/demo", Mode = 493 } // 0o755
+    new CreateDirectoryEntry { Path = "/tmp/demo", Mode = 755 }
 });
 
 await sandbox.Files.WriteFilesAsync(new[]
 {
-    new WriteEntry { Path = "/tmp/demo/hello.txt", Data = "Hello World", Mode = 420 } // 0o644
+    new WriteEntry { Path = "/tmp/demo/hello.txt", Data = "Hello World", Mode = 644 }
 });
 
 var content = await sandbox.Files.ReadFileAsync("/tmp/demo/hello.txt");
@@ -190,7 +206,7 @@ foreach (var s in list.Items)
 | `Domain` | 沙箱服务域名 (`host[:port]`) | `localhost:8080` | `OPEN_SANDBOX_DOMAIN` |
 | `Protocol` | HTTP 协议 (`Http`/`Https`) | `Http` | - |
 | `RequestTimeoutSeconds` | 应用于 SDK HTTP 调用的请求超时 | `30` | - |
-| `Debug` | 启用基本 HTTP 调试日志 | `false` | - |
+| `UseServerProxy` | 是否请求服务端代理的沙箱访问端点 URL | `false` | - |
 | `Headers` | 应用于每个请求的额外头部 | `{}` | - |
 
 ```csharp
@@ -202,6 +218,7 @@ var config = new ConnectionConfig(new ConnectionConfigOptions
     Domain = "api.opensandbox.io",
     ApiKey = "your-key",
     RequestTimeoutSeconds = 60,
+    // UseServerProxy = true, // 当客户端无法直连沙箱 endpoint 时建议开启
 });
 
 // 2. 高级：自定义头部
@@ -216,7 +233,32 @@ var config2 = new ConnectionConfig(new ConnectionConfigOptions
 });
 ```
 
-### 2. 沙箱创建配置
+### 2. 诊断与日志
+
+SDK 使用 `Microsoft.Extensions.Logging` 抽象。
+
+```csharp
+using Microsoft.Extensions.Logging;
+using OpenSandbox.Config;
+
+using var loggerFactory = LoggerFactory.Create(builder =>
+{
+    builder.SetMinimumLevel(LogLevel.Debug);
+    builder.AddConsole();
+});
+
+var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+{
+    Image = "python:3.11",
+    ConnectionConfig = new ConnectionConfig(),
+    Diagnostics = new SdkDiagnosticsOptions
+    {
+        LoggerFactory = loggerFactory
+    }
+});
+```
+
+### 3. 沙箱创建配置
 
 `Sandbox.CreateAsync()` 允许配置沙箱环境。
 
@@ -229,6 +271,7 @@ var config2 = new ConnectionConfig(new ConnectionConfigOptions
 | `Env` | 环境变量 | `{}` |
 | `Metadata` | 自定义元数据标签 | `{}` |
 | `NetworkPolicy` | 可选的出站网络策略（egress） | - |
+| `Volumes` | 可选存储挂载（`Host` / `PVC`，支持 `ReadOnly` 与 `SubPath`） | - |
 | `Extensions` | 额外的服务器定义字段 | `{}` |
 | `SkipHealthCheck` | 跳过就绪检查（`Running` + 健康检查） | `false` |
 | `HealthCheck` | 自定义就绪检查 | - |
@@ -248,6 +291,16 @@ var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
             new() { Action = NetworkRuleAction.Allow, Target = "pypi.org" }
         }
     },
+    Volumes = new[]
+    {
+        new Volume
+        {
+            Name = "workspace",
+            Host = new Host { Path = "/tmp/opensandbox-e2e/host-volume-test" },
+            MountPath = "/workspace",
+            ReadOnly = false
+        }
+    }
 });
 ```
 

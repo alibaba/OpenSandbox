@@ -32,7 +32,7 @@ public class ConnectionConfigTests
         config.Domain.Should().Be("localhost:8080");
         config.ApiKey.Should().BeNull();
         config.RequestTimeoutSeconds.Should().Be(Constants.DefaultRequestTimeoutSeconds);
-        config.Debug.Should().BeFalse();
+        config.UseServerProxy.Should().BeFalse();
         config.Headers.Should().BeEmpty();
     }
 
@@ -46,7 +46,7 @@ public class ConnectionConfigTests
             Protocol = ConnectionProtocol.Https,
             ApiKey = "test-api-key",
             RequestTimeoutSeconds = 60,
-            Debug = true,
+            UseServerProxy = true,
             Headers = new Dictionary<string, string>
             {
                 ["X-Custom-Header"] = "custom-value"
@@ -61,7 +61,7 @@ public class ConnectionConfigTests
         config.Domain.Should().Be("api.example.com");
         config.ApiKey.Should().Be("test-api-key");
         config.RequestTimeoutSeconds.Should().Be(60);
-        config.Debug.Should().BeTrue();
+        config.UseServerProxy.Should().BeTrue();
         config.Headers.Should().ContainKey("X-Custom-Header");
         config.Headers["X-Custom-Header"].Should().Be("custom-value");
     }

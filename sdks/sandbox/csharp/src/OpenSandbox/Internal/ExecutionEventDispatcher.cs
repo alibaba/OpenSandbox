@@ -32,11 +32,6 @@ internal sealed class ExecutionEventDispatcher
 
     public async Task DispatchAsync(ServerStreamEvent ev)
     {
-        if (_handlers?.OnEvent != null)
-        {
-            await _handlers.OnEvent(ev).ConfigureAwait(false);
-        }
-
         var timestamp = ev.Timestamp ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         switch (ev.Type)

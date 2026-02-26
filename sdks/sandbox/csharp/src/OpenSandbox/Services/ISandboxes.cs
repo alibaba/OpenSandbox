@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using OpenSandbox.Models;
+using OpenSandbox.Core;
 
 namespace OpenSandbox.Services;
 
@@ -27,6 +28,8 @@ public interface ISandboxes
     /// <param name="request">The create sandbox request.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created sandbox response.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
     Task<CreateSandboxResponse> CreateSandboxAsync(
         CreateSandboxRequest request,
         CancellationToken cancellationToken = default);
@@ -37,6 +40,8 @@ public interface ISandboxes
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The sandbox information.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
     Task<SandboxInfo> GetSandboxAsync(
         string sandboxId,
         CancellationToken cancellationToken = default);
@@ -47,6 +52,7 @@ public interface ISandboxes
     /// <param name="params">Optional filter parameters.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The list of sandboxes.</returns>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
     Task<ListSandboxesResponse> ListSandboxesAsync(
         ListSandboxesParams? @params = null,
         CancellationToken cancellationToken = default);
@@ -56,6 +62,8 @@ public interface ISandboxes
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
     Task DeleteSandboxAsync(
         string sandboxId,
         CancellationToken cancellationToken = default);
@@ -65,6 +73,8 @@ public interface ISandboxes
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
     Task PauseSandboxAsync(
         string sandboxId,
         CancellationToken cancellationToken = default);
@@ -74,6 +84,8 @@ public interface ISandboxes
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
     Task ResumeSandboxAsync(
         string sandboxId,
         CancellationToken cancellationToken = default);
@@ -85,6 +97,8 @@ public interface ISandboxes
     /// <param name="request">The renewal request.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The renewal response.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when arguments are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
     Task<RenewSandboxExpirationResponse> RenewSandboxExpirationAsync(
         string sandboxId,
         RenewSandboxExpirationRequest request,
@@ -95,10 +109,14 @@ public interface ISandboxes
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>
     /// <param name="port">The port number.</param>
+    /// <param name="useServerProxy">Whether to return a server-proxied URL.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The endpoint information.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when arguments are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
     Task<Endpoint> GetSandboxEndpointAsync(
         string sandboxId,
         int port,
+        bool useServerProxy = false,
         CancellationToken cancellationToken = default);
 }

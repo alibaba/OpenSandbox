@@ -174,11 +174,6 @@ public class Execution
 public class ExecutionHandlers
 {
     /// <summary>
-    /// Gets or sets the handler for raw events.
-    /// </summary>
-    public Func<object, Task>? OnEvent { get; set; }
-
-    /// <summary>
     /// Gets or sets the handler for stdout messages.
     /// </summary>
     public Func<OutputMessage, Task>? OnStdout { get; set; }

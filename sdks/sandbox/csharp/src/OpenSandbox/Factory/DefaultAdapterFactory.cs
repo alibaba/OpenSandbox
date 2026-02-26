@@ -14,6 +14,7 @@
 
 using OpenSandbox.Adapters;
 using OpenSandbox.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace OpenSandbox.Factory;
 
@@ -31,11 +32,11 @@ public sealed class DefaultAdapterFactory : IAdapterFactory
     /// <inheritdoc />
     public LifecycleStack CreateLifecycleStack(CreateLifecycleStackOptions options)
     {
-        var httpClient = options.ConnectionConfig.CreateHttpClient();
         var clientWrapper = new HttpClientWrapper(
-            httpClient,
+            options.HttpClientProvider.HttpClient,
             options.LifecycleBaseUrl,
-            options.ConnectionConfig.Headers);
+            options.ConnectionConfig.Headers,
+            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"));
 
         var sandboxes = new SandboxesAdapter(clientWrapper);
 
@@ -48,26 +49,27 @@ public sealed class DefaultAdapterFactory : IAdapterFactory
     /// <inheritdoc />
     public ExecdStack CreateExecdStack(CreateExecdStackOptions options)
     {
-        var httpClient = options.ConnectionConfig.CreateHttpClient();
-        var sseHttpClient = options.ConnectionConfig.CreateSseHttpClient();
+        var headers = options.ExecdHeaders ?? options.ConnectionConfig.Headers;
 
         var clientWrapper = new HttpClientWrapper(
-            httpClient,
+            options.HttpClientProvider.HttpClient,
             options.ExecdBaseUrl,
-            options.ConnectionConfig.Headers);
+            headers,
+            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"));
 
         var health = new HealthAdapter(clientWrapper);
         var metrics = new MetricsAdapter(clientWrapper);
         var files = new FilesystemAdapter(
             clientWrapper,
-            httpClient,
+            options.HttpClientProvider.HttpClient,
             options.ExecdBaseUrl,
-            options.ConnectionConfig.Headers);
+            headers);
         var commands = new CommandsAdapter(
             clientWrapper,
-            sseHttpClient,
+            options.HttpClientProvider.SseHttpClient,
             options.ExecdBaseUrl,
-            options.ConnectionConfig.Headers);
+            headers,
+            options.LoggerFactory.CreateLogger("OpenSandbox.CommandsAdapter"));
 
         return new ExecdStack
         {

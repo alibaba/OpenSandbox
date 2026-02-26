@@ -56,13 +56,8 @@ internal sealed class FilesystemAdapter : ISandboxFiles
         IEnumerable<string> paths,
         CancellationToken cancellationToken = default)
     {
-        var pathList = paths.ToList();
-        var queryParams = new Dictionary<string, string?>
-        {
-            ["path"] = string.Join(",", pathList)
-        };
-
-        var response = await _client.GetAsync<JsonElement>("/files/info", queryParams, cancellationToken).ConfigureAwait(false);
+        var pathWithQuery = BuildRepeatedPathQuery("/files/info", "path", paths);
+        var response = await _client.GetAsync<JsonElement>(pathWithQuery, cancellationToken: cancellationToken).ConfigureAwait(false);
         return ParseFilesInfoResponse(response);
     }
 
@@ -88,7 +83,7 @@ internal sealed class FilesystemAdapter : ISandboxFiles
             e => e.Path,
             e => new Permission
             {
-                Mode = e.Mode ?? 493, // 0o755
+                Mode = e.Mode ?? 755,
                 Owner = e.Owner,
                 Group = e.Group
             });
@@ -100,21 +95,65 @@ internal sealed class FilesystemAdapter : ISandboxFiles
         IEnumerable<string> paths,
         CancellationToken cancellationToken = default)
     {
-        var queryParams = new Dictionary<string, string?>
-        {
-            ["path"] = string.Join(",", paths)
-        };
-
-        await _client.DeleteAsync("/directories", queryParams, cancellationToken).ConfigureAwait(false);
+        var pathWithQuery = BuildRepeatedPathQuery("/directories", "path", paths);
+        await _client.DeleteAsync(pathWithQuery, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     public async Task WriteFilesAsync(
         IEnumerable<WriteEntry> entries,
         CancellationToken cancellationToken = default)
     {
-        foreach (var entry in entries)
+        var entryList = entries.ToList();
+        if (entryList.Count == 0)
         {
-            await UploadFileAsync(entry, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+        var url = $"{_baseUrl}/files/upload";
+
+        using var form = new MultipartFormDataContent();
+        foreach (var entry in entryList)
+        {
+            var fileName = GetFileName(entry.Path);
+            var metadata = new FileMetadata
+            {
+                Path = entry.Path,
+                Mode = entry.Mode,
+                Owner = entry.Owner,
+                Group = entry.Group
+            };
+
+            var metadataJson = JsonSerializer.Serialize(metadata, JsonOptions);
+            var metadataContent = new StringContent(metadataJson, Encoding.UTF8, "application/json");
+            form.Add(metadataContent, "metadata", "metadata");
+
+            var fileContent = CreateFileContent(entry.Data);
+            form.Add(fileContent, "file", fileName);
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, url)
+        {
+            Content = form
+        };
+
+        foreach (var header in _headers)
+        {
+            request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            var requestId = response.Headers.TryGetValues(Constants.RequestIdHeader, out var values)
+                ? values.FirstOrDefault()
+                : null;
+
+            throw new SandboxApiException(
+                message: $"Upload failed (status={(int)response.StatusCode})",
+                statusCode: (int)response.StatusCode,
+                requestId: requestId,
+                rawBody: content);
         }
     }
 
@@ -134,9 +173,10 @@ internal sealed class FilesystemAdapter : ISandboxFiles
         CancellationToken cancellationToken = default)
     {
         var headers = new Dictionary<string, string>();
-        if (!string.IsNullOrEmpty(options?.Range))
+        var range = options?.Range;
+        if (range != null && range.Length > 0)
         {
-            headers["Range"] = options.Range;
+            headers["Range"] = range;
         }
 
         var queryParams = new Dictionary<string, string?>
@@ -160,9 +200,10 @@ internal sealed class FilesystemAdapter : ISandboxFiles
             request.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
 
-        if (!string.IsNullOrEmpty(options?.Range))
+        var range = options?.Range;
+        if (range != null && range.Length > 0)
         {
-            request.Headers.TryAddWithoutValidation("Range", options.Range);
+            request.Headers.TryAddWithoutValidation("Range", range);
         }
 
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
@@ -197,12 +238,8 @@ internal sealed class FilesystemAdapter : ISandboxFiles
         IEnumerable<string> paths,
         CancellationToken cancellationToken = default)
     {
-        var queryParams = new Dictionary<string, string?>
-        {
-            ["path"] = string.Join(",", paths)
-        };
-
-        await _client.DeleteAsync("/files", queryParams, cancellationToken).ConfigureAwait(false);
+        var pathWithQuery = BuildRepeatedPathQuery("/files", "path", paths);
+        await _client.DeleteAsync(pathWithQuery, cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
     public async Task MoveFilesAsync(
@@ -249,58 +286,6 @@ internal sealed class FilesystemAdapter : ISandboxFiles
         await _client.PostAsync("/files/permissions", body, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task UploadFileAsync(WriteEntry entry, CancellationToken cancellationToken)
-    {
-        var url = $"{_baseUrl}/files/upload";
-        var fileName = GetFileName(entry.Path);
-
-        var metadata = new FileMetadata
-        {
-            Path = entry.Path,
-            Mode = entry.Mode,
-            Owner = entry.Owner,
-            Group = entry.Group
-        };
-
-        var metadataJson = JsonSerializer.Serialize(metadata, JsonOptions);
-
-        using var form = new MultipartFormDataContent();
-
-        // Add metadata part
-        var metadataContent = new StringContent(metadataJson, Encoding.UTF8, "application/json");
-        form.Add(metadataContent, "metadata", "metadata");
-
-        // Add file part
-        var fileContent = CreateFileContent(entry.Data);
-        form.Add(fileContent, "file", fileName);
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, url)
-        {
-            Content = form
-        };
-
-        foreach (var header in _headers)
-        {
-            request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        }
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            var requestId = response.Headers.TryGetValues(Constants.RequestIdHeader, out var values)
-                ? values.FirstOrDefault()
-                : null;
-
-            throw new SandboxApiException(
-                message: $"Upload failed (status={(int)response.StatusCode})",
-                statusCode: (int)response.StatusCode,
-                requestId: requestId,
-                rawBody: content);
-        }
-    }
-
     private static HttpContent CreateFileContent(object? data)
     {
         return data switch
@@ -309,7 +294,7 @@ internal sealed class FilesystemAdapter : ISandboxFiles
             string str => new StringContent(str, Encoding.UTF8),
             byte[] bytes => new ByteArrayContent(bytes),
             Stream stream => new StreamContent(stream),
-            _ => new StringContent(data.ToString() ?? string.Empty, Encoding.UTF8)
+            _ => throw new InvalidArgumentException($"Unsupported file data type: {data.GetType().FullName}")
         };
     }
 
@@ -317,6 +302,21 @@ internal sealed class FilesystemAdapter : ISandboxFiles
     {
         var parts = path.Split('/', '\\');
         return parts.Length > 0 ? parts[^1] : "file";
+    }
+
+    private static string BuildRepeatedPathQuery(string route, string key, IEnumerable<string> values)
+    {
+        var encodedValues = values
+            .Where(v => !string.IsNullOrEmpty(v))
+            .Select(v => $"{Uri.EscapeDataString(key)}={Uri.EscapeDataString(v)}")
+            .ToList();
+
+        if (encodedValues.Count == 0)
+        {
+            return route;
+        }
+
+        return $"{route}?{string.Join("&", encodedValues)}";
     }
 
     private static Encoding GetEncoding(string encodingName)

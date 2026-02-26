@@ -77,6 +77,39 @@ Console.WriteLine(result.Results.FirstOrDefault()?.Text);
 await sandbox.KillAsync();
 ```
 
+## 日志（ILogger）
+
+SDK 使用 `Microsoft.Extensions.Logging` 抽象。创建 Sandbox/CodeInterpreter 时可通过
+diagnostics 传入你自己的 `ILoggerFactory`：
+
+```csharp
+using Microsoft.Extensions.Logging;
+using OpenSandbox.Config;
+
+using var loggerFactory = LoggerFactory.Create(builder =>
+{
+    builder.SetMinimumLevel(LogLevel.Debug);
+    builder.AddConsole();
+});
+
+await using var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+{
+    Image = "opensandbox/code-interpreter:v1.0.1",
+    Diagnostics = new SdkDiagnosticsOptions
+    {
+        LoggerFactory = loggerFactory
+    }
+});
+
+var ci = await CodeInterpreter.CreateAsync(sandbox, new CodeInterpreterCreateOptions
+{
+    Diagnostics = new SdkDiagnosticsOptions
+    {
+        LoggerFactory = loggerFactory
+    }
+});
+```
+
 ## 运行时配置
 
 ### Docker 镜像
@@ -131,7 +164,6 @@ var ctx = await ci.Codes.CreateContextAsync(SupportedLanguage.Python);
 var same = await ci.Codes.GetContextAsync(ctx.Id!);
 Console.WriteLine($"{same.Id}, {same.Language}");
 
-var all = await ci.Codes.ListContextsAsync();
 var pyOnly = await ci.Codes.ListContextsAsync(SupportedLanguage.Python);
 
 await ci.Codes.DeleteContextAsync(ctx.Id!);
@@ -244,7 +276,7 @@ await ci.Codes.InterruptAsync(ctx.Id!);
 |------|------|
 | `CreateContextAsync(language)` | 创建新的执行上下文 |
 | `GetContextAsync(contextId)` | 获取现有上下文 |
-| `ListContextsAsync(language?)` | 列出上下文，可按语言过滤 |
+| `ListContextsAsync(language)` | 列出指定语言的上下文 |
 | `DeleteContextAsync(contextId)` | 删除特定上下文 |
 | `DeleteContextsAsync(language)` | 删除某语言的所有上下文 |
 | `RunAsync(code, options?)` | 执行代码并返回结果 |

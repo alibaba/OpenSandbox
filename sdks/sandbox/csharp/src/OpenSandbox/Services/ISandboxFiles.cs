@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using OpenSandbox.Models;
+using OpenSandbox.Core;
 
 namespace OpenSandbox.Services;
 
@@ -27,6 +28,8 @@ public interface ISandboxFiles
     /// <param name="paths">The file paths to query.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A dictionary mapping paths to file information.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task<IReadOnlyDictionary<string, SandboxFileInfo>> GetFileInfoAsync(
         IEnumerable<string> paths,
         CancellationToken cancellationToken = default);
@@ -37,6 +40,8 @@ public interface ISandboxFiles
     /// <param name="entry">The search entry with path and pattern.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>A list of matching files.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task<IReadOnlyList<SandboxFileInfo>> SearchAsync(
         SearchEntry entry,
         CancellationToken cancellationToken = default);
@@ -46,6 +51,8 @@ public interface ISandboxFiles
     /// </summary>
     /// <param name="entries">The directory entries to create.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task CreateDirectoriesAsync(
         IEnumerable<CreateDirectoryEntry> entries,
         CancellationToken cancellationToken = default);
@@ -55,6 +62,8 @@ public interface ISandboxFiles
     /// </summary>
     /// <param name="paths">The directory paths to delete.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task DeleteDirectoriesAsync(
         IEnumerable<string> paths,
         CancellationToken cancellationToken = default);
@@ -64,6 +73,8 @@ public interface ISandboxFiles
     /// </summary>
     /// <param name="entries">The file entries to write.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task WriteFilesAsync(
         IEnumerable<WriteEntry> entries,
         CancellationToken cancellationToken = default);
@@ -75,6 +86,8 @@ public interface ISandboxFiles
     /// <param name="options">Optional read options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The file content as a string.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task<string> ReadFileAsync(
         string path,
         ReadFileOptions? options = null,
@@ -87,6 +100,8 @@ public interface ISandboxFiles
     /// <param name="options">Optional read options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The file content as a byte array.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task<byte[]> ReadBytesAsync(
         string path,
         ReadBytesOptions? options = null,
@@ -99,6 +114,8 @@ public interface ISandboxFiles
     /// <param name="options">Optional read options.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>An async enumerable of byte chunks.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     IAsyncEnumerable<byte[]> ReadBytesStreamAsync(
         string path,
         ReadBytesOptions? options = null,
@@ -109,6 +126,8 @@ public interface ISandboxFiles
     /// </summary>
     /// <param name="paths">The file paths to delete.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task DeleteFilesAsync(
         IEnumerable<string> paths,
         CancellationToken cancellationToken = default);
@@ -118,6 +137,8 @@ public interface ISandboxFiles
     /// </summary>
     /// <param name="entries">The move entries with source and destination paths.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task MoveFilesAsync(
         IEnumerable<MoveEntry> entries,
         CancellationToken cancellationToken = default);
@@ -127,6 +148,8 @@ public interface ISandboxFiles
     /// </summary>
     /// <param name="entries">The content replace entries.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task ReplaceContentsAsync(
         IEnumerable<ContentReplaceEntry> entries,
         CancellationToken cancellationToken = default);
@@ -136,6 +159,8 @@ public interface ISandboxFiles
     /// </summary>
     /// <param name="entries">The permission entries.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="InvalidArgumentException">Thrown when request values are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
     Task SetPermissionsAsync(
         IEnumerable<SetPermissionEntry> entries,
         CancellationToken cancellationToken = default);

@@ -127,6 +127,12 @@ public class RunCommandRequest
     /// </summary>
     [JsonPropertyName("background")]
     public bool? Background { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum execution time in milliseconds.
+    /// </summary>
+    [JsonPropertyName("timeout")]
+    public long? Timeout { get; set; }
 }
 
 /// <summary>
@@ -143,6 +149,76 @@ public class RunCommandOptions
     /// Gets or sets whether to run the command in detached mode.
     /// </summary>
     public bool Background { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum execution time in seconds.
+    /// The server terminates the command when this duration is reached.
+    /// </summary>
+    public int? TimeoutSeconds { get; set; }
+}
+
+/// <summary>
+/// Status information for a foreground or background command.
+/// </summary>
+public class CommandStatus
+{
+    /// <summary>
+    /// Gets or sets the command ID.
+    /// </summary>
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    /// <summary>
+    /// Gets or sets the original command text.
+    /// </summary>
+    [JsonPropertyName("content")]
+    public string? Content { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the command is still running.
+    /// </summary>
+    [JsonPropertyName("running")]
+    public bool? Running { get; set; }
+
+    /// <summary>
+    /// Gets or sets the exit code when the command has finished.
+    /// </summary>
+    [JsonPropertyName("exit_code")]
+    public int? ExitCode { get; set; }
+
+    /// <summary>
+    /// Gets or sets the error message if the command failed.
+    /// </summary>
+    [JsonPropertyName("error")]
+    public string? Error { get; set; }
+
+    /// <summary>
+    /// Gets or sets the command start time in RFC3339 format.
+    /// </summary>
+    [JsonPropertyName("started_at")]
+    public DateTime? StartedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the command finish time in RFC3339 format.
+    /// </summary>
+    [JsonPropertyName("finished_at")]
+    public DateTime? FinishedAt { get; set; }
+}
+
+/// <summary>
+/// Background command logs and incremental cursor.
+/// </summary>
+public class CommandLogs
+{
+    /// <summary>
+    /// Gets or sets raw stdout/stderr content.
+    /// </summary>
+    public required string Content { get; set; }
+
+    /// <summary>
+    /// Gets or sets the latest cursor for incremental log polling.
+    /// </summary>
+    public long? Cursor { get; set; }
 }
 
 /// <summary>

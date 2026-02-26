@@ -12,21 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using OpenSandbox.Models;
-using OpenSandbox.Core;
+using Microsoft.Extensions.Logging;
 
-namespace OpenSandbox.Services;
+namespace OpenSandbox.Config;
 
 /// <summary>
-/// Service interface for retrieving metrics from the execd service.
+/// Diagnostics options for SDK logging.
 /// </summary>
-public interface IExecdMetrics
+public sealed class SdkDiagnosticsOptions
 {
     /// <summary>
-    /// Gets the current resource metrics from the sandbox.
+    /// Gets or sets the logger factory used by the SDK.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The sandbox metrics.</returns>
-    /// <exception cref="SandboxException">Thrown when the execd service request fails.</exception>
-    Task<SandboxMetrics> GetMetricsAsync(CancellationToken cancellationToken = default);
+    public ILoggerFactory? LoggerFactory { get; set; }
 }

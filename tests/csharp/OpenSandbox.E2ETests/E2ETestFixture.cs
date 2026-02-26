@@ -13,43 +13,45 @@
 // limitations under the License.
 
 using OpenSandbox.Config;
+using Xunit;
 
 namespace OpenSandbox.E2ETests;
 
 /// <summary>
 /// Shared fixture for E2E tests providing common configuration.
 /// </summary>
-public class E2ETestFixture : IAsyncLifetime
+public sealed class E2ETestFixture : IAsyncLifetime
 {
-    /// <summary>
-    /// Gets the default sandbox image for tests.
-    /// </summary>
     public string DefaultImage { get; }
 
-    /// <summary>
-    /// Gets the connection configuration for tests.
-    /// </summary>
     public ConnectionConfig ConnectionConfig { get; }
 
-    /// <summary>
-    /// Gets the default timeout in seconds for sandbox creation.
-    /// </summary>
-    public int DefaultTimeoutSeconds { get; } = 300;
+    public int DefaultTimeoutSeconds { get; } = 1200;
 
-    /// <summary>
-    /// Gets the default ready timeout in seconds.
-    /// </summary>
-    public int DefaultReadyTimeoutSeconds { get; } = 60;
+    public int DefaultReadyTimeoutSeconds { get; } = 90;
 
     public E2ETestFixture()
     {
-        // Read configuration from environment variables
-        DefaultImage = Environment.GetEnvironmentVariable("SANDBOX_IMAGE") ?? "python:3.11-slim";
+        DefaultImage =
+            Environment.GetEnvironmentVariable("OPENSANDBOX_SANDBOX_DEFAULT_IMAGE")
+            ?? Environment.GetEnvironmentVariable("SANDBOX_IMAGE")
+            ?? "opensandbox/code-interpreter:latest";
 
-        var domain = Environment.GetEnvironmentVariable("SANDBOX_DOMAIN") ?? "localhost:8080";
-        var apiKey = Environment.GetEnvironmentVariable("SANDBOX_API_KEY");
-        var protocolStr = Environment.GetEnvironmentVariable("SANDBOX_PROTOCOL") ?? "http";
-        var protocol = protocolStr.Equals("https", StringComparison.OrdinalIgnoreCase)
+        var domain =
+            Environment.GetEnvironmentVariable("OPENSANDBOX_TEST_DOMAIN")
+            ?? Environment.GetEnvironmentVariable("SANDBOX_DOMAIN")
+            ?? "localhost:8080";
+
+        var apiKey =
+            Environment.GetEnvironmentVariable("OPENSANDBOX_TEST_API_KEY")
+            ?? Environment.GetEnvironmentVariable("SANDBOX_API_KEY");
+
+        var protocolRaw =
+            Environment.GetEnvironmentVariable("OPENSANDBOX_TEST_PROTOCOL")
+            ?? Environment.GetEnvironmentVariable("SANDBOX_PROTOCOL")
+            ?? "http";
+
+        var protocol = protocolRaw.Equals("https", StringComparison.OrdinalIgnoreCase)
             ? ConnectionProtocol.Https
             : ConnectionProtocol.Http;
 
@@ -58,8 +60,7 @@ public class E2ETestFixture : IAsyncLifetime
             Domain = domain,
             Protocol = protocol,
             ApiKey = apiKey,
-            RequestTimeoutSeconds = 120,
-            Debug = Environment.GetEnvironmentVariable("SANDBOX_DEBUG") == "true"
+            RequestTimeoutSeconds = 180
         });
     }
 
@@ -74,10 +75,7 @@ public class E2ETestFixture : IAsyncLifetime
     }
 }
 
-/// <summary>
-/// Collection definition for E2E tests.
-/// </summary>
-[CollectionDefinition("E2E Tests")]
-public class E2ETestCollection : ICollectionFixture<E2ETestFixture>
+[CollectionDefinition("CSharp E2E Tests")]
+public sealed class E2ETestCollection : ICollectionFixture<E2ETestFixture>
 {
 }

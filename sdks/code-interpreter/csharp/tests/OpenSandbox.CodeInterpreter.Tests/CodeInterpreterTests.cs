@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using OpenSandbox.CodeInterpreter.Models;
+using OpenSandbox.Core;
 using Xunit;
 
 namespace OpenSandbox.CodeInterpreter.Tests;
@@ -22,7 +23,7 @@ public class CodeInterpreterTests
     [Fact]
     public async Task CreateAsync_ThrowsOnNullSandbox()
     {
-        await Assert.ThrowsAsync<ArgumentNullException>(
+        await Assert.ThrowsAsync<InvalidArgumentException>(
             () => CodeInterpreter.CreateAsync(null!));
     }
 

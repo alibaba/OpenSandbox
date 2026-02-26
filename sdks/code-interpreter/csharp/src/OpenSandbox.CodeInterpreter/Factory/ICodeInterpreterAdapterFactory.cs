@@ -13,6 +13,9 @@
 // limitations under the License.
 
 using OpenSandbox.CodeInterpreter.Services;
+using OpenSandbox.Config;
+using OpenSandbox;
+using Microsoft.Extensions.Logging;
 
 namespace OpenSandbox.CodeInterpreter.Factory;
 
@@ -22,14 +25,29 @@ namespace OpenSandbox.CodeInterpreter.Factory;
 public class CreateCodesStackOptions
 {
     /// <summary>
-    /// Gets or sets the sandbox instance.
+    /// Gets or sets the connection configuration.
     /// </summary>
-    public required Sandbox Sandbox { get; set; }
+    public required ConnectionConfig ConnectionConfig { get; set; }
 
     /// <summary>
     /// Gets or sets the execd API base URL.
     /// </summary>
     public required string ExecdBaseUrl { get; set; }
+
+    /// <summary>
+    /// Gets or sets headers to apply to execd requests.
+    /// </summary>
+    public required IReadOnlyDictionary<string, string> ExecdHeaders { get; set; }
+
+    /// <summary>
+    /// Gets or sets the HTTP client provider for this SDK instance.
+    /// </summary>
+    public required HttpClientProvider HttpClientProvider { get; set; }
+
+    /// <summary>
+    /// Gets or sets the logger factory for this SDK instance.
+    /// </summary>
+    public required ILoggerFactory LoggerFactory { get; set; }
 }
 
 /// <summary>

@@ -236,7 +236,7 @@ public class ModelsTests
         {
             Path = "/tmp/test.txt",
             Size = 1024,
-            Mode = 420, // 0o644
+            Mode = 644,
             Owner = "root",
             Group = "root",
             CreatedAt = DateTime.UtcNow,
@@ -246,7 +246,7 @@ public class ModelsTests
         // Assert
         fileInfo.Path.Should().Be("/tmp/test.txt");
         fileInfo.Size.Should().Be(1024);
-        fileInfo.Mode.Should().Be(420);
+        fileInfo.Mode.Should().Be(644);
         fileInfo.Owner.Should().Be("root");
     }
 
@@ -258,7 +258,7 @@ public class ModelsTests
         {
             Path = "/tmp/file.txt",
             Data = "Hello World",
-            Mode = 420,
+            Mode = 644,
             Owner = "user",
             Group = "group"
         };
@@ -266,7 +266,7 @@ public class ModelsTests
         // Assert
         entry.Path.Should().Be("/tmp/file.txt");
         entry.Data.Should().Be("Hello World");
-        entry.Mode.Should().Be(420);
+        entry.Mode.Should().Be(644);
     }
 
     [Fact]
@@ -306,12 +306,14 @@ public class ModelsTests
         var options = new RunCommandOptions
         {
             WorkingDirectory = "/home/user",
-            Background = true
+            Background = true,
+            TimeoutSeconds = 30
         };
 
         // Assert
         options.WorkingDirectory.Should().Be("/home/user");
         options.Background.Should().BeTrue();
+        options.TimeoutSeconds.Should().Be(30);
     }
 
     [Fact]
@@ -333,6 +335,43 @@ public class ModelsTests
         ev.Timestamp.Should().Be(1234567890);
         ev.ExecutionCount.Should().Be(1);
         ev.ExecutionTime.Should().Be(100);
+    }
+
+    [Fact]
+    public void CommandStatus_ShouldStoreProperties()
+    {
+        var startedAt = DateTime.UtcNow.AddSeconds(-5);
+        var finishedAt = DateTime.UtcNow;
+        var status = new CommandStatus
+        {
+            Id = "cmd-1",
+            Content = "echo hello",
+            Running = false,
+            ExitCode = 0,
+            Error = null,
+            StartedAt = startedAt,
+            FinishedAt = finishedAt
+        };
+
+        status.Id.Should().Be("cmd-1");
+        status.Content.Should().Be("echo hello");
+        status.Running.Should().BeFalse();
+        status.ExitCode.Should().Be(0);
+        status.StartedAt.Should().Be(startedAt);
+        status.FinishedAt.Should().Be(finishedAt);
+    }
+
+    [Fact]
+    public void CommandLogs_ShouldStoreProperties()
+    {
+        var logs = new CommandLogs
+        {
+            Content = "line1\nline2\n",
+            Cursor = 12
+        };
+
+        logs.Content.Should().Contain("line1");
+        logs.Cursor.Should().Be(12);
     }
 
     [Fact]

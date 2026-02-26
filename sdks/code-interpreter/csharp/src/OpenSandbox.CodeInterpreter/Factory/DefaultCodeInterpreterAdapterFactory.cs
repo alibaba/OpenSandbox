@@ -14,7 +14,9 @@
 
 using OpenSandbox.CodeInterpreter.Adapters;
 using OpenSandbox.CodeInterpreter.Services;
+using OpenSandbox.Core;
 using OpenSandbox.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace OpenSandbox.CodeInterpreter.Factory;
 
@@ -34,32 +36,45 @@ public class DefaultCodeInterpreterAdapterFactory : ICodeInterpreterAdapterFacto
     {
         if (options == null)
         {
-            throw new ArgumentNullException(nameof(options));
+            throw new InvalidArgumentException("options cannot be null");
         }
 
-        if (options.Sandbox == null)
+        if (options.ConnectionConfig == null)
         {
-            throw new ArgumentNullException(nameof(options.Sandbox));
+            throw new InvalidArgumentException("options.ConnectionConfig cannot be null");
         }
 
         if (string.IsNullOrWhiteSpace(options.ExecdBaseUrl))
         {
-            throw new ArgumentNullException(nameof(options.ExecdBaseUrl));
+            throw new InvalidArgumentException("options.ExecdBaseUrl cannot be null or empty");
         }
 
-        var connectionConfig = options.Sandbox.ConnectionConfig;
-        var httpClient = connectionConfig.CreateHttpClient();
-        var sseHttpClient = connectionConfig.CreateSseHttpClient();
+        if (options.ExecdHeaders == null)
+        {
+            throw new InvalidArgumentException("options.ExecdHeaders cannot be null");
+        }
+
+        if (options.HttpClientProvider == null)
+        {
+            throw new InvalidArgumentException("options.HttpClientProvider cannot be null");
+        }
+
+        if (options.LoggerFactory == null)
+        {
+            throw new InvalidArgumentException("options.LoggerFactory cannot be null");
+        }
 
         var client = new HttpClientWrapper(
-            httpClient,
+            options.HttpClientProvider.HttpClient,
             options.ExecdBaseUrl,
-            connectionConfig.Headers);
+            options.ExecdHeaders,
+            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"));
 
         return new CodesAdapter(
             client,
-            sseHttpClient,
+            options.HttpClientProvider.SseHttpClient,
             options.ExecdBaseUrl,
-            connectionConfig.Headers);
+            options.ExecdHeaders,
+            options.LoggerFactory.CreateLogger("OpenSandbox.CodeInterpreter.CodesAdapter"));
     }
 }

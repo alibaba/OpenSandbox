@@ -102,6 +102,10 @@ public class RunCodeOptions
     /// Gets or sets the language for a new ephemeral context.
     /// Cannot be used together with Context.
     /// </summary>
+    /// <remarks>
+    /// When only <see cref="Language"/> is provided and <see cref="Context"/> is null, execd creates or reuses
+    /// a default session for that language, so state can persist across runs.
+    /// </remarks>
     public string? Language { get; set; }
 
     /// <summary>

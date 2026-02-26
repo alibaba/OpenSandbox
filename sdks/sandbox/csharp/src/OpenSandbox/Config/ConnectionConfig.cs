@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-using System.Net.Http.Headers;
 using OpenSandbox.Core;
 
 namespace OpenSandbox.Config;
@@ -67,14 +66,18 @@ public class ConnectionConfigOptions
     public int? RequestTimeoutSeconds { get; set; }
 
     /// <summary>
-    /// Gets or sets whether to enable debug logging.
+    /// Gets or sets whether to use server-proxied endpoint URLs.
     /// </summary>
-    public bool? Debug { get; set; }
+    public bool? UseServerProxy { get; set; }
 }
 
 /// <summary>
 /// Configuration for connecting to the OpenSandbox API.
 /// </summary>
+/// <remarks>
+/// This type is thread-safe for concurrent reads and lazy <see cref="GetHttpClient"/> initialization.
+/// The HttpClient returned by <see cref="GetHttpClient"/> is shared per <see cref="ConnectionConfig"/> instance.
+/// </remarks>
 public sealed class ConnectionConfig
 {
     /// <summary>
@@ -103,9 +106,9 @@ public sealed class ConnectionConfig
     public int RequestTimeoutSeconds { get; }
 
     /// <summary>
-    /// Gets whether debug logging is enabled.
+    /// Gets whether server-proxied endpoint URLs should be requested.
     /// </summary>
-    public bool Debug { get; }
+    public bool UseServerProxy { get; }
 
     /// <summary>
     /// Gets the user agent string.
@@ -133,7 +136,7 @@ public sealed class ConnectionConfig
         Domain = domainBase;
         ApiKey = options.ApiKey ?? envApiKey;
         RequestTimeoutSeconds = options.RequestTimeoutSeconds ?? Constants.DefaultRequestTimeoutSeconds;
-        Debug = options.Debug ?? false;
+        UseServerProxy = options.UseServerProxy ?? false;
 
         var headers = new Dictionary<string, string>(options.Headers ?? new Dictionary<string, string>());
 
