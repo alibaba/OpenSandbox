@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'components/execd/**'
+      - 'components/internal/**'
 
 permissions:
   contents: read
