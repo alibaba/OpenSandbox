@@ -22,7 +22,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"sort"
@@ -186,31 +185,34 @@ func (s *bashSession) run(request *ExecuteCodeRequest) error {
 	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-s")
-	cmd.Env = envMapToSlice(envSnapshot)
+	script := buildWrappedScript(request.Code, envSnapshot, cwd)
+	scriptFile, err := os.CreateTemp("", "execd_bash_*.sh")
+	if err != nil {
+		return fmt.Errorf("create script file: %w", err)
+	}
+	scriptPath := scriptFile.Name()
+	if _, err := scriptFile.WriteString(script); err != nil {
+		_ = scriptFile.Close()
+		return fmt.Errorf("write script file: %w", err)
+	}
+	if err := scriptFile.Close(); err != nil {
+		return fmt.Errorf("close script file: %w", err)
+	}
 
+	cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", scriptPath)
+	// Do not pass envSnapshot via cmd.Env to avoid "argument list too long" when session env is large.
+	// Child inherits parent env (nil => default in Go). The script file already has "export K=V" for
+	// all session vars at the top, so the session environment is applied when the script runs.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("stdout pipe: %w", err)
 	}
 	cmd.Stderr = cmd.Stdout
 
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("stdin pipe: %w", err)
-	}
-
 	if err := cmd.Start(); err != nil {
+		log.Error("start bash session failed: %v (command: %q)", err, request.Code)
 		return fmt.Errorf("start bash: %w", err)
 	}
-
-	script := buildWrappedScript(request.Code, envSnapshot, cwd)
-	if _, err := io.WriteString(stdin, script); err != nil {
-		_ = stdin.Close()
-		_ = cmd.Wait()
-		return fmt.Errorf("write command: %w", err)
-	}
-	_ = stdin.Close()
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
@@ -250,10 +252,12 @@ func (s *bashSession) run(request *ExecuteCodeRequest) error {
 	waitErr := cmd.Wait()
 
 	if scanErr != nil {
+		log.Error("read stdout failed: %v (command: %q)", scanErr, request.Code)
 		return fmt.Errorf("read stdout: %w", scanErr)
 	}
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		log.Error("timeout after %s while running command: %q", wait, request.Code)
 		return fmt.Errorf("timeout after %s while running command %q", wait, request.Code)
 	}
 
@@ -274,6 +278,7 @@ func (s *bashSession) run(request *ExecuteCodeRequest) error {
 
 	var exitErr *exec.ExitError
 	if waitErr != nil && !errors.As(waitErr, &exitErr) {
+		log.Error("command wait failed: %v (command: %q)", waitErr, request.Code)
 		return waitErr
 	}
 
@@ -294,7 +299,7 @@ func (s *bashSession) run(request *ExecuteCodeRequest) error {
 				Traceback: []string{errMsg},
 			})
 		}
-		log.Error("CommandExecError: %s", errMsg)
+		log.Error("CommandExecError: %s (command: %q)", errMsg, request.Code)
 		return nil
 	}
 
@@ -310,7 +315,8 @@ func buildWrappedScript(command string, env map[string]string, cwd string) strin
 
 	keys := make([]string, 0, len(env))
 	for k := range env {
-		if isValidEnvKey(k) {
+		v := env[k]
+		if isValidEnvKey(k) && !envKeysNotPersisted[k] && len(v) <= maxPersistedEnvValueSize {
 			keys = append(keys, k)
 		}
 	}
@@ -335,7 +341,6 @@ func buildWrappedScript(command string, env map[string]string, cwd string) strin
 	}
 
 	b.WriteString("__USER_EXIT_CODE__=$?\n")
-	// Ensure env dump markers are always on their own lines even if the user command omitted a trailing newline.
 	b.WriteString("printf \"\\n%s\\n\" \"" + envDumpStartMarker + "\"\n")
 	b.WriteString("export -p\n")
 	b.WriteString("printf \"%s\\n\" \"" + envDumpEndMarker + "\"\n")
@@ -346,16 +351,26 @@ func buildWrappedScript(command string, env map[string]string, cwd string) strin
 	return b.String()
 }
 
+// envKeysNotPersisted are not carried across runs (prompt/display vars).
+var envKeysNotPersisted = map[string]bool{
+	"PS1": true, "PS2": true, "PS3": true, "PS4": true,
+	"PROMPT_COMMAND": true,
+}
+
+// maxPersistedEnvValueSize caps single env value length as a safeguard.
+const maxPersistedEnvValueSize = 8 * 1024
+
 func parseExportDump(lines []string) map[string]string {
 	if len(lines) == 0 {
 		return nil
 	}
-
 	env := make(map[string]string, len(lines))
 	for _, line := range lines {
-		if k, v, ok := parseExportLine(line); ok {
-			env[k] = v
+		k, v, ok := parseExportLine(line)
+		if !ok || envKeysNotPersisted[k] || len(v) > maxPersistedEnvValueSize {
+			continue
 		}
+		env[k] = v
 	}
 	return env
 }
@@ -365,29 +380,23 @@ func parseExportLine(line string) (string, string, bool) {
 	if !strings.HasPrefix(line, prefix) {
 		return "", "", false
 	}
-
 	rest := strings.TrimSpace(strings.TrimPrefix(line, prefix))
 	if rest == "" {
 		return "", "", false
 	}
-
-	name := rest
-	value := ""
+	name, value := rest, ""
 	if eq := strings.Index(rest, "="); eq >= 0 {
 		name = rest[:eq]
 		raw := rest[eq+1:]
-		unquoted, err := strconv.Unquote(raw)
-		if err != nil {
-			value = strings.Trim(raw, `"`)
-		} else {
+		if unquoted, err := strconv.Unquote(raw); err == nil {
 			value = unquoted
+		} else {
+			value = strings.Trim(raw, `"`)
 		}
 	}
-
 	if !isValidEnvKey(name) {
 		return "", "", false
 	}
-
 	return name, value, true
 }
 
@@ -425,18 +434,6 @@ func copyEnvMap(src map[string]string) map[string]string {
 		dst[k] = v
 	}
 	return dst
-}
-
-func envMapToSlice(env map[string]string) []string {
-	if len(env) == 0 {
-		return os.Environ()
-	}
-
-	out := make([]string, 0, len(env))
-	for k, v := range env {
-		out = append(out, fmt.Sprintf("%s=%s", k, v))
-	}
-	return out
 }
 
 func splitEnvPair(kv string) (string, string, bool) {
