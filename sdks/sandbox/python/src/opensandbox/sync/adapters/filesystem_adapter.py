@@ -22,6 +22,7 @@ import logging
 from collections.abc import Iterator
 from io import IOBase, TextIOBase
 from typing import TypedDict
+from urllib.parse import quote
 
 import httpx
 
@@ -87,12 +88,15 @@ class FilesystemAdapterSync(FilesystemSync):
         return f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}{path}"
 
     def _build_download_request(self, path: str, range_header: str | None = None) -> _DownloadRequest:
-        url = self._get_execd_url(self.FILESYSTEM_DOWNLOAD_PATH)
-        params = {"path": path}
+        # Manually encode the path so spaces become %20 (RFC 3986) rather than
+        # + (form encoding produced by httpx's params= serialisation).
+        # This mirrors what the JavaScript SDK does with encodeURIComponent().
+        encoded_path = quote(path, safe="")
+        url = f"{self._get_execd_url(self.FILESYSTEM_DOWNLOAD_PATH)}?path={encoded_path}"
         headers: dict[str, str] = {}
         if range_header:
             headers["Range"] = range_header
-        return {"url": url, "params": params, "headers": headers}
+        return {"url": url, "params": {}, "headers": headers}
 
     def read_file(
         self,
