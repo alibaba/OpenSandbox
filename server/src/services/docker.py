@@ -84,20 +84,9 @@ from src.services.validators import (
 logger = logging.getLogger(__name__)
 
 
-def _resolve_docker_timeout(default: int = 180) -> int:
-    env_value = os.environ.get("DOCKER_API_TIMEOUT")
-    if not env_value:
-        return default
-    try:
-        timeout = int(env_value)
-        if timeout <= 0:
-            raise ValueError
-        return timeout
-    except ValueError:
-        logger.warning(
-            "Invalid DOCKER_API_TIMEOUT='%s'; falling back to %s seconds.", env_value, default
-        )
-        return default
+def _running_inside_docker_container() -> bool:
+    """Return True if the current process is running inside a Docker container."""
+    return os.path.exists("/.dockerenv")
 
 
 OPENSANDBOX_DIR = "/opt/opensandbox"
@@ -109,7 +98,6 @@ BOOTSTRAP_PATH = posixpath.join(OPENSANDBOX_DIR, "bootstrap.sh")
 HOST_NETWORK_MODE = "host"
 BRIDGE_NETWORK_MODE = "bridge"
 PENDING_FAILURE_TTL_SECONDS = int(os.environ.get("PENDING_FAILURE_TTL", "3600"))
-DOCKER_CLIENT_TIMEOUT = _resolve_docker_timeout()
 EGRESS_RULES_ENV = "OPENSANDBOX_EGRESS_RULES"
 EGRESS_SIDECAR_LABEL = "opensandbox.io/egress-sidecar-for"
 
@@ -152,13 +140,14 @@ class DockerSandboxService(SandboxService):
         if self.network_mode not in {HOST_NETWORK_MODE, BRIDGE_NETWORK_MODE}:
             raise ValueError(f"Unsupported Docker network_mode '{self.network_mode}'.")
         self._execd_archive_cache: Optional[bytes] = None
+        self._api_timeout = self._resolve_api_timeout()
         try:
             # Initialize Docker service from environment variables
             client_kwargs = {}
             try:
                 signature = inspect.signature(docker.from_env)
                 if "timeout" in signature.parameters:
-                    client_kwargs["timeout"] = DOCKER_CLIENT_TIMEOUT
+                    client_kwargs["timeout"] = self._api_timeout
             except (ValueError, TypeError):
                 logger.debug(
                     "Unable to introspect docker.from_env signature; using default parameters."
@@ -166,7 +155,7 @@ class DockerSandboxService(SandboxService):
             self.docker_client = docker.from_env(**client_kwargs)
             if not client_kwargs:
                 try:
-                    self.docker_client.api.timeout = DOCKER_CLIENT_TIMEOUT
+                    self.docker_client.api.timeout = self._api_timeout
                 except AttributeError:
                     logger.debug("Docker client API does not expose timeout attribute.")
             logger.info("Docker service initialized from environment")
@@ -198,6 +187,13 @@ class DockerSandboxService(SandboxService):
         self._pending_lock = Lock()
         self._pending_cleanup_timers: Dict[str, Timer] = {}
         self._restore_existing_sandboxes()
+
+    def _resolve_api_timeout(self) -> int:
+        """Docker API timeout in seconds: [docker].api_timeout if set, else default 180."""
+        cfg = self.app_config.docker.api_timeout
+        if cfg is not None and cfg >= 1:
+            return cfg
+        return 180
 
     @contextmanager
     def _docker_operation(self, action: str, sandbox_id: Optional[str] = None):
@@ -1546,10 +1542,19 @@ class DockerSandboxService(SandboxService):
             },
         )
 
+    def _get_docker_host_ip(self) -> Optional[str]:
+        """When running inside a container, return [docker].host_ip for endpoint URLs (if set)."""
+        ip = (self.app_config.docker.host_ip or "").strip()
+        return ip or None
+
     def _resolve_public_host(self) -> str:
         host_cfg = (self.app_config.server.host or "").strip()
         host_key = host_cfg.lower()
         if host_key in {"", "0.0.0.0", "::"}:
+            if _running_inside_docker_container():
+                host_ip = self._get_docker_host_ip()
+                if host_ip:
+                    return host_ip
             return self._resolve_bind_ip(socket.AF_INET)
         return host_cfg
 

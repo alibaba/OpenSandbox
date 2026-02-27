@@ -48,6 +48,10 @@ allowed_host_paths = []
 # -----------------------------------------------------------------
 # Use bridge for network isolation
 network_mode = "bridge"
+# Docker API timeout (seconds). If unset, default 180
+# api_timeout = 300
+# When server runs in a container, host IP/hostname for bridge-mode endpoints
+# host_ip = "10.57.1.91"
 # Drop dangerous capabilities and block privilege escalation
 drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
 no_new_privileges = true

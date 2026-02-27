@@ -291,6 +291,17 @@ class DockerConfig(BaseModel):
         default="host",
         description="Docker network mode for sandbox containers (host, bridge, ...).",
     )
+    api_timeout: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Docker API timeout in seconds. If unset, default is 180.",
+    )
+    host_ip: Optional[str] = Field(
+        default=None,
+        description=(
+            "Docker host IP or hostname for bridge-mode endpoint URLs when the server runs in a container."
+        ),
+    )
     drop_capabilities: list[str] = Field(
         default_factory=lambda: [
             "AUDIT_WRITE",

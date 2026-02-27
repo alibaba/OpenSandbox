@@ -428,7 +428,6 @@ curl -X DELETE \
 |----------|-------------|
 | `SANDBOX_CONFIG_PATH` | Override config file location |
 | `DOCKER_HOST` | Docker daemon URL (e.g., `unix:///var/run/docker.sock`) |
-| `DOCKER_API_TIMEOUT` | Docker client timeout in seconds (default: 180) |
 | `PENDING_FAILURE_TTL` | TTL for failed pending sandboxes in seconds (default: 3600) |
 
 ## Development

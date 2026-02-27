@@ -429,7 +429,6 @@ curl -X DELETE \
 |------|------|
 | `SANDBOX_CONFIG_PATH` | 覆盖配置文件位置 |
 | `DOCKER_HOST` | Docker 守护进程 URL（例如 `unix:///var/run/docker.sock`）|
-| `DOCKER_API_TIMEOUT` | Docker 客户端超时时间（秒，默认：180）|
 | `PENDING_FAILURE_TTL` | 失败的待处理沙箱的 TTL（秒，默认：3600）|
 
 ## 开发
