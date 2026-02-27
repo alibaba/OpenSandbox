@@ -1,4 +1,4 @@
-// Copyright 2025 Alibaba Group Holding Ltd.
+// Copyright 2026 Alibaba Group Holding Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,22 +19,21 @@ import (
 	"runtime"
 )
 
-// Version package values is auto-generated, the following values will be overridden at build time.
+// Package values are typically overridden at build time via -ldflags.
 var (
-	// Version represents the version of taskline suite.
-	Version = "1.0.0"
-
-	// BuildTime is the time when taskline-operator binary is built
+	// Version is the component version.
+	Version = "dirty"
+	// BuildTime is when the binary was built.
 	BuildTime = "assigned-at-build-time"
-
-	// GitCommit is the commit id to build taskline-operator
+	// GitCommit is the commit id used to build the binary.
 	GitCommit = "assigned-at-build-time"
 )
 
-// EchoVersion is used to echo current binary build info for diagnosing
-func EchoVersion() {
+// EchoVersion prints build info for the given component name (e.g. "OpenSandbox Ingress", "OpenSandbox Execd").
+// All components can use this by passing their display name.
+func EchoVersion(componentName string) {
 	fmt.Println("=====================================================")
-	fmt.Println(" OpenSandbox Ingress")
+	fmt.Printf(" %s\n", componentName)
 	fmt.Println("-----------------------------------------------------")
 	fmt.Printf(" Version     : %s\n", Version)
 	fmt.Printf(" Git Commit  : %s\n", GitCommit)

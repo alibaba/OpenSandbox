@@ -29,9 +29,9 @@ golint: fmt install-golint
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
-LDFLAGS := -X 'github.com/alibaba/opensandbox/router/version.Version=$(VERSION)' \
-	-X 'github.com/alibaba/opensandbox/router/version.BuildTime=$(BUILD_TIME)' \
-	-X 'github.com/alibaba/opensandbox/router/version.GitCommit=$(GIT_COMMIT)'
+LDFLAGS := -X 'github.com/alibaba/opensandbox/internal/version.Version=$(VERSION)' \
+	-X 'github.com/alibaba/opensandbox/internal/version.BuildTime=$(BUILD_TIME)' \
+	-X 'github.com/alibaba/opensandbox/internal/version.GitCommit=$(GIT_COMMIT)'
 
 .PHONY: build
 build: vet ## Build the binary.

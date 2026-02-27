@@ -26,9 +26,12 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
+	"github.com/alibaba/opensandbox/internal/version"
 )
 
 func main() {
+	version.EchoVersion("OpenSandbox Egress")
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
