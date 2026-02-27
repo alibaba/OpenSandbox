@@ -980,14 +980,15 @@ class DockerSandboxService(SandboxService):
         Docker-specific validation for host bind mount volumes.
 
         Validates that the resolved host path (host.path + optional subPath)
-        exists on the filesystem and remains within allowed prefixes.
+        remains within allowed prefixes, then ensures the directory exists on
+        the filesystem — creating it automatically if it does not.
 
         Args:
             volume: Volume with host backend.
             allowed_prefixes: Optional allowlist of host path prefixes.
 
         Raises:
-            HTTPException: When the resolved path is invalid or missing.
+            HTTPException: When the resolved path is invalid or cannot be created.
         """
         resolved_path = volume.host.path
         if volume.sub_path:
@@ -1000,14 +1001,16 @@ class DockerSandboxService(SandboxService):
         if allowed_prefixes and resolved_path != volume.host.path:
             ensure_valid_host_path(resolved_path, allowed_prefixes)
 
-        if not os.path.exists(resolved_path):
+        try:
+            os.makedirs(resolved_path, exist_ok=True)
+        except OSError as e:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
-                    "code": SandboxErrorCodes.HOST_PATH_NOT_FOUND,
+                    "code": SandboxErrorCodes.HOST_PATH_CREATE_FAILED,
                     "message": (
-                        f"Volume '{volume.name}': resolved host path '{resolved_path}' "
-                        "does not exist. Host paths must exist before sandbox creation."
+                        f"Volume '{volume.name}': host path '{resolved_path}' "
+                        f"does not exist and could not be created: {e}"
                     ),
                 },
             )
