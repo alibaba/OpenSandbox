@@ -168,7 +168,7 @@ Before you start the server, edit the configuration file to suit your environmen
    execd_image = "opensandbox/execd:v1.0.6"
    
    [egress]
-   image = "opensandbox/egress:v1.0.0"
+   image = "opensandbox/egress:v1.0.1"
    ```
 - Supported only in Docker bridge mode; requests with `networkPolicy` are rejected when `network_mode=host` or when `egress.image` is not configured.
 - Main container shares the sidecar netns and explicitly drops `NET_ADMIN`; the sidecar keeps `NET_ADMIN` to manage iptables.

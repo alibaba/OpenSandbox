@@ -33,7 +33,7 @@ execd_image = "opensandbox/execd:v1.0.6"
 [egress]
 # Egress configuration
 # -----------------------------------------------------------------
-image = "opensandbox/egress:v1.0.0"
+image = "opensandbox/egress:v1.0.1"
 
 [storage]
 # Volume and storage configuration

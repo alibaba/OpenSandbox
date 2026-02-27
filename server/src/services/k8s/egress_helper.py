@@ -59,7 +59,7 @@ def build_egress_sidecar_container(
     Example:
         ```python
         sidecar = build_egress_sidecar_container(
-            egress_image="opensandbox/egress:v1.0.0",
+            egress_image="opensandbox/egress:v1.0.1",
             network_policy=NetworkPolicy(
                 default_action="deny",
                 egress=[NetworkRule(action="allow", target="pypi.org")]
