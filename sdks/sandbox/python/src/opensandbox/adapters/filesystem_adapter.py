@@ -477,9 +477,6 @@ class FilesystemAdapter(Filesystem):
         Returns:
             Dictionary containing URL, parameters, and headers for the request
         """
-        # Manually encode the path so spaces become %20 (RFC 3986) rather than
-        # + (form encoding produced by httpx's params= serialisation).
-        # This mirrors what the JavaScript SDK does with encodeURIComponent().
         encoded_path = quote(path, safe="")
         url = f"{self._get_execd_url(self.FILESYSTEM_DOWNLOAD_PATH)}?path={encoded_path}"
         headers: dict[str, str] = {}
