@@ -101,6 +101,20 @@ def test_auth_middleware_requires_key_for_non_proxy_paths_containing_proxy_and_s
     assert response.json()["code"] == "MISSING_API_KEY"
 
 
+def test_auth_middleware_requires_key_for_malformed_proxy_port():
+    """Malformed port (non-numeric) must get 401, not 422; limits unauthenticated surface."""
+    app = _build_test_app()
+
+    @app.get("/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}")
+    def proxy_echo(sandbox_id: str, port: int, full_path: str):
+        return {"proxied": True}
+
+    client = TestClient(app)
+    response = client.get("/sandboxes/s1/proxy/not-a-port/x")
+    assert response.status_code == 401
+    assert response.json()["code"] == "MISSING_API_KEY"
+
+
 def test_auth_middleware_is_proxy_path_rejects_traversal():
     """Paths containing '..' are never considered proxy (no auth bypass)."""
     assert AuthMiddleware._is_proxy_path("/sandboxes/abc/proxy/8080/../other") is False
@@ -108,9 +122,12 @@ def test_auth_middleware_is_proxy_path_rejects_traversal():
 
 
 def test_auth_middleware_is_proxy_path_accepts_valid_shapes():
-    """Only exact proxy route shape is accepted."""
+    """Only exact proxy route shape (including numeric port) is accepted."""
     assert AuthMiddleware._is_proxy_path("/sandboxes/id/proxy/8080") is True
     assert AuthMiddleware._is_proxy_path("/sandboxes/id/proxy/8080/") is True
     assert AuthMiddleware._is_proxy_path("/v1/sandboxes/id/proxy/443/path") is True
     assert AuthMiddleware._is_proxy_path("/proxy/sandboxes/x") is False
     assert AuthMiddleware._is_proxy_path("/foo/sandboxes/id/proxy/8080") is False
+    # Non-numeric port must not skip auth (malformed path → 401, not 422)
+    assert AuthMiddleware._is_proxy_path("/sandboxes/s1/proxy/not-a-port/x") is False
+    assert AuthMiddleware._is_proxy_path("/sandboxes/s1/proxy/8080x/") is False
