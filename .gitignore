@@ -133,6 +133,8 @@ dist
 # Gatsby files
 .cache/
 public
+!docs/public/
+!docs/public/CNAME
 
 # Serverless directories
 .serverless/

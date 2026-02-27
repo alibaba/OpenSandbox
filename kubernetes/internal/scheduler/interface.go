@@ -18,6 +18,7 @@ import (
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	apis "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -28,6 +29,6 @@ type TaskScheduler interface {
 	StopTask() []Task
 }
 
-func NewTaskScheduler(name string, tasks []*apis.Task, pods []*corev1.Pod, resPolicyWhenTaskCompleted sandboxv1alpha1.TaskResourcePolicy) (TaskScheduler, error) {
-	return newTaskScheduler(name, tasks, pods, resPolicyWhenTaskCompleted)
+func NewTaskScheduler(name string, tasks []*apis.Task, pods []*corev1.Pod, resPolicyWhenTaskCompleted sandboxv1alpha1.TaskResourcePolicy, logger logr.Logger) (TaskScheduler, error) {
+	return newTaskScheduler(name, tasks, pods, resPolicyWhenTaskCompleted, logger)
 }

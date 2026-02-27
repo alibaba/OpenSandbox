@@ -21,6 +21,8 @@ const (
 	EnvEgressHTTPAddr = "OPENSANDBOX_EGRESS_HTTP_ADDR"
 	EnvEgressToken    = "OPENSANDBOX_EGRESS_TOKEN"
 	EnvEgressRules    = "OPENSANDBOX_EGRESS_RULES"
+	EnvEgressLogLevel = "OPENSANDBOX_EGRESS_LOG_LEVEL"
+	EnvMaxNameservers = "OPENSANDBOX_EGRESS_MAX_NS"
 )
 
 const (
@@ -30,4 +32,5 @@ const (
 
 const (
 	DefaultEgressServerAddr = ":18080"
+	DefaultMaxNameservers   = 3
 )

@@ -804,9 +804,10 @@ spec:
             }
         }
         
-        result = provider.get_endpoint_info(workload, 8080)
+        result = provider.get_endpoint_info(workload, 8080, "sandbox-123")
         
-        assert result == "10.0.0.1:8080"
+        assert result.endpoint == "10.0.0.1:8080"
+        assert result.headers is None
     
     def test_get_endpoint_info_uses_first_ip(self):
         """
@@ -821,9 +822,10 @@ spec:
             }
         }
         
-        result = provider.get_endpoint_info(workload, 8080)
+        result = provider.get_endpoint_info(workload, 8080, "sandbox-123")
         
-        assert result == "10.0.0.1:8080"
+        assert result.endpoint == "10.0.0.1:8080"
+        assert result.headers is None
     
     def test_get_endpoint_info_returns_none_when_missing(self):
         """
@@ -832,7 +834,7 @@ spec:
         provider = BatchSandboxProvider(MagicMock())
         workload = {"metadata": {"annotations": {}}}
         
-        result = provider.get_endpoint_info(workload, 8080)
+        result = provider.get_endpoint_info(workload, 8080, "sandbox-123")
         
         assert result is None
     
@@ -849,7 +851,7 @@ spec:
             }
         }
         
-        result = provider.get_endpoint_info(workload, 8080)
+        result = provider.get_endpoint_info(workload, 8080, "sandbox-123")
         
         assert result is None
     
@@ -866,7 +868,7 @@ spec:
             }
         }
         
-        result = provider.get_endpoint_info(workload, 8080)
+        result = provider.get_endpoint_info(workload, 8080, "sandbox-123")
         
         assert result is None
 

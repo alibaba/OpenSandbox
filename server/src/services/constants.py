@@ -19,6 +19,7 @@ SANDBOX_EXPIRES_AT_LABEL = "opensandbox.io/expires-at"
 # Host-mapped ports recorded on containers (bridge mode).
 SANDBOX_EMBEDDING_PROXY_PORT_LABEL = "opensandbox.io/embedding-proxy-port"  # maps container 44772 -> host port
 SANDBOX_HTTP_PORT_LABEL = "opensandbox.io/http-port"  # maps container 8080 -> host port
+OPEN_SANDBOX_INGRESS_HEADER = "OpenSandbox-Ingress-To"
 
 class SandboxErrorCodes:
     """Canonical error codes for sandbox service operations."""
@@ -79,5 +80,6 @@ __all__ = [
     "SANDBOX_EXPIRES_AT_LABEL",
     "SANDBOX_EMBEDDING_PROXY_PORT_LABEL",
     "SANDBOX_HTTP_PORT_LABEL",
+    "OPEN_SANDBOX_INGRESS_HEADER",
     "SandboxErrorCodes",
 ]

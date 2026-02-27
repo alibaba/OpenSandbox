@@ -17,8 +17,8 @@ package scheduler
 import (
 	"context"
 
+	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 
 	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
@@ -29,7 +29,7 @@ func (sch *defaultTaskScheduler) recover() error {
 	var err error
 	sch.once.Do(func() {
 		sch.recoverTaskNodesStatus()
-		klog.Infof("task scheduler recovered, BatchSandbox %s, task_nodes=%d, all_pods=%d", sch.name, len(sch.taskNodes), len(sch.allPods))
+		sch.logger.Info("task scheduler recovered", "scheduler", sch.name, "task_nodes", len(sch.taskNodes), "all_pods", len(sch.allPods))
 	})
 	return err
 }
@@ -61,7 +61,7 @@ func (sch *defaultTaskScheduler) recoverTaskNodesStatus() error {
 			continue
 		}
 		if tNode := sch.taskNodeByNameIndex[task.Name]; tNode != nil {
-			recoverOneTaskNode(tNode, task, pod.Status.PodIP, pod.Name)
+			recoverOneTaskNode(tNode, task, pod.Status.PodIP, pod.Name, sch.logger)
 		} else {
 		}
 		// TODO do we need to stop tasks not belong us? e.g users ScaleIn []*sandboxv1alpha1.Task
@@ -69,12 +69,12 @@ func (sch *defaultTaskScheduler) recoverTaskNodesStatus() error {
 	return nil
 }
 
-func recoverOneTaskNode(tNode *taskNode, currentTask *api.Task, ip string, podName string) {
+func recoverOneTaskNode(tNode *taskNode, currentTask *api.Task, ip string, podName string, log logr.Logger) {
 	tNode.Status = currentTask
-	tNode.transTaskState(parseTaskState(currentTask))
+	tNode.transTaskState(parseTaskState(currentTask), log)
 	tNode.IP = ip
 	tNode.PodName = podName
 	if currentTask.DeletionTimestamp != nil {
-		tNode.transSchState(stateReleasing)
+		tNode.transSchState(stateReleasing, log)
 	}
 }

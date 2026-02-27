@@ -16,18 +16,18 @@
 set -ex
 
 TAG=${TAG:-latest}
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || realpath "$(dirname "$0")/../..")
+cd "${REPO_ROOT}"
 
 docker buildx rm egress-builder || true
-
 docker buildx create --use --name egress-builder
-
 docker buildx inspect --bootstrap
-
 docker buildx ls
 
 docker buildx build \
   -t opensandbox/egress:${TAG} \
   -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:${TAG} \
+  -f components/egress/Dockerfile \
   --platform linux/amd64,linux/arm64 \
   --push \
   .

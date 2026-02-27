@@ -17,7 +17,15 @@ import textwrap
 import pytest
 
 from src import config as config_module
-from src.config import AppConfig, RouterConfig, RuntimeConfig, ServerConfig, StorageConfig
+from src.config import (
+    AppConfig,
+    GatewayConfig,
+    GatewayRouteModeConfig,
+    IngressConfig,
+    RuntimeConfig,
+    ServerConfig,
+    StorageConfig
+)
 
 
 def _reset_config(monkeypatch):
@@ -36,11 +44,13 @@ def test_load_config_from_file(tmp_path, monkeypatch):
         api_key = "secret"
 
         [runtime]
-        type = "docker"
-        execd_image = "ghcr.io/opensandbox/platform:test"
+        type = "kubernetes"
+        execd_image = "opensandbox/execd:test"
 
-        [router]
-        domain = "opensandbox.io"
+        [ingress]
+        mode = "gateway"
+        gateway.address = "*.opensandbox.io"
+        gateway.route.mode = "wildcard"
         """
     )
     config_path = tmp_path / "config.toml"
@@ -51,11 +61,14 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     assert loaded.server.port == 9000
     assert loaded.server.log_level == "DEBUG"
     assert loaded.server.api_key == "secret"
-    assert loaded.runtime.type == "docker"
-    assert loaded.runtime.execd_image == "ghcr.io/opensandbox/platform:test"
-    assert loaded.router is not None
-    assert loaded.router.domain == "opensandbox.io"
-    assert loaded.docker.network_mode == "host"
+    assert loaded.runtime.type == "kubernetes"
+    assert loaded.runtime.execd_image == "opensandbox/execd:test"
+    assert loaded.ingress is not None
+    assert loaded.ingress.mode == "gateway"
+    assert loaded.ingress.gateway is not None
+    assert loaded.ingress.gateway.address == "*.opensandbox.io"
+    assert loaded.ingress.gateway.route.mode == "wildcard"
+    assert loaded.kubernetes is not None
 
 
 def test_docker_runtime_disallows_kubernetes_block():
@@ -68,18 +81,253 @@ def test_docker_runtime_disallows_kubernetes_block():
 
 def test_kubernetes_runtime_fills_missing_block():
     server_cfg = ServerConfig()
-    runtime_cfg = RuntimeConfig(type="kubernetes", execd_image="ghcr.io/opensandbox/platform:latest")
+    runtime_cfg = RuntimeConfig(type="kubernetes", execd_image="opensandbox/execd:latest")
     app_cfg = AppConfig(server=server_cfg, runtime=runtime_cfg)
     assert app_cfg.kubernetes is not None
 
 
-def test_router_requires_exactly_one_domain():
+def test_ingress_gateway_requires_gateway_block():
     with pytest.raises(ValueError):
-        RouterConfig(domain=None, wildcard_domain=None)
+        IngressConfig(mode="gateway")
+    cfg = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="gateway.opensandbox.io",
+            route=GatewayRouteModeConfig(mode="uri"),
+        ),
+    )
+    assert cfg.gateway.route.mode == "uri"
+
+
+def test_gateway_address_validation_for_wildcard_mode():
     with pytest.raises(ValueError):
-        RouterConfig(domain="opensandbox.io", wildcard_domain="*.opensandbox.io")
-    cfg = RouterConfig(domain="opensandbox.io")
-    assert cfg.domain == "opensandbox.io"
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="gateway.opensandbox.io",
+                route=GatewayRouteModeConfig(mode="wildcard"),
+            ),
+        )
+    cfg = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="*.opensandbox.io",
+            route=GatewayRouteModeConfig(mode="wildcard"),
+        ),
+    )
+    assert cfg.gateway.address == "*.opensandbox.io"
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="10.0.0.1",
+                route=GatewayRouteModeConfig(mode="wildcard"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="http://10.0.0.1:8080",
+                route=GatewayRouteModeConfig(mode="wildcard"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="10.0.0.1:8080",
+                route=GatewayRouteModeConfig(mode="wildcard"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="https://*.opensandbox.io",
+                route=GatewayRouteModeConfig(mode="wildcard"),
+            ),
+        )
+
+
+def test_gateway_route_mode_allows_wildcard_alias():
+    cfg = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="*.opensandbox.io",
+            route=GatewayRouteModeConfig(mode="wildcard"),
+        ),
+    )
+    assert cfg.gateway.route.mode == "wildcard"
+
+
+def test_gateway_address_validation_for_non_wildcard_mode():
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="*.opensandbox.io",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="not a host",
+                route=GatewayRouteModeConfig(mode="uri"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="gateway.opensandbox.io:8080",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="10.0.0.1:70000",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="ftp://gateway.opensandbox.io",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="http://",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="http://user:pass@gateway.opensandbox.io",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="http://gateway.opensandbox.io:8080",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="10.0.0.1:0",
+                route=GatewayRouteModeConfig(mode="uri"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="10.0.0.1:abc",
+                route=GatewayRouteModeConfig(mode="uri"),
+            ),
+        )
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="http://[::1]",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+    cfg = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="gateway.opensandbox.io",
+            route=GatewayRouteModeConfig(mode="uri"),
+        ),
+    )
+    assert cfg.gateway.address == "gateway.opensandbox.io"
+    cfg_ip = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="10.0.0.1",
+            route=GatewayRouteModeConfig(mode="header"),
+        ),
+    )
+    assert cfg_ip.gateway.address == "10.0.0.1"
+    cfg_ip_port = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="10.0.0.1:8080",
+            route=GatewayRouteModeConfig(mode="header"),
+        ),
+    )
+    assert cfg_ip_port.gateway.address == "10.0.0.1:8080"
+
+
+def test_gateway_address_allows_scheme_less_defaults():
+    cfg = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="*.example.com",
+            route=GatewayRouteModeConfig(mode="wildcard"),
+        ),
+    )
+    assert cfg.gateway.address == "*.example.com"
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="https://*.example.com",
+                route=GatewayRouteModeConfig(mode="wildcard"),
+            ),
+        )
+
+
+def test_direct_mode_rejects_gateway_block():
+    with pytest.raises(ValueError):
+        IngressConfig(
+            mode="direct",
+            gateway=GatewayConfig(
+                address="gateway.opensandbox.io",
+                route=GatewayRouteModeConfig(mode="header"),
+            ),
+        )
+
+
+def test_docker_runtime_rejects_gateway_ingress():
+    server_cfg = ServerConfig()
+    runtime_cfg = RuntimeConfig(type="docker", execd_image="busybox:latest")
+    with pytest.raises(ValueError):
+        AppConfig(
+            server=server_cfg,
+            runtime=runtime_cfg,
+            ingress=IngressConfig(
+                mode="gateway",
+                gateway=GatewayConfig(
+                    address="gateway.opensandbox.io",
+                    route=GatewayRouteModeConfig(mode="header"),
+                ),
+            ),
+        )
+    # direct remains valid
+    app_cfg = AppConfig(
+        server=server_cfg,
+        runtime=runtime_cfg,
+        ingress=IngressConfig(mode="direct"),
+    )
+    assert app_cfg.ingress.mode == "direct"
 
 
 # ============================================================================

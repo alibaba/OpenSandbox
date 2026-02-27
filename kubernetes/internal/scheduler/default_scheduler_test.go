@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/golang/mock/gomock"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +28,18 @@ import (
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
+
+// mockLogger is a simple logger implementation for testing
+type mockLogger struct{}
+
+func (m mockLogger) Init(info logr.RuntimeInfo)                                {}
+func (m mockLogger) Info(level int, msg string, keysAndValues ...interface{})  {}
+func (m mockLogger) Error(err error, msg string, keysAndValues ...interface{}) {}
+func (m mockLogger) Enabled(level int) bool                                    { return false }
+func (m mockLogger) WithValues(keysAndValues ...interface{}) logr.LogSink      { return m }
+func (m mockLogger) WithName(name string) logr.LogSink                         { return m }
+
+var testLogger = logr.New(mockLogger{})
 
 func Test_scheduleSingleTaskNode(t *testing.T) {
 	ctl := gomock.NewController(t)
@@ -199,7 +212,7 @@ func Test_scheduleSingleTaskNode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			scheduleSingleTaskNode(tt.args.tNode, tt.args.taskClientCreator, "")
+			scheduleSingleTaskNode(tt.args.tNode, tt.args.taskClientCreator, "", testLogger)
 			if !reflect.DeepEqual(tt.expectTaskNode, tt.args.tNode) {
 				t.Errorf("scheduleSingleTaskNode, want %+v, got %+v", tt.expectTaskNode, tt.args.tNode)
 			}
@@ -291,7 +304,7 @@ func Test_assignTaskNodes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := assignTaskNodes(tt.args.taskNodes, tt.args.freePods); !reflect.DeepEqual(got, tt.want) {
+			if got := assignTaskNodes(tt.args.taskNodes, tt.args.freePods, testLogger); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("assignTaskNodes() = %v, want %v", got, tt.want)
 			}
 			if !reflect.DeepEqual(tt.expectTaskNodes, tt.args.taskNodes) {
@@ -625,6 +638,7 @@ func Test_collectTaskStatus(t *testing.T) {
 			sch := &defaultTaskScheduler{
 				taskNodes:           tt.taskNodes,
 				taskStatusCollector: mockCollector,
+				logger:              testLogger,
 			}
 
 			// Call collectTaskStatus
@@ -1083,6 +1097,7 @@ func Test_scheduleTaskNodes(t *testing.T) {
 				freePods:          tt.freePods,
 				maxConcurrency:    defaultSchConcurrency,
 				taskClientCreator: taskClientCreator,
+				logger:            testLogger,
 			}
 
 			// Call scheduleTaskNodes

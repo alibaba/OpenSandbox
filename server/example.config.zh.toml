@@ -21,12 +21,8 @@
 # -----------------------------------------------------------------
 host = "127.0.0.1"
 port = 8080
-
 log_level = "INFO"
-
-# Shared API key for the OPEN-SANDBOX-API-KEY header (leave empty only for dev)
-api_key = ""
-
+# api_key = "your-secret-api-key"  # Optional: Uncomment to enable API key authentication
 
 [runtime]
 # Runtime selection (docker | kubernetes)
@@ -62,3 +58,7 @@ apparmor_profile = ""
 pids_limit = 512
 # Seccomp profile: empty string uses Docker default; set to an absolute path for a custom profile
 seccomp_profile = ""
+
+[ingress]
+# Ingress exposure mode: direct (default) or gateway
+mode = "direct"

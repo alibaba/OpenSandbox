@@ -20,7 +20,7 @@ from docker.errors import DockerException, NotFound as DockerNotFound
 import pytest
 from fastapi import HTTPException, status
 
-from src.config import AppConfig, EgressConfig, RouterConfig, RuntimeConfig, ServerConfig, StorageConfig
+from src.config import AppConfig, EgressConfig, RuntimeConfig, ServerConfig, StorageConfig, IngressConfig
 from src.services.constants import SANDBOX_ID_LABEL, SandboxErrorCodes
 from src.services.docker import DockerSandboxService, PendingSandbox
 from src.services.helpers import parse_memory_limit, parse_nano_cpus, parse_timestamp
@@ -44,7 +44,7 @@ def _app_config() -> AppConfig:
     return AppConfig(
         server=ServerConfig(),
         runtime=RuntimeConfig(type="docker", execd_image="ghcr.io/opensandbox/platform:latest"),
-        router=RouterConfig(domain="opensandbox.io"),
+        ingress=IngressConfig(mode="direct"),
     )
 
 

@@ -21,7 +21,10 @@ var (
 	XForwardedFor   = http.CanonicalHeaderKey("X-Forwarded-For")
 	XForwardedProto = http.CanonicalHeaderKey("X-Forwarded-Proto")
 
-	SandboxIngress = http.CanonicalHeaderKey("OPEN-SANDBOX-INGRESS")
+	SandboxIngress = http.CanonicalHeaderKey("OpenSandbox-Ingress-To")
+	// DeprecatedSandboxIngress is the deprecated header name
+	// Deprecated
+	DeprecatedSandboxIngress = http.CanonicalHeaderKey("OPEN-SANDBOX-INGRESS")
 
 	AccessControlAllowOrigin  = http.CanonicalHeaderKey("Access-Control-Allow-Origin")
 	ReverseProxyServerPowerBy = http.CanonicalHeaderKey("Reverse-Proxy-Server-PowerBy")

@@ -20,12 +20,14 @@ import (
 	"strconv"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
+	"github.com/alibaba/opensandbox/egress/pkg/log"
 )
 
 // SetupRedirect installs OUTPUT nat redirect for DNS (udp/tcp 53 -> port).
 // Packets carrying mark bypassMark will RETURN (used by the proxy's own upstream
 // queries to avoid redirect loops). Requires CAP_NET_ADMIN inside the namespace.
 func SetupRedirect(port int) error {
+	log.Infof("installing iptables DNS redirect: OUTPUT port 53 -> %d (mark %s bypass)", port, constants.MarkHex)
 	targetPort := strconv.Itoa(port)
 
 	rules := [][]string{
@@ -47,5 +49,6 @@ func SetupRedirect(port int) error {
 			return fmt.Errorf("iptables command failed: %v (output: %s)", err, output)
 		}
 	}
+	log.Infof("iptables DNS redirect installed successfully")
 	return nil
 }

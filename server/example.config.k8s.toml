@@ -61,3 +61,7 @@ workload_provider = "batchsandbox"
 # Path to the BatchSandbox template file
 # Replace with your path
 batchsandbox_template_file = "~/batchsandbox-template.yaml"
+
+[ingress]
+# Ingress exposure mode: direct (default) or gateway
+mode = "direct"

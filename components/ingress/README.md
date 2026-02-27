@@ -24,16 +24,16 @@ The ingress supports two routing modes for discovering sandbox instances:
 
 ### Header Mode (default: `--mode header`)
 
-Routes requests based on the `OPEN-SANDBOX-INGRESS` header or the `Host` header.
+Routes requests based on the `OpenSandbox-Ingress-To` header or the `Host` header.
 
 **Format:**
-- Header: `OPEN-SANDBOX-INGRESS: <sandbox-id>-<port>`
+- Header: `OpenSandbox-Ingress-To: <sandbox-id>-<port>`
 - Host: `<sandbox-id>-<port>.<domain>`
 
 **Example:**
 ```bash
-# Using OPEN-SANDBOX-INGRESS header
-curl -H "OPEN-SANDBOX-INGRESS: my-sandbox-8080" https://ingress.opensandbox.io/api/users
+# Using OpenSandbox-Ingress-To header
+curl -H "OpenSandbox-Ingress-To: my-sandbox-8080" https://ingress.opensandbox.io/api/users
 
 # Using Host header
 curl -H "Host: my-sandbox-8080.example.com" https://ingress.opensandbox.io/api/users
@@ -105,7 +105,7 @@ TAG=local VERSION=1.2.3 GIT_COMMIT=abc BUILD_TIME=2025-01-01T00:00:00Z bash buil
 ## Implementation Notes
 
 ### Header Mode Behavior
-- Routing key priority: `OPEN-SANDBOX-INGRESS` header first, otherwise Host parsing `<sandbox-name>-<port>.*`.
+- Routing key priority: `OpenSandbox-Ingress-To` header first, otherwise Host parsing `<sandbox-name>-<port>.*`.
 - Sandbox name extracted from request is used to query the sandbox CR (BatchSandbox or AgentSandbox) via informer cache:
   - BatchSandbox → endpoints annotation.
   - AgentSandbox → `status.serviceFQDN`.
@@ -122,7 +122,7 @@ TAG=local VERSION=1.2.3 GIT_COMMIT=abc BUILD_TIME=2025-01-01T00:00:00Z bash buil
   - `ErrSandboxNotFound` (sandbox resource not exists) → HTTP 404
   - `ErrSandboxNotReady` (not enough replicas, missing endpoints, invalid config) → HTTP 503
   - Other errors (K8s API errors, etc.) → HTTP 502
-- WebSocket path forwards essential headers and X-Forwarded-*; HTTP path strips `OPEN-SANDBOX-INGRESS` before proxying (header mode only).
+- WebSocket path forwards essential headers and X-Forwarded-*; HTTP path strips `OpenSandbox-Ingress-To` before proxying (header mode only).
 
 ## Development & Tests
 ```bash

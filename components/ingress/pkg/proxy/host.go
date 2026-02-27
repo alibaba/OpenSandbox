@@ -39,12 +39,9 @@ const (
 func (p *Proxy) getSandboxHostDefinition(r *http.Request) (*sandboxHost, error) {
 	switch p.mode {
 	case ModeHeader:
-		targetHost := r.Header.Get(SandboxIngress)
+		targetHost := p.parseTargetHostByHeader(r)
 		if targetHost == "" {
-			targetHost = r.Host
-			if targetHost == "" {
-				return nil, errors.New("missing header 'OPEN-SANDBOX-INGRESS' or 'Host'")
-			}
+			return nil, fmt.Errorf("missing header '%s' or 'Host'", SandboxIngress)
 		}
 
 		host, err := p.parseSandboxHost(targetHost)
@@ -57,6 +54,19 @@ func (p *Proxy) getSandboxHostDefinition(r *http.Request) (*sandboxHost, error) 
 	}
 
 	return nil, fmt.Errorf("unknown ingress mode: %s", p.mode)
+}
+
+func (p *Proxy) parseTargetHostByHeader(r *http.Request) string {
+	targetHost := r.Header.Get(SandboxIngress)
+	if targetHost != "" {
+		return targetHost
+	}
+	deprecatedTargetHost := r.Header.Get(DeprecatedSandboxIngress)
+	if deprecatedTargetHost != "" {
+		return deprecatedTargetHost
+	}
+
+	return r.Host
 }
 
 type sandboxHost struct {

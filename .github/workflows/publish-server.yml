@@ -19,6 +19,9 @@ on:
     tags:
       - 'server/v*'
 
+permissions:
+  contents: read
+
 jobs:
   publish-pypi:
     if: startsWith(github.ref, 'refs/tags/server/v')

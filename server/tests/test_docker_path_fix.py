@@ -15,13 +15,12 @@
 import posixpath
 from unittest.mock import MagicMock, patch
 from src.services.docker import DockerSandboxService, EXECED_INSTALL_PATH, BOOTSTRAP_PATH
-from src.config import AppConfig, RuntimeConfig, ServerConfig, RouterConfig
+from src.config import AppConfig, RuntimeConfig, ServerConfig
 
 def _app_config() -> AppConfig:
     return AppConfig(
         server=ServerConfig(),
         runtime=RuntimeConfig(type="docker", execd_image="ghcr.io/opensandbox/platform:latest"),
-        router=RouterConfig(domain="opensandbox.io"),
     )
 
 def test_container_internal_paths_use_posix_style():
