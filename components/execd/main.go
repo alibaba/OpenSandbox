@@ -24,10 +24,13 @@ import (
 	_ "github.com/alibaba/opensandbox/execd/pkg/util/safego"
 	"github.com/alibaba/opensandbox/execd/pkg/web"
 	"github.com/alibaba/opensandbox/execd/pkg/web/controller"
+	"github.com/alibaba/opensandbox/internal/version"
 )
 
 // main initializes and starts the execd server.
 func main() {
+	version.EchoVersion("OpenSandbox Execd")
+
 	flag.InitFlags()
 
 	log.Init(flag.ServerLogLevel)

@@ -7,6 +7,7 @@ const docsBase = process.env.DOCS_BASE || "/";
 export default defineConfig({
   title: "OpenSandbox",
   description: "OpenSandbox documentation site for users and developers",
+  head: [["link", { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" }]],
   cleanUrls: true,
   lastUpdated: true,
   base: docsBase,

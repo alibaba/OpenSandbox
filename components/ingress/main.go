@@ -28,12 +28,12 @@ import (
 	"github.com/alibaba/opensandbox/ingress/pkg/flag"
 	"github.com/alibaba/opensandbox/ingress/pkg/proxy"
 	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
-	"github.com/alibaba/opensandbox/ingress/version"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
+	"github.com/alibaba/opensandbox/internal/version"
 )
 
 func main() {
-	version.EchoVersion()
+	version.EchoVersion("OpenSandbox Ingress")
 
 	flag.InitFlags()
 	if flag.Namespace == "" {
