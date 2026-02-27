@@ -210,7 +210,7 @@ await sandbox.files.delete_files(["/tmp/hello.txt"])
 使用 `SandboxManager` 进行管理操作，如查询现有沙箱列表。
 
 ```python
-from opensandbox.sandbox import SandboxManager
+from opensandbox.manager import SandboxManager
 from opensandbox.models.sandboxes import SandboxFilter
 
 # 使用异步上下文管理器创建管理器
