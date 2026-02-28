@@ -35,7 +35,7 @@ class _SseTransport(httpx.AsyncBaseTransport):
         body = request.content.decode("utf-8") if isinstance(request.content, (bytes, bytearray)) else ""
         payload = json.loads(body) if body else {}
 
-        if request.url.path == "/code" and payload.get("code") == "print(1)":
+        if request.url.path == "/code" and payload.get("code") == "logging.info(1)":
             sse = (
                 b'data: {"type":"init","text":"exec-1","timestamp":1}\n\n'
                 b'data: {"type":"stdout","text":"1\\n","timestamp":2}\n\n'
@@ -43,7 +43,7 @@ class _SseTransport(httpx.AsyncBaseTransport):
             )
             return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, content=sse, request=request)
 
-        if request.url.path == "/code" and payload.get("code") == "print(2)":
+        if request.url.path == "/code" and payload.get("code") == "logging.info(2)":
             assert payload["context"]["language"] == "go"
             sse = (
                 b'data: {"type":"init","text":"exec-2","timestamp":1}\n\n'
@@ -57,8 +57,8 @@ class _SseTransport(httpx.AsyncBaseTransport):
 
 def test_code_execution_converter_includes_context() -> None:
     ctx = CodeContext(id="c1", language=SupportedLanguage.PYTHON)
-    d = CodeExecutionConverter.to_api_run_code_request("print(1)", ctx)
-    assert d["code"] == "print(1)"
+    d = CodeExecutionConverter.to_api_run_code_request("logging.info(1)", ctx)
+    assert d["code"] == "logging.info(1)"
     assert d["context"]["id"] == "c1"
     assert d["context"]["language"] == "python"
 
@@ -69,7 +69,7 @@ async def test_run_code_streaming_happy_path_updates_execution() -> None:
     endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
     adapter = CodesAdapter(endpoint, cfg)
 
-    execution = await adapter.run("print(1)")
+    execution = await adapter.run("logging.info(1)")
     assert execution.id == "exec-1"
     assert execution.logs.stdout[0].text == "1\n"
 
@@ -80,7 +80,7 @@ async def test_run_code_can_accept_language_string_without_context() -> None:
     endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
     adapter = CodesAdapter(endpoint, cfg)
 
-    execution = await adapter.run("print(2)", language=SupportedLanguage.GO)
+    execution = await adapter.run("logging.info(2)", language=SupportedLanguage.GO)
     assert execution.id == "exec-2"
     assert execution.logs.stdout[0].text == "2\n"
 
@@ -103,7 +103,7 @@ async def test_run_code_rejects_mismatched_language_and_context() -> None:
 
     with pytest.raises(InvalidArgumentException):
         await adapter.run(
-            "print(1)",
+            "logging.info(1)",
             context=CodeContext(language=SupportedLanguage.PYTHON),
             language=SupportedLanguage.GO,
         )
