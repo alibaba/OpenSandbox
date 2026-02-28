@@ -23,7 +23,7 @@
   "bugs": {
     "url": "https://github.com/alibaba/OpenSandbox/issues"
   },
-  "homepage": "https://github.com/alibaba/OpenSandbox",
+  "homepage": "https://open-sandbox.ai",
   "files": [
     "dist",
     "src"
