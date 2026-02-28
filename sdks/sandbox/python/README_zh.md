@@ -183,7 +183,7 @@ await sandbox.files.write_files([
     WriteEntry(
         path="/tmp/hello.txt",
         data="Hello World",
-        mode=0o644
+        mode=644
     )
 ])
 

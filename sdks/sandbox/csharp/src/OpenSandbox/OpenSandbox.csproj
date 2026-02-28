@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OpenSandbox</RootNamespace>
+    <AssemblyName>OpenSandbox</AssemblyName>
+
+    <!-- Package Information -->
+    <PackageId>Alibaba.OpenSandbox</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>Alibaba Group</Authors>
+    <Company>Alibaba Group Holding Ltd.</Company>
+    <Product>OpenSandbox SDK</Product>
+    <Description>A C# SDK for low-level interaction with OpenSandbox. It provides the ability to create, manage, and interact with secure sandbox environments, including executing shell commands, managing files, and reading resource metrics.</Description>
+    <Copyright>Copyright 2026 Alibaba Group Holding Ltd.</Copyright>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/alibaba/OpenSandbox</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/alibaba/OpenSandbox.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>sandbox;container;docker;execution;opensandbox;alibaba</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- Build Settings -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Expose internals to test project and code interpreter SDK -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenSandbox.Tests" />
+    <InternalsVisibleTo Include="OpenSandbox.CodeInterpreter" />
+    <InternalsVisibleTo Include="OpenSandbox.CodeInterpreter.Tests" />
+  </ItemGroup>
+
+  <!-- Common Dependencies -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.2" />
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+    <PackageReference Include="PolySharp" Version="1.14.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- .NET Standard 2.0 specific dependencies -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="8.0.0" />
+  </ItemGroup>
+
+
+  <!-- Package files -->
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

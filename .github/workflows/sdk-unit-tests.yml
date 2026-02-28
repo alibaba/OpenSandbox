@@ -19,11 +19,13 @@ on:
     branches: [main]
     paths:
       - "sdks/sandbox/**"
+      - "sdks/code-interpreter/**"
       - "specs/**"
   push:
     branches: [main]
     paths:
       - "sdks/sandbox/**"
+      - "sdks/code-interpreter/**"
       - "specs/**"
 
 concurrency:
@@ -79,3 +81,25 @@ jobs:
         working-directory: sdks/sandbox/kotlin
         run: |
           ./gradlew :sandbox:test
+
+  csharp-sdk:
+    name: C# SDK Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Run sandbox tests
+        working-directory: sdks/sandbox/csharp
+        run: |
+          dotnet test tests/OpenSandbox.Tests/OpenSandbox.Tests.csproj --configuration Release
+
+      - name: Run code interpreter tests
+        working-directory: sdks/code-interpreter/csharp
+        run: |
+          dotnet test tests/OpenSandbox.CodeInterpreter.Tests/OpenSandbox.CodeInterpreter.Tests.csproj --configuration Release

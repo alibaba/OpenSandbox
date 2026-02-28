@@ -268,3 +268,5 @@ nbdist/
 # Generated files
 generated/
 **/generated/**
+bin/
+obj/

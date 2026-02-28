@@ -123,16 +123,19 @@ await sandbox.commands.run(
 管理文件和目录，包括读写、列表/搜索与删除。
 
 ```ts
-await sandbox.files.createDirectories([{ path: "/tmp/demo", mode: 0o755 }]);
+await sandbox.files.createDirectories([{ path: "/tmp/demo", mode: 755 }]);
 
 await sandbox.files.writeFiles([
-  { path: "/tmp/demo/hello.txt", data: "Hello World", mode: 0o644 },
+  { path: "/tmp/demo/hello.txt", data: "Hello World", mode: 644 },
 ]);
 
 const content = await sandbox.files.readFile("/tmp/demo/hello.txt");
 console.log("文件内容:", content);
 
-const files = await sandbox.files.search({ path: "/tmp/demo", pattern: "*.txt" });
+const files = await sandbox.files.search({
+  path: "/tmp/demo",
+  pattern: "*.txt",
+});
 console.log(files.map((f) => f.path));
 
 await sandbox.files.deleteDirectories(["/tmp/demo"]);
@@ -155,7 +158,10 @@ const url = await sandbox.getEndpointUrl(44772);
 import { SandboxManager } from "@alibaba-group/opensandbox";
 
 const manager = SandboxManager.create({ connectionConfig: config });
-const list = await manager.listSandboxInfos({ states: ["Running"], pageSize: 10 });
+const list = await manager.listSandboxInfos({
+  states: ["Running"],
+  pageSize: 10,
+});
 console.log(list.items.map((s) => s.id));
 ```
 
@@ -166,18 +172,19 @@ console.log(list.items.map((s) => s.id));
 `ConnectionConfig` 类管理与 API 服务器的连接设置。
 
 运行环境说明：
+
 - 浏览器环境下，SDK 使用全局 `fetch`。
 - Node.js 环境下，每个 `Sandbox` 和 `SandboxManager` 都会通过 `ConnectionConfig.withTransportIfMissing()` 创建独立的 keep-alive 池（基于 `undici`）。完成交互后请调用 `sandbox.close()` 或 `manager.close()` 来释放对应的 agent，以避免遗留连接，这与 Python SDK 的 transport 生命周期一致。
 
-| 参数 | 描述 | 默认值 | 环境变量 |
-| --- | --- | --- | --- |
-| `apiKey` | 用于认证的 API Key | 可选 | `OPEN_SANDBOX_API_KEY` |
-| `domain` | 沙箱服务域名（`host[:port]`） | `localhost:8080` | `OPEN_SANDBOX_DOMAIN` |
-| `protocol` | HTTP 协议（`http`/`https`） | `http` | - |
-| `requestTimeoutSeconds` | SDK HTTP 请求超时（秒） | `30` | - |
-| `debug` | 是否开启基础 HTTP 调试日志 | `false` | - |
-| `headers` | 每次请求附加的 Header | `{}` | - |
-| `useServerProxy` | 是否通过沙箱服务代理访问 execd/endpoint（适用于客户端无法直连沙箱的场景） | `false` | - |
+| 参数                    | 描述                                                                      | 默认值           | 环境变量               |
+| ----------------------- | ------------------------------------------------------------------------- | ---------------- | ---------------------- |
+| `apiKey`                | 用于认证的 API Key                                                        | 可选             | `OPEN_SANDBOX_API_KEY` |
+| `domain`                | 沙箱服务域名（`host[:port]`）                                             | `localhost:8080` | `OPEN_SANDBOX_DOMAIN`  |
+| `protocol`              | HTTP 协议（`http`/`https`）                                               | `http`           | -                      |
+| `requestTimeoutSeconds` | SDK HTTP 请求超时（秒）                                                   | `30`             | -                      |
+| `debug`                 | 是否开启基础 HTTP 调试日志                                                | `false`          | -                      |
+| `headers`               | 每次请求附加的 Header                                                     | `{}`             | -                      |
+| `useServerProxy`        | 是否通过沙箱服务代理访问 execd/endpoint（适用于客户端无法直连沙箱的场景） | `false`          | -                      |
 
 ```ts
 import { ConnectionConfig } from "@alibaba-group/opensandbox";
@@ -201,20 +208,20 @@ const config2 = new ConnectionConfig({
 
 `Sandbox.create()` 用于配置沙箱环境。
 
-| 参数 | 描述 | 默认值 |
-| --- | --- | --- |
-| `image` | 使用的 Docker 镜像 | 必填 |
-| `timeoutSeconds` | 自动终止超时时间（服务端 TTL） | 10 分钟 |
-| `entrypoint` | 容器启动入口命令 | `["tail","-f","/dev/null"]` |
-| `resource` | CPU/内存限制（字符串 map） | `{"cpu":"1","memory":"2Gi"}` |
-| `env` | 环境变量 | `{}` |
-| `metadata` | 自定义元数据标签 | `{}` |
-| `networkPolicy` | 可选的出站网络策略（egress） | - |
-| `extensions` | 额外的服务端扩展字段 | `{}` |
-| `skipHealthCheck` | 跳过就绪检测（`Running` + 健康检查） | `false` |
-| `healthCheck` | 自定义就绪检查 | - |
-| `readyTimeoutSeconds` | 等待就绪最大时间 | 30 秒 |
-| `healthCheckPollingInterval` | 就绪轮询间隔（毫秒） | 200 ms |
+| 参数                         | 描述                                 | 默认值                       |
+| ---------------------------- | ------------------------------------ | ---------------------------- |
+| `image`                      | 使用的 Docker 镜像                   | 必填                         |
+| `timeoutSeconds`             | 自动终止超时时间（服务端 TTL）       | 10 分钟                      |
+| `entrypoint`                 | 容器启动入口命令                     | `["tail","-f","/dev/null"]`  |
+| `resource`                   | CPU/内存限制（字符串 map）           | `{"cpu":"1","memory":"2Gi"}` |
+| `env`                        | 环境变量                             | `{}`                         |
+| `metadata`                   | 自定义元数据标签                     | `{}`                         |
+| `networkPolicy`              | 可选的出站网络策略（egress）         | -                            |
+| `extensions`                 | 额外的服务端扩展字段                 | `{}`                         |
+| `skipHealthCheck`            | 跳过就绪检测（`Running` + 健康检查） | `false`                      |
+| `healthCheck`                | 自定义就绪检查                       | -                            |
+| `readyTimeoutSeconds`        | 等待就绪最大时间                     | 30 秒                        |
+| `healthCheckPollingInterval` | 就绪轮询间隔（毫秒）                 | 200 ms                       |
 
 ```ts
 const sandbox = await Sandbox.create({
@@ -236,4 +243,3 @@ const sandbox = await Sandbox.create({
 - SDK 可在浏览器运行，但**流式文件上传仅支持 Node**。
 - 如果 `writeFiles` 传入 `ReadableStream` 或 `AsyncIterable`，浏览器会回退为**先缓存在内存，再上传**。
 - 原因：浏览器不支持以自定义 boundary 的 `multipart/form-data` 流式请求体（execd 上传接口需要此能力）。
-

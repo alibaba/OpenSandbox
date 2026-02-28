@@ -33,7 +33,7 @@ OpenSandbox is a **general-purpose sandbox platform** for AI applications, offer
 
 ## Features
 
-- **Multi-language SDKs**: Client SDKs for Python, Java/Kotlin, and JavaScript/TypeScript.
+- **Multi-language SDKs**: Provides sandbox SDKs in Python, Java/Kotlin, JavaScript/TypeScript, C#/.NET, Go (Roadmap), and more.
 - **Sandbox Protocol**: Defines sandbox lifecycle management APIs and sandbox execution APIs so you can extend custom sandbox runtimes.
 - **Sandbox Runtime**: Built-in lifecycle management supporting Docker and [high-performance Kubernetes runtime](./kubernetes), enabling both local runs and large-scale distributed scheduling.
 - **Sandbox Environments**: Built-in Command, Filesystem, and Code Interpreter implementations. Examples cover Coding Agents (e.g., Claude Code), browser automation (Chrome, Playwright), and desktop environments (VNC, VS Code).
@@ -177,7 +177,7 @@ For more details, please refer to [examples](examples/README.md) and the README 
 
 | Directory | Description                                                      |
 |-----------|------------------------------------------------------------------|
-| [`sdks/`](sdks/) | Multi-language SDKs (Python, Java/Kotlin, TypeScript/JavaScript) |
+| [`sdks/`](sdks/) | Multi-language SDKs (Python, Java/Kotlin, TypeScript/JavaScript, C#/.NET) |
 | [`specs/`](specs/README.md) | OpenAPI specs and lifecycle specifications                      |
 | [`server/`](server/README.md) | Python FastAPI sandbox lifecycle server                          |
 | [`kubernetes/`](kubernetes/README.md) | Kubernetes deployment and examples                               |
@@ -197,8 +197,8 @@ For detailed architecture, see [docs/architecture.md](docs/architecture.md).
 
 - [docs/architecture.md](docs/architecture.md) – Overall architecture & design philosophy
 - SDK
-  - Sandbox base SDK ([Java\Kotlin SDK](sdks/sandbox/kotlin/README.md), [Python SDK](sdks/sandbox/python/README.md), [JavaScript/TypeScript SDK](sdks/sandbox/javascript/README.md)) - includes sandbox lifecycle, command execution, file operations
-  - Code Interpreter SDK ([Java\Kotlin SDK](sdks/code-interpreter/kotlin/README.md), [Python SDK](sdks/code-interpreter/python/README.md), [JavaScript/TypeScript SDK](sdks/code-interpreter/javascript/README.md)) - code interpreter
+  - Sandbox base SDK ([Java\Kotlin SDK](sdks/sandbox/kotlin/README.md), [Python SDK](sdks/sandbox/python/README.md), [JavaScript/TypeScript SDK](sdks/sandbox/javascript/README.md), [C#/.NET SDK](sdks/sandbox/csharp/README.md)) - includes sandbox lifecycle, command execution, file operations
+  - Code Interpreter SDK ([Java\Kotlin SDK](sdks/code-interpreter/kotlin/README.md), [Python SDK](sdks/code-interpreter/python/README.md), [JavaScript/TypeScript SDK](sdks/code-interpreter/javascript/README.md), [C#/.NET SDK](sdks/code-interpreter/csharp/README.md)) - code interpreter
 - [specs/README.md](specs/README.md) - OpenAPI definitions for sandbox lifecycle API and sandbox execution API
 - [server/README.md](server/README.md) - Sandbox server startup and configuration; supports Docker and Kubernetes runtimes
 
