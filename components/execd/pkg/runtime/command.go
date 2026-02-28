@@ -52,6 +52,13 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 
 	startAt := time.Now()
 	log.Info("received command: %v", request.Code)
+	if request.User != nil {
+		if request.User.UID != nil {
+			log.Info("run_command request.User.UID=%d", *request.User.UID)
+		} else if request.User.Username != nil {
+			log.Info("run_command request.User.Username=%s", *request.User.Username)
+		}
+	}
 	cred, resolvedUser, err := resolveUserCredential(request.User)
 	if err != nil {
 		request.Hooks.OnExecuteInit(session)
@@ -86,6 +93,9 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	sysProcAttr := &syscall.SysProcAttr{Setpgid: true}
 	if cred != nil {
 		sysProcAttr.Credential = cred
+		log.Info("run_command setting Credential Uid=%d Gid=%d", cred.Uid, cred.Gid)
+	} else {
+		log.Info("run_command cred is nil, not switching user")
 	}
 	cmd.SysProcAttr = sysProcAttr
 
