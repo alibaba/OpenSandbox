@@ -28,7 +28,7 @@ jobs:
       UV_BIN: /home/admin/.local/bin
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up uv PATH and verify
         run: |
@@ -73,7 +73,7 @@ jobs:
 
       - name: Upload execd logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: execd-log-for-python-e2e
           path: /tmp/opensandbox-e2e/logs/
@@ -94,7 +94,7 @@ jobs:
       JAVA_VERSION: "17.0.14+7"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up uv PATH and verify
         run: |
@@ -159,7 +159,7 @@ jobs:
 
       - name: Upload Test Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: java-test-report
           path: tests/java/build/reports/tests/test/
@@ -167,7 +167,7 @@ jobs:
 
       - name: Upload execd logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: execd-log-for-java-e2e
           path: /tmp/opensandbox-e2e/logs/
@@ -188,7 +188,7 @@ jobs:
       NODE_VERSION: "20.19.0"
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up uv PATH and verify
         run: |
@@ -248,7 +248,7 @@ jobs:
 
       - name: Upload Test Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: javascript-test-report
           path: tests/javascript/build/test-results/junit.xml
@@ -256,7 +256,7 @@ jobs:
 
       - name: Upload execd logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: execd-log-for-js-e2e
           path: /tmp/opensandbox-e2e/logs/
@@ -276,7 +276,7 @@ jobs:
       UV_BIN: /home/admin/.local/bin
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up uv PATH and verify
         run: |
@@ -286,7 +286,7 @@ jobs:
           uv run python --version
 
       - name: Set up .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         env:
           DOTNET_INSTALL_DIR: /home/admin/.local/dotnet
         with:
@@ -326,7 +326,7 @@ jobs:
 
       - name: Upload Test Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: csharp-test-report
           path: tests/csharp/build/test-results/
@@ -334,7 +334,7 @@ jobs:
 
       - name: Upload execd logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: execd-log-for-csharp-e2e
           path: /tmp/opensandbox-e2e/logs/
