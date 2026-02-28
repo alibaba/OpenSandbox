@@ -47,9 +47,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/alibaba/OpenSandbox"
+Homepage = "https://open-sandbox.ai"
 Repository = "https://github.com/alibaba/OpenSandbox"
-Documentation = "https://docs.opensandbox.io"
+Documentation = "https://open-sandbox.ai"
 Issues = "https://github.com/alibaba/OpenSandbox/issues"
 
 [project.scripts]

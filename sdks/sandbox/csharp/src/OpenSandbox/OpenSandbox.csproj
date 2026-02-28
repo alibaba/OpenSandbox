@@ -17,7 +17,7 @@
     <Description>A C# SDK for low-level interaction with OpenSandbox. It provides the ability to create, manage, and interact with secure sandbox environments, including executing shell commands, managing files, and reading resource metrics.</Description>
     <Copyright>Copyright 2026 Alibaba Group Holding Ltd.</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/alibaba/OpenSandbox</PackageProjectUrl>
+    <PackageProjectUrl>https://open-sandbox.ai</PackageProjectUrl>
     <RepositoryUrl>https://github.com/alibaba/OpenSandbox.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>sandbox;container;docker;execution;opensandbox;alibaba</PackageTags>

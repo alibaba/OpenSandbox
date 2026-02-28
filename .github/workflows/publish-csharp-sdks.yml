@@ -61,11 +61,16 @@ jobs:
       - name: Pack
         if: startsWith(github.ref, format('refs/tags/csharp/{0}/v', matrix.sdk.tagPrefix))
         run: |
+          EXTRA_PACK_ARGS=""
+          if [ "${{ matrix.sdk.name }}" = "code-interpreter" ]; then
+            EXTRA_PACK_ARGS="-p:UseLocalOpenSandboxProjectReference=false"
+          fi
           dotnet pack "${{ matrix.sdk.csprojPath }}" \
             --configuration Release \
             --no-restore \
             -p:PackageVersion="${PACKAGE_VERSION}" \
             -p:ContinuousIntegrationBuild=true \
+            ${EXTRA_PACK_ARGS} \
             --output ./artifacts/${{ matrix.sdk.name }}
 
       - name: Publish to NuGet
