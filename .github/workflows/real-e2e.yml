@@ -23,19 +23,25 @@ concurrency:
 jobs:
   python-e2e:
     name: Python E2E (docker bridge)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    env:
+      UV_BIN: /home/admin/.local/bin
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install uv
+      - name: Set up uv PATH and verify
         run: |
-          pip install uv
+          echo "${UV_BIN}" >> "$GITHUB_PATH"
+          export PATH="${UV_BIN}:${PATH}"
+          uv --version
+          uv run python --version
+
+      - name: Clean up previous E2E resources
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          # Remove root-owned files from previous sandbox runs by mounting parent dir
+          docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
 
       - name: Run tests
         run: |
@@ -73,27 +79,53 @@ jobs:
           path: /tmp/opensandbox-e2e/logs/
           retention-days: 5
 
+      - name: Clean up after E2E
+        if: always()
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
+          pkill -f "python -m src.main" || true
+
   java-e2e:
     name: Java E2E (docker bridge)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    env:
+      UV_BIN: /home/admin/.local/bin
+      JAVA_VERSION: "17.0.14+7"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+      - name: Set up uv PATH and verify
+        run: |
+          echo "${UV_BIN}" >> "$GITHUB_PATH"
+          export PATH="${UV_BIN}:${PATH}"
+          uv --version
+          uv run python --version
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: "temurin"
-          java-version: "17"
-          cache: gradle
+      - name: Set up JDK
+        run: |
+          # Adoptium Temurin JDK 17 for Linux x64
+          JAVA_MAJOR="${JAVA_VERSION%%.*}"
+          JAVA_URL_VERSION=$(echo "${JAVA_VERSION}" | sed 's/+/%2B/')
+          JAVA_DIR="/home/admin/.local/jdk-${JAVA_VERSION}"
+          if [ -x "${JAVA_DIR}/bin/java" ]; then
+            echo "JDK ${JAVA_VERSION} already cached"
+          else
+            echo "Downloading Temurin JDK ${JAVA_VERSION}..."
+            mkdir -p /home/admin/.local
+            curl -fsSL "https://api.adoptium.net/v3/binary/version/jdk-${JAVA_URL_VERSION}/linux/x64/jdk/hotspot/normal/eclipse?project=jdk" \
+              | tar -xzf - -C /home/admin/.local/
+          fi
+          echo "${JAVA_DIR}/bin" >> "$GITHUB_PATH"
+          echo "JAVA_HOME=${JAVA_DIR}" >> "$GITHUB_ENV"
+          export PATH="${JAVA_DIR}/bin:${PATH}"
+          java -version
 
-      - name: Install uv
-        run: pip install uv
+      - name: Clean up previous E2E resources
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
 
       - name: Run tests
         env:
@@ -132,6 +164,7 @@ jobs:
           name: java-test-report
           path: tests/java/build/reports/tests/test/
           retention-days: 5
+
       - name: Upload execd logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -140,25 +173,50 @@ jobs:
           path: /tmp/opensandbox-e2e/logs/
           retention-days: 5
 
+      - name: Clean up after E2E
+        if: always()
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
+          pkill -f "python -m src.main" || true
+
   javascript-e2e:
     name: JavaScript E2E (docker bridge)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    env:
+      UV_BIN: /home/admin/.local/bin
+      NODE_VERSION: "20.19.0"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+      - name: Set up uv PATH and verify
+        run: |
+          echo "${UV_BIN}" >> "$GITHUB_PATH"
+          export PATH="${UV_BIN}:${PATH}"
+          uv --version
+          uv run python --version
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.10"
+      - name: Set up Node.js
+        run: |
+          NODE_DIR="/home/admin/.local/node-v${NODE_VERSION}-linux-x64"
+          if [ -x "${NODE_DIR}/bin/node" ]; then
+            echo "Node.js ${NODE_VERSION} already cached"
+          else
+            echo "Downloading Node.js ${NODE_VERSION}..."
+            mkdir -p /home/admin/.local
+            curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" \
+              | tar -xJ -C /home/admin/.local/
+          fi
+          echo "${NODE_DIR}/bin" >> "$GITHUB_PATH"
+          export PATH="${NODE_DIR}/bin:${PATH}"
+          node --version
+          npm --version
 
-      - name: Install uv
-        run: pip install uv
+      - name: Clean up previous E2E resources
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
 
       - name: Run tests
         run: |
@@ -203,3 +261,88 @@ jobs:
           name: execd-log-for-js-e2e
           path: /tmp/opensandbox-e2e/logs/
           retention-days: 5
+
+      - name: Clean up after E2E
+        if: always()
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
+          pkill -f "python -m src.main" || true
+
+  csharp-e2e:
+    name: C# E2E (docker bridge)
+    runs-on: self-hosted
+    env:
+      UV_BIN: /home/admin/.local/bin
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up uv PATH and verify
+        run: |
+          echo "${UV_BIN}" >> "$GITHUB_PATH"
+          export PATH="${UV_BIN}:${PATH}"
+          uv --version
+          uv run python --version
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        env:
+          DOTNET_INSTALL_DIR: /home/admin/.local/dotnet
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Clean up previous E2E resources
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
+
+      - name: Run tests
+        run: |
+          set -e
+
+          cat <<EOF > ~/.sandbox.toml
+          [server]
+          host = "127.0.0.1"
+          port = 8080
+          log_level = "INFO"
+          api_key = ""
+          [runtime]
+          type = "docker"
+          execd_image = "opensandbox/execd:local"
+          [egress]
+          image = "opensandbox/egress:latest"
+          [docker]
+          network_mode = "bridge"
+          [storage]
+          allowed_host_paths = ["/tmp/opensandbox-e2e"]
+          EOF
+
+          bash ./scripts/csharp-e2e.sh
+
+      - name: Eval server logs
+        if: ${{ always() }}
+        run: cat server/server.log
+
+      - name: Upload Test Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: csharp-test-report
+          path: tests/csharp/build/test-results/
+          retention-days: 5
+
+      - name: Upload execd logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: execd-log-for-csharp-e2e
+          path: /tmp/opensandbox-e2e/logs/
+          retention-days: 5
+
+      - name: Clean up after E2E
+        if: always()
+        run: |
+          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
+          pkill -f "python -m src.main" || true

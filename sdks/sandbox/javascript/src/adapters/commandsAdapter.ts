@@ -41,11 +41,15 @@ type ApiCommandLogsOk =
   ExecdPaths["/command/{id}/logs"]["get"]["responses"][200]["content"]["text/plain"];
 
 function toRunCommandRequest(command: string, opts?: RunCommandOpts): ApiRunCommandRequest {
-  return {
+  const body: ApiRunCommandRequest = {
     command,
     cwd: opts?.workingDirectory,
     background: !!opts?.background,
   };
+  if (opts?.timeoutSeconds != null) {
+    body.timeout = Math.round(opts.timeoutSeconds * 1000);
+  }
+  return body;
 }
 
 function parseOptionalDate(value: unknown, field: string): Date | undefined {

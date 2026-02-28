@@ -17,6 +17,8 @@ spec:
           emptyDir: { }
         - name: opensandbox-bin
           emptyDir: { }
+        - name: sandbox-logs
+          emptyDir: { }
       initContainers:
         - name: task-executor-installer
           image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/task-executor:latest
@@ -29,7 +31,7 @@ spec:
             - name: opensandbox-bin
               mountPath: /opt/opensandbox/bin
         - name: execd-installer
-          image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5
+          image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.6
           command: [ "/bin/sh", "-c" ]
           args:
             - |
@@ -60,6 +62,8 @@ spec:
               mountPath: /var/lib/sandbox
             - name: opensandbox-bin
               mountPath: /opt/opensandbox/bin
+            - name: sandbox-logs
+              mountPath: /workspace/logs
       tolerations:
         - operator: "Exists"
   capacitySpec:

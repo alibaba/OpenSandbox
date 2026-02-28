@@ -19,7 +19,8 @@ BatchSandbox-based workload provider implementation.
 import logging
 import shlex
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Callable
+from threading import Lock
 
 from kubernetes.client import (
     V1Container,
@@ -29,7 +30,9 @@ from kubernetes.client import (
     ApiException,
 )
 
-from src.api.schema import ImageSpec, NetworkPolicy
+from src.config import IngressConfig, INGRESS_MODE_GATEWAY
+from src.services.helpers import format_ingress_endpoint
+from src.api.schema import Endpoint, ImageSpec, NetworkPolicy
 from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.egress_helper import (
@@ -38,6 +41,7 @@ from src.services.k8s.egress_helper import (
     build_security_context_from_dict,
     serialize_security_context_to_dict,
 )
+from src.services.k8s.informer import WorkloadInformer
 from src.services.k8s.workload_provider import WorkloadProvider
 
 logger = logging.getLogger(__name__)
@@ -51,7 +55,16 @@ class BatchSandboxProvider(WorkloadProvider):
     and provides additional features like task management.
     """
     
-    def __init__(self, k8s_client: K8sClient, template_file_path: Optional[str] = None):
+    def __init__(
+        self,
+        k8s_client: K8sClient,
+        template_file_path: Optional[str] = None,
+        ingress_config: Optional[IngressConfig] = None,
+        enable_informer: bool = True,
+        informer_factory: Optional[Callable[[str], WorkloadInformer]] = None,
+        informer_resync_seconds: int = 300,
+        informer_watch_timeout_seconds: int = 60,
+    ):
         """
         Initialize BatchSandbox provider.
         
@@ -61,6 +74,7 @@ class BatchSandboxProvider(WorkloadProvider):
         """
         self.k8s_client = k8s_client
         self.custom_api = k8s_client.get_custom_objects_api()
+        self.ingress_config = ingress_config
         
         # CRD constants
         self.group = "sandbox.opensandbox.io"
@@ -69,6 +83,20 @@ class BatchSandboxProvider(WorkloadProvider):
         
         # Template manager
         self.template_manager = BatchSandboxTemplateManager(template_file_path)
+        self._enable_informer = enable_informer
+        self._informer_factory = informer_factory or (
+            lambda ns: WorkloadInformer(
+                custom_api=self.custom_api,
+                group=self.group,
+                version=self.version,
+                plural=self.plural,
+                namespace=ns,
+                resync_period_seconds=informer_resync_seconds,
+                watch_timeout_seconds=informer_watch_timeout_seconds,
+            )
+        )
+        self._informers: Dict[str, WorkloadInformer] = {}
+        self._informers_lock = Lock()
     
     def create_workload(
         self,
@@ -196,6 +224,13 @@ class BatchSandboxProvider(WorkloadProvider):
             body=batchsandbox,
         )
         
+        informer = self._get_informer(namespace)
+        if informer:
+            try:
+                informer.update_cache(created)
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to update informer cache for %s: %s", sandbox_id, exc)
+
         return {
             "name": created["metadata"]["name"],
             "uid": created["metadata"]["uid"],
@@ -534,16 +569,57 @@ class BatchSandboxProvider(WorkloadProvider):
         
         return result
     
+    def _get_informer(self, namespace: str) -> Optional[WorkloadInformer]:
+        if not self._enable_informer:
+            return None
+
+        with self._informers_lock:
+            informer = self._informers.get(namespace)
+            if informer is None:
+                informer = self._informer_factory(namespace)
+                self._informers[namespace] = informer
+                try:
+                    informer.start()
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning(
+                        "Failed to start informer for namespace %s: %s", namespace, exc
+                    )
+                    self._informers.pop(namespace, None)
+                    return None
+        return informer
+
     def get_workload(self, sandbox_id: str, namespace: str) -> Optional[Dict[str, Any]]:
         """Get BatchSandbox by sandbox ID."""
+        informer = self._get_informer(namespace)
+        cache_ready = informer.has_synced if informer else False
+
+        if informer and cache_ready:
+            cached = informer.get(sandbox_id)
+            if cached:
+                return cached
+
+            legacy_name = self.legacy_resource_name(sandbox_id)
+            if legacy_name != sandbox_id:
+                legacy_cached = informer.get(legacy_name)
+                if legacy_cached:
+                    return legacy_cached
+
+        if informer and not cache_ready:
+            logger.warning(
+                f"Informer cache not synced for namespace {namespace}; falling back to direct API get."
+            )
+
         try:
-            return self.custom_api.get_namespaced_custom_object(
+            workload = self.custom_api.get_namespaced_custom_object(
                 group=self.group,
                 version=self.version,
                 namespace=namespace,
                 plural=self.plural,
                 name=sandbox_id,
             )
+            if informer and workload:
+                informer.update_cache(workload)
+            return workload
         except ApiException as e:
             if e.status != 404:
                 logger.error(f"Unexpected error getting BatchSandbox for {sandbox_id}: {e}")
@@ -553,13 +629,16 @@ class BatchSandboxProvider(WorkloadProvider):
         legacy_name = self.legacy_resource_name(sandbox_id)
         if legacy_name != sandbox_id:
             try:
-                return self.custom_api.get_namespaced_custom_object(
+                workload = self.custom_api.get_namespaced_custom_object(
                     group=self.group,
                     version=self.version,
                     namespace=namespace,
                     plural=self.plural,
                     name=legacy_name,
                 )
+                if informer and workload:
+                    informer.update_cache(workload)
+                return workload
             except ApiException as e:
                 if e.status == 404:
                     return None
@@ -711,38 +790,32 @@ class BatchSandboxProvider(WorkloadProvider):
             "last_transition_at": creation_timestamp,
         }
     
-    def get_endpoint_info(self, workload: Dict[str, Any], port: int) -> Optional[str]:
+    def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[Endpoint]:
         """
         Get endpoint information from BatchSandbox.
-        
-        Reads Pod IP from sandbox.opensandbox.io/endpoints annotation.
-        The annotation contains a JSON array of IP addresses.
-        
-        Args:
-            workload: BatchSandbox dict
-            port: Port number
-            
-        Returns:
-            Endpoint string in format "IP:PORT" or None if not available
+        - gateway mode: use ingress config to format endpoint
+        - direct/default: resolve Pod IP from annotation
         """
         import json
-        
-        # Get annotations
+
+        if self.ingress_config and self.ingress_config.mode == INGRESS_MODE_GATEWAY:
+            return format_ingress_endpoint(self.ingress_config, sandbox_id, port)
+
         annotations = workload.get("metadata", {}).get("annotations", {})
         
         # Get endpoints from annotation
         endpoints_str = annotations.get("sandbox.opensandbox.io/endpoints")
         if not endpoints_str:
             return None
-        
+
         try:
             # Parse JSON array of IPs
             endpoints = json.loads(endpoints_str)
             if endpoints and len(endpoints) > 0:
                 # Use the first IP
                 pod_ip = endpoints[0]
-                return f"{pod_ip}:{port}"
+                return Endpoint(endpoint=f"{pod_ip}:{port}")
         except (json.JSONDecodeError, IndexError, TypeError):
             return None
-        
+
         return None

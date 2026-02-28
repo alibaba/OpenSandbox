@@ -33,7 +33,7 @@ class TestBuildEgressSidecarContainer:
 
     def test_builds_container_with_basic_config(self):
         """Test that container is built with correct basic configuration."""
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[
@@ -50,7 +50,7 @@ class TestBuildEgressSidecarContainer:
 
     def test_contains_egress_rules_environment_variable(self):
         """Test that container includes OPENSANDBOX_EGRESS_RULES environment variable."""
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
@@ -65,7 +65,7 @@ class TestBuildEgressSidecarContainer:
 
     def test_serializes_network_policy_correctly(self):
         """Test that network policy is correctly serialized to JSON."""
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[
@@ -92,7 +92,7 @@ class TestBuildEgressSidecarContainer:
 
     def test_handles_empty_egress_rules(self):
         """Test that empty egress rules are handled correctly."""
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
         network_policy = NetworkPolicy(
             default_action="allow",
             egress=[],
@@ -108,7 +108,7 @@ class TestBuildEgressSidecarContainer:
 
     def test_handles_missing_default_action(self):
         """Test that missing default_action is handled (exclude_none=True)."""
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
         network_policy = NetworkPolicy(
             egress=[NetworkRule(action="allow", target="example.com")],
         )
@@ -124,7 +124,7 @@ class TestBuildEgressSidecarContainer:
 
     def test_security_context_has_net_admin_capability(self):
         """Test that security context includes NET_ADMIN capability."""
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[],
@@ -139,7 +139,7 @@ class TestBuildEgressSidecarContainer:
 
     def test_container_spec_is_valid_kubernetes_format(self):
         """Test that returned container spec is in valid Kubernetes format."""
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
@@ -161,7 +161,7 @@ class TestBuildEgressSidecarContainer:
 
     def test_handles_wildcard_domains(self):
         """Test that wildcard domains in egress rules are handled correctly."""
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[
@@ -251,7 +251,7 @@ class TestApplyEgressToSpec:
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
         )
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
 
         apply_egress_to_spec(
             pod_spec=pod_spec,
@@ -272,7 +272,7 @@ class TestApplyEgressToSpec:
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
         )
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
 
         apply_egress_to_spec(
             pod_spec=pod_spec,
@@ -303,7 +303,7 @@ class TestApplyEgressToSpec:
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
         )
-        egress_image = "opensandbox/egress:v1.0.0"
+        egress_image = "opensandbox/egress:v1.0.1"
 
         apply_egress_to_spec(
             pod_spec=pod_spec,
@@ -337,7 +337,7 @@ class TestApplyEgressToSpec:
             pod_spec=pod_spec,
             containers=containers,
             network_policy=None,
-            egress_image="opensandbox/egress:v1.0.0",
+            egress_image="opensandbox/egress:v1.0.1",
         )
 
         assert len(containers) == 0

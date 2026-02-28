@@ -43,7 +43,7 @@ docker build \
 
 ## Tips
 - Health check: `/status.ok`
-- Proxy endpoint: `/` (routes based on `OPEN-SANDBOX-INGRESS` header or Host)
+- Proxy endpoint: `/` (routes based on `OpenSandbox-Ingress-To` header or Host)
 - Env overrides: `VERSION/GIT_COMMIT/BUILD_TIME` usable via Makefile and build.sh.
 - BatchSandbox must have `sandbox.opensandbox.io/endpoints` annotation with JSON array of IPs.
 

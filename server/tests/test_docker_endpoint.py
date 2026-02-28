@@ -117,3 +117,35 @@ def test_get_endpoint_bridge_internal_resolution(mock_docker_service):
 
     endpoint = service.get_endpoint("sbx-123", 8080, resolve_internal=True)
     assert endpoint.endpoint == "10.0.0.5:8080"
+
+
+def test_get_endpoint_bridge_uses_docker_host_ip_when_server_in_container():
+    """When server runs in container (host=0.0.0.0), endpoint uses [docker].host_ip."""
+    config = AppConfig(
+        server=ServerConfig(port=8080, host="0.0.0.0"),
+        runtime=RuntimeConfig(type="docker", execd_image="test/execd:latest"),
+        router=None,
+        docker=DockerConfig(network_mode="bridge", host_ip="10.57.1.91"),
+    )
+    with patch("docker.from_env") as mock_docker:
+        mock_client = MagicMock()
+        mock_docker.return_value = mock_client
+        service = DockerSandboxService(config=config)
+        service.docker_client = mock_client
+
+    labels = {
+        "opensandbox.io/embedding-proxy-port": "40109",
+        "opensandbox.io/http-port": "50001",
+    }
+    mock_container = MagicMock()
+    mock_container.attrs = {
+        "State": {"Running": True},
+        "Config": {"Labels": labels},
+        "NetworkSettings": {"IPAddress": "172.17.0.5"},
+    }
+    mock_client.containers.list.return_value = [mock_container]
+
+    with patch("src.services.docker._running_inside_docker_container", return_value=True):
+        endpoint = service.get_endpoint("sbx-123", 44772, resolve_internal=False)
+
+    assert endpoint.endpoint == "10.57.1.91:40109/proxy/44772"

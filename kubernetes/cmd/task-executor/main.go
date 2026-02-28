@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -36,7 +37,10 @@ func main() {
 	cfg := config.NewConfig()
 	cfg.LoadFromEnv()
 	cfg.LoadFromFlags()
-
+	if err := cfg.InitKlog(); err != nil {
+		fmt.Println("failed to init klog")
+		os.Exit(1)
+	}
 	klog.InfoS("task-executor starting", "dataDir", cfg.DataDir, "listenAddr", cfg.ListenAddr, "sidecarMode", cfg.EnableSidecarMode)
 
 	// Initialize TaskStore

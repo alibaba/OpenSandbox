@@ -94,6 +94,7 @@ class CommandsAdapter(Commands):
         headers = {
             "User-Agent": self.connection_config.user_agent,
             **self.connection_config.headers,
+            **self.execd_endpoint.headers,
         }
 
         # Execd API does not require authentication
@@ -111,7 +112,7 @@ class CommandsAdapter(Commands):
         )
         self._client.set_async_httpx_client(self._httpx_client)
 
-        # SSE client (read timeout disabled)
+        # SSE client (read timeout disabled); endpoint headers already in headers
         sse_headers = {
             **headers,
             "Accept": "text/event-stream",

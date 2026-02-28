@@ -16,17 +16,33 @@ FROM golang:1.24.0 AS builder
 
 WORKDIR /build
 
-COPY go.mod go.sum ./
+ARG VERSION=dev
+ARG GIT_COMMIT=unknown
+ARG BUILD_TIME=unknown
 
-RUN go mod download
+# Prepare local modules to satisfy replace directives.
+COPY components/internal/go.mod components/internal/go.sum ./components/internal/
+COPY components/execd/go.mod components/execd/go.sum ./components/execd/
 
-COPY . .
+# Download deps with only mod files for better caching.
+RUN cd components/internal && go mod download
+RUN cd components/execd && go mod download
 
-RUN CGO_ENABLED=0 go build -o /build/execd ./main.go
+# Copy sources.
+COPY components/internal ./components/internal
+COPY components/execd ./components/execd
+
+WORKDIR /build/components/execd
+
+RUN CGO_ENABLED=0 go build \
+    -ldflags "-X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
+              -X 'github.com/alibaba/opensandbox/internal/version.BuildTime=${BUILD_TIME}' \
+              -X 'github.com/alibaba/opensandbox/internal/version.GitCommit=${GIT_COMMIT}'" \
+    -o /build/execd ./main.go
 
 FROM alpine:latest
 
 COPY --from=builder /build/execd .
-COPY bootstrap.sh .
+COPY components/execd/bootstrap.sh ./bootstrap.sh
 
 ENTRYPOINT ["./execd"]

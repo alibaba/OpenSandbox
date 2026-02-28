@@ -31,6 +31,7 @@ export interface LifecycleStack {
 export interface CreateExecdStackOptions {
   connectionConfig: ConnectionConfig;
   execdBaseUrl: string;
+  endpointHeaders?: Record<string, string>;
 }
 
 export interface ExecdStack {

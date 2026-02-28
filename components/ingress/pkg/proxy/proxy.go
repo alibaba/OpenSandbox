@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 )
 
 type Proxy struct {
@@ -42,7 +43,7 @@ func NewProxy(_ context.Context, sandboxProvider sandbox.Provider, mode Mode) *P
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if err := recover(); err != nil {
-			Logger.Errorw("Proxy: proxy causes panic", "error", err)
+			Logger.With(slogger.Field{Key: "error", Value: err}).Errorf("Proxy: proxy causes panic")
 			var errMsg string
 			if e, ok := err.(error); ok {
 				errMsg = e.Error()
@@ -74,7 +75,12 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.URL.Host = targetHost
 	r.Header.Del(SandboxIngress)
 
-	Logger.Infow("ingress requested", "target", targetHost, "client", p.getClientIP(r), "uri", r.RequestURI, "method", r.Method)
+	Logger.With(
+		slogger.Field{Key: "target", Value: targetHost},
+		slogger.Field{Key: "client", Value: p.getClientIP(r)},
+		slogger.Field{Key: "uri", Value: r.RequestURI},
+		slogger.Field{Key: "method", Value: r.Method},
+	).Infof("ingress requested")
 	p.serve(w, r)
 }
 

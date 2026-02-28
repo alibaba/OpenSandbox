@@ -219,6 +219,7 @@ sandboxes.getSandboxInfos().forEach(info -> {
 | `debug`          | 是否开启 HTTP 请求的调试日志 | `false`                  | -                      |
 | `headers`        | 自定义 HTTP 请求头           | 空                       | -                      |
 | `connectionPool` | 共享 OKHttp 连接池           | SDK 每实例创建            | -                      |
+| `useServerProxy` | 是否通过沙箱服务代理访问 execd/endpoint（适用于客户端无法直连沙箱的场景） | `false` | -                      |
 
 ```java
 // 1. 基础配置

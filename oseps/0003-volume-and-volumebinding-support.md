@@ -3,7 +3,7 @@ title: Volume Support
 authors:
   - "@hittyt"
 creation-date: 2026-01-29
-last-updated: 2026-02-03
+last-updated: 2026-02-11
 status: implementing
 ---
 
@@ -48,7 +48,8 @@ OpenSandbox users running long-lived agents need artifacts (web pages, images, r
 ### Goals
 
 - Add a volume mount field to the Lifecycle API without breaking existing clients.
-- Support Docker bind mounts (local path) and OSS mounts as the initial MVP.
+- Support Docker bind mounts (local path), Docker named volumes, and OSS mounts as the initial MVP.
+- Provide a runtime-neutral `pvc` backend that maps to Docker named volumes and Kubernetes PersistentVolumeClaims, enabling portable cross-container data sharing.
 - Provide secure, explicit controls for read/write access and path isolation.
 - Keep runtime-specific details out of the core API where possible.
 
@@ -78,7 +79,7 @@ The core API describes what storage is required using strongly-typed backend def
 
 - Sandbox runtime (Docker/Kubernetes) and storage backend (host/ossfs/pvc) are independent dimensions. The API is designed so the same SDK request can target different runtimes; if a runtime cannot support a backend, it must return a clear validation error.
 - OSS/S3/GitFS are popular production backends; this proposal keeps the model extensible so these can be supported early by adding new backend structs.
-- The MVP targets Docker with `host` and `ossfs` backends, and Kubernetes with `host`, `ossfs`, and `pvc` backends. Other backends (e.g., `nfs`) are described for future extension and may be unsupported initially.
+- The MVP targets Docker with `host`, `pvc`, and `ossfs` backends, and Kubernetes with `host`, `ossfs`, and `pvc` backends. The `pvc` backend is runtime-neutral: it maps to Docker named volumes in Docker and PersistentVolumeClaims in Kubernetes. Other backends (e.g., `nfs`) are described for future extension and may be unsupported initially.
 - Kubernetes template merging currently replaces lists; this proposal requires list-merge or append behavior for volumes/volumeMounts to preserve user input.
 - Exactly one backend struct must be specified per volume entry; specifying zero or multiple backend structs is a validation error.
 
@@ -113,7 +114,9 @@ volumes:
       version: "2.0"
     mountPath: /mnt/data
 
-  # PVC mount (Kubernetes, read-only)
+  # PVC mount (platform-managed named volume, read-only)
+  # Kubernetes: maps to PersistentVolumeClaim
+  # Docker: maps to named volume
   - name: models
     pvc:
       claimName: "shared-models-pvc"
@@ -159,10 +162,12 @@ Each backend type is defined as a distinct struct with explicit typed fields:
 
 *Future enhancement: support `credentialRef` for secret references instead of inline credentials.
 
-**`pvc`** - Kubernetes PersistentVolumeClaim mount:
+**`pvc`** - Platform-managed named volume:
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `claimName` | string | Yes | Name of the PersistentVolumeClaim in the same namespace |
+| `claimName` | string | Yes | Name of the volume on the target platform (PVC name in Kubernetes, Docker volume name in Docker) |
+
+The `pvc` backend is a runtime-neutral abstraction for referencing a pre-existing, platform-managed named volume. The semantics are identical across runtimes: claim an existing volume by name, mount it into the container, and leave volume lifecycle management to the user. In Kubernetes this maps to a PersistentVolumeClaim; in Docker this maps to a named volume (created via `docker volume create`).
 
 **`nfs`** - NFS mount (future):
 | Field | Type | Required | Description |
@@ -178,7 +183,7 @@ Validation rules for each backend struct to reduce runtime-only failures:
 
 - **`host`**: `path` must be an absolute path (e.g., `/data/opensandbox/user-a`). Reject relative paths and require normalization before validation.
 - **`ossfs`**: `bucket` must be a valid bucket name. `endpoint` must be a valid OSS endpoint. `accessKeyId` and `accessKeySecret` are required unless `credentialRef` is provided (future). `version` must be `1.0` or `2.0`; if omitted, defaults to `1.0`. The runtime performs the mount during sandbox creation.
-- **`pvc`**: `claimName` must be a valid Kubernetes resource name. The PVC must exist in the same namespace as the sandbox pod; the runtime validates existence at scheduling time.
+- **`pvc`**: `claimName` must be a valid resource name (DNS label: lowercase alphanumeric and hyphens, max 63 characters). The volume identified by `claimName` must already exist on the target platform; the runtime validates existence before container creation. In Kubernetes, the PVC must exist in the same namespace as the sandbox pod. In Docker, a named volume with the given name must exist (created via `docker volume create`); if the volume does not exist, the request fails validation rather than auto-creating it, to maintain explicit volume lifecycle management.
 - **`nfs`**: `server` must be a valid hostname or IP. `path` must be an absolute path (e.g., `/exports/sandbox`).
 
 These constraints are enforced in request validation and surfaced as clear API errors; runtimes may apply stricter checks.
@@ -186,7 +191,8 @@ These constraints are enforced in request validation and surfaced as clear API e
 ### Permissions and ownership
 Volume permissions are a frequent source of runtime failures and must be explicit in the contract:
 - Default behavior: OpenSandbox does not automatically fix ownership or permissions on mounted storage. Users are responsible for ensuring the backend target is writable by the sandbox process UID/GID.
-- Docker: host path permissions are enforced by the host filesystem. Even with `readOnly: false`, writes will fail if the host path is not writable by the container user.
+- Docker `host`: host path permissions are enforced by the host filesystem. Even with `readOnly: false`, writes will fail if the host path is not writable by the container user.
+- Docker `pvc` (named volume): Docker named volumes created with the default `local` driver are owned by root. If the container runs as a non-root user, write access depends on the volume's filesystem permissions. Users should ensure correct ownership when creating the volume or use an init process to fix permissions.
 - Kubernetes: filesystem permissions vary by storage driver. Future enhancement: add optional `fsGroup` field to backend structs that support it for pod-level volume access control.
 
 ### Concurrency and isolation
@@ -197,6 +203,7 @@ SubPath provides path-level isolation, not concurrency control. If multiple sand
 - The host config uses `mounts`/`binds` with `ReadOnly` set from `readOnly` field.
 - If the resolved host path does not exist, the request fails validation (do not auto-create host directories in MVP to avoid permission and security pitfalls).
 - Allowed host paths are restricted by a server-side allowlist; users must specify a `host.path` under permitted prefixes. The allowlist is an operator-configured policy and should be documented for users of a given deployment.
+- `pvc` backend maps to Docker named volumes. `pvc.claimName` is used as the Docker volume name in the bind string (e.g., `my-volume:/mnt/data:rw`). Docker recognizes non-absolute-path sources as named volume references. The named volume must already exist (created via `docker volume create`); if it does not exist, the request fails validation. When `subPath` is specified, the runtime resolves the volume's host-side `Mountpoint` via `docker volume inspect` and appends the `subPath` to produce a standard bind mount (e.g., `/var/lib/docker/volumes/my-volume/_data/subdir:/mnt/data:rw`). This requires the volume to use the `local` driver; non-local drivers are rejected when `subPath` is present because their `Mountpoint` may not be a real filesystem path. The resolved path must exist on the host; if it does not, the request fails validation.
 - `ossfs` backend requires the runtime to mount OSS via ossfs during sandbox creation using the struct fields. If the runtime does not support ossfs mounting, the request is rejected.
 
 ### Kubernetes mapping
@@ -319,32 +326,42 @@ request = CreateSandboxRequest(
 post_sandboxes.sync(client=client, body=request)
 ```
 
-### Example: Kubernetes PVC mount
-Create a sandbox that mounts an existing PersistentVolumeClaim:
+### Example: PVC mount (cross-runtime)
+The `pvc` backend provides a portable way to reference platform-managed named volumes. The same API request works on both Docker and Kubernetes:
 
 ```yaml
 volumes:
-  - name: models
+  - name: shared-data
     pvc:
-      claimName: "shared-models-pvc"
-    mountPath: /mnt/models
-    readOnly: true
-    subPath: "v1.0"
+      claimName: "my-shared-volume"
+    mountPath: /mnt/data
+    subPath: "task-001"
+```
+
+Runtime mapping (Docker):
+The `claimName` is used as the Docker named volume name. The volume must already exist (created via `docker volume create my-shared-volume`). When `subPath` is specified, the runtime resolves the volume's host-side `Mountpoint` via `docker volume inspect` and appends the subPath to produce a standard bind mount:
+```text
+# Docker bind string generated by the runtime (with subPath):
+# Mountpoint = /var/lib/docker/volumes/my-shared-volume/_data
+/var/lib/docker/volumes/my-shared-volume/_data/task-001:/mnt/data:rw
+
+# Without subPath, the named volume is used directly:
+# my-shared-volume:/mnt/data:rw
 ```
 
 Runtime mapping (Kubernetes):
+The `claimName` maps to a PersistentVolumeClaim in the same namespace.
 ```yaml
 volumes:
-  - name: models
+  - name: shared-data
     persistentVolumeClaim:
-      claimName: shared-models-pvc
+      claimName: my-shared-volume
 containers:
   - name: sandbox
     volumeMounts:
-      - name: models
-        mountPath: /mnt/models
-        readOnly: true
-        subPath: v1.0
+      - name: shared-data
+        mountPath: /mnt/data
+        subPath: task-001
 ```
 
 Python SDK example (PVC):
@@ -368,18 +385,40 @@ request = CreateSandboxRequest(
     entrypoint=["python", "-c", "print('hello')"],
     volumes=[
         Volume(
-            name="models",
+            name="shared-data",
             pvc=PVC(
-                claim_name="shared-models-pvc",
+                claim_name="my-shared-volume",
             ),
-            mount_path="/mnt/models",
-            read_only=True,
-            sub_path="v1.0",
+            mount_path="/mnt/data",
+            sub_path="task-001",
         )
     ],
 )
 
 post_sandboxes.sync(client=client, body=request)
+```
+
+#### Cross-container data sharing with PVC (Docker)
+Multiple sandboxes can share data through the same named volume. This is more convenient and secure than using host paths, as Docker manages the storage location and no host paths need to be exposed:
+
+```python
+# Sandbox A: writes data to the shared volume
+sandbox_a = CreateSandboxRequest(
+    image=ImageSpec(uri="python:3.11"),
+    entrypoint=["python", "-c", "open('/mnt/shared/result.txt','w').write('hello')"],
+    volumes=[
+        Volume(name="shared", pvc=PVC(claim_name="team-data"), mount_path="/mnt/shared")
+    ],
+)
+
+# Sandbox B: reads data from the same shared volume
+sandbox_b = CreateSandboxRequest(
+    image=ImageSpec(uri="python:3.11"),
+    entrypoint=["python", "-c", "print(open('/mnt/shared/result.txt').read())"],
+    volumes=[
+        Volume(name="shared", pvc=PVC(claim_name="team-data"), mount_path="/mnt/shared")
+    ],
+)
 ```
 
 ### Example: Kubernetes NFS (future)
@@ -449,12 +488,12 @@ post_sandboxes.sync(client=client, body=request)
 ```
 
 ### Provider validation
-- Reject unsupported backend types per runtime (e.g., `pvc` is only valid in Kubernetes).
+- Reject unsupported backend types per runtime (e.g., `nfs` is only valid in Kubernetes).
 - Validate that exactly one backend struct is specified per volume entry.
 - Normalize and validate `subPath` against traversal; reject `..` and absolute path inputs.
 - Enforce allowlist prefixes for `host.path` in Docker.
 - For `ossfs` backend, validate required fields (`bucket`, `endpoint`, `accessKeyId`, `accessKeySecret`) and reject missing credentials.
-- For `pvc` backend, validate `claimName` is a valid Kubernetes resource name.
+- For `pvc` backend, validate `claimName` is a valid DNS label (lowercase alphanumeric and hyphens, max 63 characters). In Kubernetes, validate the PVC exists in the same namespace. In Docker, validate the named volume exists via the Docker API (`docker volume inspect`).
 - For `nfs` backend, validate required fields (`server`, `path`).
 - `subPath` is created if missing under the resolved backend path; if creation fails due to permissions or policy, the request is rejected.
 
@@ -475,9 +514,12 @@ ossfs_mount_root = "/mnt/ossfs"
   - Validate required fields per backend type.
 - Provider unit tests:
   - Docker `host`: bind mount generation, read-only enforcement, allowlist rejection.
+  - Docker `pvc`: named volume bind generation, volume existence validation, read-only enforcement, `claimName` format validation, rejection when volume does not exist, `subPath` resolution via `Mountpoint` for `local` driver, rejection of `subPath` for non-local drivers, rejection when resolved subPath does not exist.
   - Docker `ossfs`: mount option validation, credential validation, version validation (`1.0`/`2.0`), mount failure handling.
   - Kubernetes `pvc`: PVC reference validation, volume mount generation.
-- Integration tests for sandbox creation with volumes in Docker and Kubernetes.
+- Integration tests:
+  - Docker: sandbox creation with `host` volume, sandbox creation with `pvc` (named volume), `pvc` with `subPath` mount, cross-container data sharing via named volume.
+  - Kubernetes: sandbox creation with `pvc`, sandbox creation with `host` volume.
 - Negative tests for unsupported backends and invalid paths.
 
 ## Drawbacks

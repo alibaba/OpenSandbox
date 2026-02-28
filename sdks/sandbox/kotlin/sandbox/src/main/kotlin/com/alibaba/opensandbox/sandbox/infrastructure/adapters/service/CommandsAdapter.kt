@@ -41,6 +41,7 @@ import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.Executi
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.jsonParser
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.parseSandboxError
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.toSandboxException
+import okhttp3.Headers.Companion.toHeaders
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -61,7 +62,19 @@ internal class CommandsAdapter(
     }
 
     private val logger = LoggerFactory.getLogger(CommandsAdapter::class.java)
-    private val api = CommandApi("${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}", httpClientProvider.httpClient)
+    private val api =
+        CommandApi(
+            "${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}",
+            httpClientProvider.httpClient.newBuilder()
+                .addInterceptor { chain ->
+                    val requestBuilder = chain.request().newBuilder()
+                    execdEndpoint.headers.forEach { (key, value) ->
+                        requestBuilder.header(key, value)
+                    }
+                    chain.proceed(requestBuilder.build())
+                }
+                .build(),
+        )
 
     override fun run(request: RunCommandRequest): Execution {
         if (request.command.isEmpty()) {
@@ -74,6 +87,7 @@ internal class CommandsAdapter(
                     .post(
                         jsonParser.encodeToString(request.toApiRunCommandRequest()).toRequestBody("application/json".toMediaType()),
                     )
+                    .headers(execdEndpoint.headers.toHeaders())
                     .build()
 
             val execution = Execution()

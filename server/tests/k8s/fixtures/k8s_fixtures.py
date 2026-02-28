@@ -15,7 +15,6 @@
 """
 Shared fixtures for Kubernetes runtime tests.
 """
-
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 from typing import Dict, Any

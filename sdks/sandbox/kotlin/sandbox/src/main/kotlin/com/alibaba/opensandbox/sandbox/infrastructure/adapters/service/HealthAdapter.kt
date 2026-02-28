@@ -30,7 +30,19 @@ internal class HealthAdapter(
     private val execdEndpoint: SandboxEndpoint,
 ) : Health {
     private val logger = LoggerFactory.getLogger(HealthAdapter::class.java)
-    private val api = HealthApi("${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}", httpClientProvider.httpClient)
+    private val api =
+        HealthApi(
+            "${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}",
+            httpClientProvider.httpClient.newBuilder()
+                .addInterceptor { chain ->
+                    val requestBuilder = chain.request().newBuilder()
+                    execdEndpoint.headers.forEach { (key, value) ->
+                        requestBuilder.header(key, value)
+                    }
+                    chain.proceed(requestBuilder.build())
+                }
+                .build(),
+        )
 
     override fun ping(sandboxId: String): Boolean {
         logger.debug("Checking health for sandbox: {}", sandboxId)

@@ -69,7 +69,6 @@ export type {
   CommandLogs,
   CommandStatus,
   RunCommandOpts,
-  RunCommandRequest,
   ServerStreamEvent,
   CodeContextRequest,
   SupportedLanguage,

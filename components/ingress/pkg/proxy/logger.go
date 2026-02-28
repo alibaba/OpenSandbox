@@ -17,13 +17,12 @@ package proxy
 import (
 	"context"
 
-	"go.uber.org/zap"
-	"knative.dev/pkg/logging"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 )
 
-var Logger *zap.SugaredLogger
+var Logger slogger.Logger
 
-func WithLogger(ctx context.Context, logger *zap.SugaredLogger) context.Context {
+func WithLogger(ctx context.Context, logger slogger.Logger) context.Context {
 	Logger = logger
-	return logging.WithLogger(ctx, logger)
+	return ctx
 }

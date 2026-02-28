@@ -157,6 +157,8 @@ export interface paths {
          * @description Executes a shell command and streams the output in real-time using SSE (Server-Sent Events).
          *     The command can run in foreground or background mode. The response includes stdout, stderr,
          *     execution status, and completion events.
+         *     Optionally specify `timeout` (milliseconds) to enforce a maximum runtime; the server will
+         *     terminate the process when the timeout is reached.
          */
         post: operations["runCommand"];
         /**
@@ -519,6 +521,12 @@ export interface components {
              * @example false
              */
             background: boolean;
+            /**
+             * Format: int64
+             * @description Maximum allowed execution time in milliseconds before the command is forcefully terminated by the server. If omitted, the server will not enforce any timeout.
+             * @example 60000
+             */
+            timeout?: number;
         };
         /** @description Command execution status (foreground or background) */
         CommandStatusResponse: {

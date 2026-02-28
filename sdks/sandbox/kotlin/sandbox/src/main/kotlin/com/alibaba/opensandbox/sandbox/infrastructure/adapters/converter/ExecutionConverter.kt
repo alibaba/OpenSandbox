@@ -27,6 +27,7 @@ object ExecutionConverter {
             command = command,
             background = background,
             cwd = workingDirectory,
+            timeout = timeout?.inWholeMilliseconds,
         )
     }
 

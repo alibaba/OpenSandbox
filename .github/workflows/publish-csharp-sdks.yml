@@ -1,0 +1,79 @@
+# Copyright 2026 Alibaba Group Holding Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: Publish C# SDKs
+
+on:
+  push:
+    tags:
+      - "csharp/sandbox/v*"
+      - "csharp/code-interpreter/v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish (${{ matrix.sdk.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk:
+          - name: sandbox
+            tagPrefix: sandbox
+            csprojPath: sdks/sandbox/csharp/src/OpenSandbox/OpenSandbox.csproj
+          - name: code-interpreter
+            tagPrefix: code-interpreter
+            csprojPath: sdks/code-interpreter/csharp/src/OpenSandbox.CodeInterpreter/OpenSandbox.CodeInterpreter.csproj
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Parse package version from tag
+        if: startsWith(github.ref, format('refs/tags/csharp/{0}/v', matrix.sdk.tagPrefix))
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#csharp/${{ matrix.sdk.tagPrefix }}/v}"
+          echo "PACKAGE_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Restore
+        if: startsWith(github.ref, format('refs/tags/csharp/{0}/v', matrix.sdk.tagPrefix))
+        run: dotnet restore "${{ matrix.sdk.csprojPath }}"
+
+      - name: Pack
+        if: startsWith(github.ref, format('refs/tags/csharp/{0}/v', matrix.sdk.tagPrefix))
+        run: |
+          dotnet pack "${{ matrix.sdk.csprojPath }}" \
+            --configuration Release \
+            --no-restore \
+            -p:PackageVersion="${PACKAGE_VERSION}" \
+            -p:ContinuousIntegrationBuild=true \
+            --output ./artifacts/${{ matrix.sdk.name }}
+
+      - name: Publish to NuGet
+        if: startsWith(github.ref, format('refs/tags/csharp/{0}/v', matrix.sdk.tagPrefix))
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          dotnet nuget push "./artifacts/${{ matrix.sdk.name }}/*.nupkg" \
+            --api-key "$NUGET_API_KEY" \
+            --source "https://api.nuget.org/v3/index.json" \
+            --skip-duplicate

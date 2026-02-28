@@ -105,6 +105,18 @@ def test_execution_converter_to_api_run_command_request() -> None:
     # background defaults to False in domain opts; when False we omit it from the API request.
     assert d2.get("background", UNSET) is UNSET
 
+    from datetime import timedelta
+
+    api3 = ExecutionConverter.to_api_run_command_request(
+        "sleep 10",
+        RunCommandOpts(timeout=timedelta(seconds=60)),
+    )
+    d3 = api3.to_dict()
+    assert d3["command"] == "sleep 10"
+    assert d3["timeout"] == 60_000
+    # timeout omitted when not set (backward compat)
+    assert "timeout" not in ExecutionConverter.to_api_run_command_request("x", RunCommandOpts()).to_dict()
+
 
 def test_filesystem_and_metrics_converters() -> None:
     from datetime import datetime, timezone

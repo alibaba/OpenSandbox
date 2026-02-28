@@ -23,6 +23,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
 
@@ -48,6 +49,10 @@ func (s *stubNft) ApplyStatic(_ context.Context, p *policy.NetworkPolicy) error 
 	s.calls++
 	s.applied = p
 	return s.err
+}
+
+func (s *stubNft) AddResolvedIPs(_ context.Context, _ []nftables.ResolvedIP) error {
+	return nil
 }
 
 func TestHandlePolicy_AppliesNftAndUpdatesProxy(t *testing.T) {

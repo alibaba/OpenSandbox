@@ -21,8 +21,10 @@ helpers to access the parsed settings throughout the application.
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal, Optional
 
@@ -38,30 +40,122 @@ logger = logging.getLogger(__name__)
 CONFIG_ENV_VAR = "SANDBOX_CONFIG_PATH"
 DEFAULT_CONFIG_PATH = Path.home() / ".sandbox.toml"
 
+_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
+_WILDCARD_DOMAIN_RE = re.compile(r"^\*\.(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
+_IPV4_WITH_PORT_RE = re.compile(r"^(?P<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d{1,5}))?$")
 
-class RouterConfig(BaseModel):
-    """Configuration for external sandbox router endpoints."""
+INGRESS_MODE_DIRECT = "direct"
+INGRESS_MODE_GATEWAY = "gateway"
+GATEWAY_ROUTE_MODE_WILDCARD = "wildcard"
+GATEWAY_ROUTE_MODE_HEADER = "header"
+GATEWAY_ROUTE_MODE_URI = "uri"
 
-    domain: Optional[str] = Field(
-        default=None,
-        description="Base domain used to expose sandbox endpoints (e.g., 'opensandbox.io').",
-        min_length=1,
+
+def _is_valid_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_valid_ip_or_ip_port(address: str) -> bool:
+    match = _IPV4_WITH_PORT_RE.match(address)
+    if not match:
+        return False
+    ip_str = match.group("ip")
+    if not _is_valid_ip(ip_str):
+        return False
+    port_str = match.group("port")
+    if port_str is None:
+        return True
+    try:
+        port = int(port_str)
+    except ValueError:
+        return False
+    return 1 <= port <= 65535
+
+
+def _is_valid_domain(host: str) -> bool:
+    return bool(_DOMAIN_RE.match(host))
+
+
+def _is_wildcard_domain(host: str) -> bool:
+    return bool(_WILDCARD_DOMAIN_RE.match(host))
+
+
+class GatewayRouteModeConfig(BaseModel):
+    """Routing strategy for gateway ingress exposure."""
+
+    mode: Literal[
+        GATEWAY_ROUTE_MODE_WILDCARD,
+        GATEWAY_ROUTE_MODE_HEADER,
+        GATEWAY_ROUTE_MODE_URI,
+    ] = Field(
+        ...,
+        description="Routing mode used by the gateway (wildcard, header, uri).",
     )
-    wildcard_domain: Optional[str] = Field(
-        default=None,
-        alias="wildcard-domain",
-        description="Wildcard domain pattern (e.g., '*.opensandbox.io') used for sandbox endpoints.",
-        min_length=1,
-    )
-
-    @model_validator(mode="after")
-    def validate_domain_choice(self) -> "RouterConfig":
-        if bool(self.domain) == bool(self.wildcard_domain):
-            raise ValueError("Exactly one of domain or wildcard-domain must be specified in [router].")
-        return self
 
     class Config:
         populate_by_name = True
+
+
+class GatewayConfig(BaseModel):
+    """Gateway mode configuration for ingress exposure."""
+
+    address: str = Field(
+        ...,
+        description="Gateway host used to expose sandboxes (domain or IP, may include :port; scheme is not allowed).",
+        min_length=1,
+    )
+    route: GatewayRouteModeConfig = Field(
+        ...,
+        description="Routing mode configuration used by the gateway.",
+    )
+
+
+class IngressConfig(BaseModel):
+    """Configuration for exposing sandbox ingress."""
+
+    mode: Literal[INGRESS_MODE_DIRECT, INGRESS_MODE_GATEWAY] = Field(
+        default=INGRESS_MODE_DIRECT,
+        description="Ingress exposure mode (direct or gateway).",
+    )
+    gateway: Optional[GatewayConfig] = Field(
+        default=None,
+        description="Gateway configuration required when mode = 'gateway'.",
+    )
+
+    @model_validator(mode="after")
+    def validate_ingress_mode(self) -> "IngressConfig":
+        if self.mode == INGRESS_MODE_GATEWAY and self.gateway is None:
+            raise ValueError("gateway block must be provided when ingress.mode = 'gateway'.")
+        if self.mode == INGRESS_MODE_DIRECT and self.gateway is not None:
+            raise ValueError("gateway block must be omitted unless ingress.mode = 'gateway'.")
+
+        if self.mode == INGRESS_MODE_GATEWAY and self.gateway:
+            route_mode = self.gateway.route.mode
+            address_raw = self.gateway.address
+            hostport = address_raw
+            if "://" in address_raw:
+                raise ValueError("ingress.gateway.address must not include a scheme; clients choose http/https.")
+
+            if route_mode == GATEWAY_ROUTE_MODE_WILDCARD:
+                if not _is_wildcard_domain(hostport):
+                    raise ValueError(
+                        "ingress.gateway.address must be a wildcard domain (e.g., *.example.com) "
+                        "when gateway.route.mode is wildcard."
+                    )
+            else:
+                if "*" in hostport:
+                    raise ValueError(
+                        "ingress.gateway.address must not contain wildcard when gateway.route.mode is not wildcard."
+                    )
+                if not (_is_valid_domain(hostport) or _is_valid_ip_or_ip_port(hostport)):
+                    raise ValueError(
+                        "ingress.gateway.address must be a valid domain, IP, or IP:port when gateway.route.mode is not wildcard."
+                    )
+        return self
 
 
 class ServerConfig(BaseModel):
@@ -95,6 +189,28 @@ class KubernetesRuntimeConfig(BaseModel):
     kubeconfig_path: Optional[str] = Field(
         default=None,
         description="Absolute path to the kubeconfig file used for API authentication.",
+    )
+    informer_enabled: bool = Field(
+        default=True,
+        description=(
+            "[Beta] Enable informer-backed cache for workload reads. "
+            "Keeps a watch to reduce API pressure; set false to disable."
+        ),
+    )
+    informer_resync_seconds: int = Field(
+        default=300,
+        ge=1,
+        description=(
+            "[Beta] Full resync interval for informer cache (seconds). "
+            "Shorter intervals refresh the cache more eagerly."
+        ),
+    )
+    informer_watch_timeout_seconds: int = Field(
+        default=60,
+        ge=1,
+        description=(
+            "[Beta] Watch timeout (seconds) before restarting the informer stream."
+        ),
     )
     namespace: Optional[str] = Field(
         default=None,
@@ -175,6 +291,17 @@ class DockerConfig(BaseModel):
         default="host",
         description="Docker network mode for sandbox containers (host, bridge, ...).",
     )
+    api_timeout: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Docker API timeout in seconds. If unset, default is 180.",
+    )
+    host_ip: Optional[str] = Field(
+        default=None,
+        description=(
+            "Docker host IP or hostname for bridge-mode endpoint URLs when the server runs in a container."
+        ),
+    )
     drop_capabilities: list[str] = Field(
         default_factory=lambda: [
             "AUDIT_WRITE",
@@ -221,7 +348,7 @@ class AppConfig(BaseModel):
     runtime: RuntimeConfig = Field(..., description="Sandbox runtime configuration.")
     kubernetes: Optional[KubernetesRuntimeConfig] = None
     agent_sandbox: Optional["AgentSandboxRuntimeConfig"] = None
-    router: Optional[RouterConfig] = None
+    ingress: Optional[IngressConfig] = None
     docker: DockerConfig = Field(default_factory=DockerConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     egress: Optional[EgressConfig] = None
@@ -233,6 +360,8 @@ class AppConfig(BaseModel):
                 raise ValueError("Kubernetes block must be omitted when runtime.type = 'docker'.")
             if self.agent_sandbox is not None:
                 raise ValueError("agent_sandbox block must be omitted when runtime.type = 'docker'.")
+            if self.ingress is not None and self.ingress.mode != INGRESS_MODE_DIRECT:
+                raise ValueError("ingress.mode must be 'direct' when runtime.type = 'docker'.")
         elif self.runtime.type == "kubernetes":
             if self.kubernetes is None:
                 self.kubernetes = KubernetesRuntimeConfig()
@@ -334,7 +463,11 @@ __all__ = [
     "AppConfig",
     "ServerConfig",
     "RuntimeConfig",
-    "RouterConfig",
+    "IngressConfig",
+    "GatewayConfig",
+    "GatewayRouteModeConfig",
+    "INGRESS_MODE_DIRECT",
+    "INGRESS_MODE_GATEWAY",
     "DockerConfig",
     "StorageConfig",
     "KubernetesRuntimeConfig",

@@ -1,0 +1,60 @@
+configs:
+  opensandbox-config:
+    content: |
+      [server]
+      host = "0.0.0.0"
+      port = 8090
+      log_level = "INFO"
+
+      [runtime]
+      type = "docker"
+      # execd_image = "opensandbox/execd:v1.0.6"
+      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.6"
+
+      [egress]
+      image = "opensandbox/egress:v1.0.1"
+      # image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.1"
+
+      [docker]
+      network_mode = "bridge"
+      # When server runs in a container, set host_ip to the host's IP or hostname so bridge-mode endpoints are reachable (e.g. host.docker.internal or the host LAN IP).
+      # It's required when server deployed with docker container under host.
+      host_ip = "host.docker.internal"
+      drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
+      no_new_privileges = true
+      pids_limit = 512
+
+      [ingress]
+      mode = "direct"
+
+version: '3.8'
+
+services:
+  opensandbox-server:
+    image: opensandbox/server:latest
+    container_name: opensandbox-server
+    networks:
+      - opensandbox-net
+    ports:
+      - "8090:8090"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    configs:
+      - source: opensandbox-config
+        target: /etc/opensandbox/config.toml
+    environment:
+      - SANDBOX_CONFIG_PATH=/etc/opensandbox/config.toml
+
+  sdk-client:
+    image: python:3.11-slim
+    container_name: sdk-client
+    networks:
+      - opensandbox-net
+    command: >
+      sh -c "pip install opensandbox && tail -f /dev/null"
+    environment:
+      - OPENSANDBOX_SERVER_URL=http://opensandbox-server:8090
+
+networks:
+  opensandbox-net:
+    driver: bridge

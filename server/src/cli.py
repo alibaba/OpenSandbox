@@ -27,10 +27,11 @@ from src.config import (
     DEFAULT_CONFIG_PATH,
     DockerConfig,
     EgressConfig,
+    IngressConfig,
     KubernetesRuntimeConfig,
-    RouterConfig,
     RuntimeConfig,
     ServerConfig,
+    StorageConfig,
 )
 
 EXAMPLE_FILE_MAP = {
@@ -183,12 +184,8 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
             AgentSandboxRuntimeConfig,
             extra_comments=["Requires kubernetes.workload_provider = \"agent-sandbox\""],
         ),
-        _render_section(
-            "router",
-            RouterConfig,
-            placeholders={"domain": '""', "wildcard-domain": '""'},
-            extra_comments=["Set exactly one of domain or wildcard-domain."],
-        ),
+        _render_section("ingress", IngressConfig),
+        _render_section("storage", StorageConfig),
     ]
 
     content = "\n\n".join(sections) + "\n"

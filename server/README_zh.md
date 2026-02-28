@@ -92,7 +92,7 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s-zh
 
    [runtime]
    type = "docker"
-   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
+   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.6"
 
    [docker]
    network_mode = "host"  # 容器共享宿主机网络，只能创建一个sandbox实例
@@ -108,7 +108,7 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s-zh
 
    [runtime]
    type = "docker"
-   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
+   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.6"
 
    [docker]
    network_mode = "bridge"  # 容器隔离网络
@@ -127,16 +127,49 @@ opensandbox-server init-config ~/.sandbox.toml --example k8s-zh
    ```
    更多 Docker 容器安全参考：https://docs.docker.com/engine/security/
 
+**Ingress 暴露（direct | gateway）**
+```toml
+[ingress]
+mode = "direct"  # Docker 运行时仅支持 direct（直连，无 L7 网关）
+# gateway.address = "*.example.com"  # 仅主机（域名/IP 或 IP:port），不允许带 scheme
+# gateway.route.mode = "wildcard"            # wildcard | uri | header
+```
+- `mode=direct`：默认；当 `runtime.type=docker` 时必须使用（客户端与 sandbox 直连，不经过网关）。
+- `mode=gateway`：配置外部入口。
+  - `gateway.address`：当 `gateway.route.mode=wildcard` 时必须是泛域名；其他模式需为域名/IP 或 IP:port。不允许携带 scheme，客户端自行选择 http/https。
+  - `gateway.route.mode`：`wildcard`（域名泛匹配）、`uri`（基于路径前缀）、`header`（基于请求头路由）。
+  - 返回示例：
+    - `wildcard`：`<sandbox-id>-<port>.example.com/path/to/request`
+    - `uri`：`10.0.0.1:8000/<sandbox-id>/<port>/path/to/request`
+    - `header`：`gateway.example.com`，请求头 `OpenSandbox-Ingress-To: <sandbox-id>-<port>`
+
+**Kubernetes 运行时**
+   ```toml
+   [runtime]
+   type = "kubernetes"
+   execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
+
+   [kubernetes]
+   kubeconfig_path = "~/.kube/config"
+   namespace = "opensandbox"
+   workload_provider = "batchsandbox"        # 或 "agent-sandbox"
+   informer_enabled = true                   # Beta：启用 watch 缓存
+   informer_resync_seconds = 300             # Beta：全量刷新间隔
+   informer_watch_timeout_seconds = 60       # Beta：watch 超时重连间隔
+   ```
+   - Informer 配置为 **Beta**，默认开启以减少 API 压力；若需关闭设置 `informer_enabled = false`。
+   - resync / watch 超时用于控制缓存刷新频率，可根据集群 API 限流调优。
+
 ### Egress sidecar 配置与使用
 
 - **使用 `networkPolicy` 时必需**：配置 sidecar 镜像。当请求携带 `networkPolicy` 时，`egress.image` 配置项是必需的：
 ```toml
 [runtime]
 type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.6"
 
 [egress]
-image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.0"
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.1"
 ```
 
 - 仅支持 Docker bridge 模式（`network_mode=host` 时会拒绝携带 `networkPolicy` 的请求，或当 `egress.image` 未配置时也会拒绝）。
@@ -396,7 +429,6 @@ curl -X DELETE \
 |------|------|
 | `SANDBOX_CONFIG_PATH` | 覆盖配置文件位置 |
 | `DOCKER_HOST` | Docker 守护进程 URL（例如 `unix:///var/run/docker.sock`）|
-| `DOCKER_API_TIMEOUT` | Docker 客户端超时时间（秒，默认：180）|
 | `PENDING_FAILURE_TTL` | 失败的待处理沙箱的 TTL（秒，默认：3600）|
 
 ## 开发

@@ -173,9 +173,13 @@ export class SandboxesAdapter implements Sandboxes {
     } as RenewSandboxExpirationResponse;
   }
 
-  async getSandboxEndpoint(sandboxId: SandboxId, port: number): Promise<Endpoint> {
+  async getSandboxEndpoint(
+    sandboxId: SandboxId,
+    port: number,
+    useServerProxy = false
+  ): Promise<Endpoint> {
     const { data, error, response } = await this.client.GET("/sandboxes/{sandboxId}/endpoints/{port}", {
-      params: { path: { sandboxId, port } },
+      params: { path: { sandboxId, port }, query: { use_server_proxy: useServerProxy } },
     });
     throwOnOpenApiFetchError({ error, response }, "Get sandbox endpoint failed");
     const ok = data as ApiEndpointOk | undefined;

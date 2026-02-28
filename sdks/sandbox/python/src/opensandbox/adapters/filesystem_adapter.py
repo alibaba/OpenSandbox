@@ -90,6 +90,7 @@ class FilesystemAdapter(Filesystem):
         headers = {
             "User-Agent": self.connection_config.user_agent,
             **self.connection_config.headers,
+            **self.execd_endpoint.headers,
         }
 
         self._httpx_client = httpx.AsyncClient(

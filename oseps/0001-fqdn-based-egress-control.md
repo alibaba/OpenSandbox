@@ -5,7 +5,7 @@ authors:
   - "@Pangjiping"
 creation-date: 2025-12-27
 last-updated: 2026-01-22
-status: implementing
+status: implemented
 ---
 
 # OSEP-0001: FQDN-based Egress Control
@@ -1316,5 +1316,3 @@ Update `specs/sandbox-lifecycle.yml` with the schema defined in [API Schema](#ap
 - Add egress control section to SDK documentation
 - Add security considerations page explaining enforcement modes
 - Add troubleshooting guide for network policy issues
-
-

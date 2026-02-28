@@ -46,7 +46,11 @@ class MetricsAdapterSync(MetricsSync):
 
         base_url = f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}"
         timeout = httpx.Timeout(self.connection_config.request_timeout.total_seconds())
-        headers = {"User-Agent": self.connection_config.user_agent, **self.connection_config.headers}
+        headers = {
+            "User-Agent": self.connection_config.user_agent,
+            **self.connection_config.headers,
+            **self.execd_endpoint.headers,
+        }
 
         self._client = Client(base_url=base_url, timeout=timeout)
         self._httpx_client = httpx.Client(

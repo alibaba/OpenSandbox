@@ -61,7 +61,6 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 	pidPath := filepath.Join(taskDir, PidFile)
 	exitPath := filepath.Join(taskDir, ExitFile)
 
-	// 1. Construct the user command securely
 	var cmdList []string
 	if task.Process != nil {
 		cmdList = append(task.Process.Command, task.Process.Args...)
@@ -73,21 +72,17 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 		return fmt.Errorf("no command specified in process spec (task name: %s)", task.Name)
 	}
 
-	// Use shell escaping to prevent command injection
 	safeCmdStr := shellEscape(cmdList)
 	shimScript := e.buildShimScript(exitPath, safeCmdStr)
 
-	// 2. Prepare the execution command based on mode
 	var cmd *exec.Cmd
 
 	if e.config.EnableSidecarMode {
-		// Sidecar Logic: Find target PID and use nsenter
 		targetPID, err := e.findPidByEnvVar("SANDBOX_MAIN_CONTAINER", e.config.MainContainerName)
 		if err != nil {
 			return fmt.Errorf("failed to resolve target PID: %w", err)
 		}
 
-		// Inherit environment variables from the target process (Main Container)
 		targetEnv, err := getProcEnviron(targetPID)
 		if err != nil {
 			return fmt.Errorf("failed to read target process environment: %w", err)
@@ -104,22 +99,16 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 		klog.InfoS("Starting sidecar task", "id", task.Name, "targetPID", targetPID)
 
 	} else {
-		// Host Logic: Direct execution
-		// Use exec.Command instead of CommandContext to ensure the process survives
-		// after the HTTP request context is canceled.
 		cmd = exec.Command("/bin/sh", "-c", shimScript)
 		cmd.Env = os.Environ()
 		klog.InfoS("Starting host task", "name", task.Name, "cmd", safeCmdStr, "exitPath", exitPath)
 	}
 
-	// Set process group ID to isolate from parent process lifecycle
-	// This applies to both Host and Sidecar (nsenter) processes
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Create new process group
-		Pgid:    0,    // Use PID as PGID
+		Setpgid: true,
+		Pgid:    0,
 	}
 
-	// 3. Execute common logic (logs, shim start)
 	return e.executeCommand(task, cmd, pidPath)
 }
 
@@ -151,16 +140,13 @@ func (e *processExecutor) executeCommand(task *types.Task, cmd *exec.Cmd, pidPat
 	cmd.Stdout = stdoutFile
 	cmd.Stderr = stderrFile
 
-	// Apply environment variables from ProcessTask spec
 	if task.Process != nil {
-		// Add task-specific environment variables
 		for _, env := range task.Process.Env {
 			if env.Name != "" {
 				cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", env.Name, env.Value))
 			}
 		}
 
-		// Apply working directory
 		if task.Process.WorkingDir != "" {
 			cmd.Dir = task.Process.WorkingDir
 			klog.InfoS("Set working directory", "name", task.Name, "workingDir", task.Process.WorkingDir)
@@ -179,7 +165,6 @@ func (e *processExecutor) executeCommand(task *types.Task, cmd *exec.Cmd, pidPat
 	pid := cmd.Process.Pid
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
 		klog.ErrorS(err, "failed to write pid file", "name", task.Name)
-		// Try to kill the process since we failed to track it
 		_ = cmd.Process.Kill()
 		stdoutFile.Close()
 		stderrFile.Close()
@@ -188,11 +173,9 @@ func (e *processExecutor) executeCommand(task *types.Task, cmd *exec.Cmd, pidPat
 
 	klog.InfoS("Task command started successfully", "name", task.Name, "pid", pid)
 
-	// Close file descriptors in parent; child process has inherited them
 	stdoutFile.Close()
 	stderrFile.Close()
 
-	// Wait for process in background
 	go func() {
 		if err := cmd.Wait(); err != nil {
 			klog.ErrorS(err, "task process exited with error", "name", task.Name)
@@ -240,10 +223,8 @@ func (e *processExecutor) Inspect(ctx context.Context, task *types.Task) (*types
 	status := &types.Status{
 		State: types.TaskStateUnknown,
 	}
-	// Prepare a single sub-status for the process
 	subStatus := types.SubStatus{}
 	var pid int
-	// 1. Check Exit File (Completed)
 	if exitData, err := os.ReadFile(exitPath); err == nil {
 		fileInfo, _ := os.Stat(exitPath)
 		exitCode, _ := strconv.Atoi(string(exitData))
@@ -260,7 +241,6 @@ func (e *processExecutor) Inspect(ctx context.Context, task *types.Task) (*types
 			subStatus.Reason = "Failed"
 		}
 
-		// Try to read start time from PID file
 		if pidFileInfo, err := os.Stat(pidPath); err == nil {
 			startedAt := pidFileInfo.ModTime()
 			subStatus.StartedAt = &startedAt
@@ -270,7 +250,6 @@ func (e *processExecutor) Inspect(ctx context.Context, task *types.Task) (*types
 		return status, nil
 	}
 
-	// 2. Check PID File (Running)
 	if pidData, err := os.ReadFile(pidPath); err == nil {
 		pid, _ = strconv.Atoi(strings.TrimSpace(string(pidData)))
 		fileInfo, _ := os.Stat(pidPath)
@@ -289,19 +268,16 @@ func (e *processExecutor) Inspect(ctx context.Context, task *types.Task) (*types
 				}
 			}
 		} else {
-			// Process crashed
 			status.State = types.TaskStateFailed
-			subStatus.ExitCode = 137 // Assume kill/crash
+			subStatus.ExitCode = 137
 			subStatus.Reason = "ProcessCrashed"
 			subStatus.Message = "Process exited without writing exit code"
-			// Use ModTime as FinishedAt for crash approximation
 			subStatus.FinishedAt = &startedAt
 		}
 		status.SubStatuses = []types.SubStatus{subStatus}
 		return status, nil
 	}
 
-	// 3. Pending
 	status.State = types.TaskStatePending
 	subStatus.Reason = "Pending"
 	status.SubStatuses = []types.SubStatus{subStatus}
@@ -310,7 +286,6 @@ func (e *processExecutor) Inspect(ctx context.Context, task *types.Task) (*types
 }
 
 func (e *processExecutor) Stop(ctx context.Context, task *types.Task) error {
-	// Read from pid file (Root PID: nsenter or sh)
 	taskDir, err := utils.SafeJoin(e.rootDir, task.Name)
 	if err != nil {
 		return fmt.Errorf("invalid task name: %w", err)
@@ -318,7 +293,7 @@ func (e *processExecutor) Stop(ctx context.Context, task *types.Task) error {
 	pidPath := filepath.Join(taskDir, PidFile)
 	pidData, err := os.ReadFile(pidPath)
 	if err != nil {
-		return nil // pid file does not exist, process might not be started
+		return nil
 	}
 	var pid int
 	pid, err = strconv.Atoi(strings.TrimSpace(string(pidData)))
@@ -327,29 +302,21 @@ func (e *processExecutor) Stop(ctx context.Context, task *types.Task) error {
 	}
 	klog.InfoS("Read PID from pid file", "name", task.Name, "pid", pid)
 
-	// Target the process group (negative PID)
 	pgid := -pid
 
-	// Determine target PID to signal
 	targetPID := 0
 	if e.config.EnableSidecarMode {
-		// In Sidecar mode, pid is nsenter. We need to signal its child (Shim).
-		// We use /proc/<pid>/task/<pid>/children which is O(1) compared to scanning /proc.
 		children, err := getChildrenPIDs(pid)
 		if err == nil && len(children) > 0 {
-			targetPID = children[0] // Assume first child is Shim
+			targetPID = children[0]
 			klog.InfoS("Sidecar mode: targeted Shim process via /proc/children", "nsenterPID", pid, "shimPID", targetPID)
 		} else {
 			klog.Warning("Sidecar mode: failed to find child process via /proc/children, falling back to PGID", "pid", pid, "err", err)
 		}
 	} else {
-		// In Host mode, pid is the Shim itself.
 		targetPID = pid
 	}
 
-	// 1. Send SIGTERM
-	// If we found a specific target (Shim), signal it. It will trap and forward to child.
-	// If not (or if signal fails), fallback to signaling the group.
 	killedShim := false
 	if targetPID > 0 {
 		if err := syscall.Kill(targetPID, syscall.SIGTERM); err == nil {
@@ -360,13 +327,9 @@ func (e *processExecutor) Stop(ctx context.Context, task *types.Task) error {
 	}
 
 	if !killedShim {
-		// Fallback: kill the group.
-		// Note: In Sidecar mode, this might kill nsenter before Shim exits, risking zombies.
 		_ = syscall.Kill(pgid, syscall.SIGTERM)
 	}
 
-	// 2. Wait for process to exit (Graceful shutdown)
-	// Poll every 500ms for up to 10 seconds
 	timeout := 10 * time.Second
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -376,7 +339,6 @@ func (e *processExecutor) Stop(ctx context.Context, task *types.Task) error {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	// 3. Force Kill (SIGKILL)
 	klog.InfoS("Process did not exit after timeout, sending SIGKILL", "pgid", pgid)
 	if targetPID > 0 {
 		_ = syscall.Kill(targetPID, syscall.SIGKILL)
@@ -386,8 +348,7 @@ func (e *processExecutor) Stop(ctx context.Context, task *types.Task) error {
 	return nil
 }
 
-// getChildrenPIDs reads /proc/<pid>/task/<pid>/children to find direct children.
-// This requires kernel 3.5+ and CONFIG_PROC_CHILDREN.
+// getChildrenPIDs reads /proc/<pid>/task/<pid>/children to find direct children
 func getChildrenPIDs(pid int) ([]int, error) {
 	path := fmt.Sprintf("/proc/%d/task/%d/children", pid, pid)
 	data, err := os.ReadFile(path)
@@ -404,7 +365,6 @@ func getChildrenPIDs(pid int) ([]int, error) {
 	return pids, nil
 }
 
-// Helpers
 func isProcessRunning(pid int) bool {
 	process, err := os.FindProcess(pid)
 	if err != nil {
@@ -429,8 +389,7 @@ func shellEscapePath(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
-// findPidByEnvVar finds a process by checking for a specific environment variable.
-// It looks for processes with SANDBOX_MAIN_CONTAINER=<expectedValue> in their environment.
+// findPidByEnvVar finds a process by checking for a specific environment variable
 func (e *processExecutor) findPidByEnvVar(envName, expectedValue string) (int, error) {
 	procDir, err := os.Open("/proc")
 	if err != nil {
@@ -475,8 +434,7 @@ func (e *processExecutor) findPidByEnvVar(envName, expectedValue string) (int, e
 	return 0, fmt.Errorf("no process found with environment variable %s=%s", envName, expectedValue)
 }
 
-// getProcEnviron reads the environment variables of a process from /proc/<pid>/environ.
-// It returns a list of "KEY=VALUE" strings.
+// getProcEnviron reads environment variables from /proc/<pid>/environ
 func getProcEnviron(pid int) ([]string, error) {
 	envPath := filepath.Join("/proc", strconv.Itoa(pid), "environ")
 	data, err := os.ReadFile(envPath)

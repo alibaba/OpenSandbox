@@ -21,18 +21,25 @@ ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
 
 COPY kubernetes ./kubernetes
+# Prepare local modules to satisfy replace directives.
+COPY components/internal/go.mod components/internal/go.sum ./components/internal/
 COPY components/ingress/go.mod components/ingress/go.sum ./components/ingress/
+
+WORKDIR /build
+
+RUN cd components/internal && go mod download
+RUN cd components/ingress && go mod download
+
+# Copy sources.
+COPY components/internal ./components/internal
+COPY components/ingress/. ./components/ingress
 
 WORKDIR /build/components/ingress
 
-RUN go mod download
-
-COPY components/ingress/. .
-
 RUN CGO_ENABLED=0 go build \
-    -ldflags "-X 'github.com/alibaba/opensandbox/ingress/version.Version=${VERSION}' \
-              -X 'github.com/alibaba/opensandbox/ingress/version.BuildTime=${BUILD_TIME}' \
-              -X 'github.com/alibaba/opensandbox/ingress/version.GitCommit=${GIT_COMMIT}'" \
+    -ldflags "-X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
+              -X 'github.com/alibaba/opensandbox/internal/version.BuildTime=${BUILD_TIME}' \
+              -X 'github.com/alibaba/opensandbox/internal/version.GitCommit=${GIT_COMMIT}'" \
     -o /build/ingress ./main.go
 
 FROM alpine:latest

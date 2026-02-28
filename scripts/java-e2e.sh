@@ -17,9 +17,10 @@ set -euxo pipefail
 
 TAG=${TAG:-latest}
 
-# build execd image locally
-cd components/execd && docker build -t opensandbox/execd:local .
-cd ../..
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# build execd image locally (context must include internal/)
+docker build -f components/execd/Dockerfile -t opensandbox/execd:local "${REPO_ROOT}"
 
 # prepare required images from registry
 docker pull opensandbox/code-interpreter:${TAG}
@@ -31,6 +32,15 @@ mkdir -p /tmp/opensandbox-e2e/host-volume-test
 mkdir -p /tmp/opensandbox-e2e/logs
 echo "opensandbox-e2e-marker" > /tmp/opensandbox-e2e/host-volume-test/marker.txt
 chmod -R 755 /tmp/opensandbox-e2e
+
+# prepare Docker named volume for pvc e2e test
+docker volume rm opensandbox-e2e-pvc-test 2>/dev/null || true
+docker volume create opensandbox-e2e-pvc-test
+# seed the named volume with a marker file and subpath test data via a temporary container
+docker run --rm -v opensandbox-e2e-pvc-test:/data alpine sh -c "\
+  echo 'pvc-marker-data' > /data/marker.txt && \
+  mkdir -p /data/datasets/train && \
+  echo 'pvc-subpath-marker' > /data/datasets/train/marker.txt"
 echo "-------- JAVA E2E test logs for execd --------" > /tmp/opensandbox-e2e/logs/execd.log
 
 # setup server

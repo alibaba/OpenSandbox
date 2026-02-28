@@ -209,7 +209,7 @@ internal object SandboxModelConverter {
      * API Endpoint -> Domain Endpoint
      */
     fun Endpoint.toSandboxEndpoint(): SandboxEndpoint {
-        return SandboxEndpoint(this.endpoint)
+        return SandboxEndpoint(this.endpoint, this.headers ?: emptyMap())
     }
 
     /**

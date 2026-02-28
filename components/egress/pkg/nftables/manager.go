@@ -19,8 +19,10 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
+	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
 
@@ -47,10 +49,11 @@ type Options struct {
 	DoHBlocklistV6 []string
 }
 
-// Manager applies static IP/CIDR policy into nftables.
+// Manager applies static IP/CIDR policy into nftables and dynamic DNS-learned IPs.
 type Manager struct {
 	run  runner
 	opts Options
+	mu   sync.Mutex
 }
 
 // NewManager builds an nftables manager that shells out to `nft -f -` with defaults.
@@ -75,10 +78,18 @@ func NewManagerWithOptions(opts Options) *Manager {
 
 // ApplyStatic reconciles static allow/deny IP and CIDR entries into nftables.
 // It creates a dedicated table/chain and overwrites previous state.
+// Uses the same mutex as AddResolvedIPs so a /policy update never overlaps a DNS
+// callback: without this, add-element could run while the table is being deleted/recreated
+// and fail, causing a transient deny for a client that already got an allowed DNS answer.
 func (m *Manager) ApplyStatic(ctx context.Context, p *policy.NetworkPolicy) error {
 	if p == nil {
 		p = policy.DefaultDenyPolicy()
 	}
+	allowV4, allowV6, denyV4, denyV6 := p.StaticIPSets()
+	log.Infof("nftables: applying static policy: default=%s, allow_v4=%d, allow_v6=%d, deny_v4=%d, deny_v6=%d",
+		p.DefaultAction, len(allowV4), len(allowV6), len(denyV4), len(denyV6))
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	script := buildRuleset(p, m.opts)
 	if _, err := m.run(ctx, script); err != nil {
 		// On a fresh host the delete-table may fail; retry once without the delete line.
@@ -92,7 +103,26 @@ func (m *Manager) ApplyStatic(ctx context.Context, p *policy.NetworkPolicy) erro
 		}
 		return err
 	}
+	log.Infof("nftables: static policy applied successfully")
 	return nil
+}
+
+// AddResolvedIPs adds DNS-learned IPs to dynamic allow sets with TTL-based timeout.
+// TTL is clamped to minTTLSec–maxTTLSec. Call only when table exists (dns+nft mode).
+func (m *Manager) AddResolvedIPs(ctx context.Context, ips []ResolvedIP) error {
+	if len(ips) == 0 {
+		return nil
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	script := buildAddResolvedIPsScript(tableName, ips)
+	if script == "" {
+		return nil
+	}
+	log.Infof("nftables: adding %d resolved IP(s) to dynamic allow sets with script statement %s", len(ips), script)
+	_, err := m.run(ctx, script)
+	return err
 }
 
 func buildRuleset(p *policy.NetworkPolicy, opts Options) string {
@@ -107,6 +137,8 @@ func buildRuleset(p *policy.NetworkPolicy, opts Options) string {
 	fmt.Fprintf(&b, "add set inet %s %s { type ipv4_addr; flags interval; }\n", tableName, denyV4Set)
 	fmt.Fprintf(&b, "add set inet %s %s { type ipv6_addr; flags interval; }\n", tableName, allowV6Set)
 	fmt.Fprintf(&b, "add set inet %s %s { type ipv6_addr; flags interval; }\n", tableName, denyV6Set)
+	fmt.Fprintf(&b, "add set inet %s %s { type ipv4_addr; timeout %ds; }\n", tableName, dynAllowV4Set, dynSetTimeoutS)
+	fmt.Fprintf(&b, "add set inet %s %s { type ipv6_addr; timeout %ds; }\n", tableName, dynAllowV6Set, dynSetTimeoutS)
 
 	if len(opts.DoHBlocklistV4) > 0 {
 		fmt.Fprintf(&b, "add set inet %s %s { type ipv4_addr; flags interval; }\n", tableName, dohBlockV4Set)
@@ -149,6 +181,8 @@ func buildRuleset(p *policy.NetworkPolicy, opts Options) string {
 	}
 	fmt.Fprintf(&b, "add rule inet %s %s ip daddr @%s drop\n", tableName, chainName, denyV4Set)
 	fmt.Fprintf(&b, "add rule inet %s %s ip6 daddr @%s drop\n", tableName, chainName, denyV6Set)
+	fmt.Fprintf(&b, "add rule inet %s %s ip daddr @%s accept\n", tableName, chainName, dynAllowV4Set)
+	fmt.Fprintf(&b, "add rule inet %s %s ip6 daddr @%s accept\n", tableName, chainName, dynAllowV6Set)
 	fmt.Fprintf(&b, "add rule inet %s %s ip daddr @%s accept\n", tableName, chainName, allowV4Set)
 	fmt.Fprintf(&b, "add rule inet %s %s ip6 daddr @%s accept\n", tableName, chainName, allowV6Set)
 	if chainPolicy == "drop" {

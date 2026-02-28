@@ -128,6 +128,114 @@ class TestAgentSandboxProvider:
 
         assert exc_info.value.status == 500
 
+    def test_get_workload_prefers_informer_cache(self, mock_k8s_client, monkeypatch):
+        """
+        Test case: Use informer cache when already synced
+        """
+        cached = {"metadata": {"name": "test-id"}}
+
+        class FakeInformer:
+            def __init__(self):
+                self.started = False
+                self.has_synced = True
+
+            def start(self):
+                self.started = True
+
+            def get(self, name):
+                return cached if name == "test-id" else None
+
+            def update_cache(self, obj):
+                self.updated = obj
+
+        fake_informer = FakeInformer()
+        provider = AgentSandboxProvider(
+            mock_k8s_client,
+            informer_factory=lambda ns: fake_informer,
+        )
+
+        result = provider.get_workload("test-id", "test-ns")
+
+        assert result == cached
+        assert fake_informer.started is True
+        mock_k8s_client.get_custom_objects_api().get_namespaced_custom_object.assert_not_called()
+
+    def test_create_workload_updates_informer_cache(self, mock_k8s_client):
+        """
+        Test case: informer cache is updated immediately after create
+        """
+        created_body = {"metadata": {"name": "test-id", "uid": "test-uid"}}
+
+        class FakeInformer:
+            def __init__(self):
+                self.started = False
+                self.updated = None
+
+            def start(self):
+                self.started = True
+
+            def update_cache(self, obj):
+                self.updated = obj
+
+        fake_informer = FakeInformer()
+        provider = AgentSandboxProvider(
+            mock_k8s_client,
+            informer_factory=lambda ns: fake_informer,
+        )
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = created_body
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+
+        result = provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={"FOO": "bar"},
+            resource_limits={"cpu": "1", "memory": "1Gi"},
+            labels={"opensandbox.io/id": "test-id"},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+        )
+
+        assert result == {"name": "test-id", "uid": "test-uid"}
+        assert fake_informer.updated == created_body
+        assert fake_informer.started is True
+
+    def test_get_informer_single_instance_per_namespace(self, mock_k8s_client):
+        """
+        Test case: informer is created only once per namespace even with repeated calls
+        """
+
+        class FakeInformer:
+            def __init__(self):
+                self.started = 0
+
+            def start(self):
+                self.started += 1
+
+            def update_cache(self, obj):
+                self.updated = obj
+
+        factory_calls = {"count": 0}
+
+        def factory(ns):
+            factory_calls["count"] += 1
+            return FakeInformer()
+
+        provider = AgentSandboxProvider(
+            mock_k8s_client,
+            informer_factory=factory,
+        )
+
+        informer1 = provider._get_informer("test-ns")
+        informer2 = provider._get_informer("test-ns")
+
+        assert informer1 is informer2
+        assert factory_calls["count"] == 1
+        assert informer1.started == 1
+
     def test_update_expiration_patches_spec(self, mock_k8s_client):
         """
         Test case: Verify expiration time update
@@ -247,9 +355,10 @@ class TestAgentSandboxProvider:
             "metadata": {"namespace": "test-ns"},
         }
 
-        endpoint = provider.get_endpoint_info(workload, 8080)
+        endpoint = provider.get_endpoint_info(workload, 8080, "sandbox-123")
 
-        assert endpoint == "10.0.0.9:8080"
+        assert endpoint.endpoint == "10.0.0.9:8080"
+        assert endpoint.headers is None
 
     def test_get_endpoint_info_falls_back_to_service_fqdn(self, mock_k8s_client):
         """
@@ -263,9 +372,10 @@ class TestAgentSandboxProvider:
             "metadata": {"namespace": "test-ns"},
         }
 
-        endpoint = provider.get_endpoint_info(workload, 9000)
+        endpoint = provider.get_endpoint_info(workload, 9000, "sandbox-123")
 
-        assert endpoint == "svc.example.com:9000"
+        assert endpoint.endpoint == "svc.example.com:9000"
+        assert endpoint.headers is None
 
 
 class TestAgentSandboxProviderEgress:
@@ -334,7 +444,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.0",
+            egress_image="opensandbox/egress:v1.0.1",
         )
 
         body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
@@ -347,7 +457,7 @@ class TestAgentSandboxProviderEgress:
         # Find sidecar container
         sidecar = next((c for c in containers if c["name"] == "egress"), None)
         assert sidecar is not None
-        assert sidecar["image"] == "opensandbox/egress:v1.0.0"
+        assert sidecar["image"] == "opensandbox/egress:v1.0.1"
         
         # Verify sidecar has environment variable
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
@@ -386,7 +496,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.0",
+            egress_image="opensandbox/egress:v1.0.1",
         )
 
         body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
@@ -435,7 +545,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.0",
+            egress_image="opensandbox/egress:v1.0.1",
         )
 
         body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
@@ -520,7 +630,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.0",
+            egress_image="opensandbox/egress:v1.0.1",
         )
 
         body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]

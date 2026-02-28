@@ -183,7 +183,7 @@ await sandbox.files.write_files([
     WriteEntry(
         path="/tmp/hello.txt",
         data="Hello World",
-        mode=0o644
+        mode=644
     )
 ])
 
@@ -210,7 +210,7 @@ await sandbox.files.delete_files(["/tmp/hello.txt"])
 使用 `SandboxManager` 进行管理操作，如查询现有沙箱列表。
 
 ```python
-from opensandbox.sandbox import SandboxManager
+from opensandbox.manager import SandboxManager
 from opensandbox.models.sandboxes import SandboxFilter
 
 # 使用异步上下文管理器创建管理器
@@ -245,6 +245,7 @@ async with await SandboxManager.create(connection_config=config) as manager:
 | `debug`           | 是否开启 HTTP 请求的调试日志             | `False`                  | -                      |
 | `headers`         | 自定义 HTTP 请求头                       | 空                       | -                      |
 | `transport`       | 共享 httpx transport（连接池/代理/重试） | SDK 每实例创建           | -                      |
+| `use_server_proxy` | 是否通过沙箱服务代理访问 execd/endpoint（适用于客户端无法直连沙箱的场景） | `False` | -                      |
 
 ```python
 from datetime import timedelta

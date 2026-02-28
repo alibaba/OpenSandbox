@@ -28,7 +28,6 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class VolumeModelsTest {
-
     @Test
     fun `Host should require absolute path`() {
         val backend = Host.of("/data/shared")
@@ -57,11 +56,12 @@ class VolumeModelsTest {
 
     @Test
     fun `Volume with host backend should be created correctly`() {
-        val volume = Volume.builder()
-            .name("data")
-            .host(Host.of("/data/shared"))
-            .mountPath("/mnt/data")
-            .build()
+        val volume =
+            Volume.builder()
+                .name("data")
+                .host(Host.of("/data/shared"))
+                .mountPath("/mnt/data")
+                .build()
 
         assertEquals("data", volume.name)
         assertNotNull(volume.host)
@@ -74,13 +74,14 @@ class VolumeModelsTest {
 
     @Test
     fun `Volume with PVC backend should be created correctly`() {
-        val volume = Volume.builder()
-            .name("models")
-            .pvc(PVC.of("shared-models"))
-            .mountPath("/mnt/models")
-            .readOnly(true)
-            .subPath("v1")
-            .build()
+        val volume =
+            Volume.builder()
+                .name("models")
+                .pvc(PVC.of("shared-models"))
+                .mountPath("/mnt/models")
+                .readOnly(true)
+                .subPath("v1")
+                .build()
 
         assertEquals("models", volume.name)
         assertNull(volume.host)
@@ -157,11 +158,12 @@ class VolumeModelsTest {
 
     @Test
     fun `Volume readOnly defaults to false`() {
-        val volume = Volume.builder()
-            .name("test")
-            .host(Host.of("/data"))
-            .mountPath("/mnt")
-            .build()
+        val volume =
+            Volume.builder()
+                .name("test")
+                .host(Host.of("/data"))
+                .mountPath("/mnt")
+                .build()
 
         assertFalse(volume.readOnly)
     }

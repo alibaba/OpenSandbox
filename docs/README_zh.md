@@ -3,10 +3,26 @@
 
   <h1>OpenSandbox</h1>
 
-[![GitHub stars](https://img.shields.io/github/stars/alibaba/OpenSandbox.svg?style=social)](https://github.com/alibaba/OpenSandbox)
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/alibaba/OpenSandbox)
-[![license](https://img.shields.io/github/license/alibaba/OpenSandbox.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
-[![PyPI version](https://badge.fury.io/py/opensandbox.svg)](https://badge.fury.io/py/opensandbox)
+<p align="center">
+  <a href="https://github.com/alibaba/OpenSandbox">
+    <img src="https://img.shields.io/github/stars/alibaba/OpenSandbox.svg?style=social" alt="GitHub stars" />
+  </a>
+  <a href="https://deepwiki.com/alibaba/OpenSandbox">
+    <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
+  </a>
+  <a href="https://www.apache.org/licenses/LICENSE-2.0.html">
+    <img src="https://img.shields.io/github/license/alibaba/OpenSandbox.svg" alt="license" />
+  </a>
+  <a href="https://badge.fury.io/py/opensandbox">
+    <img src="https://badge.fury.io/py/opensandbox.svg" alt="PyPI version" />
+  </a>
+  <a href="https://badge.fury.io/js/@alibaba-group%2Fopensandbox">
+    <img src="https://badge.fury.io/js/@alibaba-group%2Fopensandbox.svg" alt="npm version" />
+  </a>
+  <a href="https://github.com/alibaba/OpenSandbox/actions">
+    <img src="https://github.com/alibaba/OpenSandbox/actions/workflows/real-e2e.yml/badge.svg?branch=main" alt="E2E Status" />
+  </a>
+</p>
 
   <hr />
 </div>
@@ -17,7 +33,7 @@ OpenSandbox 是一个面向 AI 应用场景设计的「通用沙箱平台」，�
 
 ## 核心特性
 
-- **多语言 SDK**：提供 Python、Java/Kotlin、JavaScript/TypeScript 等语言的客户端 SDK。
+- **多语言 SDK**：提供 Python、Java/Kotlin、JavaScript/TypeScript、C#/.NET 等语言的客户端 SDK，Go SDK 仍在规划中。
 - **沙箱协议**：定义了沙箱生命周期管理 API 和沙箱执行 API。你可以通过这些沙箱协议扩展自己的沙箱运行时。
 - **沙箱运行时**：沙箱全生命周期管理，支持 Docker 和[自研高性能 Kubernetes 运行时](../kubernetes)，实现本地运行、企业级大规模分布式沙箱调度。
 - **沙箱环境**：内置 Command、Filesystem、Code Interpreter 实现。并提供 Coding Agent（Claude Code 等）、浏览器自动化（Chrome、Playwright）和桌面环境（VNC、VS Code）等示例。
@@ -54,7 +70,8 @@ opensandbox-server init-config ~/.sandbox.toml --example docker-zh
 ```bash
 opensandbox-server
 
-# opensandbox-server -h # Show help
+# Show help
+opensandbox-server -h
 ```
 
 #### 3. 创建代码解释器，并在沙箱中执行命令
@@ -143,6 +160,7 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 - **[iflow-cli](../examples/iflow-cli/README.md)** - 在 OpenSandbox 中运行 iFlow CLI。
 - **[langgraph](../examples/langgraph/README.md)** - 基于 LangGraph 状态机编排沙箱任务与回退重试。
 - **[google-adk](../examples/google-adk/README.md)** - 使用 Google ADK 通过 OpenSandbox 工具读写文件并执行命令。
+- **[openclaw](../examples/openclaw/README.md)** - 在沙箱中启动 OpenClaw Gateway。
 
 #### 🌐 浏览器与桌面环境
 
@@ -161,7 +179,7 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 | 目录 | 说明                                                |
 |------|---------------------------------------------------|
-| [`sdks/`](../sdks/) | 多语言 SDK（Python、Java/Kotlin、TypeScript/JavaScript） |
+| [`sdks/`](../sdks/) | 多语言 SDK（Python、Java/Kotlin、TypeScript/JavaScript、C#/.NET）      |
 | [`specs/`](../specs/) | OpenAPI 与生命周期规范                                   |
 | [`server/`](../server/README_zh.md) | Python FastAPI 沙箱生命周期服务，并集成多种运行时实现                |
 | [`kubernetes/`](../kubernetes/README-ZH.md) | Kubernetes 部署与示例                                  |
@@ -181,8 +199,8 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 - [docs/architecture.md](architecture.md) – 整体架构 & 设计理念
 - SDK
-  - Sandbox SDK（[Java\Kotlin SDK](../sdks/sandbox/kotlin/README_zh.md)、[Python SDK](../sdks/sandbox/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/sandbox/javascript/README_zh.md)）- 包含沙箱生命周期、命令执行、文件操作
-  - Code Interpreter SDK（[Java\Kotlin SDK](../sdks/code-interpreter/kotlin/README_zh.md) 、[Python SDK](../sdks/code-interpreter/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/code-interpreter/javascript/README_zh.md)）- 代码解释器
+  - Sandbox 基础 SDK（[Java\Kotlin SDK](../sdks/sandbox/kotlin/README_zh.md)、[Python SDK](../sdks/sandbox/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/sandbox/javascript/README_zh.md)、[C#/.NET SDK](../sdks/sandbox/csharp/README_zh.md)）- 包含沙箱生命周期、命令执行、文件操作
+  - Code Interpreter SDK（[Java\Kotlin SDK](../sdks/code-interpreter/kotlin/README_zh.md) 、[Python SDK](../sdks/code-interpreter/python/README_zh.md)、[JavaScript/TypeScript SDK](../sdks/code-interpreter/javascript/README_zh.md)、[C#/.NET SDK](../sdks/code-interpreter/csharp/README_zh.md)）- 代码解释器
 - [specs/README.md](../specs/README_zh.md) - 包含沙箱生命周期 API 和沙箱执行 API 的 OpenAPI 定义
 - [server/README.md](../server/README_zh.md) - 包含沙箱 Server 的启动和配置，支持 Docker 与 Kubernetes Runtime
 
@@ -192,7 +210,7 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 
 你可以在遵守许可条款的前提下，将 OpenSandbox 用于个人或商业项目。
 
-## Roadmap
+## 路线图
 
 ### SDK
 
@@ -213,3 +231,7 @@ OpenSandbox 提供了丰富的示例来演示不同场景下的沙箱使用方�
 - Issue：通过 GitHub Issues 提交 bug、功能请求或设计讨论
 
 欢迎一起把 OpenSandbox 打造成 AI 场景下的通用沙箱基础设施。
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=alibaba/OpenSandbox&type=date&legend=top-left)](https://www.star-history.com/#alibaba/OpenSandbox&type=date&legend=top-left)

@@ -39,6 +39,7 @@ LICENSE_BASENAMES=(
 IGNORED_PATHS=(
   "LICENSE"
   "NOTICE"
+  "docs/"
   "scripts/spec-doc/index.html" # Generated doc
 )
 
@@ -74,7 +75,11 @@ cd "$REPO_ROOT"
 is_ignored() {
   local file="$1"
   for ignore in "${IGNORED_PATHS[@]}"; do
-    if [[ "$file" == "$ignore" ]]; then
+    if [[ "$ignore" == */ ]]; then
+      if [[ "$file" == "$ignore"* ]]; then
+        return 0
+      fi
+    elif [[ "$file" == "$ignore" ]]; then
       return 0
     fi
   done

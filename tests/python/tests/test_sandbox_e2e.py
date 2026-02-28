@@ -41,7 +41,7 @@ from opensandbox.models.filesystem import (
     SetPermissionEntry,
     WriteEntry,
 )
-from opensandbox.models.sandboxes import Host, NetworkPolicy, NetworkRule, SandboxImageSpec, Volume
+from opensandbox.models.sandboxes import Host, NetworkPolicy, NetworkRule, PVC, SandboxImageSpec, Volume
 
 from tests.base_e2e_test import create_connection_config, get_sandbox_image
 
@@ -430,6 +430,198 @@ class TestSandboxE2E:
             await sandbox.close()
 
         logger.info("TEST 1c PASSED: Read-only host volume mount test completed successfully")
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
+    async def test_01d_pvc_named_volume_mount(self):
+        """Test creating a sandbox with a PVC (Docker named volume) mount."""
+        logger.info("=" * 80)
+        logger.info("TEST 1d: Creating sandbox with PVC named volume mount (async)")
+        logger.info("=" * 80)
+
+        pvc_volume_name = "opensandbox-e2e-pvc-test"
+        container_mount_path = "/mnt/pvc-data"
+
+        cfg = create_connection_config()
+        sandbox = await Sandbox.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            volumes=[
+                Volume(
+                    name="test-pvc-vol",
+                    pvc=PVC(claimName=pvc_volume_name),
+                    mountPath=container_mount_path,
+                    readOnly=False,
+                ),
+            ],
+        )
+        try:
+            logger.info(f"✓ Sandbox with PVC volume created: {sandbox.id}")
+
+            # Step 1: Verify the marker file seeded into the named volume is readable
+            logger.info("Step 1: Verify PVC marker file is readable inside the sandbox")
+            result = await sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
+            assert result.error is None, f"Failed to read marker file: {result.error}"
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "pvc-marker-data"
+            logger.info("✓ PVC marker file read successfully inside sandbox")
+
+            # Step 2: Write a file from inside the sandbox to the named volume
+            logger.info("Step 2: Write a file from inside the sandbox to the PVC mount")
+            result = await sandbox.commands.run(
+                f"echo 'written-to-pvc' > {container_mount_path}/pvc-output.txt"
+            )
+            assert result.error is None, f"Failed to write file: {result.error}"
+
+            # Step 3: Verify the written file is readable
+            result = await sandbox.commands.run(f"cat {container_mount_path}/pvc-output.txt")
+            assert result.error is None
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "written-to-pvc"
+            logger.info("✓ File written and verified inside sandbox via PVC mount")
+
+            # Step 4: Verify the mount path is a proper directory
+            result = await sandbox.commands.run(f"test -d {container_mount_path} && echo OK")
+            assert result.error is None
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "OK"
+            logger.info("✓ PVC mount path is a valid directory")
+
+        finally:
+            try:
+                await sandbox.kill()
+            except Exception:
+                pass
+            await sandbox.close()
+
+        logger.info("TEST 1d PASSED: PVC named volume mount test completed successfully")
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
+    async def test_01e_pvc_named_volume_mount_readonly(self):
+        """Test creating a sandbox with a read-only PVC (Docker named volume) mount."""
+        logger.info("=" * 80)
+        logger.info("TEST 1e: Creating sandbox with read-only PVC named volume mount (async)")
+        logger.info("=" * 80)
+
+        pvc_volume_name = "opensandbox-e2e-pvc-test"
+        container_mount_path = "/mnt/pvc-data-ro"
+
+        cfg = create_connection_config()
+        sandbox = await Sandbox.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            volumes=[
+                Volume(
+                    name="test-pvc-vol-ro",
+                    pvc=PVC(claimName=pvc_volume_name),
+                    mountPath=container_mount_path,
+                    readOnly=True,
+                ),
+            ],
+        )
+        try:
+            logger.info(f"✓ Sandbox with read-only PVC volume created: {sandbox.id}")
+
+            # Step 1: Verify the marker file is readable on read-only mount
+            result = await sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
+            assert result.error is None, f"Failed to read marker file: {result.error}"
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "pvc-marker-data"
+            logger.info("✓ PVC marker file read successfully in read-only mount")
+
+            # Step 2: Verify writing is denied on read-only mount
+            result = await sandbox.commands.run(
+                f"touch {container_mount_path}/should-fail.txt"
+            )
+            assert result.error is not None, "Write should fail on read-only PVC mount"
+            logger.info("✓ Write correctly denied on read-only PVC mount")
+
+        finally:
+            try:
+                await sandbox.kill()
+            except Exception:
+                pass
+            await sandbox.close()
+
+        logger.info("TEST 1e PASSED: Read-only PVC named volume mount test completed successfully")
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
+    async def test_01f_pvc_named_volume_subpath_mount(self):
+        """Test creating a sandbox with a PVC named volume mount using subPath."""
+        logger.info("=" * 80)
+        logger.info("TEST 1f: Creating sandbox with PVC named volume subPath mount (async)")
+        logger.info("=" * 80)
+
+        pvc_volume_name = "opensandbox-e2e-pvc-test"
+        container_mount_path = "/mnt/train"
+
+        cfg = create_connection_config()
+        sandbox = await Sandbox.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            volumes=[
+                Volume(
+                    name="test-pvc-subpath",
+                    pvc=PVC(claimName=pvc_volume_name),
+                    mountPath=container_mount_path,
+                    readOnly=False,
+                    subPath="datasets/train",
+                ),
+            ],
+        )
+        try:
+            logger.info(f"✓ Sandbox with PVC subPath volume created: {sandbox.id}")
+
+            # Step 1: Verify the subpath marker file is readable
+            logger.info("Step 1: Verify subPath marker file is readable")
+            result = await sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
+            assert result.error is None, f"Failed to read subpath marker file: {result.error}"
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "pvc-subpath-marker"
+            logger.info("✓ SubPath marker file read successfully")
+
+            # Step 2: Verify we only see the subpath contents (not the full volume)
+            logger.info("Step 2: Verify only subPath contents are visible")
+            result = await sandbox.commands.run(f"ls {container_mount_path}/")
+            assert result.error is None
+            # Should contain marker.txt but NOT 'datasets' directory (we are inside it)
+            stdout_text = "\n".join(msg.text for msg in result.logs.stdout)
+            assert "marker.txt" in stdout_text
+            assert "datasets" not in stdout_text
+            logger.info("✓ Only subPath contents are visible inside the sandbox")
+
+            # Step 3: Write a file and verify (retry read-back for transient SSE drops)
+            logger.info("Step 3: Write and verify a file inside subPath mount")
+            result = await sandbox.commands.run(
+                f"echo 'subpath-write-test' > {container_mount_path}/output.txt"
+            )
+            assert result.error is None
+            for _attempt in range(3):
+                result = await sandbox.commands.run(f"cat {container_mount_path}/output.txt")
+                if result.logs.stdout:
+                    break
+                await asyncio.sleep(1)
+            assert result.error is None
+            assert len(result.logs.stdout) == 1
+            assert result.logs.stdout[0].text == "subpath-write-test"
+            logger.info("✓ File written and verified inside subPath mount")
+
+        finally:
+            try:
+                await sandbox.kill()
+            except Exception:
+                pass
+            await sandbox.close()
+
+        logger.info("TEST 1f PASSED: PVC subPath named volume mount test completed successfully")
 
     @pytest.mark.timeout(120)
     @pytest.mark.order(2)
@@ -912,7 +1104,7 @@ class TestSandboxE2E:
             assert execution.error.value
             _assert_recent_timestamp_ms(execution.error.timestamp, tolerance_ms=180_000)
 
-    @pytest.mark.timeout(600)
+    @pytest.mark.timeout(120)
     @pytest.mark.order(6)
     async def test_05_sandbox_pause(self):
         """Test sandbox pause operation."""
@@ -923,8 +1115,9 @@ class TestSandboxE2E:
         logger.info("TEST 5: Testing sandbox pause operation")
         logger.info("=" * 80)
 
-        logger.info("Waiting 20 seconds before pausing to ensure sandbox is stable...")
-        await asyncio.sleep(20)
+        # Sandbox has been exercised through tests 01-04; a brief settle is sufficient.
+        await asyncio.sleep(2)
+        assert await sandbox.is_healthy(), "Sandbox should be healthy before pause"
 
         logger.info("Requesting sandbox pause...")
         await sandbox.pause()
@@ -933,8 +1126,8 @@ class TestSandboxE2E:
         poll_count = 0
         final_status = None
 
-        logger.info("Polling for status change (timeout: 5 minutes)...")
-        while poll_count < 300:
+        logger.info("Polling for status change (timeout: 30s)...")
+        while poll_count < 30:
             await asyncio.sleep(1)
             poll_count += 1
 
@@ -951,18 +1144,19 @@ class TestSandboxE2E:
         assert final_status is not None, "Failed to get final status after pause operation"
         assert final_status.state == "Paused", "Sandbox should be in Paused state"
 
-        # Confirm pause semantics: execd becomes unhealthy/unreachable after pause.
-        healthy = True
-        for _ in range(10):
-            healthy = await sandbox.is_healthy()
-            if not healthy:
-                break
-            await asyncio.sleep(0.5)
+        # Verify pause semantics: execd should be unreachable.
+        # The global HTTP request_timeout is 3 min, so we wrap the single
+        # is_healthy() call in a short asyncio timeout.  A paused container's
+        # frozen process will never reply, causing either a timeout (good) or
+        # an immediate connection refusal (also good).
+        try:
+            healthy = await asyncio.wait_for(sandbox.is_healthy(), timeout=15)
+        except asyncio.TimeoutError:
+            healthy = False
         assert healthy is False, "Sandbox should be unhealthy after pause"
 
         elapsed_time = (time.time() - start_time) * 1000
-        logger.info(f"✓ Sandbox pause completed in {elapsed_time:.2f} ms")
-        logger.info("TEST 4 PASSED: Sandbox pause operation test completed successfully")
+        logger.info(f"✓ Sandbox pause confirmed in {elapsed_time:.2f} ms")
 
     @pytest.mark.timeout(120)
     @pytest.mark.order(7)

@@ -555,9 +555,11 @@ class SandboxRenewResponse(
  * Connection endpoint information for a sandbox.
  *
  * @property endpoint Sandbox endpoint
+ * @property headers Headers that must be included on every request targeting this endpoint (e.g. when the server requires them for routing or auth). Empty if not required.
  */
 class SandboxEndpoint(
     val endpoint: String,
+    val headers: Map<String, String> = emptyMap(),
 )
 
 /**

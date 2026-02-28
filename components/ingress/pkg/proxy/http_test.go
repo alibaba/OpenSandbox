@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 	"github.com/stretchr/testify/assert"
-	"knative.dev/pkg/logging"
 )
 
 // mockProvider implements sandbox.Provider interface for testing
@@ -72,7 +72,7 @@ func httpProxyWithHeaderMode(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	Logger = logging.FromContext(ctx)
+	Logger = slogger.MustNew(slogger.Config{Level: "debug"})
 	proxy := NewProxy(ctx, provider, ModeHeader)
 
 	mux := http.NewServeMux()
@@ -146,7 +146,7 @@ func httpProxyWithURIMode(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	Logger = logging.FromContext(ctx)
+	Logger = slogger.MustNew(slogger.Config{Level: "debug"})
 	proxy := NewProxy(ctx, provider, ModeURI)
 
 	mux := http.NewServeMux()

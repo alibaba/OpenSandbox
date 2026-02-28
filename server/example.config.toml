@@ -21,23 +21,19 @@
 # -----------------------------------------------------------------
 host = "127.0.0.1"
 port = 8080
-
 log_level = "INFO"
-
-# Shared API key for the OPEN-SANDBOX-API-KEY header (leave empty only for dev)
-api_key = ""
-
+# api_key = "your-secret-api-key"  # Optional: Uncomment to enable API key authentication
 
 [runtime]
 # Runtime selection (docker | kubernetes)
 # -----------------------------------------------------------------
 type = "docker"
-execd_image = "opensandbox/execd:v1.0.5"
+execd_image = "opensandbox/execd:v1.0.6"
 
 [egress]
 # Egress configuration
 # -----------------------------------------------------------------
-image = "opensandbox/egress:v1.0.0"
+image = "opensandbox/egress:v1.0.1"
 
 [storage]
 # Volume and storage configuration
@@ -52,6 +48,10 @@ allowed_host_paths = []
 # -----------------------------------------------------------------
 # Use bridge for network isolation
 network_mode = "bridge"
+# Docker API timeout (seconds). If unset, default 180
+# api_timeout = 300
+# When server runs in a container, host IP/hostname for bridge-mode endpoints
+# host_ip = "10.57.1.91"
 # Drop dangerous capabilities and block privilege escalation
 drop_capabilities = ["AUDIT_WRITE", "MKNOD", "NET_ADMIN", "NET_RAW", "SYS_ADMIN", "SYS_MODULE", "SYS_PTRACE", "SYS_TIME", "SYS_TTY_CONFIG"]
 no_new_privileges = true
@@ -61,3 +61,7 @@ apparmor_profile = ""
 pids_limit = 512
 # Seccomp profile: empty string uses Docker default; set to an absolute path for a custom profile
 seccomp_profile = ""
+
+[ingress]
+# Ingress exposure mode: direct (default) or gateway
+mode = "direct"

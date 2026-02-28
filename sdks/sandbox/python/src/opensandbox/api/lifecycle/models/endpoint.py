@@ -17,9 +17,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from attrs import define as _attrs_define
+
+from ..types import UNSET, Unset
+
+if TYPE_CHECKING:
+    from ..models.endpoint_headers import EndpointHeaders
+
 
 T = TypeVar("T", bound="Endpoint")
 
@@ -33,12 +39,18 @@ class Endpoint:
             endpoint (str): Public URL to access the service from outside the sandbox.
                 Format: {endpoint-host}/sandboxes/{sandboxId}/port/{port}
                 Example: endpoint.opensandbox.io/sandboxes/abc123/port/8080
+            headers (EndpointHeaders | Unset): Requests targeting the sandbox must include the corresponding header(s).
     """
 
     endpoint: str
+    headers: EndpointHeaders | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         endpoint = self.endpoint
+
+        headers: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.headers, Unset):
+            headers = self.headers.to_dict()
 
         field_dict: dict[str, Any] = {}
 
@@ -47,16 +59,28 @@ class Endpoint:
                 "endpoint": endpoint,
             }
         )
+        if headers is not UNSET:
+            field_dict["headers"] = headers
 
         return field_dict
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.endpoint_headers import EndpointHeaders
+
         d = dict(src_dict)
         endpoint = d.pop("endpoint")
 
+        _headers = d.pop("headers", UNSET)
+        headers: EndpointHeaders | Unset
+        if isinstance(_headers, Unset):
+            headers = UNSET
+        else:
+            headers = EndpointHeaders.from_dict(_headers)
+
         endpoint = cls(
             endpoint=endpoint,
+            headers=headers,
         )
 
         return endpoint

@@ -123,23 +123,31 @@ class Host(BaseModel):
 
     path: str = Field(
         ...,
-        description="Absolute path on the host filesystem to mount. Must start with '/'.",
-        pattern=r"^/.*",
+        description="Absolute path on the host filesystem to mount.",
+        pattern=r"^(/|[A-Za-z]:[\\/])",
     )
 
 
 class PVC(BaseModel):
     """
-    Kubernetes PersistentVolumeClaim mount backend.
+    Platform-managed named volume backend.
 
-    References an existing PVC in the same namespace as the sandbox pod.
-    Only available in Kubernetes runtime.
+    A runtime-neutral abstraction for referencing a pre-existing, platform-managed
+    named volume. The semantics are identical across runtimes: claim an existing
+    volume by name, mount it into the container, and leave volume lifecycle
+    management to the user.
+
+    - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+    - Docker: maps to a Docker named volume (created via ``docker volume create``).
     """
 
     claim_name: str = Field(
         ...,
         alias="claimName",
-        description="Name of the PersistentVolumeClaim in the same namespace.",
+        description=(
+            "Name of the volume on the target platform. "
+            "In Kubernetes this is the PVC name; in Docker this is the named volume name."
+        ),
         pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
         max_length=253,
     )
@@ -170,7 +178,7 @@ class Volume(BaseModel):
     )
     pvc: Optional[PVC] = Field(
         None,
-        description="Kubernetes PersistentVolumeClaim mount backend.",
+        description="Platform-managed named volume backend (PVC in Kubernetes, named volume in Docker).",
     )
     mount_path: str = Field(
         ...,
@@ -439,6 +447,10 @@ class Endpoint(BaseModel):
     endpoint: str = Field(
         ...,
         description="Public endpoint string (host[:port]/path) exposed for the sandbox service",
+    )
+    headers: Optional[dict[str, str]] = Field(
+        default=None,
+        description="Optional headers required when accessing the endpoint (e.g., for header-based routing).",
     )
 
 

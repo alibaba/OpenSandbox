@@ -75,7 +75,11 @@ class CommandsAdapterSync(CommandsSync):
         timeout_seconds = self.connection_config.request_timeout.total_seconds()
         timeout = httpx.Timeout(timeout_seconds)
 
-        headers = {"User-Agent": self.connection_config.user_agent, **self.connection_config.headers}
+        headers = {
+            "User-Agent": self.connection_config.user_agent,
+            **self.connection_config.headers,
+            **self.execd_endpoint.headers,
+        }
 
         self._client = Client(base_url=base_url, timeout=timeout)
 
@@ -87,7 +91,7 @@ class CommandsAdapterSync(CommandsSync):
         )
         self._client.set_httpx_client(self._httpx_client)
 
-        # SSE client (read timeout disabled)
+        # SSE client (read timeout disabled); endpoint headers already in headers
         sse_headers = {
             **headers,
             "Accept": "text/event-stream",

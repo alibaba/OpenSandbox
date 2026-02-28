@@ -35,11 +35,14 @@ class RunCommandRequest:
         command (str): Shell command to execute Example: ls -la /workspace.
         cwd (str | Unset): Working directory for command execution Example: /workspace.
         background (bool | Unset): Whether to run command in detached mode Default: False.
+        timeout (int | Unset): Maximum allowed execution time in milliseconds before the command is forcefully
+            terminated by the server. If omitted, the server will not enforce any timeout. Example: 60000.
     """
 
     command: str
     cwd: str | Unset = UNSET
     background: bool | Unset = False
+    timeout: int | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -48,6 +51,8 @@ class RunCommandRequest:
         cwd = self.cwd
 
         background = self.background
+
+        timeout = self.timeout
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -60,6 +65,8 @@ class RunCommandRequest:
             field_dict["cwd"] = cwd
         if background is not UNSET:
             field_dict["background"] = background
+        if timeout is not UNSET:
+            field_dict["timeout"] = timeout
 
         return field_dict
 
@@ -72,10 +79,13 @@ class RunCommandRequest:
 
         background = d.pop("background", UNSET)
 
+        timeout = d.pop("timeout", UNSET)
+
         run_command_request = cls(
             command=command,
             cwd=cwd,
             background=background,
+            timeout=timeout,
         )
 
         run_command_request.additional_properties = d

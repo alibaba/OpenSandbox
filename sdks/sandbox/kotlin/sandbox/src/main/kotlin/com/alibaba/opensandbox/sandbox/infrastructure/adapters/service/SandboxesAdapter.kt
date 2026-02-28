@@ -115,9 +115,17 @@ internal class SandboxesAdapter(
         sandboxId: String,
         port: Int,
     ): SandboxEndpoint {
+        return getSandboxEndpoint(sandboxId, port, false)
+    }
+
+    override fun getSandboxEndpoint(
+        sandboxId: String,
+        port: Int,
+        useServerProxy: Boolean,
+    ): SandboxEndpoint {
         logger.debug("Retrieving sandbox endpoint: {}, port {}", sandboxId, port)
         return try {
-            api.sandboxesSandboxIdEndpointsPortGet(sandboxId, port).toSandboxEndpoint()
+            api.sandboxesSandboxIdEndpointsPortGet(sandboxId, port, useServerProxy).toSandboxEndpoint()
         } catch (e: Exception) {
             logger.error("Failed to retrieve sandbox endpoint for sandbox {}", sandboxId, e)
             throw e.toSandboxException()

@@ -17,8 +17,10 @@ package nftables
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
@@ -52,8 +54,12 @@ func TestApplyStatic_BuildsRuleset_DefaultDeny(t *testing.T) {
 	expectContains(t, rendered, "add rule inet opensandbox egress oifname \"lo\" accept")
 	expectContains(t, rendered, "add rule inet opensandbox egress tcp dport 853 drop")
 	expectContains(t, rendered, "add rule inet opensandbox egress udp dport 853 drop")
+	expectContains(t, rendered, "add set inet opensandbox dyn_allow_v4 { type ipv4_addr; timeout 300s; }")
+	expectContains(t, rendered, "add set inet opensandbox dyn_allow_v6 { type ipv6_addr; timeout 300s; }")
 	expectContains(t, rendered, "add element inet opensandbox allow_v4 { 1.1.1.1, 2.2.0.0/16 }")
 	expectContains(t, rendered, "add element inet opensandbox deny_v6 { 2001:db8::/32 }")
+	expectContains(t, rendered, "add rule inet opensandbox egress ip daddr @dyn_allow_v4 accept")
+	expectContains(t, rendered, "add rule inet opensandbox egress ip6 daddr @dyn_allow_v6 accept")
 	expectContains(t, rendered, "add rule inet opensandbox egress counter drop")
 }
 
@@ -137,4 +143,51 @@ func TestApplyStatic_DoHBlocklist(t *testing.T) {
 	expectContains(t, rendered, "add element inet opensandbox doh_block_v4 { 9.9.9.9 }")
 	expectContains(t, rendered, "add rule inet opensandbox egress ip daddr @doh_block_v4 tcp dport 443 drop")
 	expectContains(t, rendered, "add rule inet opensandbox egress ip6 daddr @doh_block_v6 tcp dport 443 drop")
+}
+
+func TestAddResolvedIPs_BuildsDynamicElements(t *testing.T) {
+	var rendered string
+	m := NewManagerWithRunner(func(_ context.Context, script string) ([]byte, error) {
+		rendered = script
+		return nil, nil
+	})
+	ips := []ResolvedIP{
+		{Addr: netip.MustParseAddr("1.1.1.1"), TTL: 120 * time.Second},
+		{Addr: netip.MustParseAddr("2001:db8::1"), TTL: 60 * time.Second},
+	}
+	if err := m.AddResolvedIPs(context.Background(), ips); err != nil {
+		t.Fatalf("AddResolvedIPs: %v", err)
+	}
+	expectContains(t, rendered, "add element inet opensandbox dyn_allow_v4 { 1.1.1.1 timeout 120s }")
+	expectContains(t, rendered, "add element inet opensandbox dyn_allow_v6 { 2001:db8::1 timeout 60s }")
+}
+
+func TestAddResolvedIPs_ClampsTTL(t *testing.T) {
+	var rendered string
+	m := NewManagerWithRunner(func(_ context.Context, script string) ([]byte, error) {
+		rendered = script
+		return nil, nil
+	})
+	ips := []ResolvedIP{
+		{Addr: netip.MustParseAddr("10.0.0.1"), TTL: 10 * time.Second},
+		{Addr: netip.MustParseAddr("10.0.0.2"), TTL: 9999 * time.Second},
+	}
+	if err := m.AddResolvedIPs(context.Background(), ips); err != nil {
+		t.Fatalf("AddResolvedIPs: %v", err)
+	}
+	expectContains(t, rendered, "10.0.0.1 timeout 60s")
+	expectContains(t, rendered, "10.0.0.2 timeout 300s")
+}
+
+func TestAddResolvedIPs_EmptyNoOp(t *testing.T) {
+	m := NewManagerWithRunner(func(_ context.Context, script string) ([]byte, error) {
+		t.Fatal("runner should not be called for empty ips")
+		return nil, nil
+	})
+	if err := m.AddResolvedIPs(context.Background(), nil); err != nil {
+		t.Fatalf("AddResolvedIPs: %v", err)
+	}
+	if err := m.AddResolvedIPs(context.Background(), []ResolvedIP{}); err != nil {
+		t.Fatalf("AddResolvedIPs: %v", err)
+	}
 }

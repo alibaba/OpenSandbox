@@ -18,7 +18,7 @@ import (
 	"context"
 	"sync"
 
-	"k8s.io/klog/v2"
+	"github.com/go-logr/logr"
 
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils"
 	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
@@ -26,8 +26,8 @@ import (
 
 type taskClientCreator func(ip string) taskClient
 
-func newTaskStatusCollector(creator taskClientCreator) taskStatusCollector {
-	return &defaultTaskStatusCollector{creator: creator}
+func newTaskStatusCollector(creator taskClientCreator, logger logr.Logger) taskStatusCollector {
+	return &defaultTaskStatusCollector{creator: creator, logger: logger}
 }
 
 // TODO error
@@ -38,6 +38,7 @@ type taskStatusCollector interface {
 // TODO maybe cache
 type defaultTaskStatusCollector struct {
 	creator taskClientCreator
+	logger  logr.Logger
 }
 
 func (s *defaultTaskStatusCollector) Collect(ctx context.Context, ipList []string) map[string]*api.Task {
@@ -59,7 +60,7 @@ func (s *defaultTaskStatusCollector) Collect(ctx context.Context, ipList []strin
 			client := s.creator(ip)
 			task, err := client.Get(ctx)
 			if err != nil {
-				klog.Errorf("failed to GetTask for IP %s, err %v", ip, err)
+				s.logger.Error(err, "failed to GetTask", "ip", ip)
 			} else if task != nil {
 				mu.Lock()
 				ret[ip] = task
@@ -68,6 +69,6 @@ func (s *defaultTaskStatusCollector) Collect(ctx context.Context, ipList []strin
 		}(ip)
 	}
 	wg.Wait()
-	klog.Infof("Collect task status %s", utils.DumpJSON(ret))
+	s.logger.Info("Collect task status", "result", utils.DumpJSON(ret))
 	return ret
 }

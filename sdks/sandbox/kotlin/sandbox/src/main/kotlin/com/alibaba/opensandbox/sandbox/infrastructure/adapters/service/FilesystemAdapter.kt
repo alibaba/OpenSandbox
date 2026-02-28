@@ -39,6 +39,7 @@ import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.parseSa
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.toSandboxException
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import okhttp3.Headers.Companion.toHeaders
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -69,7 +70,19 @@ internal class FilesystemAdapter(
     }
 
     private val logger = LoggerFactory.getLogger(FilesystemAdapter::class.java)
-    private val api = FilesystemApi("${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}", httpClientProvider.httpClient)
+    private val api =
+        FilesystemApi(
+            "${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}",
+            httpClientProvider.httpClient.newBuilder()
+                .addInterceptor { chain ->
+                    val requestBuilder = chain.request().newBuilder()
+                    execdEndpoint.headers.forEach { (key, value) ->
+                        requestBuilder.header(key, value)
+                    }
+                    chain.proceed(requestBuilder.build())
+                }
+                .build(),
+        )
 
     override fun readFile(
         path: String,
@@ -210,6 +223,7 @@ internal class FilesystemAdapter(
             val request =
                 Request.Builder()
                     .url("${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}$FILESYSTEM_UPLOAD_PATH")
+                    .headers(execdEndpoint.headers.toHeaders())
                     .post(builder.build())
                     .build()
 
@@ -340,6 +354,7 @@ internal class FilesystemAdapter(
         val requestBuilder =
             Request.Builder()
                 .url(httpUrl)
+                .headers(execdEndpoint.headers.toHeaders())
                 .get()
 
         if (range != null) {

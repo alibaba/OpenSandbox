@@ -12,13 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+from docker.errors import DockerException, NotFound as DockerNotFound
 import pytest
 from fastapi import HTTPException, status
 
-from src.config import AppConfig, EgressConfig, RouterConfig, RuntimeConfig, ServerConfig, StorageConfig
+from src.config import AppConfig, EgressConfig, RuntimeConfig, ServerConfig, StorageConfig, IngressConfig
 from src.services.constants import SANDBOX_ID_LABEL, SandboxErrorCodes
 from src.services.docker import DockerSandboxService, PendingSandbox
 from src.services.helpers import parse_memory_limit, parse_nano_cpus, parse_timestamp
@@ -42,7 +44,7 @@ def _app_config() -> AppConfig:
     return AppConfig(
         server=ServerConfig(),
         runtime=RuntimeConfig(type="docker", execd_image="ghcr.io/opensandbox/platform:latest"),
-        router=RouterConfig(domain="opensandbox.io"),
+        ingress=IngressConfig(mode="direct"),
     )
 
 
@@ -539,41 +541,52 @@ def test_async_worker_cleans_up_leftover_container_on_failure(mock_docker):
 # ============================================================================
 
 
+@patch("src.services.docker.docker")
 class TestBuildVolumeBinds:
-    """Tests for DockerSandboxService._build_volume_binds static method."""
+    """Tests for DockerSandboxService._build_volume_binds instance method."""
 
-    def test_none_volumes_returns_empty(self):
+    def test_none_volumes_returns_empty(self, mock_docker):
         """None volumes should produce empty binds list."""
-        assert DockerSandboxService._build_volume_binds(None) == []
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        assert service._build_volume_binds(None) == []
 
-    def test_empty_volumes_returns_empty(self):
+    def test_empty_volumes_returns_empty(self, mock_docker):
         """Empty volumes list should produce empty binds list."""
-        assert DockerSandboxService._build_volume_binds([]) == []
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        assert service._build_volume_binds([]) == []
 
-    def test_single_host_volume_rw(self):
+    def test_single_host_volume_rw(self, mock_docker):
         """Single host volume with read-write should produce correct bind string."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
         volume = Volume(
             name="workdir",
             host=Host(path="/data/opensandbox/user-a"),
             mount_path="/mnt/work",
             read_only=False,
         )
-        binds = DockerSandboxService._build_volume_binds([volume])
+        binds = service._build_volume_binds([volume])
         assert binds == ["/data/opensandbox/user-a:/mnt/work:rw"]
 
-    def test_single_host_volume_ro(self):
+    def test_single_host_volume_ro(self, mock_docker):
         """Single host volume with read-only should produce correct bind string."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
         volume = Volume(
             name="workdir",
             host=Host(path="/data/opensandbox/user-a"),
             mount_path="/mnt/work",
             read_only=True,
         )
-        binds = DockerSandboxService._build_volume_binds([volume])
+        binds = service._build_volume_binds([volume])
         assert binds == ["/data/opensandbox/user-a:/mnt/work:ro"]
 
-    def test_host_volume_with_subpath(self):
+    def test_host_volume_with_subpath(self, mock_docker):
         """Host volume with subPath should resolve the full host path."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
         volume = Volume(
             name="workdir",
             host=Host(path="/data/opensandbox/user-a"),
@@ -581,11 +594,14 @@ class TestBuildVolumeBinds:
             read_only=False,
             sub_path="task-001",
         )
-        binds = DockerSandboxService._build_volume_binds([volume])
-        assert binds == ["/data/opensandbox/user-a/task-001:/mnt/work:rw"]
+        binds = service._build_volume_binds([volume])
+        expected_host = os.path.normpath("/data/opensandbox/user-a/task-001")
+        assert binds == [f"{expected_host}:/mnt/work:rw"]
 
-    def test_multiple_host_volumes(self):
+    def test_multiple_host_volumes(self, mock_docker):
         """Multiple host volumes should produce multiple bind strings."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
         volumes = [
             Volume(
                 name="workdir",
@@ -600,31 +616,116 @@ class TestBuildVolumeBinds:
                 read_only=True,
             ),
         ]
-        binds = DockerSandboxService._build_volume_binds(volumes)
+        binds = service._build_volume_binds(volumes)
         assert len(binds) == 2
         assert "/data/work:/mnt/work:rw" in binds
         assert "/data/shared:/mnt/data:ro" in binds
 
-    def test_non_host_volumes_are_skipped(self):
-        """PVC volumes (non-host) should be skipped in bind generation."""
+    def test_single_pvc_volume_rw(self, mock_docker):
+        """Single PVC volume with read-write (no subPath) should produce named volume bind string."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="shared-data",
+            pvc=PVC(claim_name="my-shared-volume"),
+            mount_path="/mnt/data",
+            read_only=False,
+        )
+        binds = service._build_volume_binds([volume])
+        assert binds == ["my-shared-volume:/mnt/data:rw"]
+
+    def test_single_pvc_volume_ro(self, mock_docker):
+        """Single PVC volume with read-only (no subPath) should produce named volume bind string."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
         volume = Volume(
             name="models",
             pvc=PVC(claim_name="shared-models-pvc"),
             mount_path="/mnt/models",
             read_only=True,
         )
-        binds = DockerSandboxService._build_volume_binds([volume])
-        assert binds == []
+        binds = service._build_volume_binds([volume])
+        assert binds == ["shared-models-pvc:/mnt/models:ro"]
+
+    def test_pvc_volume_with_subpath(self, mock_docker):
+        """PVC volume with subPath should resolve via cached Mountpoint and produce bind mount."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="datasets",
+            pvc=PVC(claim_name="my-vol"),
+            mount_path="/mnt/train",
+            read_only=False,
+            sub_path="datasets/train",
+        )
+        cache = {
+            "my-vol": {
+                "Name": "my-vol",
+                "Driver": "local",
+                "Mountpoint": "/var/lib/docker/volumes/my-vol/_data",
+            }
+        }
+        binds = service._build_volume_binds([volume], pvc_inspect_cache=cache)
+        assert binds == [
+            "/var/lib/docker/volumes/my-vol/_data/datasets/train:/mnt/train:rw"
+        ]
+
+    def test_pvc_volume_with_subpath_readonly(self, mock_docker):
+        """PVC volume with subPath and readOnly should produce ':ro' bind mount."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="datasets",
+            pvc=PVC(claim_name="my-vol"),
+            mount_path="/mnt/eval",
+            read_only=True,
+            sub_path="datasets/eval",
+        )
+        cache = {
+            "my-vol": {
+                "Name": "my-vol",
+                "Driver": "local",
+                "Mountpoint": "/var/lib/docker/volumes/my-vol/_data",
+            }
+        }
+        binds = service._build_volume_binds([volume], pvc_inspect_cache=cache)
+        assert binds == [
+            "/var/lib/docker/volumes/my-vol/_data/datasets/eval:/mnt/eval:ro"
+        ]
+
+    def test_mixed_host_and_pvc_volumes(self, mock_docker):
+        """Mixed host and PVC volumes should both produce bind strings."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        volumes = [
+            Volume(
+                name="workdir",
+                host=Host(path="/data/work"),
+                mount_path="/mnt/work",
+                read_only=False,
+            ),
+            Volume(
+                name="shared-data",
+                pvc=PVC(claim_name="my-shared-volume"),
+                mount_path="/mnt/data",
+                read_only=True,
+            ),
+        ]
+        binds = service._build_volume_binds(volumes)
+        assert len(binds) == 2
+        assert "/data/work:/mnt/work:rw" in binds
+        assert "my-shared-volume:/mnt/data:ro" in binds
 
 
 @patch("src.services.docker.docker")
 class TestDockerVolumeValidation:
     """Tests for volume validation in DockerSandboxService.create_sandbox."""
 
-    def test_pvc_rejected_in_docker(self, mock_docker):
-        """PVC backend should be rejected in Docker runtime."""
+    def test_pvc_volume_not_found_rejected(self, mock_docker):
+        """PVC backend with non-existent Docker named volume should be rejected."""
         mock_client = MagicMock()
         mock_client.containers.list.return_value = []
+        mock_client.api.inspect_volume.side_effect = DockerNotFound("volume not found")
         mock_docker.from_env.return_value = mock_client
 
         service = DockerSandboxService(config=_app_config())
@@ -639,7 +740,7 @@ class TestDockerVolumeValidation:
             volumes=[
                 Volume(
                     name="models",
-                    pvc=PVC(claim_name="shared-models-pvc"),
+                    pvc=PVC(claim_name="nonexistent-volume"),
                     mount_path="/mnt/models",
                     read_only=True,
                 )
@@ -650,7 +751,241 @@ class TestDockerVolumeValidation:
             service.create_sandbox(request)
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
-        assert exc_info.value.detail["code"] == SandboxErrorCodes.UNSUPPORTED_VOLUME_BACKEND
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.PVC_VOLUME_NOT_FOUND
+
+    def test_pvc_volume_inspect_failure_returns_500(self, mock_docker):
+        """Docker API failure during volume inspection should return 500."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.inspect_volume.side_effect = DockerException("connection error")
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="shared-data",
+                    pvc=PVC(claim_name="my-volume"),
+                    mount_path="/mnt/data",
+                )
+            ],
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            service.create_sandbox(request)
+
+        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.PVC_VOLUME_INSPECT_FAILED
+
+    def test_pvc_volume_binds_passed_to_docker(self, mock_docker):
+        """PVC volume binds should be passed to Docker host config as named volume refs."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.inspect_volume.return_value = {"Name": "my-shared-volume"}
+        mock_client.api.create_host_config.return_value = {}
+        mock_client.api.create_container.return_value = {"Id": "cid"}
+        mock_client.containers.get.return_value = MagicMock()
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="shared-data",
+                    pvc=PVC(claim_name="my-shared-volume"),
+                    mount_path="/mnt/data",
+                    read_only=False,
+                )
+            ],
+        )
+
+        with patch.object(service, "_ensure_image_available"), patch.object(
+            service, "_prepare_sandbox_runtime"
+        ):
+            response = service.create_sandbox(request)
+
+        assert response.status.state == "Running"
+
+        # Verify named volume bind was passed to create_host_config
+        host_config_call = mock_client.api.create_host_config.call_args
+        assert "binds" in host_config_call.kwargs
+        binds = host_config_call.kwargs["binds"]
+        assert len(binds) == 1
+        assert binds[0] == "my-shared-volume:/mnt/data:rw"
+
+    def test_pvc_volume_readonly_binds_passed_to_docker(self, mock_docker):
+        """PVC volume with read-only should produce ':ro' bind string."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.inspect_volume.return_value = {"Name": "shared-models"}
+        mock_client.api.create_host_config.return_value = {}
+        mock_client.api.create_container.return_value = {"Id": "cid"}
+        mock_client.containers.get.return_value = MagicMock()
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="models",
+                    pvc=PVC(claim_name="shared-models"),
+                    mount_path="/mnt/models",
+                    read_only=True,
+                )
+            ],
+        )
+
+        with patch.object(service, "_ensure_image_available"), patch.object(
+            service, "_prepare_sandbox_runtime"
+        ):
+            service.create_sandbox(request)
+
+        host_config_call = mock_client.api.create_host_config.call_args
+        binds = host_config_call.kwargs["binds"]
+        assert binds[0] == "shared-models:/mnt/models:ro"
+
+    def test_pvc_subpath_non_local_driver_rejected(self, mock_docker):
+        """PVC with subPath on a non-local driver should be rejected."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.inspect_volume.return_value = {
+            "Name": "cloud-vol",
+            "Driver": "nfs",
+            "Mountpoint": "",
+        }
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="data",
+                    pvc=PVC(claim_name="cloud-vol"),
+                    mount_path="/mnt/data",
+                    sub_path="subdir",
+                )
+            ],
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            service.create_sandbox(request)
+
+        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.PVC_SUBPATH_UNSUPPORTED_DRIVER
+
+    def test_pvc_subpath_symlink_escape_rejected(self, mock_docker):
+        """PVC with subPath that resolves outside mountpoint via symlink should be rejected."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.inspect_volume.return_value = {
+            "Name": "my-vol",
+            "Driver": "local",
+            "Mountpoint": "/var/lib/docker/volumes/my-vol/_data",
+        }
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="data",
+                    pvc=PVC(claim_name="my-vol"),
+                    mount_path="/mnt/data",
+                    sub_path="datasets",
+                )
+            ],
+        )
+
+        # Simulate: realpath resolves a symlink that escapes the mountpoint.
+        # datasets -> / inside the volume, so realpath(…/_data/datasets) = /
+        with patch("src.services.docker.os.path.realpath") as mock_realpath:
+            mock_realpath.side_effect = lambda p, **kwargs: (
+                "/" if p.endswith("datasets") else p
+            )
+            with pytest.raises(HTTPException) as exc_info:
+                service.create_sandbox(request)
+
+        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_SUB_PATH
+        assert "symlink" in exc_info.value.detail["message"]
+
+    def test_pvc_subpath_binds_resolved_to_mountpoint(self, mock_docker):
+        """PVC with subPath should resolve Mountpoint+subPath and pass as bind mount."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.inspect_volume.return_value = {
+            "Name": "my-vol",
+            "Driver": "local",
+            "Mountpoint": "/var/lib/docker/volumes/my-vol/_data",
+        }
+        mock_client.api.create_host_config.return_value = {}
+        mock_client.api.create_container.return_value = {"Id": "cid"}
+        mock_client.containers.get.return_value = MagicMock()
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="train-data",
+                    pvc=PVC(claim_name="my-vol"),
+                    mount_path="/mnt/train",
+                    read_only=True,
+                    sub_path="datasets/train",
+                )
+            ],
+        )
+
+        with patch.object(service, "_ensure_image_available"), \
+             patch.object(service, "_prepare_sandbox_runtime"):
+            service.create_sandbox(request)
+
+        host_config_call = mock_client.api.create_host_config.call_args
+        binds = host_config_call.kwargs["binds"]
+        assert len(binds) == 1
+        assert binds[0] == "/var/lib/docker/volumes/my-vol/_data/datasets/train:/mnt/train:ro"
 
     def test_host_path_not_found_rejected(self, mock_docker):
         """Host path that does not exist should be rejected."""
@@ -798,7 +1133,6 @@ class TestDockerVolumeValidation:
         service = DockerSandboxService(config=_app_config())
 
         import tempfile
-        import os
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create the subPath directory

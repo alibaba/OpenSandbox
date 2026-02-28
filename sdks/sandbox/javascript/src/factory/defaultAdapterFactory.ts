@@ -36,9 +36,13 @@ export class DefaultAdapterFactory implements AdapterFactory {
   }
 
   createExecdStack(opts: CreateExecdStackOptions): ExecdStack {
+    const headers: Record<string, string> = {
+      ...(opts.connectionConfig.headers ?? {}),
+      ...(opts.endpointHeaders ?? {}),
+    };
     const execdClient = createExecdClient({
       baseUrl: opts.execdBaseUrl,
-      headers: opts.connectionConfig.headers,
+      headers,
       fetch: opts.connectionConfig.fetch,
     });
 
@@ -47,12 +51,12 @@ export class DefaultAdapterFactory implements AdapterFactory {
     const files = new FilesystemAdapter(execdClient, {
       baseUrl: opts.execdBaseUrl,
       fetch: opts.connectionConfig.fetch,
-      headers: opts.connectionConfig.headers,
+      headers,
     });
     const commands = new CommandsAdapter(execdClient, {
       baseUrl: opts.execdBaseUrl,
       fetch: opts.connectionConfig.sseFetch,
-      headers: opts.connectionConfig.headers,
+      headers,
     });
 
     return {

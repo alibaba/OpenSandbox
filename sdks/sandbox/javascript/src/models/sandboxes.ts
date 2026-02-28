@@ -222,6 +222,11 @@ export interface RenewSandboxExpirationResponse extends Record<string, unknown> 
 
 export interface Endpoint extends Record<string, unknown> {
   endpoint: string;
+  /**
+   * Headers that must be included on every request targeting this endpoint
+   * (e.g. when the server requires them for routing or auth). Omit or empty if not required.
+   */
+  headers?: Record<string, string>;
 }
 
 export interface ListSandboxesParams {

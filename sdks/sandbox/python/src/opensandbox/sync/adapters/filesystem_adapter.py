@@ -65,7 +65,11 @@ class FilesystemAdapterSync(FilesystemSync):
         base_url = self._get_execd_base_url()
         timeout_seconds = self.connection_config.request_timeout.total_seconds()
         timeout = httpx.Timeout(timeout_seconds)
-        headers = {"User-Agent": self.connection_config.user_agent, **self.connection_config.headers}
+        headers = {
+            "User-Agent": self.connection_config.user_agent,
+            **self.connection_config.headers,
+            **self.execd_endpoint.headers,
+        }
 
         self._httpx_client = httpx.Client(
             base_url=base_url,

@@ -20,7 +20,7 @@ Models for code execution, results, and output handling.
 """
 
 from collections.abc import Awaitable, Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -229,6 +229,10 @@ class RunCommandOpts(BaseModel):
         default=None,
         description="Directory to execute command in",
         alias="working_directory",
+    )
+    timeout: timedelta | None = Field(
+        default=None,
+        description="Maximum execution time; server will terminate the command when reached. If omitted, the server will not enforce any timeout.",
     )
 
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)

@@ -19,6 +19,7 @@ SANDBOX_EXPIRES_AT_LABEL = "opensandbox.io/expires-at"
 # Host-mapped ports recorded on containers (bridge mode).
 SANDBOX_EMBEDDING_PROXY_PORT_LABEL = "opensandbox.io/embedding-proxy-port"  # maps container 44772 -> host port
 SANDBOX_HTTP_PORT_LABEL = "opensandbox.io/http-port"  # maps container 8080 -> host port
+OPEN_SANDBOX_INGRESS_HEADER = "OpenSandbox-Ingress-To"
 
 class SandboxErrorCodes:
     """Canonical error codes for sandbox service operations."""
@@ -68,6 +69,9 @@ class SandboxErrorCodes:
     INVALID_PVC_NAME = "VOLUME::INVALID_PVC_NAME"
     UNSUPPORTED_VOLUME_BACKEND = "VOLUME::UNSUPPORTED_BACKEND"
     HOST_PATH_NOT_FOUND = "VOLUME::HOST_PATH_NOT_FOUND"
+    PVC_VOLUME_NOT_FOUND = "VOLUME::PVC_NOT_FOUND"
+    PVC_VOLUME_INSPECT_FAILED = "VOLUME::PVC_INSPECT_FAILED"
+    PVC_SUBPATH_UNSUPPORTED_DRIVER = "VOLUME::PVC_SUBPATH_UNSUPPORTED_DRIVER"
 
 
 __all__ = [
@@ -75,5 +79,6 @@ __all__ = [
     "SANDBOX_EXPIRES_AT_LABEL",
     "SANDBOX_EMBEDDING_PROXY_PORT_LABEL",
     "SANDBOX_HTTP_PORT_LABEL",
+    "OPEN_SANDBOX_INGRESS_HEADER",
     "SandboxErrorCodes",
 ]

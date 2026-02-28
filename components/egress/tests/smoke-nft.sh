@@ -19,6 +19,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# tests/ is two levels under repo root: components/egress/tests -> climb 3 levels.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+
 IMG="opensandbox/egress:local"
 containerName="egress-smoke-nft"
 POLICY_PORT=18080
@@ -31,7 +35,7 @@ cleanup() {
 trap cleanup EXIT
 
 info "Building image ${IMG}"
-docker build -t "${IMG}" .
+docker build -t "${IMG}" -f "${REPO_ROOT}/components/egress/Dockerfile" "${REPO_ROOT}"
 
 info "Starting containerName"
 docker run -d --name "${containerName}" \
@@ -61,9 +65,9 @@ run_in_app() {
 pass() { info "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-info "Test: allowed domain should succeed (example.com)"
-run_in_app -I https://example.com --max-time 10 >/dev/null 2>&1 || fail "example.com should succeed"
-pass "example.com allowed"
+info "Test: allowed domain should succeed (google.com)"
+run_in_app -I https://google.com --max-time 10 >/dev/null 2>&1 || fail "google.com should succeed"
+pass "google.com allowed"
 
 info "Test: denied domain should fail (api.github.com)"
 if run_in_app -I https://api.github.com --max-time 8 >/dev/null 2>&1; then

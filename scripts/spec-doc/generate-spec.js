@@ -20,13 +20,14 @@
  * Generate spec-inline.js from sandbox-lifecycle.yml
  *
  * Usage:
- *   node scripts/generate-spec.js
+ *   node scripts/spec-doc/generate-spec.js
+ *   node scripts/spec-doc/generate-spec.js --output docs/public/api/spec-inline.js
  *
  * This script:
  * 1. Reads specs/sandbox-lifecycle.yml
  * 2. Escapes backticks
  * 3. Wraps in JavaScript template literal
- * 4. Writes to docs/spec-inline.js
+ * 4. Writes to docs/public/api/spec-inline.js (by default)
  */
 
 const fs = require('fs');
@@ -44,20 +45,37 @@ function findProjectRoot() {
   throw new Error('Could not find project root (sandbox-lifecycle.yml not found)');
 }
 
+function parseOutputPathArg(projectRoot) {
+  const outputFlagIndex = process.argv.indexOf('--output');
+  if (outputFlagIndex === -1) {
+    return path.join(projectRoot, 'docs', 'public', 'api', 'spec-inline.js');
+  }
+  const outputValue = process.argv[outputFlagIndex + 1];
+  if (!outputValue) {
+    throw new Error('Missing value for --output');
+  }
+  if (path.isAbsolute(outputValue)) {
+    return outputValue;
+  }
+  return path.join(projectRoot, outputValue);
+}
+
 function main() {
   try {
     const projectRoot = findProjectRoot();
     const yamlPath = path.join(projectRoot, 'specs', 'sandbox-lifecycle.yml');
-    const outputPath = path.join(projectRoot, 'docs', 'spec-inline.js');
+    const outputPath = parseOutputPathArg(projectRoot);
 
     // Validate input file exists
     if (!fs.existsSync(yamlPath)) {
       throw new Error(`YAML file not found: ${yamlPath}`);
     }
 
-    console.log('📝 Generating spec-inline.js...');
+    console.log('Generating spec-inline.js...');
     console.log(`   Input:  ${yamlPath}`);
     console.log(`   Output: ${outputPath}`);
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+
 
     // Read YAML
     const yamlContent = fs.readFileSync(yamlPath, 'utf-8');
@@ -73,7 +91,7 @@ function main() {
     // Write output
     fs.writeFileSync(outputPath, jsContent, 'utf-8');
 
-    console.log(`\n✅ Successfully generated spec-inline.js`);
+    console.log('\nSuccessfully generated spec-inline.js');
     console.log(`   YAML size: ${yamlSize} KB`);
     console.log(`   JS size:   ${jsSize} KB`);
     console.log(`   Compression ratio: ${((jsSize / yamlSize) * 100).toFixed(1)}%`);
@@ -81,13 +99,13 @@ function main() {
     // Verify
     const generated = fs.readFileSync(outputPath, 'utf-8');
     if (generated.startsWith('const OPENAPI_SPEC_YAML = `')) {
-      console.log(`\n✅ File validated successfully`);
+      console.log('\nFile validated successfully');
       process.exit(0);
     } else {
       throw new Error('Generated file validation failed');
     }
   } catch (error) {
-    console.error(`\n❌ Error: ${error.message}`);
+    console.error(`\nError: ${error.message}`);
     console.error(error.stack);
     process.exit(1);
   }

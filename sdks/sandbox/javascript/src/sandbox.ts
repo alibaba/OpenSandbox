@@ -278,7 +278,8 @@ export class Sandbox {
 
       const endpoint = await sandboxes.getSandboxEndpoint(
         sandboxId,
-        DEFAULT_EXECD_PORT
+        DEFAULT_EXECD_PORT,
+        connectionConfig.useServerProxy
       );
       const execdBaseUrl = `${connectionConfig.protocol}://${endpoint.endpoint}`;
 
@@ -286,6 +287,7 @@ export class Sandbox {
         adapterFactory.createExecdStack({
           connectionConfig,
           execdBaseUrl,
+          endpointHeaders: endpoint.headers,
         });
 
       const sbx = new Sandbox({
@@ -349,13 +351,15 @@ export class Sandbox {
     try {
       const endpoint = await sandboxes.getSandboxEndpoint(
         opts.sandboxId,
-        DEFAULT_EXECD_PORT
+        DEFAULT_EXECD_PORT,
+        connectionConfig.useServerProxy
       );
       const execdBaseUrl = `${connectionConfig.protocol}://${endpoint.endpoint}`;
       const { commands, files, health, metrics } =
         adapterFactory.createExecdStack({
           connectionConfig,
           execdBaseUrl,
+          endpointHeaders: endpoint.headers,
         });
 
       const sbx = new Sandbox({
@@ -486,7 +490,11 @@ export class Sandbox {
    * Get sandbox endpoint for a port (STRICT: no scheme), e.g. "localhost:44772" or "domain/route/.../44772".
    */
   async getEndpoint(port: number): Promise<Endpoint> {
-    return await this.sandboxes.getSandboxEndpoint(this.id, port);
+    return await this.sandboxes.getSandboxEndpoint(
+      this.id,
+      port,
+      this.connectionConfig.useServerProxy
+    );
   }
 
   /**

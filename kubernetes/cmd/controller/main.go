@@ -23,7 +23,6 @@ import (
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
-	"k8s.io/klog/v2"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -39,6 +38,7 @@ import (
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/fieldindex"
+	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/logging"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -64,6 +64,15 @@ func main() {
 	var secureMetrics bool
 	var enableHTTP2 bool
 	var tlsOpts []func(*tls.Config)
+
+	// Log file options
+	var enableFileLog bool
+	var logFilePath string
+	var logMaxSize int
+	var logMaxBackups int
+	var logMaxAge int
+	var logCompress bool
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -81,16 +90,34 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
-	opts := zap.Options{
-		Development: true,
-	}
-	opts.BindFlags(flag.CommandLine)
 
-	klog.InitFlags(flag.CommandLine)
+	// Log file flags
+	flag.BoolVar(&enableFileLog, "enable-file-log", false, "Enable log output to file")
+	flag.StringVar(&logFilePath, "log-file-path", "/var/log/sandbox-controller/controller.log", "Path to the log file")
+	flag.IntVar(&logMaxSize, "log-max-size", 100, "Maximum size in megabytes of the log file before it gets rotated")
+	flag.IntVar(&logMaxBackups, "log-max-backups", 10, "Maximum number of old log files to retain")
+	flag.IntVar(&logMaxAge, "log-max-age", 30, "Maximum number of days to retain old log files")
+	flag.BoolVar(&logCompress, "log-compress", true, "Compress determines if the rotated log files should be compressed using gzip")
+
+	opts := zap.Options{}
+	opts.BindFlags(flag.CommandLine)
 
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	// Setup logger with file rotation support
+	logOpts := logging.Options{
+		Development:      opts.Development,
+		EnableFileOutput: enableFileLog,
+		LogFilePath:      logFilePath,
+		MaxSize:          logMaxSize,
+		MaxBackups:       logMaxBackups,
+		MaxAge:           logMaxAge,
+		Compress:         logCompress,
+		ZapOptions:       opts,
+	}
+
+	logger := logging.NewLoggerWithZapOptions(logOpts)
+	ctrl.SetLogger(logger)
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will

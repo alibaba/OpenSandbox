@@ -432,6 +432,257 @@ public class SandboxE2ETest extends BaseE2ETest {
         }
     }
 
+    @Test
+    @Order(2)
+    @DisplayName("Sandbox create with PVC named volume mount (read-write)")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testSandboxCreateWithPvcVolumeMount() {
+        String pvcVolumeName = "opensandbox-e2e-pvc-test";
+        String containerMountPath = "/mnt/pvc-data";
+
+        Volume volume =
+                Volume.builder()
+                        .name("test-pvc-vol")
+                        .pvc(PVC.of(pvcVolumeName))
+                        .mountPath(containerMountPath)
+                        .readOnly(false)
+                        .build();
+
+        Sandbox pvcSandbox =
+                Sandbox.builder()
+                        .connectionConfig(sharedConnectionConfig)
+                        .image(getSandboxImage())
+                        .timeout(Duration.ofMinutes(2))
+                        .readyTimeout(Duration.ofSeconds(60))
+                        .volume(volume)
+                        .build();
+
+        try {
+            assertTrue(pvcSandbox.isHealthy(), "PVC volume sandbox should be healthy");
+
+            // Step 1: Verify the marker file seeded into the named volume is readable
+            Execution readMarker =
+                    pvcSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("cat " + containerMountPath + "/marker.txt")
+                                            .build());
+            assertNull(readMarker.getError(), "Failed to read marker file from PVC volume");
+            assertEquals(1, readMarker.getLogs().getStdout().size());
+            assertEquals(
+                    "pvc-marker-data",
+                    readMarker.getLogs().getStdout().get(0).getText());
+
+            // Step 2: Write a file from inside the sandbox to the named volume
+            Execution writeResult =
+                    pvcSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "echo 'written-to-pvc' > "
+                                                            + containerMountPath
+                                                            + "/pvc-output.txt")
+                                            .build());
+            assertNull(writeResult.getError(), "Failed to write file to PVC volume");
+
+            // Step 3: Verify the written file is readable
+            Execution readBack =
+                    pvcSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "cat "
+                                                            + containerMountPath
+                                                            + "/pvc-output.txt")
+                                            .build());
+            assertNull(readBack.getError());
+            assertEquals(1, readBack.getLogs().getStdout().size());
+            assertEquals(
+                    "written-to-pvc", readBack.getLogs().getStdout().get(0).getText());
+
+            // Step 4: Verify the mount path is a proper directory
+            Execution dirCheck =
+                    pvcSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "test -d " + containerMountPath + " && echo OK")
+                                            .build());
+            assertNull(dirCheck.getError());
+            assertEquals(1, dirCheck.getLogs().getStdout().size());
+            assertEquals("OK", dirCheck.getLogs().getStdout().get(0).getText());
+        } finally {
+            try {
+                pvcSandbox.kill();
+            } catch (Exception ignored) {
+            }
+            pvcSandbox.close();
+        }
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("Sandbox create with PVC named volume mount (read-only)")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testSandboxCreateWithPvcVolumeMountReadOnly() {
+        String pvcVolumeName = "opensandbox-e2e-pvc-test";
+        String containerMountPath = "/mnt/pvc-data-ro";
+
+        Volume volume =
+                Volume.builder()
+                        .name("test-pvc-vol-ro")
+                        .pvc(PVC.of(pvcVolumeName))
+                        .mountPath(containerMountPath)
+                        .readOnly(true)
+                        .build();
+
+        Sandbox roSandbox =
+                Sandbox.builder()
+                        .connectionConfig(sharedConnectionConfig)
+                        .image(getSandboxImage())
+                        .timeout(Duration.ofMinutes(2))
+                        .readyTimeout(Duration.ofSeconds(60))
+                        .volume(volume)
+                        .build();
+
+        try {
+            assertTrue(roSandbox.isHealthy(), "Read-only PVC volume sandbox should be healthy");
+
+            // Step 1: Verify the marker file is readable
+            Execution readMarker =
+                    roSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("cat " + containerMountPath + "/marker.txt")
+                                            .build());
+            assertNull(readMarker.getError(), "Failed to read marker file on read-only PVC mount");
+            assertEquals(1, readMarker.getLogs().getStdout().size());
+            assertEquals(
+                    "pvc-marker-data",
+                    readMarker.getLogs().getStdout().get(0).getText());
+
+            // Step 2: Verify writing is denied on read-only mount
+            Execution writeResult =
+                    roSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "touch "
+                                                            + containerMountPath
+                                                            + "/should-fail.txt")
+                                            .build());
+            assertNotNull(
+                    writeResult.getError(), "Write should fail on read-only PVC mount");
+        } finally {
+            try {
+                roSandbox.kill();
+            } catch (Exception ignored) {
+            }
+            roSandbox.close();
+        }
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("Sandbox create with PVC named volume subPath mount")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testSandboxCreateWithPvcVolumeMountSubPath() {
+        String pvcVolumeName = "opensandbox-e2e-pvc-test";
+        String containerMountPath = "/mnt/train";
+
+        Volume volume =
+                Volume.builder()
+                        .name("test-pvc-subpath")
+                        .pvc(PVC.of(pvcVolumeName))
+                        .mountPath(containerMountPath)
+                        .readOnly(false)
+                        .subPath("datasets/train")
+                        .build();
+
+        Sandbox subpathSandbox =
+                Sandbox.builder()
+                        .connectionConfig(sharedConnectionConfig)
+                        .image(getSandboxImage())
+                        .timeout(Duration.ofMinutes(2))
+                        .readyTimeout(Duration.ofSeconds(60))
+                        .volume(volume)
+                        .build();
+
+        try {
+            assertTrue(subpathSandbox.isHealthy(), "PVC subPath sandbox should be healthy");
+
+            // Step 1: Verify the subpath marker file is readable
+            Execution readMarker =
+                    subpathSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("cat " + containerMountPath + "/marker.txt")
+                                            .build());
+            assertNull(readMarker.getError(), "Failed to read subpath marker file");
+            assertEquals(1, readMarker.getLogs().getStdout().size());
+            assertEquals(
+                    "pvc-subpath-marker",
+                    readMarker.getLogs().getStdout().get(0).getText());
+
+            // Step 2: Verify only subPath contents are visible (not the full volume)
+            Execution lsResult =
+                    subpathSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("ls " + containerMountPath + "/")
+                                            .build());
+            assertNull(lsResult.getError());
+            String lsOutput =
+                    lsResult.getLogs().getStdout().stream()
+                            .map(m -> m.getText())
+                            .reduce("", (a, b) -> a + "\n" + b);
+            assertTrue(lsOutput.contains("marker.txt"), "Should contain marker.txt");
+            assertFalse(lsOutput.contains("datasets"), "Should not contain datasets dir");
+
+            // Step 3: Write a file and verify
+            Execution writeResult =
+                    subpathSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "echo 'subpath-write-test' > "
+                                                            + containerMountPath
+                                                            + "/output.txt")
+                                            .build());
+            assertNull(writeResult.getError(), "Failed to write file to PVC subPath");
+
+            Execution readBack =
+                    subpathSandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "cat "
+                                                            + containerMountPath
+                                                            + "/output.txt")
+                                            .build());
+            assertNull(readBack.getError());
+            assertEquals(1, readBack.getLogs().getStdout().size());
+            assertEquals(
+                    "subpath-write-test", readBack.getLogs().getStdout().get(0).getText());
+        } finally {
+            try {
+                subpathSandbox.kill();
+            } catch (Exception ignored) {
+            }
+            subpathSandbox.close();
+        }
+    }
+
     // ==========================================
     // Command Execution Tests
     // ==========================================

@@ -16,17 +16,22 @@
 
 package com.alibaba.opensandbox.sandbox.domain.models.execd.executions
 
+import kotlin.time.Duration
+
 /**
  * Parameters for command execution.
  *
  * @property command The command content to execute
  * @property background Whether to run in background (detached)
  * @property workingDirectory Directory to execute command in
+ * @property timeout Maximum execution time; server will terminate when reached.  Null means the server will not enforce any timeout.
+ * @property handlers Optional execution handlers
  */
 class RunCommandRequest private constructor(
     val command: String,
     val background: Boolean,
     val workingDirectory: String?,
+    val timeout: Duration?,
     val handlers: ExecutionHandlers?,
 ) {
     companion object {
@@ -38,6 +43,7 @@ class RunCommandRequest private constructor(
         private var command: String? = null
         private var background: Boolean = false
         private var workingDirectory: String? = null
+        private var timeout: Duration? = null
         private var handlers: ExecutionHandlers? = null
 
         fun command(command: String): Builder {
@@ -56,6 +62,15 @@ class RunCommandRequest private constructor(
             return this
         }
 
+        /**
+         * Maximum execution time; server will terminate the command when reached.
+         * If omitted, the server will not enforce any timeout.
+         */
+        fun timeout(timeout: Duration?): Builder {
+            this.timeout = timeout
+            return this
+        }
+
         fun handlers(handlers: ExecutionHandlers?): Builder {
             this.handlers = handlers
             return this
@@ -67,6 +82,7 @@ class RunCommandRequest private constructor(
                 command = commandValue,
                 background = background,
                 workingDirectory = workingDirectory,
+                timeout = timeout,
                 handlers = handlers,
             )
         }

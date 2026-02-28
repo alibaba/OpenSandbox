@@ -41,6 +41,11 @@ class ConnectionConfig private constructor(
     val connectionPool: ConnectionPool?,
     /** Whether the connection pool is managed by the user */
     val connectionPoolManagedByUser: Boolean,
+    /**
+     * Use sandbox server as proxy for process execd requests.
+     * Useful when the client SDK cannot access the created sandbox directly.
+     */
+    val useServerProxy: Boolean = false,
 ) {
     companion object {
         private const val DEFAULT_DOMAIN = "localhost:8080"
@@ -121,6 +126,17 @@ class ConnectionConfig private constructor(
         private var connectionPool: ConnectionPool? = null
 
         private var connectionPoolManagedByUser: Boolean = false
+
+        private var useServerProxy: Boolean = false
+
+        /**
+         * Use sandbox server as proxy for process execd requests.
+         * Useful when the client SDK cannot access the created sandbox directly.
+         */
+        fun useServerProxy(useServerProxy: Boolean): Builder {
+            this.useServerProxy = useServerProxy
+            return this
+        }
 
         /**
          * Set the API key used for authentication.
@@ -258,6 +274,7 @@ class ConnectionConfig private constructor(
                 headers = headers,
                 connectionPool = connectionPool,
                 connectionPoolManagedByUser = connectionPoolManagedByUser,
+                useServerProxy = useServerProxy,
             )
         }
     }

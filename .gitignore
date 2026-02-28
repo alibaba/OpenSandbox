@@ -133,6 +133,8 @@ dist
 # Gatsby files
 .cache/
 public
+!docs/public/
+!docs/public/CNAME
 
 # Serverless directories
 .serverless/
@@ -222,6 +224,9 @@ secrets/
 
 # Generated API documentation
 docs/generated/
+docs/.vitepress/generated/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
 apidocs/
 
 # Test results
@@ -263,3 +268,5 @@ nbdist/
 # Generated files
 generated/
 **/generated/**
+bin/
+obj/

@@ -15,83 +15,66 @@
 package log
 
 import (
-	"fmt"
 	"os"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 )
 
 const logFileEnvKey = "EXECD_LOG_FILE"
 
-var (
-	atomicLevel = zap.NewAtomicLevelAt(zap.InfoLevel)
-	base        *zap.Logger
-	sugar       *zap.SugaredLogger
-)
+var current slogger.Logger
 
-func init() {
-	cfg := zap.NewProductionConfig()
-	cfg.Level = atomicLevel
-	cfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
-	cfg.EncoderConfig.CallerKey = ""
-	cfg.DisableCaller = true
-	cfg.DisableStacktrace = true
-	cfg.EncoderConfig.StacktraceKey = ""
-
-	logFile := os.Getenv(logFileEnvKey)
-	if logFile != "" {
-		cfg.OutputPaths = []string{logFile}
-		cfg.ErrorOutputPaths = []string{logFile}
-	} else {
-		// outputs log to stdout pipe by default
-		cfg.OutputPaths = []string{"stdout"}
-		cfg.ErrorOutputPaths = []string{"stdout"}
-	}
-
-	logger, err := cfg.Build()
-	if err != nil {
-		panic(fmt.Sprintf("failed to init logger: %v", err))
-	}
-	base = logger
-	sugar = base.Sugar()
+// Init constructs the singleton logger. Call once during startup.
+// Legacy levels: 0/1/2=fatal, 3=error, 4=warn, 5/6=info, 7+=debug.
+func Init(level int) {
+	current = newLogger(mapLevel(level))
 }
 
-// SetLevel maps legacy Beego log levels to zap levels.
-// 0/1/2 => Fatal, 3 => Error, 4 => Warn, 5/6 => Info, 7+ => Debug.
-func SetLevel(level int) {
-	atomicLevel.SetLevel(mapLevel(level))
-}
-
-func mapLevel(level int) zapcore.Level {
+func mapLevel(level int) string {
 	switch {
 	case level <= 2:
-		return zapcore.FatalLevel
+		return "fatal"
 	case level == 3:
-		return zapcore.ErrorLevel
+		return "error"
 	case level == 4:
-		return zapcore.WarnLevel
+		return "warn"
 	case level == 5 || level == 6:
-		return zapcore.InfoLevel
+		return "info"
 	default:
-		return zapcore.DebugLevel
+		return "debug"
 	}
 }
 
-func Sync() {
-	_ = base.Sync()
+func newLogger(level string) slogger.Logger {
+	cfg := slogger.Config{
+		Level: level,
+	}
+	if logFile := os.Getenv(logFileEnvKey); logFile != "" {
+		cfg.OutputPaths = []string{logFile}
+		cfg.ErrorOutputPaths = cfg.OutputPaths
+	}
+	return slogger.MustNew(cfg)
+}
+
+func getLogger() slogger.Logger {
+	if current != nil {
+		return current
+	}
+	l := newLogger("info")
+	current = l
+	return l
 }
 
 func Debug(format string, args ...any) {
-	sugar.Debugf(format, args...)
+	getLogger().Debugf(format, args...)
 }
 
 func Info(format string, args ...any) {
-	sugar.Infof(format, args...)
+	getLogger().Infof(format, args...)
 }
 
 func Warn(format string, args ...any) {
-	sugar.Warnf(format, args...)
+	getLogger().Warnf(format, args...)
 }
 
 // Warning is an alias to Warn for compatibility.
@@ -100,5 +83,5 @@ func Warning(format string, args ...any) {
 }
 
 func Error(format string, args ...any) {
-	sugar.Errorf(format, args...)
+	getLogger().Errorf(format, args...)
 }

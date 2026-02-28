@@ -33,7 +33,19 @@ internal class MetricsAdapter(
     private val execdEndpoint: SandboxEndpoint,
 ) : Metrics {
     private val logger = LoggerFactory.getLogger(MetricsAdapter::class.java)
-    private val api = MetricApi("${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}", httpClientProvider.httpClient)
+    private val api =
+        MetricApi(
+            "${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}",
+            httpClientProvider.httpClient.newBuilder()
+                .addInterceptor { chain ->
+                    val requestBuilder = chain.request().newBuilder()
+                    execdEndpoint.headers.forEach { (key, value) ->
+                        requestBuilder.header(key, value)
+                    }
+                    chain.proceed(requestBuilder.build())
+                }
+                .build(),
+        )
 
     override fun getMetrics(sandboxId: String): SandboxMetrics {
         logger.debug("Retrieving sandbox metrics for {}", sandboxId)

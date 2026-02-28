@@ -26,7 +26,15 @@ import re
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from src.api.schema import Sandbox, SandboxFilter
+from src.api.schema import Endpoint, Sandbox, SandboxFilter
+from src.services.constants import OPEN_SANDBOX_INGRESS_HEADER
+from src.config import (
+    GATEWAY_ROUTE_MODE_HEADER,
+    GATEWAY_ROUTE_MODE_URI,
+    GATEWAY_ROUTE_MODE_WILDCARD,
+    INGRESS_MODE_GATEWAY,
+    IngressConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -141,9 +149,49 @@ def matches_filter(sandbox: Sandbox, filter_: SandboxFilter) -> bool:
     return True
 
 
+# ============================================================================
+# Ingress helpers
+# ============================================================================
+def format_ingress_endpoint(
+    ingress_config: Optional[IngressConfig],
+    sandbox_id: str,
+    port: int,
+) -> Optional[Endpoint]:
+    """
+    Build an ingress-based endpoint string for a sandbox.
+
+    Returns None when ingress is not in gateway mode.
+    """
+    if not ingress_config or ingress_config.mode != INGRESS_MODE_GATEWAY:
+        return None
+    gateway_cfg = ingress_config.gateway
+    if gateway_cfg is None:
+        return None
+
+    address = gateway_cfg.address
+    route_mode = gateway_cfg.route.mode
+
+    if route_mode == GATEWAY_ROUTE_MODE_WILDCARD:
+        base = address[2:] if address.startswith("*.") else address
+        return Endpoint(endpoint=f"{sandbox_id}-{port}.{base}")
+
+    if route_mode == GATEWAY_ROUTE_MODE_URI:
+        return Endpoint(endpoint=f"{address}/{sandbox_id}/{port}")
+
+    if route_mode == GATEWAY_ROUTE_MODE_HEADER:
+        header_value = f"{sandbox_id}-{port}"
+        return Endpoint(
+            endpoint=address,
+            headers={OPEN_SANDBOX_INGRESS_HEADER: header_value},
+        )
+
+    raise RuntimeError(f"Unsupported route mode: {route_mode}")
+
+
 __all__ = [
     "parse_memory_limit",
     "parse_nano_cpus",
     "parse_timestamp",
+    "format_ingress_endpoint",
     "matches_filter",
 ]

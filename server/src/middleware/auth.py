@@ -19,6 +19,7 @@ This module implements API Key authentication as specified in the OpenAPI spec.
 API keys are configured via config.toml and validated against the OPEN-SANDBOX-API-KEY header.
 """
 
+import re
 from typing import Callable, Optional
 
 from fastapi import Request, Response, status
@@ -39,6 +40,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
     # Paths that don't require authentication
     EXEMPT_PATHS = ["/health", "/docs", "/redoc", "/openapi.json"]
+
+    # Strict pattern for proxy-to-sandbox: /sandboxes/{id}/proxy/{port}/... with numeric port only.
+    # Matches the actual route in lifecycle.py; rejects path traversal (..) and malformed port.
+    _PROXY_PATH_RE = re.compile(r"^(/v1)?/sandboxes/[^/]+/proxy/\d+(/|$)")
+
+    @staticmethod
+    def _is_proxy_path(path: str) -> bool:
+        """True only for the exact proxy-route shape; rejects path traversal (..)."""
+        if ".." in path:
+            return False
+        return bool(AuthMiddleware._PROXY_PATH_RE.match(path))
 
     def __init__(self, app, config: Optional[AppConfig] = None):
         """
@@ -80,6 +92,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         """
         # Skip authentication for exempt paths
         if any(request.url.path.startswith(path) for path in self.EXEMPT_PATHS):
+            return await call_next(request)
+
+        # Skip authentication only for the exact proxy-to-sandbox route shape
+        # (no path traversal, no loose substring match)
+        if self._is_proxy_path(request.url.path):
             return await call_next(request)
 
         # If no API keys are configured, skip authentication
