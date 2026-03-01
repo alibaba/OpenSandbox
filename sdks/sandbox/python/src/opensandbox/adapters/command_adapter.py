@@ -96,8 +96,12 @@ class CommandsAdapter(Commands):
             **self.connection_config.headers,
             **self.execd_endpoint.headers,
         }
+        api_key = self.connection_config.get_api_key()
+        if api_key:
+            headers.setdefault("OPEN-SANDBOX-API-KEY", api_key)
 
-        # Execd API does not require authentication
+        # Execd API typically does not require authentication.
+        # Keep API key header available for server-proxy mode.
         self._client = Client(
             base_url=base_url,
             timeout=timeout,

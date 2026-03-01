@@ -21,7 +21,12 @@ from opensandbox.adapters.health_adapter import HealthAdapter
 from opensandbox.adapters.metrics_adapter import MetricsAdapter
 from opensandbox.adapters.sandboxes_adapter import SandboxesAdapter
 from opensandbox.config import ConnectionConfig
+from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.models.sandboxes import SandboxEndpoint
+from opensandbox.sync.adapters.command_adapter import CommandsAdapterSync
+from opensandbox.sync.adapters.filesystem_adapter import FilesystemAdapterSync
+from opensandbox.sync.adapters.health_adapter import HealthAdapterSync
+from opensandbox.sync.adapters.metrics_adapter import MetricsAdapterSync
 
 
 def test_sandbox_service_adapter_eager_init() -> None:
@@ -48,3 +53,40 @@ async def test_execd_service_adapters_eager_init_and_urls() -> None:
     assert await fs._get_client() is not None
     assert await health._get_client() is not None
     assert await metrics._get_client() is not None
+
+
+@pytest.mark.asyncio
+async def test_execd_service_adapters_set_api_key_header() -> None:
+    cfg = ConnectionConfig(protocol="http", api_key="proxy-key")
+    endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
+
+    cmd = CommandsAdapter(cfg, endpoint)
+    fs = FilesystemAdapter(cfg, endpoint)
+    health = HealthAdapter(cfg, endpoint)
+    metrics = MetricsAdapter(cfg, endpoint)
+
+    for adapter in (cmd, fs, health, metrics):
+        assert adapter._httpx_client.headers.get("OPEN-SANDBOX-API-KEY") == "proxy-key"
+
+    await cmd._httpx_client.aclose()
+    await fs._httpx_client.aclose()
+    await health._httpx_client.aclose()
+    await metrics._httpx_client.aclose()
+
+
+def test_sync_execd_service_adapters_set_api_key_header() -> None:
+    cfg = ConnectionConfigSync(protocol="http", api_key="proxy-key")
+    endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
+
+    cmd = CommandsAdapterSync(cfg, endpoint)
+    fs = FilesystemAdapterSync(cfg, endpoint)
+    health = HealthAdapterSync(cfg, endpoint)
+    metrics = MetricsAdapterSync(cfg, endpoint)
+
+    for adapter in (cmd, fs, health, metrics):
+        assert adapter._httpx_client.headers.get("OPEN-SANDBOX-API-KEY") == "proxy-key"
+
+    cmd._httpx_client.close()
+    fs._httpx_client.close()
+    health._httpx_client.close()
+    metrics._httpx_client.close()

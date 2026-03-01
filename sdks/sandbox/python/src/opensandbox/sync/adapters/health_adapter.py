@@ -42,6 +42,9 @@ class HealthAdapterSync(HealthSync):
             **self.connection_config.headers,
             **self.execd_endpoint.headers,
         }
+        api_key = self.connection_config.get_api_key()
+        if api_key:
+            headers.setdefault("OPEN-SANDBOX-API-KEY", api_key)
 
         self._client = Client(base_url=base_url, timeout=timeout)
         self._httpx_client = httpx.Client(
