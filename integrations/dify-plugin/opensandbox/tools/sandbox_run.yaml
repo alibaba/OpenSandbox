@@ -1,0 +1,72 @@
+identity:
+  name: sandbox_run
+  author: OpenSandbox
+  label:
+    en_US: Run Command
+    zh_Hans: 运行命令
+description:
+  human:
+    en_US: Run a shell command in an existing sandbox.
+    zh_Hans: 在已有 sandbox 中运行 shell 命令。
+  llm: Run a shell command in an existing sandbox and return stdout/stderr.
+parameters:
+  - name: sandbox_id
+    type: string
+    required: true
+    label:
+      en_US: Sandbox ID
+      zh_Hans: Sandbox ID
+    human_description:
+      en_US: ID returned by sandbox_create.
+      zh_Hans: sandbox_create 返回的 ID。
+    llm_description: The sandbox id to connect.
+    form: form
+  - name: command
+    type: string
+    required: true
+    label:
+      en_US: Command
+      zh_Hans: 命令
+    human_description:
+      en_US: Shell command to execute.
+      zh_Hans: 需要执行的 shell 命令。
+    llm_description: Command string to execute in sandbox.
+    form: form
+  - name: working_directory
+    type: string
+    required: false
+    label:
+      en_US: Working directory
+      zh_Hans: 工作目录
+    human_description:
+      en_US: Optional working directory for the command.
+      zh_Hans: 命令的工作目录（可选）。
+    llm_description: Working directory for command execution.
+    form: form
+  - name: background
+    type: boolean
+    required: false
+    default: false
+    label:
+      en_US: Run in background
+      zh_Hans: 后台运行
+    human_description:
+      en_US: Run command in background (detached).
+      zh_Hans: 以后台方式执行命令（detached）。
+    llm_description: Run command in background.
+    form: form
+output_schema:
+  type: object
+  properties:
+    execution_id:
+      type: string
+      description: Execution identifier.
+    stdout:
+      type: string
+      description: Combined stdout output.
+    stderr:
+      type: string
+      description: Combined stderr output.
+extra:
+  python:
+    source: tools/sandbox_run.py

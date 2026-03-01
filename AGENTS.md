@@ -40,6 +40,7 @@
 - Use feature branches (e.g., `feature/...`, `fix/...`) and keep PRs focused.
 - PRs should include summary, testing status, and linked issues; follow the template in `CONTRIBUTING.md`.
 - For major API or architectural changes, submit an OSEP (`oseps/`).
+- **IMPORTANT: Before committing code**, always run `./scripts/add-license.sh` from the repo root to add Apache 2.0 license headers to new source files. This is required for CI to pass.
 
 ## Security & Configuration Tips
 - Local server config lives in `~/.sandbox.toml` (copied from `server/example.config.toml`).

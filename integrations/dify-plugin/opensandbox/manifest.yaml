@@ -1,0 +1,32 @@
+version: 0.1.0
+type: plugin
+author: "opensandbox"
+name: "opensandbox"
+label:
+  en_US: "OpenSandbox"
+  zh_Hans: "OpenSandbox"
+created_at: "2026-01-31T00:00:00Z"
+icon: icon.svg
+description:
+  en_US: "Run code in OpenSandbox via your self-hosted server."
+  zh_Hans: "通过自建 OpenSandbox Server 运行代码。"
+tags:
+  - "utilities"
+resource:
+  memory: 1048576
+  permission:
+    tool:
+      enabled: true
+plugins:
+  tools:
+    - "provider/opensandbox.yaml"
+meta:
+  version: 0.0.1
+  arch:
+    - "amd64"
+    - "arm64"
+  runner:
+    language: "python"
+    version: "3.12"
+    entrypoint: "main"
+privacy: "./privacy.md"

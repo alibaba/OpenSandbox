@@ -1,0 +1,44 @@
+identity:
+  author: OpenSandbox
+  name: opensandbox
+  label:
+    en_US: OpenSandbox
+    zh_Hans: OpenSandbox
+  description:
+    en_US: OpenSandbox tools for running code in isolated sandboxes.
+    zh_Hans: OpenSandbox 工具，用于在隔离沙箱中运行代码。
+  icon: icon.svg
+  tags:
+    - utilities
+credentials_for_provider:
+  opensandbox_base_url:
+    type: text-input
+    required: false
+    label:
+      en_US: OpenSandbox base URL
+      zh_Hans: OpenSandbox 基础地址
+    placeholder:
+      en_US: http://localhost:8080
+      zh_Hans: http://localhost:8080
+    help:
+      en_US: Base URL of your OpenSandbox server (without /v1). Falls back to OPENSANDBOX_BASE_URL env var.
+      zh_Hans: 你的 OpenSandbox 服务地址（不包含 /v1）。如未填写，将使用 OPENSANDBOX_BASE_URL 环境变量。
+  opensandbox_api_key:
+    type: secret-input
+    required: false
+    label:
+      en_US: OpenSandbox API Key
+      zh_Hans: OpenSandbox API Key
+    placeholder:
+      en_US: sk-...
+      zh_Hans: sk-...
+    help:
+      en_US: API key for OpenSandbox server authentication. Falls back to OPENSANDBOX_API_KEY env var.
+      zh_Hans: 用于 OpenSandbox 服务鉴权的 API Key。如未填写，将使用 OPENSANDBOX_API_KEY 环境变量。
+tools:
+  - tools/sandbox_create.yaml
+  - tools/sandbox_run.yaml
+  - tools/sandbox_kill.yaml
+extra:
+  python:
+    source: provider/opensandbox.py
