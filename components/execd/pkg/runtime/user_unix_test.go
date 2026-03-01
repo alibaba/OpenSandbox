@@ -43,10 +43,13 @@ func TestResolveUserCredentialWithUsername(t *testing.T) {
 		assert.Equal(t, cur.Username, *resolved.Username)
 	}
 	uid, _ := strconv.ParseUint(cur.Uid, 10, 32)
+	gid, _ := strconv.ParseUint(cur.Gid, 10, 32)
 	if assert.NotNil(t, resolved.UID) {
 		assert.Equal(t, int64(uid), *resolved.UID)
 	}
 	assert.Equal(t, uint32(uid), cred.Uid)
+	assert.Equal(t, uint32(gid), cred.Gid)
+	expectSupplementaryGroups(t, cur, cred.Groups)
 }
 
 func TestResolveUserCredentialWithUID(t *testing.T) {
@@ -70,5 +73,34 @@ func TestResolveUserCredentialWithUID(t *testing.T) {
 	assert.NotNil(t, resolved.Username)
 	if assert.NotNil(t, cred) {
 		assert.Equal(t, uint32(uidVal), cred.Uid)
+		gid, _ := strconv.ParseUint(cur.Gid, 10, 32)
+		assert.Equal(t, uint32(gid), cred.Gid)
+		expectSupplementaryGroups(t, cur, cred.Groups)
 	}
+}
+
+// expectSupplementaryGroups asserts that credGroups matches the current user's
+// supplementary groups (all groups from usr.GroupIds() except the primary Gid).
+func expectSupplementaryGroups(t *testing.T, usr *user.User, credGroups []uint32) {
+	t.Helper()
+	primaryGid, err := strconv.ParseUint(usr.Gid, 10, 32)
+	if err != nil {
+		t.Skipf("cannot parse primary gid: %v", err)
+	}
+	allGids, err := usr.GroupIds()
+	if err != nil {
+		t.Skipf("cannot get group ids: %v", err)
+	}
+	var expected []uint32
+	for _, gidStr := range allGids {
+		g, parseErr := strconv.ParseUint(gidStr, 10, 32)
+		if parseErr != nil {
+			continue
+		}
+		if g == primaryGid {
+			continue
+		}
+		expected = append(expected, uint32(g))
+	}
+	assert.ElementsMatch(t, expected, credGroups, "supplementary groups should match user's groups excluding primary")
 }

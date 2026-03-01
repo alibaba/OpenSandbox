@@ -61,9 +61,29 @@ func resolveUserCredential(u *CommandUser) (*syscall.Credential, *CommandUser, e
 		return nil, nil, fmt.Errorf("parse gid %s: %w", usr.Gid, err)
 	}
 
+	// Supplementary groups: required so the process has all permissions the user is entitled to
+	// (e.g. docker group for socket access, device access).
+	groupIds, err := usr.GroupIds()
+	if err != nil {
+		return nil, nil, fmt.Errorf("lookup supplementary groups for user %s: %w", usr.Username, err)
+	}
+	groups := make([]uint32, 0, len(groupIds))
+	for _, gidStr := range groupIds {
+		g, parseErr := strconv.ParseUint(gidStr, 10, 32)
+		if parseErr != nil {
+			continue
+		}
+		// Skip primary group; it is already set in Credential.Gid.
+		if g == gid {
+			continue
+		}
+		groups = append(groups, uint32(g))
+	}
+
 	cred := &syscall.Credential{
-		Uid: uint32(uid),
-		Gid: uint32(gid),
+		Uid:    uint32(uid),
+		Gid:    uint32(gid),
+		Groups: groups,
 	}
 
 	resolvedUID := int64(uid)
