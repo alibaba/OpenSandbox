@@ -1,0 +1,30 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ${GVISOR_KIND_CLUSTER}
+# Configure containerd to use gVisor runsc runtime with containerd-shim-runsc-v1
+containerdConfigPatches:
+  - |-
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+      runtime_type = "io.containerd.runsc.v1"
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc.options]
+        TypeUrl = "io.containerd.runsc.v1.options"
+        ConfigPath = "/etc/containerd/runsc.toml"
+nodes:
+  - role: control-plane
+    image: ${GVISOR_KIND_IMAGE}
+    extraMounts:
+      - hostPath: ${PWD}/test/kind/gvisor/runsc
+        containerPath: /usr/local/bin/runsc
+        readOnly: true
+      - hostPath: ${PWD}/test/kind/gvisor/containerd-shim-runsc-v1
+        containerPath: /usr/local/bin/containerd-shim-runsc-v1
+        readOnly: true
+  - role: worker
+    image: ${GVISOR_KIND_IMAGE}
+    extraMounts:
+      - hostPath: ${PWD}/test/kind/gvisor/runsc
+        containerPath: /usr/local/bin/runsc
+        readOnly: true
+      - hostPath: ${PWD}/test/kind/gvisor/containerd-shim-runsc-v1
+        containerPath: /usr/local/bin/containerd-shim-runsc-v1
+        readOnly: true

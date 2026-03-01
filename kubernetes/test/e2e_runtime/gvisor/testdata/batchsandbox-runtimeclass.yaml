@@ -1,0 +1,14 @@
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: BatchSandbox
+metadata:
+  name: {{.BatchSandboxName}}
+  namespace: {{.Namespace}}
+spec:
+  replicas: 1
+  template:
+    spec:
+      runtimeClassName: {{.RuntimeClassName}}
+      containers:
+        - name: sandbox-container
+          image: {{.SandboxImage}}
+          command: ["sleep", "3600"]
