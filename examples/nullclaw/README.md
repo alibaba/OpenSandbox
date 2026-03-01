@@ -63,6 +63,8 @@ Nullclaw gateway started. Please refer to 127.0.0.1:56234
 
 The endpoint printed at the end (e.g., `127.0.0.1:56234`) is the Nullclaw Gateway address exposed from the sandbox.
 
+By default, Nullclaw requires pairing before authenticated endpoints (for example, `/webhook`) can be used. The `/health` endpoint remains publicly accessible.
+
 ## References
 - [Nullclaw](https://github.com/nullclaw/nullclaw) — Minimal AI assistant runtime (678 KB static Zig binary)
 - [Nullclaw Documentation](https://nullclaw.github.io) — Full documentation

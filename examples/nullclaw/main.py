@@ -12,14 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
 import time
 from datetime import timedelta
 
+import requests
 from opensandbox import SandboxSync
 from opensandbox.config import ConnectionConfigSync
 from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
-import requests
 
 
 def check_nullclaw(sbx: SandboxSync) -> bool:
