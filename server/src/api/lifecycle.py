@@ -85,7 +85,7 @@ sandbox_service = create_sandbox_service()
 )
 async def create_sandbox(
     request: CreateSandboxRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> CreateSandboxResponse:
     """
     Create a sandbox from a container image.
@@ -96,7 +96,7 @@ async def create_sandbox(
 
     Args:
         request: Sandbox creation request
-        x_request_id: Unique request identifier for tracing
+        x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
         CreateSandboxResponse: Accepted sandbox creation request
@@ -125,7 +125,7 @@ async def list_sandboxes(
     metadata: Optional[str] = Query(None, description="Arbitrary metadata key-value pairs for filtering (URL encoded)."),
     page: int = Query(1, ge=1, description="Page number for pagination"),
     page_size: int = Query(20, ge=1, le=200, alias="pageSize", description="Number of items per page"),
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> ListSandboxesResponse:
     """
     List sandboxes with optional filtering and pagination.
@@ -138,7 +138,7 @@ async def list_sandboxes(
         metadata: Arbitrary metadata key-value pairs for filtering.
         page: Page number for pagination.
         page_size: Number of items per page.
-        x_request_id: Unique request identifier for tracing.
+        x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
         ListSandboxesResponse: Paginated list of sandboxes
@@ -186,7 +186,7 @@ async def list_sandboxes(
 )
 async def get_sandbox(
     sandbox_id: str,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Sandbox:
     """
     Fetch a sandbox by id.
@@ -196,7 +196,7 @@ async def get_sandbox(
 
     Args:
         sandbox_id: Unique sandbox identifier
-        x_request_id: Unique request identifier for tracing
+        x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
         Sandbox: Complete sandbox information
@@ -222,7 +222,7 @@ async def get_sandbox(
 )
 async def delete_sandbox(
     sandbox_id: str,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Response:
     """
     Delete a sandbox.
@@ -231,7 +231,7 @@ async def delete_sandbox(
 
     Args:
         sandbox_id: Unique sandbox identifier
-        x_request_id: Unique request identifier for tracing
+        x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
         Response: 204 No Content
@@ -262,7 +262,7 @@ async def delete_sandbox(
 )
 async def pause_sandbox(
     sandbox_id: str,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Response:
     """
     Pause execution while retaining state.
@@ -272,7 +272,7 @@ async def pause_sandbox(
 
     Args:
         sandbox_id: Unique sandbox identifier
-        x_request_id: Unique request identifier for tracing
+        x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
         Response: 202 Accepted
@@ -299,7 +299,7 @@ async def pause_sandbox(
 )
 async def resume_sandbox(
     sandbox_id: str,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Response:
     """
     Resume a paused sandbox.
@@ -309,7 +309,7 @@ async def resume_sandbox(
 
     Args:
         sandbox_id: Unique sandbox identifier
-        x_request_id: Unique request identifier for tracing
+        x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
         Response: 202 Accepted
@@ -339,7 +339,7 @@ async def resume_sandbox(
 async def renew_sandbox_expiration(
     sandbox_id: str,
     request: RenewSandboxExpirationRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> RenewSandboxExpirationResponse:
     """
     Renew sandbox expiration.
@@ -350,7 +350,7 @@ async def renew_sandbox_expiration(
     Args:
         sandbox_id: Unique sandbox identifier
         request: Renewal request with new expiration time
-        x_request_id: Unique request identifier for tracing
+        x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
         RenewSandboxExpirationResponse: Updated expiration time
@@ -383,7 +383,7 @@ async def get_sandbox_endpoint(
     sandbox_id: str,
     port: int,
     use_server_proxy: bool = Query(False, description="Whether to return a server-proxied URL"),
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Endpoint:
     """
     Get sandbox access endpoint.
@@ -397,7 +397,7 @@ async def get_sandbox_endpoint(
         sandbox_id: Unique sandbox identifier
         port: Port number where the service is listening inside the sandbox (1-65535)
         use_server_proxy: Whether to return a server-proxied URL
-        x_request_id: Unique request identifier for tracing
+        x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
         Endpoint: Public endpoint URL
