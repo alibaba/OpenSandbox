@@ -17,7 +17,7 @@
     <Description>A C# SDK for code interpretation with OpenSandbox. Provides high-level APIs for executing code in multiple languages (Python, JavaScript, TypeScript, Go, Java, Bash) within secure sandbox environments.</Description>
     <Copyright>Copyright 2026 Alibaba Group Holding Ltd.</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/alibaba/OpenSandbox</PackageProjectUrl>
+    <PackageProjectUrl>https://open-sandbox.ai</PackageProjectUrl>
     <RepositoryUrl>https://github.com/alibaba/OpenSandbox.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>sandbox;code-interpreter;execution;opensandbox;alibaba;python;javascript</PackageTags>
@@ -27,6 +27,14 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <TreatWarningsAsErrors Condition="'$(Configuration)' == 'Release'">true</TreatWarningsAsErrors>
+
+    <!--
+      Default to local source reference for development.
+      For release packing with NuGet version range, run:
+      dotnet pack -c Release -p:UseLocalOpenSandboxProjectReference=false
+    -->
+    <UseLocalOpenSandboxProjectReference Condition="'$(UseLocalOpenSandboxProjectReference)' == ''">true</UseLocalOpenSandboxProjectReference>
+    <OpenSandboxDependencyVersionRange>[0.1.0,0.2.0)</OpenSandboxDependencyVersionRange>
   </PropertyGroup>
 
   <!-- Expose internals to test project -->
@@ -34,9 +42,14 @@
     <InternalsVisibleTo Include="OpenSandbox.CodeInterpreter.Tests" />
   </ItemGroup>
 
-  <!-- Project References -->
-  <ItemGroup>
+  <!-- Use local project reference for day-to-day development -->
+  <ItemGroup Condition="'$(UseLocalOpenSandboxProjectReference)' == 'true'">
     <ProjectReference Include="..\..\..\..\sandbox\csharp\src\OpenSandbox\OpenSandbox.csproj" />
+  </ItemGroup>
+
+  <!-- Use NuGet dependency range for release packaging -->
+  <ItemGroup Condition="'$(UseLocalOpenSandboxProjectReference)' != 'true'">
+    <PackageReference Include="Alibaba.OpenSandbox" Version="$(OpenSandboxDependencyVersionRange)" />
   </ItemGroup>
 
   <!-- Common Dependencies -->
