@@ -42,6 +42,80 @@ Pool 自定义资源维护一个预热的计算资源池，以实现快速沙箱
 - 池范围的容量限制，防止资源耗尽
 - 基于需求的自动扩展
 
+## 沙箱安全隔离（RuntimeClass）
+
+OpenSandbox 以 Kubernetes Pod 作为执行单元，因此最终隔离强度取决于 Pod 使用的运行时和节点配置。
+
+### 隔离目标与边界
+
+- `runc`（默认）：基于 namespace/cgroup 的隔离，共享宿主机内核。
+- `gVisor`：用户态内核，提供更强的系统调用隔离，通常在兼容性/性能上有一定折中。
+- `Kata Containers`：每个 Pod 对应轻量 VM，隔离边界更强，但启动开销更高。
+- `Firecracker microVM`：通常通过运行时集成（例如 Kata + Firecracker）对接，隔离最强，运维复杂度也最高。
+
+可按威胁模型选择：
+- 多租户、不可信代码执行：优先 Kata 或 Firecracker 相关运行时类。
+- 兼顾兼容性和性能：优先 runc，或在可接受范围内使用 gVisor。
+
+### 运行时选择权衡
+
+| 运行时 | 隔离强度 | 兼容性 | 启动/吞吐 | 典型场景 |
+|---|---|---|---|---|
+| runc | 中 | 高 | 快 | 单租户或可信负载 |
+| gVisor | 高 | 中 | 中 | 需要更强 syscall 隔离的通用场景 |
+| Kata | 很高 | 中 | 中/慢 | 多租户不可信代码执行 |
+| Firecracker 相关 | 很高 | 中/低 | 最慢 | 对隔离要求极高的场景 |
+
+### 在 OpenSandbox CRD 中的配置方式
+
+`BatchSandbox.spec.template` 与 `Pool.spec.template` 都是 `PodTemplateSpec`，
+可直接在模板里设置 `runtimeClassName`。
+
+#### 示例：非池化 BatchSandbox 使用 gVisor
+
+```yaml
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: BatchSandbox
+metadata:
+  name: bsbx-gvisor
+spec:
+  replicas: 2
+  template:
+    spec:
+      runtimeClassName: gvisor
+      containers:
+      - name: sandbox-container
+        image: nginx:latest
+```
+
+#### 示例：资源池使用 Kata RuntimeClass
+
+```yaml
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: pool-kata
+spec:
+  template:
+    spec:
+      runtimeClassName: kata
+      containers:
+      - name: sandbox-container
+        image: nginx:latest
+  capacitySpec:
+    bufferMax: 10
+    bufferMin: 2
+    poolMax: 20
+    poolMin: 5
+```
+
+### 适用性与注意事项
+
+- 集群运行时必须提供对应的 runtime handler，并创建相应 `RuntimeClass`。
+- 高隔离运行时通常建议配套专用节点；结合 `nodeSelector`、亲和性、污点/容忍度进行调度约束。
+- 不同运行时对能力与底层特性的支持存在差异（例如依赖 ptrace 的场景）。
+- 切换 RuntimeClass 后，建议重新评估启动时延与资源池密度。
+
 
 ## 与 [kubernates-sigs/agent-sandbox](kubernates-sigs/agent-sandbox) 的关系
 

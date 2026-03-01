@@ -42,6 +42,82 @@ Intelligent resource management features:
 - Pool-wide capacity limits to prevent resource exhaustion
 - Automatic scaling based on demand
 
+## Sandbox Security Isolation (RuntimeClass)
+
+OpenSandbox uses Kubernetes pods as the execution unit, so sandbox isolation level depends on
+the runtime and node configuration used by those pods.
+
+### Isolation goals and boundaries
+
+- `runc` (default): Linux namespace/cgroup isolation, shared host kernel.
+- `gVisor`: user-space kernel for stronger syscall isolation, typically lower compatibility/performance.
+- `Kata Containers`: hardware-virtualized sandbox (lightweight VM per pod), stronger boundary with startup overhead.
+- `Firecracker microVM`: typically exposed through a runtime integration (for example Kata + Firecracker), strongest boundary with the highest ops complexity.
+
+Choose the runtime based on your threat model:
+- Untrusted multi-tenant code execution: prefer Kata or Firecracker-backed runtime classes.
+- Mixed trust with better compatibility/performance: prefer runc or gVisor where suitable.
+
+### Runtime selection trade-offs
+
+| Runtime | Isolation | Compatibility | Startup / Throughput | Typical use |
+|---|---|---|---|---|
+| runc | Medium | High | Fast | Trusted or single-tenant workloads |
+| gVisor | High | Medium | Medium | Strong syscall filtering with Kubernetes-native ops |
+| Kata | Very high | Medium | Medium/Slow | Multi-tenant untrusted code with VM boundary |
+| Firecracker-backed | Very high | Medium/Low | Slowest | Highest isolation requirement and strict tenancy |
+
+### How to apply in OpenSandbox CRDs
+
+`BatchSandbox.spec.template` and `Pool.spec.template` are `PodTemplateSpec`, so you can set
+`runtimeClassName` directly in template spec.
+
+#### Example: non-pooled BatchSandbox with gVisor
+
+```yaml
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: BatchSandbox
+metadata:
+  name: bsbx-gvisor
+spec:
+  replicas: 2
+  template:
+    spec:
+      runtimeClassName: gvisor
+      containers:
+      - name: sandbox-container
+        image: nginx:latest
+```
+
+#### Example: pooled sandbox with Kata runtime class
+
+```yaml
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: pool-kata
+spec:
+  template:
+    spec:
+      runtimeClassName: kata
+      containers:
+      - name: sandbox-container
+        image: nginx:latest
+  capacitySpec:
+    bufferMax: 10
+    bufferMin: 2
+    poolMax: 20
+    poolMin: 5
+```
+
+### Applicability and caveats
+
+- Your cluster runtime must provide the corresponding runtime handler and `RuntimeClass` object.
+- Isolated runtime pods are usually scheduled to dedicated nodes; combine with `nodeSelector`,
+  affinity, and taints/tolerations to avoid mismatch.
+- Some capabilities and low-level features may differ by runtime (for example ptrace-heavy workloads).
+- Revalidate startup latency and density after switching runtime classes, especially for large pools.
+
 
 ## Relationship with [kubernates-sigs/agent-sandbox](kubernates-sigs/agent-sandbox)
 
