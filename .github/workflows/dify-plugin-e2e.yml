@@ -71,9 +71,8 @@ jobs:
           docker images | grep -E "langgenius|dify" || true
 
       - name: Build execd image
-        working-directory: components/execd
         run: |
-          docker build -t opensandbox/execd:local .
+          docker build -f components/execd/Dockerfile -t opensandbox/execd:local .
 
       - name: Create OpenSandbox config
         run: |
