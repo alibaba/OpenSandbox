@@ -12,6 +12,7 @@ Examples for common OpenSandbox use cases. Each subdirectory contains runnable c
 - <img src="https://cli.iflow.cn/img/favicon.ico" alt="iFlow" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**iflow-cli**](iflow-cli): CLI invocation template for iFlow/custom HTTP LLM services
 - <img src="https://geminicli.com/favicon.ico" alt="Google Gemini" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**gemini-cli**](gemini-cli): Call Google Gemini within the sandbox
 - <img src="https://developers.openai.com/favicon.png" alt="OpenAI" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**codex-cli**](codex-cli): Call OpenAI/Codex-like models within the sandbox
+- <img src="https://www.kimi.com/favicon.ico" alt="Kimi" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**kimi-cli**](kimi-cli): Call Kimi Code CLI (Moonshot AI) within the sandbox
 - <img src="https://img.shields.io/badge/-%20-1C3C3C?logo=langgraph&logoColor=white&style=flat-square" alt="LangGraph" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**langgraph**](langgraph): LangGraph agent orchestrating sandbox lifecycle + tools
 - <img src="https://google.github.io/adk-docs/assets/agent-development-kit.png" alt="Google ADK" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**google-adk**](google-adk): Google ADK agent calling OpenSandbox tools
 - 🦞 [**openclaw**](openclaw): Run an OpenClaw Gateway inside a sandbox
@@ -22,7 +23,7 @@ Examples for common OpenSandbox use cases. Each subdirectory contains runnable c
 
 ## How to Run
 - Set basic environment variables (e.g., `export SANDBOX_DOMAIN=...`, `export SANDBOX_API_KEY=...`)
-- Add provider-specific variables as needed (e.g., `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `IFLOW_API_KEY`/`IFLOW_ENDPOINT`, etc.; model selection is optional)
+- Add provider-specific variables as needed (e.g., `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `KIMI_API_KEY`, `IFLOW_API_KEY`/`IFLOW_ENDPOINT`, etc.; model selection is optional)
 - Navigate to the example directory and install dependencies: `pip install -r requirements.txt` (or refer to the Dockerfile in the directory)
 - Then execute: `python main.py`
 - To run in a container, build and run using the `Dockerfile` in the directory
