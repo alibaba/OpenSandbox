@@ -27,7 +27,7 @@
   <hr />
 </div>
 
-English | [中文](docs/README_zh.md)
+[Document](https://open-sandbox.ai/) | [文档](https://open-sandbox.ai/zh/)
 
 OpenSandbox is a **general-purpose sandbox platform** for AI applications, offering multi-language SDKs, unified sandbox APIs, and Docker/Kubernetes runtimes for scenarios like Coding Agents, GUI Agents, Agent Evaluation, AI Code Execution, and RL Training.
 
