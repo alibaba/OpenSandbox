@@ -938,6 +938,22 @@ components:
           format: int64
           description: Maximum allowed execution time in milliseconds before the command is forcefully terminated by the server. If omitted, the server will not enforce any timeout.
           example: 60000
+        user:
+          type: object
+          properties:
+            name:
+              type: string
+              description: POSIX username to drop privileges to
+              example: sandbox
+            uid:
+              type: integer
+              format: int64
+              description: Numeric UID to drop privileges to
+              example: 1001
+          additionalProperties: false
+          description: |
+            Target user identity. Specify either `name` or `uid` (but not both).
+            Effective switching requires root or CAP_SETUID/CAP_SETGID (and valid UID/GID mappings when using user namespaces); otherwise the command will fail with a permission error.
 
     CommandStatusResponse:
       type: object
@@ -951,6 +967,19 @@ components:
           type: string
           description: Original command content
           example: ls -la
+        user:
+          type: object
+          properties:
+            name:
+              type: string
+              description: Effective username that executed the command
+              example: sandbox
+            uid:
+              type: integer
+              format: int64
+              description: Effective UID that executed the command
+              example: 1001
+          additionalProperties: false
         running:
           type: boolean
           description: Whether the command is still running

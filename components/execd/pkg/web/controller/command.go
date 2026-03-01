@@ -90,6 +90,7 @@ func (c *CodeInterpretingController) GetCommandStatus() {
 
 	resp := model.CommandStatusResponse{
 		ID:       status.Session,
+		User:     model.UserIdentityFromRuntime(status.User),
 		Running:  status.Running,
 		ExitCode: status.ExitCode,
 		Error:    status.Error,
@@ -132,6 +133,7 @@ func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.Ru
 			Language: runtime.BackgroundCommand,
 			Code:     request.Command,
 			Cwd:      request.Cwd,
+			User:     request.User.ToRuntime(),
 			Timeout:  timeout,
 		}
 	} else {
@@ -139,6 +141,7 @@ func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.Ru
 			Language: runtime.Command,
 			Code:     request.Command,
 			Cwd:      request.Cwd,
+			User:     request.User.ToRuntime(),
 			Timeout:  timeout,
 		}
 	}

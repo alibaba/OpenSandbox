@@ -14,15 +14,49 @@
 
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/go-playground/validator/v10"
+)
 
 // CommandStatusResponse represents command status for REST APIs.
 type CommandStatusResponse struct {
-	ID         string     `json:"id"`
-	Content    string     `json:"content,omitempty"`
-	Running    bool       `json:"running"`
-	ExitCode   *int       `json:"exit_code,omitempty"`
-	Error      string     `json:"error,omitempty"`
-	StartedAt  time.Time  `json:"started_at,omitempty"`
-	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	ID         string        `json:"id"`
+	Content    string        `json:"content,omitempty"`
+	User       *UserIdentity `json:"user,omitempty"`
+	Running    bool          `json:"running"`
+	ExitCode   *int          `json:"exit_code,omitempty"`
+	Error      string        `json:"error,omitempty"`
+	StartedAt  time.Time     `json:"started_at,omitempty"`
+	FinishedAt *time.Time    `json:"finished_at,omitempty"`
+}
+
+// RunCommandRequest represents a shell command execution request.
+type RunCommandRequest struct {
+	Command    string `json:"command" validate:"required"`
+	Cwd        string `json:"cwd,omitempty"`
+	Background bool   `json:"background,omitempty"`
+
+	// User specifies the username or UID to run the command as.
+	// Effective switching requires root or CAP_SETUID/CAP_SETGID (and valid UID/GID
+	// mappings when using user namespaces); otherwise it will fail with a permission error.
+	User *UserIdentity `json:"user,omitempty"`
+
+	// TimeoutMs caps execution duration; 0 uses server default.
+	TimeoutMs int64 `json:"timeout,omitempty" validate:"omitempty,gte=1"`
+}
+
+func (r *RunCommandRequest) Validate() error {
+	validate := validator.New()
+	if err := validate.Struct(r); err != nil {
+		return err
+	}
+	if err := r.User.validate(); err != nil {
+		return err
+	}
+	if err := r.User.validateExists(); err != nil {
+		return err
+	}
+	return nil
 }

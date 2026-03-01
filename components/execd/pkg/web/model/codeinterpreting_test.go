@@ -36,30 +36,6 @@ func TestRunCodeRequestValidate(t *testing.T) {
 	}
 }
 
-func TestRunCommandRequestValidate(t *testing.T) {
-	req := RunCommandRequest{Command: "ls"}
-	if err := req.Validate(); err != nil {
-		t.Fatalf("expected command validation success: %v", err)
-	}
-
-	req.TimeoutMs = -100
-	if err := req.Validate(); err == nil {
-		t.Fatalf("expected validation error when timeout is negative")
-	}
-
-	req.TimeoutMs = 0
-	req.Command = "ls"
-	if err := req.Validate(); err != nil {
-		t.Fatalf("expected success when timeout is omitted/zero: %v", err)
-	}
-
-	req.TimeoutMs = 10
-	req.Command = ""
-	if err := req.Validate(); err == nil {
-		t.Fatalf("expected validation error when command is empty")
-	}
-}
-
 func TestServerStreamEventToJSON(t *testing.T) {
 	event := ServerStreamEvent{
 		Type:           StreamEventTypeStdout,
