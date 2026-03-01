@@ -34,6 +34,24 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/util/safego"
 )
 
+// storeFailedCommandKernel records a session with an error-state kernel so the client
+// can query GetCommandStatus instead of getting 404. Call when execution fails before
+// or at Start (e.g. resolveUserCredential or cmd.Start error).
+func (c *Controller) storeFailedCommandKernel(session, stdoutPath, stderrPath, content string, startAt time.Time, isBackground bool, user *CommandUser, err error) {
+	kernel := &commandKernel{
+		pid:          -1,
+		stdoutPath:   stdoutPath,
+		stderrPath:   stderrPath,
+		startedAt:    startAt,
+		running:      false,
+		content:      content,
+		isBackground: isBackground,
+		user:         user,
+	}
+	c.storeCommandKernel(session, kernel)
+	c.markCommandFinished(session, 255, err.Error())
+}
+
 // runCommand executes shell commands and streams their output.
 func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest) error {
 	session := c.newContextID()
@@ -68,6 +86,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 			Traceback: []string{err.Error()},
 		})
 		log.Error("CommandExecError: error preparing command user: %v", err)
+		c.storeFailedCommandKernel(session, stdoutPath, stderrPath, request.Code, startAt, false, nil, err)
 		return nil
 	}
 	cmd := exec.CommandContext(ctx, "bash", "-c", request.Code)
@@ -104,6 +123,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		request.Hooks.OnExecuteInit(session)
 		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "CommandExecError", EValue: err.Error()})
 		log.Error("CommandExecError: error starting commands: %v", err)
+		c.storeFailedCommandKernel(session, stdoutPath, stderrPath, request.Code, startAt, false, resolvedUser, err)
 		return nil
 	}
 
@@ -199,18 +219,7 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	cred, resolvedUser, err := resolveUserCredential(request.User)
 	if err != nil {
 		log.Error("CommandExecError: error preparing command user: %v", err)
-		kernel := &commandKernel{
-			pid:          -1,
-			stdoutPath:   stdoutPath,
-			stderrPath:   stderrPath,
-			startedAt:    startAt,
-			running:      false,
-			content:      request.Code,
-			isBackground: true,
-			user:         nil,
-		}
-		c.storeCommandKernel(session, kernel)
-		c.markCommandFinished(session, 255, err.Error())
+		c.storeFailedCommandKernel(session, stdoutPath, stderrPath, request.Code, startAt, true, nil, err)
 		return nil
 	}
 
@@ -228,8 +237,14 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	cmd.Stdin = os.NewFile(uintptr(syscall.Stdin), os.DevNull)
 
 	err = cmd.Start()
+	if err != nil {
+		cancel()
+		log.Error("CommandExecError: error starting commands: %v", err)
+		c.storeFailedCommandKernel(session, stdoutPath, stderrPath, request.Code, startAt, true, resolvedUser, err)
+		return fmt.Errorf("failed to start commands: %w", err)
+	}
 	kernel := &commandKernel{
-		pid:          -1,
+		pid:          cmd.Process.Pid,
 		stdoutPath:   stdoutPath,
 		stderrPath:   stderrPath,
 		startedAt:    startAt,
@@ -238,21 +253,10 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 		isBackground: true,
 		user:         resolvedUser,
 	}
-	if err != nil {
-		cancel()
-		log.Error("CommandExecError: error starting commands: %v", err)
-		kernel.running = false
-		c.storeCommandKernel(session, kernel)
-		c.markCommandFinished(session, 255, err.Error())
-		return fmt.Errorf("failed to start commands: %w", err)
-	}
 
+	c.storeCommandKernel(session, kernel)
 	safego.Go(func() {
 		defer pipe.Close()
-
-		kernel.running = true
-		kernel.pid = cmd.Process.Pid
-		c.storeCommandKernel(session, kernel)
 
 		err = cmd.Wait()
 		cancel()
