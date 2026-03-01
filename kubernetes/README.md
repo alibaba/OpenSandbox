@@ -147,6 +147,138 @@ For more detailed instructions on using kind, please refer to the [official kind
 
 This project requires two separate images - one for the controller and another for the task-executor component.
 
+#### Option 1: Deploy with Helm (Recommended)
+
+**Install from GitHub Release:**
+
+You can install OpenSandbox Controller directly from GitHub Releases. Check the [Releases page](https://github.com/alibaba/OpenSandbox/releases?q=helm%2Fopensandbox-controller&expanded=true) for all available versions.
+
+```sh
+# Replace <version> with the desired version (e.g., 0.1.0)
+helm install opensandbox \
+  https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox-controller/<version>/opensandbox-controller-<version>.tgz \
+  --namespace opensandbox-system \
+  --create-namespace
+```
+
+Example with specific version:
+```sh
+helm install opensandbox \
+  https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox-controller/0.1.0/opensandbox-controller-0.1.0.tgz \
+  --namespace opensandbox-system \
+  --create-namespace
+```
+
+You can also download the chart first and then install:
+```sh
+# Download the chart
+wget https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox-controller/<version>/opensandbox-controller-<version>.tgz
+
+# Install from local file
+helm install opensandbox ./opensandbox-controller-<version>.tgz \
+  --namespace opensandbox-system \
+  --create-namespace
+```
+
+**Customize Installation:**
+
+Use `--set` flags to customize the configuration:
+
+```sh
+# Example: Custom resource limits
+helm install opensandbox \
+  https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox-controller/0.1.0/opensandbox-controller-0.1.0.tgz \
+  --namespace opensandbox-system \
+  --create-namespace \
+  --set controller.replicaCount=2 \
+  --set controller.resources.limits.cpu=1000m \
+  --set controller.resources.limits.memory=512Mi
+
+# Example: Custom log level
+helm install opensandbox \
+  https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox-controller/0.1.0/opensandbox-controller-0.1.0.tgz \
+  --namespace opensandbox-system \
+  --create-namespace \
+  --set controller.logLevel=5
+```
+
+Or use a values file for complex configurations:
+
+```sh
+# Create a custom values file
+cat > custom-values.yaml <<EOF
+controller:
+  replicaCount: 2
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  logLevel: 5
+EOF
+
+# Install with custom values
+helm install opensandbox \
+  https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox-controller/0.1.0/opensandbox-controller-0.1.0.tgz \
+  --namespace opensandbox-system \
+  --create-namespace \
+  -f custom-values.yaml
+```
+
+**Install from source (for development):**
+
+If you're developing or need to customize the chart:
+
+1. **Build and push your images:**
+   ```sh
+   # Build and push the controller image
+   make docker-build docker-push IMG=<some-registry>/opensandbox-controller:tag
+   
+   # Build and push the task-executor image
+   make docker-build-task-executor docker-push-task-executor TASK_EXECUTOR_IMG=<some-registry>/opensandbox-task-executor:tag
+   ```
+
+2. **Install with Helm:**
+   ```sh
+   helm install opensandbox ./charts/opensandbox-controller \
+     --set controller.image.repository=<some-registry>/opensandbox-controller \
+     --set controller.image.tag=<tag> \
+     --namespace opensandbox-system \
+     --create-namespace
+   ```
+
+**Verify Installation:**
+
+Check the controller is running:
+```sh
+kubectl get pods -n opensandbox-system
+kubectl get deployment -n opensandbox-system
+
+# Check logs
+kubectl logs -n opensandbox-system -l control-plane=controller-manager -f
+```
+
+**Upgrade:**
+
+```sh
+# Upgrade to a new version
+helm upgrade opensandbox \
+  https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox-controller/<new-version>/opensandbox-controller-<new-version>.tgz \
+  --namespace opensandbox-system
+```
+
+**Uninstall:**
+
+```sh
+helm uninstall opensandbox -n opensandbox-system
+```
+
+For more configuration options and advanced usage, see the [Helm Chart README](charts/opensandbox-controller/README.md).
+
+#### Option 2: Deploy with Kustomize
+
 1. **Build and push your images:**
    ```sh
    # Build and push the controller image

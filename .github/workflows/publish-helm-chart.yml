@@ -1,0 +1,148 @@
+name: Publish Helm Chart
+
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: 'Component to release'
+        required: true
+        type: choice
+        options:
+          - opensandbox-controller
+        default: 'opensandbox-controller'
+      app_version:
+        description: 'App version (without v prefix, e.g., 0.1.0)'
+        required: true
+        default: '0.1.0'
+  push:
+    tags:
+      - 'helm/**'  # Format: helm/<component>/<app_version>, e.g., helm/opensandbox-controller/0.1.0
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Parse tag and set variables
+        id: parse_tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/helm/* ]]; then
+            TAG_PATH="${{ github.ref }}"
+            TAG_PATH="${TAG_PATH#refs/tags/}"
+            
+            COMPONENT=$(echo "$TAG_PATH" | cut -d'/' -f2)
+            VERSION=$(echo "$TAG_PATH" | cut -d'/' -f3)
+            
+            # Remove 'v' prefix if present
+            VERSION=${VERSION#v}
+            
+            echo "component=$COMPONENT" >> $GITHUB_OUTPUT
+            echo "app_version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            echo "component=${{ inputs.component }}" >> $GITHUB_OUTPUT
+            echo "app_version=${{ inputs.app_version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set chart path
+        id: chart_path
+        run: |
+          COMPONENT="${{ steps.parse_tag.outputs.component }}"
+          
+          if [ "$COMPONENT" == "opensandbox-controller" ]; then
+            CHART_PATH="kubernetes/charts/opensandbox-controller"
+          else
+            echo "Error: Unknown component: $COMPONENT"
+            exit 1
+          fi
+          
+          echo "path=$CHART_PATH" >> $GITHUB_OUTPUT
+
+      - name: Get chart version from Chart.yaml
+        id: chart_version
+        run: |
+          CHART_PATH="${{ steps.chart_path.outputs.path }}"
+          CHART_VERSION=$(grep '^version:' $CHART_PATH/Chart.yaml | awk '{print $2}')
+          echo "version=$CHART_VERSION" >> $GITHUB_OUTPUT
+          echo "Chart version: $CHART_VERSION"
+
+      - name: Update Chart.yaml with app version
+        run: |
+          APP_VERSION="${{ steps.parse_tag.outputs.app_version }}"
+          CHART_PATH="${{ steps.chart_path.outputs.path }}"
+          
+          # Only update appVersion, keep chart version as-is in Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"$APP_VERSION\"/" $CHART_PATH/Chart.yaml
+          
+          echo "Updated Chart.yaml:"
+          cat $CHART_PATH/Chart.yaml
+
+      - name: Lint Helm chart
+        run: |
+          CHART_PATH="${{ steps.chart_path.outputs.path }}"
+          helm lint $CHART_PATH
+
+      - name: Package Helm chart
+        run: |
+          CHART_PATH="${{ steps.chart_path.outputs.path }}"
+          helm package $CHART_PATH
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: helm/${{ steps.parse_tag.outputs.component }}/${{ steps.parse_tag.outputs.app_version }}
+          name: Helm Chart ${{ steps.parse_tag.outputs.component }} ${{ steps.chart_version.outputs.version }} (App v${{ steps.parse_tag.outputs.app_version }})
+          body: |
+            ## ${{ steps.parse_tag.outputs.component }} Helm Chart
+            
+            **Chart Version:** ${{ steps.chart_version.outputs.version }}
+            **App Version:** ${{ steps.parse_tag.outputs.app_version }}
+            
+            ### Installation
+            
+            直接从 GitHub Release 安装:
+            
+            ```bash
+            helm install opensandbox \
+              https://github.com/${{ github.repository }}/releases/download/helm/${{ steps.parse_tag.outputs.component }}/${{ steps.parse_tag.outputs.app_version }}/${{ steps.parse_tag.outputs.component }}-${{ steps.chart_version.outputs.version }}.tgz \
+              --namespace opensandbox-system \
+              --create-namespace
+            ```
+            
+            或者先下载后安装:
+            
+            ```bash
+            # 下载
+            wget https://github.com/${{ github.repository }}/releases/download/helm/${{ steps.parse_tag.outputs.component }}/${{ steps.parse_tag.outputs.app_version }}/${{ steps.parse_tag.outputs.component }}-${{ steps.chart_version.outputs.version }}.tgz
+            
+            # 安装
+            helm install opensandbox ./${{ steps.parse_tag.outputs.component }}-${{ steps.chart_version.outputs.version }}.tgz \
+              --namespace opensandbox-system \
+              --create-namespace
+            ```
+            
+            ### What's Changed
+            
+            - Chart version: ${{ steps.chart_version.outputs.version }}
+            - App version: ${{ steps.parse_tag.outputs.app_version }}
+          files: |
+            ${{ steps.parse_tag.outputs.component }}-*.tgz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

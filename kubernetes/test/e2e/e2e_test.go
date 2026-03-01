@@ -32,7 +32,7 @@ import (
 )
 
 // namespace where the project is deployed in
-const namespace = "sandbox-k8s-system"
+const namespace = "opensandbox-system"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string

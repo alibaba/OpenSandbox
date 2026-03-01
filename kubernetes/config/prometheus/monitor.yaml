@@ -4,7 +4,7 @@ kind: ServiceMonitor
 metadata:
   labels:
     control-plane: controller-manager
-    app.kubernetes.io/name: sandbox-k8s
+    app.kubernetes.io/name: opensandbox
     app.kubernetes.io/managed-by: kustomize
   name: controller-manager-metrics-monitor
   namespace: system
@@ -24,4 +24,4 @@ spec:
   selector:
     matchLabels:
       control-plane: controller-manager
-      app.kubernetes.io/name: sandbox-k8s
+      app.kubernetes.io/name: opensandbox

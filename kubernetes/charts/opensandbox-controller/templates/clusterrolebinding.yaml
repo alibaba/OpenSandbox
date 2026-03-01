@@ -1,0 +1,39 @@
+{{- if .Values.rbac.create -}}
+---
+# Leader election role binding
+apiVersion: {{ include "opensandbox.rbac.apiVersion" . }}
+kind: RoleBinding
+metadata:
+  name: {{ include "opensandbox.leaderElectionRoleName" . }}
+  namespace: {{ include "opensandbox.namespace" . }}
+  labels:
+    {{- include "opensandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "opensandbox.leaderElectionRoleName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "opensandbox.serviceAccountName" . }}
+  namespace: {{ include "opensandbox.namespace" . }}
+
+---
+# Manager role binding
+apiVersion: {{ include "opensandbox.rbac.apiVersion" . }}
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "opensandbox.managerRoleName" . }}
+  labels:
+    {{- include "opensandbox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: rbac
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "opensandbox.managerRoleName" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "opensandbox.serviceAccountName" . }}
+  namespace: {{ include "opensandbox.namespace" . }}
+
+{{- end }}

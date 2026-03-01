@@ -2,7 +2,7 @@ apiVersion: sandbox.opensandbox.io/v1alpha1
 kind: Pool
 metadata:
   labels:
-    app.kubernetes.io/name: sandbox-k8s
+    app.kubernetes.io/name: opensandbox
     app.kubernetes.io/managed-by: kustomize
   name: pool-sample
   namespace: opensandbox

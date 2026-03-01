@@ -3,7 +3,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   labels:
-    app.kubernetes.io/name: sandbox-k8s
+    app.kubernetes.io/name: opensandbox
     app.kubernetes.io/managed-by: kustomize
   name: leader-election-role
 rules:
