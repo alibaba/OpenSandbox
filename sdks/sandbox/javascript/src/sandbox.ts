@@ -511,24 +511,43 @@ export class Sandbox {
     healthCheck?: (sbx: Sandbox) => boolean | Promise<boolean>;
   }): Promise<void> {
     const deadline = Date.now() + opts.readyTimeoutSeconds * 1000;
+    let attempt = 0;
+    let errorDetail = "Health check returned false continuously.";
+
+    const buildTimeoutMessage = () => {
+      const context = `domain=${this.connectionConfig.domain}, useServerProxy=${this.connectionConfig.useServerProxy}`;
+      let suggestion =
+        "If this sandbox runs in Docker bridge or remote-network mode, consider enabling useServerProxy=true.";
+      if (!this.connectionConfig.useServerProxy) {
+        suggestion += " You can also configure server-side [docker].host_ip for direct endpoint access.";
+      }
+      return `Sandbox health check timed out after ${opts.readyTimeoutSeconds}s (${attempt} attempts). ${errorDetail} Connection context: ${context}. ${suggestion}`;
+    };
 
     // Wait until execd becomes reachable and passes health check.
     while (true) {
       if (Date.now() > deadline) {
         throw new SandboxReadyTimeoutException({
-          message: `Sandbox not ready: timed out waiting for health check (timeoutSeconds=${opts.readyTimeoutSeconds})`,
+          message: buildTimeoutMessage(),
         });
       }
+      attempt++;
       try {
         if (opts.healthCheck) {
           const ok = await opts.healthCheck(this);
-          if (ok) return;
+          if (ok) {
+            return;
+          }
         } else {
           const ok = await this.health.ping();
-          if (ok) return;
+          if (ok) {
+            return;
+          }
         }
-      } catch {
-        // ignore and retry
+        errorDetail = "Health check returned false continuously.";
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errorDetail = `Last health check error: ${message}`;
       }
       await sleep(opts.pollingIntervalMillis);
     }
