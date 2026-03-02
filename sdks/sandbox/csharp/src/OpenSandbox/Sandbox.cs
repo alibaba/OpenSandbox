@@ -521,6 +521,8 @@ public sealed class Sandbox : IAsyncDisposable
     {
         _logger.LogDebug("Start readiness check for sandbox {SandboxId} (timeoutSeconds={TimeoutSeconds})", Id, options.ReadyTimeoutSeconds);
         var deadline = DateTime.UtcNow.AddSeconds(options.ReadyTimeoutSeconds);
+        var attempt = 0;
+        var errorDetail = "Health check returned false continuously.";
 
         while (true)
         {
@@ -528,9 +530,16 @@ public sealed class Sandbox : IAsyncDisposable
 
             if (DateTime.UtcNow > deadline)
             {
+                var context = $"domain={ConnectionConfig.Domain}, useServerProxy={ConnectionConfig.UseServerProxy}";
+                var suggestion = "If this sandbox runs in Docker bridge or remote-network mode, consider enabling useServerProxy=true.";
+                if (!ConnectionConfig.UseServerProxy)
+                {
+                    suggestion += " You can also configure server-side [docker].host_ip for direct endpoint access.";
+                }
                 throw new SandboxReadyTimeoutException(
-                    $"Sandbox not ready: timed out waiting for health check (timeoutSeconds={options.ReadyTimeoutSeconds})");
+                    $"Sandbox health check timed out after {options.ReadyTimeoutSeconds}s ({attempt} attempts). {errorDetail} Connection context: {context}. {suggestion}");
             }
+            attempt++;
 
             try
             {
@@ -549,10 +558,13 @@ public sealed class Sandbox : IAsyncDisposable
                     _logger.LogInformation("Sandbox is ready: {SandboxId}", Id);
                     return;
                 }
+
+                errorDetail = "Health check returned false continuously.";
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Readiness probe failed for sandbox {SandboxId}", Id);
+                errorDetail = $"Last health check error: {ex.Message}";
             }
 
             await Task.Delay(options.PollingIntervalMillis, cancellationToken).ConfigureAwait(false);
