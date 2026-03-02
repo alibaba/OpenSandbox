@@ -475,6 +475,9 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
             status_code=502,
             detail=f"Could not connect to the backend sandbox {endpoint}: {e}",
         )
+    except HTTPException:
+        # Preserve explicit HTTP exceptions raised above (e.g. websocket upgrade not supported).
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"An internal error occurred in the proxy: {e}"
