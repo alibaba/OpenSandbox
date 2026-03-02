@@ -49,7 +49,13 @@ class _Noop:
     pass
 
 
-def _make_sandbox(*, health_service, sandbox_service, custom_health_check=None) -> Sandbox:
+def _make_sandbox(
+    *,
+    health_service,
+    sandbox_service,
+    custom_health_check=None,
+    connection_config: ConnectionConfig | None = None,
+) -> Sandbox:
     return Sandbox(
         sandbox_id=str(uuid4()),
         sandbox_service=sandbox_service,
@@ -57,7 +63,7 @@ def _make_sandbox(*, health_service, sandbox_service, custom_health_check=None) 
         command_service=_Noop(),
         health_service=health_service,
         metrics_service=_Noop(),
-        connection_config=ConnectionConfig(),
+        connection_config=connection_config or ConnectionConfig(),
         custom_health_check=custom_health_check,
     )
 
@@ -108,6 +114,26 @@ async def test_check_ready_timeout_raises() -> None:
 
     with pytest.raises(SandboxReadyTimeoutException):
         await sbx.check_ready(timeout=timedelta(seconds=0.01), polling_interval=timedelta(seconds=0))
+
+
+@pytest.mark.asyncio
+async def test_check_ready_timeout_message_includes_troubleshooting_hints() -> None:
+    async def _always_false(_: Sandbox) -> bool:
+        return False
+
+    sbx = _make_sandbox(
+        health_service=_HealthServiceStub(),
+        sandbox_service=_SandboxServiceStub(),
+        custom_health_check=_always_false,
+        connection_config=ConnectionConfig(domain="10.0.0.1:8080", use_server_proxy=False),
+    )
+
+    with pytest.raises(SandboxReadyTimeoutException) as exc_info:
+        await sbx.check_ready(timeout=timedelta(seconds=0.01), polling_interval=timedelta(seconds=0))
+
+    message = str(exc_info.value)
+    assert "ConnectionConfig(domain=10.0.0.1:8080, use_server_proxy=False)" in message
+    assert "ConnectionConfig(use_server_proxy=True)" in message
 
 
 @pytest.mark.asyncio
