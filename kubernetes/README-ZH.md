@@ -200,7 +200,7 @@ helm install opensandbox \
   https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox-controller/0.1.0/opensandbox-controller-0.1.0.tgz \
   --namespace opensandbox-system \
   --create-namespace \
-  --set controller.logLevel=5
+  --set controller.logLevel=debug
 ```
 
 或使用 values 文件进行复杂配置：
@@ -217,7 +217,7 @@ controller:
     requests:
       cpu: 100m
       memory: 128Mi
-  logLevel: 5
+  logLevel: debug
 EOF
 
 # 使用自定义 values 安装

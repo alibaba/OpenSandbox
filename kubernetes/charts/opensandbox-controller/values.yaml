@@ -34,8 +34,8 @@ controller:
       cpu: 10m
       memory: 64Mi
   
-  # -- Log level (0-5, higher is more verbose)
-  logLevel: 3
+  # -- Log level for --zap-log-level (e.g. debug, info, error)
+  logLevel: info
   
   # -- Enable leader election for controller manager
   leaderElection:

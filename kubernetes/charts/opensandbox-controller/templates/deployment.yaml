@@ -51,7 +51,7 @@ spec:
         - --leader-elect
         {{- end }}
         - --health-probe-bind-address=:8081
-        - --v={{ .Values.controller.logLevel }}
+        - --zap-log-level={{ .Values.controller.logLevel }}
         ports:
         - name: health
           containerPort: 8081

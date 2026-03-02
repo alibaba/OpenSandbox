@@ -70,7 +70,7 @@ kubectl delete crd pools.sandbox.opensandbox.io
 | `controller.resources.limits.memory` | Memory resource limits | `128Mi` |
 | `controller.resources.requests.cpu` | CPU resource requests | `10m` |
 | `controller.resources.requests.memory` | Memory resource requests | `64Mi` |
-| `controller.logLevel` | Log level (0-5, higher is more verbose) | `3` |
+| `controller.logLevel` | Log level passed to `--zap-log-level` (e.g. debug/info/error) | `info` |
 | `controller.leaderElection.enabled` | Enable leader election | `true` |
 | `controller.nodeSelector` | Node labels for pod assignment | `{}` |
 | `controller.tolerations` | Tolerations for pod assignment | `[]` |

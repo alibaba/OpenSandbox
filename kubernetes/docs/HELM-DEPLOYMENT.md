@@ -122,7 +122,7 @@ controller:
       cpu: 100m
       memory: 128Mi
   
-  logLevel: 5
+  logLevel: debug
 
 imagePullSecrets:
   - name: myregistrykey
@@ -365,7 +365,7 @@ helm upgrade opensandbox ./charts/opensandbox-controller \
 #### values-dev.yaml
 ```yaml
 controller:
-  logLevel: 5
+  logLevel: debug
   resources:
     limits:
       cpu: 200m
@@ -375,7 +375,7 @@ controller:
 #### values-prod.yaml
 ```yaml
 controller:
-  logLevel: 2
+  logLevel: info
   replicaCount: 3
   resources:
     limits:
