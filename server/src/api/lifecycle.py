@@ -149,7 +149,8 @@ async def list_sandboxes(
         from urllib.parse import parse_qsl
         try:
             # Parse query string format: key=value&key2=value2
-            parsed = parse_qsl(metadata)
+            # strict_parsing=True rejects malformed segments like "a=1&broken"
+            parsed = parse_qsl(metadata, keep_blank_values=True, strict_parsing=True)
             metadata_dict = dict(parsed)
         except Exception as e:
             from fastapi import HTTPException

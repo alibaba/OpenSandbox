@@ -83,6 +83,55 @@ def test_list_sandboxes_parses_filters_and_pagination(
     assert captured_requests[0].pagination.page_size == 5
 
 
+def test_list_sandboxes_rejects_malformed_metadata_query(
+    client: TestClient,
+    auth_headers: dict,
+) -> None:
+    response = client.get(
+        "/v1/sandboxes",
+        params={"metadata": "team=infra&broken"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_METADATA_FORMAT"
+    assert "bad query field" in response.json()["message"]
+
+
+def test_list_sandboxes_keeps_blank_metadata_values(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    captured_requests: list[object] = []
+
+    class StubService:
+        @staticmethod
+        def list_sandboxes(request) -> ListSandboxesResponse:
+            captured_requests.append(request)
+            return ListSandboxesResponse(
+                items=[],
+                pagination=PaginationInfo(
+                    page=1,
+                    pageSize=20,
+                    totalItems=0,
+                    totalPages=0,
+                    hasNextPage=False,
+                ),
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.get(
+        "/v1/sandboxes",
+        params={"metadata": "team=infra&note="},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert captured_requests[0].filter.metadata == {"team": "infra", "note": ""}
+
+
 def test_list_sandboxes_validates_page_bounds(
     client: TestClient,
     auth_headers: dict,
