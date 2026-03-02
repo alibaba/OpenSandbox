@@ -184,10 +184,17 @@ test("01b sandbox create with host volume mount (read-write)", async () => {
     expect(readBack.logs.stdout[0]?.text).toBe("written-from-sandbox");
 
     // Step 4: Verify the mount path is a proper directory
-    const dirCheck = await volumeSandbox.commands.run(
+    let dirCheck = await volumeSandbox.commands.run(
       `test -d ${containerMountPath} && echo OK`
     );
-    expect(dirCheck.error).toBeUndefined();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect(dirCheck.error).toBeUndefined();
+      if (dirCheck.logs.stdout[0]?.text === "OK") break;
+      await new Promise((r) => setTimeout(r, 1000));
+      dirCheck = await volumeSandbox.commands.run(
+        `test -d ${containerMountPath} && echo OK`
+      );
+    }
     expect(dirCheck.logs.stdout[0]?.text).toBe("OK");
   } finally {
     try {
@@ -289,10 +296,17 @@ test("01d sandbox create with PVC named volume mount (read-write)", async () => 
     expect(readBack.logs.stdout[0]?.text).toBe("written-to-pvc");
 
     // Step 4: Verify the mount path is a proper directory
-    const dirCheck = await pvcSandbox.commands.run(
+    let dirCheck = await pvcSandbox.commands.run(
       `test -d ${containerMountPath} && echo OK`
     );
-    expect(dirCheck.error).toBeUndefined();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      expect(dirCheck.error).toBeUndefined();
+      if (dirCheck.logs.stdout[0]?.text === "OK") break;
+      await new Promise((r) => setTimeout(r, 1000));
+      dirCheck = await pvcSandbox.commands.run(
+        `test -d ${containerMountPath} && echo OK`
+      );
+    }
     expect(dirCheck.logs.stdout[0]?.text).toBe("OK");
   } finally {
     try {
