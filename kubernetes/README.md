@@ -260,6 +260,34 @@ kubectl get deployment -n opensandbox-system
 kubectl logs -n opensandbox-system -l control-plane=controller-manager -f
 ```
 
+**Connect from C# SDK (after controller is ready):**
+
+The C# SDK talks to the **OpenSandbox server API**, not directly to the controller pod.
+After your server is configured to use Kubernetes runtime, point the SDK to the server domain:
+
+```csharp
+using OpenSandbox;
+using OpenSandbox.Config;
+
+var config = new ConnectionConfig(new ConnectionConfigOptions
+{
+    Domain = "localhost:8080", // Replace with your OpenSandbox server endpoint
+    ApiKey = "your-api-key",
+    UseServerProxy = true,     // Recommended when client cannot directly reach sandbox endpoints
+});
+
+await using var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+{
+    ConnectionConfig = config,
+    Image = "python:3.11",
+});
+
+var execution = await sandbox.Commands.RunAsync("python -V");
+Console.WriteLine(execution.Logs.Stdout.FirstOrDefault()?.Text);
+```
+
+For more C# SDK details, see [OpenSandbox C# SDK README](../sdks/sandbox/csharp/README.md).
+
 **Upgrade:**
 
 ```sh

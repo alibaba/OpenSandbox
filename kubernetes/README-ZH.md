@@ -261,6 +261,34 @@ kubectl get deployment -n opensandbox-system
 kubectl logs -n opensandbox-system -l control-plane=controller-manager -f
 ```
 
+**通过 C# SDK 接入（控制器就绪后）：**
+
+C# SDK 连接的是 **OpenSandbox 服务端 API**，而不是直接连接 controller Pod。
+当服务端已配置为 Kubernetes runtime 后，将 SDK `Domain` 指向服务端地址：
+
+```csharp
+using OpenSandbox;
+using OpenSandbox.Config;
+
+var config = new ConnectionConfig(new ConnectionConfigOptions
+{
+    Domain = "localhost:8080", // 替换为你的 OpenSandbox 服务端地址
+    ApiKey = "your-api-key",
+    UseServerProxy = true,     // 当客户端无法直连 sandbox endpoint 时建议开启
+});
+
+await using var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+{
+    ConnectionConfig = config,
+    Image = "python:3.11",
+});
+
+var execution = await sandbox.Commands.RunAsync("python -V");
+Console.WriteLine(execution.Logs.Stdout.FirstOrDefault()?.Text);
+```
+
+更多 C# SDK 细节请参考 [OpenSandbox C# SDK README](../sdks/sandbox/csharp/README_zh.md)。
+
 **升级：**
 
 ```sh
