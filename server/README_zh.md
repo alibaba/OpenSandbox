@@ -426,6 +426,7 @@ curl -X DELETE \
 | `server.port` | integer | `8080` | 监听端口 |
 | `server.log_level` | string | `"INFO"` | Python 日志级别 |
 | `server.api_key` | string | `null` | API 认证密钥 |
+| `server.eip` | string | `null` | 绑定的公网 IP；配置后，返回 sandbox endpoint 时作为地址的 host 部分（Docker 运行时） |
 
 ### 运行时配置
 

@@ -23,6 +23,7 @@ host = "127.0.0.1"
 port = 8080
 log_level = "INFO"
 # api_key = "your-secret-api-key"  # Optional: Uncomment to enable API key authentication
+# eip = "1.2.3.4"  # Optional: External IP/hostname for endpoint URLs when returning sandbox endpoints
 
 [runtime]
 # Runtime selection (docker | kubernetes)

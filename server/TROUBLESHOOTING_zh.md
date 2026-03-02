@@ -25,3 +25,24 @@ exec /opt/opensandbox/bootstrap.sh: operation not permitted
 - `docker logs opensandbox-server`
 - `docker logs <sandbox-container>`
 - `config.toml`（注意脱敏）
+
+## 沙箱健康检查超时（如阿里云 ECS）
+
+若服务端部署在云主机（例如 [阿里云 ECS](https://github.com/alibaba/OpenSandbox/issues/297)），客户端创建沙箱时出现：
+
+```text
+opensandbox.exceptions.sandbox.SandboxReadyTimeoutException: Sandbox health check timed out after 30.0s (2 attempts). Health check returned false continuously
+```
+
+通常是因为服务端返回的 endpoint 地址（如 `127.0.0.1` 或内网 IP）对客户端不可达，客户端无法完成健康检查。
+
+**解决办法：** 配置绑定的公网 IP，让服务端在返回 sandbox endpoint 时使用客户端可访问的地址。在配置文件（如 `~/.sandbox.toml`）的 `[server]` 下设置 `eip` 为云主机的公网 IP（或客户端访问该服务时使用的主机名）：
+
+```toml
+[server]
+host = "0.0.0.0"
+port = 8080
+eip = "47.x.x.x"   # 你的 ECS 公网 IP，或客户端用来访问本机的主机名
+```
+
+重启服务后，获取 endpoint 的 API 会使用 `eip` 作为返回地址的 host 部分，客户端即可连通沙箱并通过健康检查。该行为针对 Docker 运行时；配置了 `eip` 后，服务端将不再根据 `host` 解析地址。

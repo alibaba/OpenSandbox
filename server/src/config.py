@@ -181,6 +181,10 @@ class ServerConfig(BaseModel):
         default=None,
         description="Global API key for authenticating incoming lifecycle API calls.",
     )
+    eip: Optional[str] = Field(
+        default=None,
+        description="Bound public IP. When set, used as the host part when returning sandbox endpoints.",
+    )
 
 
 class KubernetesRuntimeConfig(BaseModel):

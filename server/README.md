@@ -427,6 +427,7 @@ curl -X DELETE \
 | `server.port` | integer | `8080` | Port to listen on |
 | `server.log_level` | string | `"INFO"` | Python logging level |
 | `server.api_key` | string | `null` | API key for authentication |
+| `server.eip` | string | `null` | Bound public IP; when set, used as the host part when returning sandbox endpoints (Docker runtime) |
 
 ### Runtime configuration
 

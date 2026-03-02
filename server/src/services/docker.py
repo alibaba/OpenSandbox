@@ -1548,6 +1548,10 @@ class DockerSandboxService(SandboxService):
         return ip or None
 
     def _resolve_public_host(self) -> str:
+        """Resolve the host used in endpoint URLs. If [server].eip is set, use it directly without resolving host."""
+        eip_cfg = (self.app_config.server.eip or "").strip()
+        if eip_cfg:
+            return eip_cfg
         host_cfg = (self.app_config.server.host or "").strip()
         host_key = host_cfg.lower()
         if host_key in {"", "0.0.0.0", "::"}:
