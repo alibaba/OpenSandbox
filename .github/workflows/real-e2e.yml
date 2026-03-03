@@ -7,9 +7,8 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'server/**'
+      - 'server/src/**'
       - 'components/execd/**'
-      - 'sandboxes/**'
       - 'sdks/code-interpreter/**'
       - 'sdks/sandbox/**'
       - 'tests/**'
