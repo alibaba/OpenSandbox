@@ -27,9 +27,15 @@ docker buildx create --use --name egress-builder
 docker buildx inspect --bootstrap
 docker buildx ls
 
+LATEST_TAGS=()
+if [[ "${TAG}" == v* ]]; then
+  LATEST_TAGS+=(-t opensandbox/egress:latest -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:latest)
+fi
+
 docker buildx build \
   -t opensandbox/egress:${TAG} \
   -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:${TAG} \
+  "${LATEST_TAGS[@]}" \
   -f components/egress/Dockerfile \
   --build-arg VERSION="${VERSION}" \
   --build-arg GIT_COMMIT="${GIT_COMMIT}" \

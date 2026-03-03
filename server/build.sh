@@ -25,9 +25,15 @@ docker buildx inspect --bootstrap
 
 docker buildx ls
 
+LATEST_TAGS=()
+if [[ "${TAG}" == v* ]]; then
+  LATEST_TAGS+=(-t opensandbox/server:latest -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:latest)
+fi
+
 docker buildx build \
   -t opensandbox/server:${TAG} \
   -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:${TAG} \
+  "${LATEST_TAGS[@]}" \
   --platform linux/amd64,linux/arm64 \
   --push \
   .

@@ -31,9 +31,15 @@ docker buildx inspect --bootstrap
 
 docker buildx ls
 
+LATEST_TAGS=()
+if [[ "${TAG}" == v* ]]; then
+  LATEST_TAGS+=(-t opensandbox/ingress:latest -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ingress:latest)
+fi
+
 docker buildx build \
   -t opensandbox/ingress:${TAG} \
   -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ingress:${TAG} \
+  "${LATEST_TAGS[@]}" \
   -f components/ingress/Dockerfile \
   --build-arg VERSION="${VERSION}" \
   --build-arg GIT_COMMIT="${GIT_COMMIT}" \
