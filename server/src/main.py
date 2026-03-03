@@ -92,10 +92,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add request-id middleware first (outermost) so all layers see request_id in context.
-app.add_middleware(RequestIdMiddleware)
+# Attach global config for runtime access
+app.state.config = app_config
 
-# Add CORS middleware
+# Middleware run in reverse order of addition: last added = first to run (outermost).
+# Add auth and CORS first so they run after RequestIdMiddleware.
+app.add_middleware(AuthMiddleware, config=app_config)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -103,12 +105,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Attach global config for runtime access
-app.state.config = app_config
-
-# Add authentication middleware
-app.add_middleware(AuthMiddleware, config=app_config)
+# RequestIdMiddleware last = outermost: runs first, so every response (including
+# 401 from AuthMiddleware) gets X-Request-ID and logs have request_id in context.
+app.add_middleware(RequestIdMiddleware)
 
 # Include API routes at root and versioned prefix
 app.include_router(router)
