@@ -11,7 +11,7 @@
     <img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki" />
   </a>
   <a href="https://www.apache.org/licenses/LICENSE-2.0.html">
-    <img src="https://img.shields.io/github/license/alibaba/OpenSandbox.svg" alt="license" />
+    <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="license" />
   </a>
   <a href="https://badge.fury.io/py/opensandbox">
     <img src="https://badge.fury.io/py/opensandbox.svg" alt="PyPI version" />
