@@ -17,6 +17,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -255,4 +256,27 @@ func TestAgentSandboxProvider_GetEndpoint_NotReadyCondition(t *testing.T) {
 	_, err = provider.GetEndpoint("demo")
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, ErrSandboxNotReady))
+}
+
+func TestToDNS1035Label_HashOnSymbolOnlyIDs(t *testing.T) {
+	name1 := toDNS1035Label("!!!", agentSandboxNamePrefix)
+	name2 := toDNS1035Label("???", agentSandboxNamePrefix)
+
+	assert.NotEqual(t, name1, name2)
+	assert.Equal(t, "sandbox-e84c538e", name1)
+	assert.Equal(t, "sandbox-2d86c2a6", name2)
+}
+
+func TestToDNS1035Label_PrefixesDigitStart(t *testing.T) {
+	name := toDNS1035Label("1234", agentSandboxNamePrefix)
+	assert.Equal(t, "sandbox-1234", name)
+}
+
+func TestToDNS1035Label_TruncatesWithHashSuffix(t *testing.T) {
+	input := "A" + strings.Repeat("b", 100)
+	name := toDNS1035Label(input, agentSandboxNamePrefix)
+
+	assert.LessOrEqual(t, len(name), 63)
+	assert.Regexp(t, `^[a-z][a-z0-9-]*$`, name)
+	assert.Regexp(t, `[0-9a-f]{8}$`, name)
 }

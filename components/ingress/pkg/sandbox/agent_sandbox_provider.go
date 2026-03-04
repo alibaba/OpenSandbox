@@ -16,13 +16,18 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/rest"
@@ -35,6 +40,12 @@ const (
 	agentSandboxResource = "sandboxes"
 
 	agentSandboxConditionReady = "Ready"
+	agentSandboxNamePrefix     = "sandbox"
+)
+
+var (
+	dns1035InvalidChars   = regexp.MustCompile(`[^a-z0-9-]+`)
+	dns1035DuplicateHyphens = regexp.MustCompile(`-+`)
 )
 
 // AgentSandboxProvider implements Provider for agents.x-k8s.io Sandbox CR.
@@ -81,15 +92,90 @@ func newAgentSandboxProviderWithClient(dyn dynamic.Interface, namespace string, 
 	}
 }
 
-func (a *AgentSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
-	key := fmt.Sprintf("%s/%s", a.namespace, sandboxId)
+func agentSandboxResourceName(sandboxId string) string {
+	return toDNS1035Label(sandboxId, agentSandboxNamePrefix)
+}
 
-	obj, exists, err := a.informer.GetStore().GetByKey(key)
-	if err != nil {
-		return "", fmt.Errorf("failed to get AgentSandbox %s: %w", key, err)
+func toDNS1035Label(value, prefix string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = dns1035InvalidChars.ReplaceAllString(normalized, "-")
+	normalized = dns1035DuplicateHyphens.ReplaceAllString(normalized, "-")
+	normalized = strings.Trim(normalized, "-")
+
+	hash := sha1.Sum([]byte(value))
+	suffix := hex.EncodeToString(hash[:])[:8]
+
+	if normalized == "" {
+		normalized = prefix + "-" + suffix
+	} else if !startsWithLetter(normalized) {
+		normalized = prefix + "-" + normalized
+	}
+
+	if len(normalized) > validation.DNS1035LabelMaxLength {
+		maxBase := validation.DNS1035LabelMaxLength - len(suffix) - 1
+		base := normalized
+		if len(base) > maxBase {
+			base = base[:maxBase]
+		}
+		base = strings.Trim(base, "-")
+		if !startsWithLetter(base) {
+			base = prefix
+		}
+		normalized = base + "-" + suffix
+	}
+
+	return strings.Trim(normalized, "-")
+}
+
+func startsWithLetter(value string) bool {
+	if value == "" {
+		return false
+	}
+	first := value[0]
+	return first >= 'a' && first <= 'z'
+}
+
+func legacyAgentSandboxName(sandboxId string) string {
+	legacyPrefix := agentSandboxNamePrefix + "-"
+	if strings.HasPrefix(sandboxId, legacyPrefix) {
+		return sandboxId
+	}
+	return legacyPrefix + sandboxId
+}
+
+func resourceNameCandidates(sandboxId string) []string {
+	candidates := []string{}
+	primary := agentSandboxResourceName(sandboxId)
+	candidates = append(candidates, primary)
+	if sandboxId != primary {
+		candidates = append(candidates, sandboxId)
+	}
+	legacy := legacyAgentSandboxName(sandboxId)
+	if legacy != primary && legacy != sandboxId {
+		candidates = append(candidates, legacy)
+	}
+	return candidates
+}
+
+func (a *AgentSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
+	candidates := resourceNameCandidates(sandboxId)
+	var (
+		obj    any
+		exists bool
+		err    error
+	)
+	for _, name := range candidates {
+		key := fmt.Sprintf("%s/%s", a.namespace, name)
+		obj, exists, err = a.informer.GetStore().GetByKey(key)
+		if err != nil {
+			return "", fmt.Errorf("failed to get AgentSandbox %s: %w", key, err)
+		}
+		if exists {
+			break
+		}
 	}
 	if !exists {
-		return "", fmt.Errorf("%w: %s", ErrSandboxNotFound, key)
+		return "", fmt.Errorf("%w: %s/%s", ErrSandboxNotFound, a.namespace, sandboxId)
 	}
 
 	u, ok := obj.(*unstructured.Unstructured)

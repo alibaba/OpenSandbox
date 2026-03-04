@@ -84,6 +84,47 @@ class TestAgentSandboxProvider:
         assert "containers" in body["spec"]["podTemplate"]["spec"]
         assert "volumes" in body["spec"]["podTemplate"]["spec"]
 
+    def test_create_workload_sanitizes_resource_name(self, mock_k8s_client):
+        """
+        Test case: Ensure sandbox names are DNS-1035 compliant when IDs start with digits
+        """
+        provider = AgentSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "sandbox-1234", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+
+        result = provider.create_workload(
+            sandbox_id="1234",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={"FOO": "bar"},
+            resource_limits={"cpu": "1", "memory": "1Gi"},
+            labels={"opensandbox.io/id": "1234"},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+        )
+
+        assert result == {"name": "sandbox-1234", "uid": "test-uid"}
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        assert body["metadata"]["name"] == "sandbox-1234"
+
+    def test_resource_name_uses_hash_when_id_has_no_alnum(self, mock_k8s_client):
+        """
+        Test case: Ensure symbol-only sandbox ids do not collapse to the same name
+        """
+        provider = AgentSandboxProvider(mock_k8s_client)
+
+        first = provider._resource_name("!!!")
+        second = provider._resource_name("???")
+
+        assert first.startswith("sandbox-")
+        assert second.startswith("sandbox-")
+        assert first != second
+
     def test_get_workload_returns_none_on_404(self, mock_k8s_client):
         """
         Test case: Verify None returned on 404 exception
@@ -98,6 +139,23 @@ class TestAgentSandboxProvider:
         result = provider.get_workload("test-id", "test-ns")
 
         assert result is None
+
+    def test_get_workload_prefers_sanitized_name(self, mock_k8s_client):
+        """
+        Test case: Ensure DNS-1035 resource name is tried before raw id
+        """
+        provider = AgentSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.get_namespaced_custom_object.side_effect = [
+            ApiException(status=404),
+            {"metadata": {"name": "1234"}},
+        ]
+
+        result = provider.get_workload("1234", "test-ns")
+
+        assert result["metadata"]["name"] == "1234"
+        assert mock_api.get_namespaced_custom_object.call_args_list[0].kwargs["name"] == "sandbox-1234"
+        assert mock_api.get_namespaced_custom_object.call_args_list[1].kwargs["name"] == "1234"
 
     def test_get_workload_falls_back_to_legacy_name(self, mock_k8s_client):
         """

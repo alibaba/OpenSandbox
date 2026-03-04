@@ -16,7 +16,9 @@
 Agent-sandbox workload provider implementation.
 """
 
+import hashlib
 import logging
+import re
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable
 from threading import Lock
@@ -45,6 +47,31 @@ from src.services.k8s.workload_provider import WorkloadProvider
 from src.services.runtime_resolver import SecureRuntimeResolver
 
 logger = logging.getLogger(__name__)
+
+DNS1035_LABEL_MAX_LENGTH = 63
+DNS1035_INVALID_CHARS = re.compile(r"[^a-z0-9-]+")
+DNS1035_DUPLICATE_HYPHENS = re.compile(r"-+")
+
+
+def _to_dns1035_label(value: str, prefix: str = "sandbox") -> str:
+    normalized = DNS1035_INVALID_CHARS.sub("-", value.strip().lower())
+    normalized = DNS1035_DUPLICATE_HYPHENS.sub("-", normalized).strip("-")
+
+    hash_suffix = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+
+    if not normalized:
+        normalized = f"{prefix}-{hash_suffix}"
+    elif not normalized[0].isalpha():
+        normalized = f"{prefix}-{normalized}"
+
+    if len(normalized) > DNS1035_LABEL_MAX_LENGTH:
+        max_base = DNS1035_LABEL_MAX_LENGTH - len(hash_suffix) - 1
+        base = normalized[:max_base].rstrip("-")
+        if not base or not base[0].isalpha():
+            base = prefix
+        normalized = f"{base}-{hash_suffix}"
+
+    return normalized.strip("-")
 
 
 class AgentSandboxProvider(WorkloadProvider):
@@ -100,6 +127,20 @@ class AgentSandboxProvider(WorkloadProvider):
             self.resolver.get_k8s_runtime_class() if self.resolver else None
         )
 
+    def _resource_name(self, sandbox_id: str) -> str:
+        return _to_dns1035_label(sandbox_id, prefix="sandbox")
+
+    def _resource_name_candidates(self, sandbox_id: str) -> List[str]:
+        candidates = []
+        primary = self._resource_name(sandbox_id)
+        candidates.append(primary)
+        if sandbox_id not in candidates:
+            candidates.append(sandbox_id)
+        legacy = self.legacy_resource_name(sandbox_id)
+        if legacy not in candidates:
+            candidates.append(legacy)
+        return candidates
+
     def create_workload(
         self,
         sandbox_id: str,
@@ -135,11 +176,13 @@ class AgentSandboxProvider(WorkloadProvider):
         if self.service_account:
             pod_spec["serviceAccountName"] = self.service_account
 
+        resource_name = self._resource_name(sandbox_id)
+
         runtime_manifest = {
             "apiVersion": f"{self.group}/{self.version}",
             "kind": "Sandbox",
             "metadata": {
-                "name": sandbox_id,
+                "name": resource_name,
                 "namespace": namespace,
                 "labels": labels,
             },
@@ -354,56 +397,35 @@ class AgentSandboxProvider(WorkloadProvider):
         informer = self._get_informer(namespace)
         cache_ready = informer.has_synced if informer else False
 
-        if informer and cache_ready:
-            cached = informer.get(sandbox_id)
-            if cached:
-                return cached
+        candidates = self._resource_name_candidates(sandbox_id)
 
-            legacy_name = self.legacy_resource_name(sandbox_id)
-            if legacy_name != sandbox_id:
-                legacy_cached = informer.get(legacy_name)
-                if legacy_cached:
-                    return legacy_cached
+        if informer and cache_ready:
+            for name in candidates:
+                cached = informer.get(name)
+                if cached:
+                    return cached
 
         if informer and not cache_ready:
             logger.warning(
                 f"Informer cache not synced for namespace {namespace}; falling back to direct API get."
             )
 
-        try:
-            workload = self.custom_api.get_namespaced_custom_object(
-                group=self.group,
-                version=self.version,
-                namespace=namespace,
-                plural=self.plural,
-                name=sandbox_id,
-            )
-            if informer and workload:
-                informer.update_cache(workload)
-            return workload
-        except ApiException as e:
-            if e.status != 404:
-                logger.error(f"Unexpected error getting Sandbox for {sandbox_id}: {e}")
-                raise
-
-        # Fallback for pre-upgrade sandboxes that used "sandbox-<id>" naming
-        legacy_name = self.legacy_resource_name(sandbox_id)
-        if legacy_name != sandbox_id:
+        for name in candidates:
             try:
                 workload = self.custom_api.get_namespaced_custom_object(
                     group=self.group,
                     version=self.version,
                     namespace=namespace,
                     plural=self.plural,
-                    name=legacy_name,
+                    name=name,
                 )
                 if informer and workload:
                     informer.update_cache(workload)
                 return workload
             except ApiException as e:
-                if e.status == 404:
-                    return None
-                raise
+                if e.status != 404:
+                    logger.error(f"Unexpected error getting Sandbox for {sandbox_id}: {e}")
+                    raise
             except Exception as e:
                 logger.error(f"Unexpected error getting Sandbox for {sandbox_id}: {e}")
                 raise
