@@ -166,8 +166,8 @@ install-e2e-deps:
 	@cd config/manager && $(KUSTOMIZE) edit set image controller=$(IMG)
 	@$(KUSTOMIZE) build config/default | kubectl apply -f -
 	@echo "Waiting for controller to be ready..."
-	@kubectl wait --for=condition=available --timeout=120s deployment -n sandbox-k8s-system sandbox-k8s-controller-manager || \
-		{ kubectl describe deployment -n sandbox-k8s-system sandbox-k8s-controller-manager; exit 1; }
+	@kubectl wait --for=condition=available --timeout=120s deployment -n opensandbox-system opensandbox-controller-manager || \
+		{ kubectl describe deployment -n opensandbox-system opensandbox-controller-manager; exit 1; }
 
 # RuntimeClass E2E testing - gVisor
 GVISOR_KIND_CLUSTER ?= gvisor-test

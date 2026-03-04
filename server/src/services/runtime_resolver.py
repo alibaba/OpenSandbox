@@ -24,7 +24,7 @@ This module provides:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 
 from kubernetes.client.exceptions import ApiException
 
