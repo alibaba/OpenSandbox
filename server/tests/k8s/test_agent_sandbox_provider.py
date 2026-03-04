@@ -51,7 +51,7 @@ class TestAgentSandboxProvider:
         )
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
-            "metadata": {"name": "test-id", "uid": "test-uid"}
+            "metadata": {"name": "sandbox-test-id", "uid": "test-uid"}
         }
 
         expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
@@ -68,12 +68,12 @@ class TestAgentSandboxProvider:
             execd_image="execd:latest",
         )
 
-        assert result == {"name": "test-id", "uid": "test-uid"}
+        assert result == {"name": "sandbox-test-id", "uid": "test-uid"}
 
         body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
         assert body["apiVersion"] == "agents.x-k8s.io/v1alpha1"
         assert body["kind"] == "Sandbox"
-        assert body["metadata"]["name"] == "test-id"
+        assert body["metadata"]["name"] == "sandbox-test-id"
         assert body["metadata"]["namespace"] == "test-ns"
         assert body["spec"]["replicas"] == 1
         assert body["spec"]["shutdownTime"] == "2025-12-31T10:00:00+00:00"
@@ -98,22 +98,37 @@ class TestAgentSandboxProvider:
 
         assert result is None
 
-    def test_get_workload_falls_back_to_legacy_name(self, mock_k8s_client):
+    def test_get_workload_tries_prefixed_name_first(self, mock_k8s_client):
         """
-        Test case: Verify legacy sandbox-<id> name is used when primary lookup 404s
+        Test case: Verify sandbox-<id> prefixed name is tried first
+        """
+        provider = AgentSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.get_namespaced_custom_object.return_value = {
+            "metadata": {"name": "sandbox-test-id"}
+        }
+
+        result = provider.get_workload("test-id", "test-ns")
+
+        assert result["metadata"]["name"] == "sandbox-test-id"
+        assert mock_api.get_namespaced_custom_object.call_args_list[0].kwargs["name"] == "sandbox-test-id"
+
+    def test_get_workload_falls_back_to_raw_uuid(self, mock_k8s_client):
+        """
+        Test case: Verify raw UUID is used as fallback when prefixed name 404s
         """
         provider = AgentSandboxProvider(mock_k8s_client)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.get_namespaced_custom_object.side_effect = [
             ApiException(status=404),
-            {"metadata": {"name": "sandbox-test-id"}},
+            {"metadata": {"name": "test-id"}},
         ]
 
         result = provider.get_workload("test-id", "test-ns")
 
-        assert result["metadata"]["name"] == "sandbox-test-id"
-        assert mock_api.get_namespaced_custom_object.call_args_list[0].kwargs["name"] == "test-id"
-        assert mock_api.get_namespaced_custom_object.call_args_list[1].kwargs["name"] == "sandbox-test-id"
+        assert result["metadata"]["name"] == "test-id"
+        assert mock_api.get_namespaced_custom_object.call_args_list[0].kwargs["name"] == "sandbox-test-id"
+        assert mock_api.get_namespaced_custom_object.call_args_list[1].kwargs["name"] == "test-id"
 
     def test_get_workload_reraises_non_404_exceptions(self, mock_k8s_client):
         """
@@ -132,7 +147,7 @@ class TestAgentSandboxProvider:
         """
         Test case: Use informer cache when already synced
         """
-        cached = {"metadata": {"name": "test-id"}}
+        cached = {"metadata": {"name": "sandbox-test-id"}}
 
         class FakeInformer:
             def __init__(self):
@@ -143,7 +158,7 @@ class TestAgentSandboxProvider:
                 self.started = True
 
             def get(self, name):
-                return cached if name == "test-id" else None
+                return cached if name == "sandbox-test-id" else None
 
             def update_cache(self, obj):
                 self.updated = obj

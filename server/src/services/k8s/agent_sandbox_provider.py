@@ -118,11 +118,13 @@ class AgentSandboxProvider(WorkloadProvider):
         if self.service_account:
             pod_spec["serviceAccountName"] = self.service_account
 
+        resource_name = self.legacy_resource_name(sandbox_id)
+
         runtime_manifest = {
             "apiVersion": f"{self.group}/{self.version}",
             "kind": "Sandbox",
             "metadata": {
-                "name": sandbox_id,
+                "name": resource_name,
                 "namespace": namespace,
                 "labels": labels,
             },
@@ -325,16 +327,18 @@ class AgentSandboxProvider(WorkloadProvider):
         informer = self._get_informer(namespace)
         cache_ready = informer.has_synced if informer else False
 
+        resource_name = self.legacy_resource_name(sandbox_id)
+
         if informer and cache_ready:
-            cached = informer.get(sandbox_id)
+            cached = informer.get(resource_name)
             if cached:
                 return cached
 
-            legacy_name = self.legacy_resource_name(sandbox_id)
-            if legacy_name != sandbox_id:
-                legacy_cached = informer.get(legacy_name)
-                if legacy_cached:
-                    return legacy_cached
+            # Fallback for sandboxes created with raw UUID naming
+            if resource_name != sandbox_id:
+                raw_cached = informer.get(sandbox_id)
+                if raw_cached:
+                    return raw_cached
 
         if informer and not cache_ready:
             logger.warning(
@@ -347,7 +351,7 @@ class AgentSandboxProvider(WorkloadProvider):
                 version=self.version,
                 namespace=namespace,
                 plural=self.plural,
-                name=sandbox_id,
+                name=resource_name,
             )
             if informer and workload:
                 informer.update_cache(workload)
@@ -357,16 +361,15 @@ class AgentSandboxProvider(WorkloadProvider):
                 logger.error(f"Unexpected error getting Sandbox for {sandbox_id}: {e}")
                 raise
 
-        # Fallback for pre-upgrade sandboxes that used "sandbox-<id>" naming
-        legacy_name = self.legacy_resource_name(sandbox_id)
-        if legacy_name != sandbox_id:
+        # Fallback for sandboxes created with raw UUID naming
+        if resource_name != sandbox_id:
             try:
                 workload = self.custom_api.get_namespaced_custom_object(
                     group=self.group,
                     version=self.version,
                     namespace=namespace,
                     plural=self.plural,
-                    name=legacy_name,
+                    name=sandbox_id,
                 )
                 if informer and workload:
                     informer.update_cache(workload)
