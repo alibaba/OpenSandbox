@@ -94,7 +94,7 @@ spec:
           emptyDir: { }
       initContainers:
         - name: task-executor-installer
-          image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/task-executor:latest
+          image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/task-executor:v0.1.0
           command: [ "/bin/sh", "-c" ]
           args:
             - |
