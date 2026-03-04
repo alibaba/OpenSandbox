@@ -85,13 +85,7 @@ include = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
-force-include = {
-    "example.config.toml" = "example.config.toml",
-    "example.config.zh.toml" = "example.config.zh.toml",
-    "example.config.k8s.toml" = "example.config.k8s.toml",
-    "example.config.k8s.zh.toml" = "example.config.k8s.zh.toml",
-    "example.batchsandbox-template.yaml" = "example.batchsandbox-template.yaml",
-}
+force-include = { "example.config.toml" = "example.config.toml", "example.config.zh.toml" = "example.config.zh.toml", "example.config.k8s.toml" = "example.config.k8s.toml", "example.config.k8s.zh.toml" = "example.config.k8s.zh.toml", "example.batchsandbox-template.yaml" = "example.batchsandbox-template.yaml" }
 
 [dependency-groups]
 dev = [
