@@ -15,7 +15,7 @@
 import pytest
 from fastapi import HTTPException
 
-from src.api.schema import Host, PVC, Volume
+from src.api.schema import Host, OSSFS, PVC, Volume
 from src.services.constants import SandboxErrorCodes
 from src.services.validators import (
     ensure_metadata_labels,
@@ -412,6 +412,23 @@ class TestEnsureVolumesValid:
         )
         ensure_volumes_valid([volume])
 
+    def test_valid_ossfs_volume(self):
+        """Valid OSSFS volume should pass validation."""
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                path="/folder",
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+            read_only=False,
+            sub_path="task-001",
+        )
+        ensure_volumes_valid([volume])
+
     def test_valid_volume_with_subpath(self):
         """Valid volume with subPath should pass validation."""
         volume = Volume(
@@ -516,6 +533,44 @@ class TestEnsureVolumesValid:
             ensure_volumes_valid([volume], allowed_host_prefixes=["/data/opensandbox"])
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.HOST_PATH_NOT_ALLOWED
+
+    def test_ossfs_invalid_version_raises(self):
+        """Unsupported OSSFS version should raise HTTPException."""
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="1.0",
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+        )
+        # Bypass model-level literal validation to test runtime validator branch.
+        volume.ossfs.version = "3.0"  # type: ignore
+        with pytest.raises(HTTPException) as exc_info:
+            ensure_volumes_valid([volume])
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_OSSFS_VERSION
+
+    def test_ossfs_missing_inline_credentials_raises(self):
+        """Missing inline credentials should raise HTTPException."""
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+        )
+        volume.ossfs.access_key_id = None
+        with pytest.raises(HTTPException) as exc_info:
+            ensure_volumes_valid([volume])
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_OSSFS_CREDENTIALS
 
     def test_invalid_pvc_name_rejected_by_pydantic(self):
         """Invalid PVC name should be rejected by Pydantic pattern validation."""

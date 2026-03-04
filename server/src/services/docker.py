@@ -30,6 +30,7 @@ import os
 import posixpath
 import random
 import socket
+import subprocess
 import tarfile
 import time
 from contextlib import contextmanager
@@ -63,6 +64,7 @@ from src.services.constants import (
     SANDBOX_EXPIRES_AT_LABEL,
     SANDBOX_HTTP_PORT_LABEL,
     SANDBOX_ID_LABEL,
+    SANDBOX_OSSFS_MOUNTS_LABEL,
     SandboxErrorCodes,
 )
 from src.services.helpers import (
@@ -185,6 +187,8 @@ class DockerSandboxService(SandboxService):
         self._pending_sandboxes: Dict[str, PendingSandbox] = {}
         self._pending_lock = Lock()
         self._pending_cleanup_timers: Dict[str, Timer] = {}
+        self._ossfs_mount_lock = Lock()
+        self._ossfs_mount_ref_counts: Dict[str, int] = {}
         self._restore_existing_sandboxes()
 
         # Initialize secure runtime resolver
@@ -292,6 +296,7 @@ class DockerSandboxService(SandboxService):
 
     def _expire_sandbox(self, sandbox_id: str) -> None:
         """Timer callback to terminate expired sandboxes."""
+        mount_keys: list[str] = []
         try:
             container = self._get_container_by_sandbox_id(sandbox_id)
         except HTTPException as exc:
@@ -301,6 +306,15 @@ class DockerSandboxService(SandboxService):
                 )
             self._remove_expiration_tracking(sandbox_id)
             return
+
+        labels = container.attrs.get("Config", {}).get("Labels") or {}
+        mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+        try:
+            parsed_mount_keys = json.loads(mount_keys_raw)
+            if isinstance(parsed_mount_keys, list):
+                mount_keys = [key for key in parsed_mount_keys if isinstance(key, str) and key]
+        except (TypeError, json.JSONDecodeError):
+            mount_keys = []
 
         try:
             state = container.attrs.get("State", {})
@@ -317,6 +331,7 @@ class DockerSandboxService(SandboxService):
         self._remove_expiration_tracking(sandbox_id)
         # Ensure sidecar is also cleaned up on expiration
         self._cleanup_egress_sidecar(sandbox_id)
+        self._release_ossfs_mounts(mount_keys)
 
     def _restore_existing_sandboxes(self) -> None:
         """On startup, rebuild expiration timers for containers already running."""
@@ -328,6 +343,7 @@ class DockerSandboxService(SandboxService):
 
         restored = 0
         seen_sidecars: set[str] = set()
+        restored_mount_refs: dict[str, int] = {}
         now = datetime.now(timezone.utc)
         for container in containers:
             labels = container.attrs.get("Config", {}).get("Labels") or {}
@@ -356,6 +372,15 @@ class DockerSandboxService(SandboxService):
                 continue
 
             self._schedule_expiration(sandbox_id, expires_at)
+            mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+            try:
+                mount_keys = json.loads(mount_keys_raw)
+            except (TypeError, json.JSONDecodeError):
+                mount_keys = []
+            if isinstance(mount_keys, list):
+                for key in mount_keys:
+                    if isinstance(key, str) and key:
+                        restored_mount_refs[key] = restored_mount_refs.get(key, 0) + 1
             restored += 1
 
         # Cleanup orphan sidecars (no matching sandbox container)
@@ -372,6 +397,8 @@ class DockerSandboxService(SandboxService):
 
         if restored:
             logger.info("Restored expiration timers for %d sandbox(es).", restored)
+        with self._ossfs_mount_lock:
+            self._ossfs_mount_ref_counts = restored_mount_refs
 
     def _fetch_execd_archive(self) -> bytes:
         """Fetch (and memoize) the execd archive from the platform container."""
@@ -711,6 +738,12 @@ class DockerSandboxService(SandboxService):
             return
 
         for container in containers:
+            labels = container.attrs.get("Config", {}).get("Labels") or {}
+            mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+            try:
+                mount_keys: list[str] = json.loads(mount_keys_raw)
+            except (TypeError, json.JSONDecodeError):
+                mount_keys = []
             try:
                 with self._docker_operation("cleanup failed sandbox container", sandbox_id):
                     container.remove(force=True)
@@ -721,6 +754,8 @@ class DockerSandboxService(SandboxService):
                     container.id,
                     exc,
                 )
+            finally:
+                self._release_ossfs_mounts(mount_keys)
         # Always attempt to cleanup sidecar as well
         self._cleanup_egress_sidecar(sandbox_id)
 
@@ -829,6 +864,14 @@ class DockerSandboxService(SandboxService):
         image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
         mem_limit, nano_cpus = self._resolve_resource_limits(request)
 
+        # Prepare OSSFS mounts first so binds can reference mounted host paths.
+        ossfs_mount_keys = self._prepare_ossfs_mounts(request.volumes)
+        if ossfs_mount_keys:
+            labels[SANDBOX_OSSFS_MOUNTS_LABEL] = json.dumps(
+                ossfs_mount_keys,
+                separators=(",", ":"),
+            )
+
         # Build volume bind mounts from request volumes.
         # pvc_inspect_cache carries Docker volume inspect data from the
         # validation phase, avoiding a redundant API call.
@@ -895,6 +938,7 @@ class DockerSandboxService(SandboxService):
                         sandbox_id,
                         cleanup_exc,
                     )
+            self._release_ossfs_mounts(ossfs_mount_keys)
             raise
 
         status_info = SandboxStatus(
@@ -1018,8 +1062,274 @@ class DockerSandboxService(SandboxService):
             elif volume.pvc is not None:
                 vol_info = self._validate_pvc_volume(volume)
                 pvc_inspect_cache[volume.pvc.claim_name] = vol_info
+            elif volume.ossfs is not None:
+                self._validate_ossfs_volume(volume)
 
         return pvc_inspect_cache
+
+    @staticmethod
+    def _derive_oss_region(endpoint: str) -> Optional[str]:
+        """Best-effort derive region from endpoint like oss-cn-hangzhou.aliyuncs.com."""
+        marker = "oss-"
+        idx = endpoint.find(marker)
+        if idx < 0:
+            return None
+        start = idx + len(marker)
+        end = endpoint.find(".", start)
+        if end <= start:
+            return None
+        return endpoint[start:end]
+
+    def _resolve_ossfs_paths(self, volume) -> tuple[str, str]:
+        """
+        Resolve OSSFS base mount path and bind path.
+
+        - base path = ossfs_mount_root/<bucket>/<ossfs.path>
+        - bind path = base path (+ subPath when present)
+        """
+        mount_root = self.app_config.storage.ossfs_mount_root
+        if not mount_root or not os.path.isabs(mount_root):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_OSSFS_MOUNT_ROOT,
+                    "message": (
+                        "storage.ossfs_mount_root must be configured as an absolute path."
+                    ),
+                },
+            )
+
+        bucket_root = os.path.normpath(os.path.join(mount_root, volume.ossfs.bucket))
+        ossfs_path = (volume.ossfs.path or "/").lstrip("/")
+        backend_path = os.path.normpath(os.path.join(bucket_root, ossfs_path))
+
+        bucket_prefix = bucket_root if bucket_root.endswith(os.sep) else bucket_root + os.sep
+        if backend_path != bucket_root and not backend_path.startswith(bucket_prefix):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_SUB_PATH,
+                    "message": (
+                        f"Volume '{volume.name}': ossfs.path resolves outside bucket root."
+                    ),
+                },
+            )
+
+        bind_path = backend_path
+        if volume.sub_path:
+            bind_path = os.path.normpath(os.path.join(backend_path, volume.sub_path))
+            backend_prefix = (
+                backend_path if backend_path.endswith(os.sep) else backend_path + os.sep
+            )
+            if bind_path != backend_path and not bind_path.startswith(backend_prefix):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_SUB_PATH,
+                        "message": (
+                            f"Volume '{volume.name}': resolved subPath escapes OSSFS base path."
+                        ),
+                    },
+                )
+
+        return backend_path, bind_path
+
+    def _mount_ossfs_backend_path(self, volume, backend_path: str) -> None:
+        """Mount OSS bucket/path to backend_path with ossfs."""
+        access_key_id = volume.ossfs.access_key_id
+        access_key_secret = volume.ossfs.access_key_secret
+        if not access_key_id or not access_key_secret:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_OSSFS_CREDENTIALS,
+                    "message": (
+                        "OSSFS inline credentials are required: "
+                        "accessKeyId and accessKeySecret must be provided."
+                    ),
+                },
+            )
+        os.makedirs(backend_path, exist_ok=True)
+
+        bucket = volume.ossfs.bucket
+        prefix = (volume.ossfs.path or "/").strip("/")
+        source = f"{bucket}:{prefix}" if prefix else bucket
+        endpoint = volume.ossfs.endpoint
+        region = self._derive_oss_region(endpoint)
+
+        passwd_file = os.path.join(
+            "/tmp",
+            f"opensandbox-ossfs-inline-{uuid4().hex}",
+        )
+        try:
+            with open(passwd_file, "w", encoding="utf-8") as f:
+                # ossfs passwd_file format: bucket:accessKeyId:accessKeySecret
+                f.write(f"{bucket}:{access_key_id}:{access_key_secret}")
+            os.chmod(passwd_file, 0o600)
+
+            cmd: list[str] = [
+                "ossfs",
+                source,
+                backend_path,
+                "-o",
+                f"url=http://{endpoint}",
+                "-o",
+                f"passwd_file={passwd_file}",
+            ]
+            if region:
+                cmd.extend(["-o", "sigv4", "-o", f"region={region}"])
+            if volume.ossfs.options:
+                for opt in volume.ossfs.options:
+                    cmd.extend(["-o", opt])
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            if result.returncode != 0:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": SandboxErrorCodes.OSSFS_MOUNT_FAILED,
+                        "message": (
+                            f"Volume '{volume.name}': failed to mount OSSFS backend. "
+                            f"stderr={result.stderr.strip() or 'unknown error'}"
+                        ),
+                    },
+                )
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.OSSFS_MOUNT_FAILED,
+                    "message": (
+                        f"Volume '{volume.name}': failed to execute ossfs command: {exc}"
+                    ),
+                },
+            ) from exc
+        finally:
+            try:
+                os.remove(passwd_file)
+            except OSError:
+                pass
+
+    def _ensure_ossfs_mounted(self, volume_or_mount_key) -> str:
+        """Ensure OSSFS backend path is mounted and return mount key."""
+        if isinstance(volume_or_mount_key, str):
+            mount_key = volume_or_mount_key
+            backend_path = volume_or_mount_key
+            volume = None
+        else:
+            volume = volume_or_mount_key
+            backend_path, _ = self._resolve_ossfs_paths(volume)
+            mount_key = backend_path
+
+        with self._ossfs_mount_lock:
+            current = self._ossfs_mount_ref_counts.get(mount_key, 0)
+            if current > 0:
+                self._ossfs_mount_ref_counts[mount_key] = current + 1
+                return mount_key
+
+            if not os.path.ismount(backend_path):
+                if volume is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "code": SandboxErrorCodes.OSSFS_MOUNT_FAILED,
+                            "message": (
+                                f"Failed to mount OSSFS path '{mount_key}': "
+                                "missing volume context."
+                            ),
+                        },
+                    )
+                self._mount_ossfs_backend_path(volume, backend_path)
+
+            self._ossfs_mount_ref_counts[mount_key] = 1
+            return mount_key
+
+    def _release_ossfs_mount(self, mount_key: str) -> None:
+        """Release one reference and unmount when ref count reaches zero."""
+        with self._ossfs_mount_lock:
+            current = self._ossfs_mount_ref_counts.get(mount_key, 0)
+            if current <= 0:
+                logger.warning(
+                    "Skipping OSSFS unmount for untracked mount key '%s'.",
+                    mount_key,
+                )
+                return
+            if current == 1:
+                self._ossfs_mount_ref_counts.pop(mount_key, None)
+                should_unmount = True
+            else:
+                self._ossfs_mount_ref_counts[mount_key] = current - 1
+                should_unmount = False
+
+        if not should_unmount or not os.path.ismount(mount_key):
+            return
+
+        errors: list[str] = []
+        for cmd in (["fusermount", "-u", mount_key], ["umount", mount_key]):
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+            if result.returncode == 0:
+                return
+            errors.append(result.stderr.strip() or "unknown error")
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": SandboxErrorCodes.OSSFS_UNMOUNT_FAILED,
+                "message": f"Failed to unmount OSSFS path '{mount_key}': {'; '.join(errors)}",
+            },
+        )
+
+    def _release_ossfs_mounts(self, mount_keys: list[str]) -> None:
+        for key in mount_keys:
+            try:
+                self._release_ossfs_mount(key)
+            except HTTPException as exc:
+                logger.warning("Failed to release OSSFS mount %s: %s", key, exc.detail)
+
+    def _prepare_ossfs_mounts(self, volumes: Optional[list]) -> list[str]:
+        if not volumes:
+            return []
+        key_to_volume: dict[str, Any] = {}
+        for volume in volumes:
+            if volume.ossfs is not None:
+                mount_key, _ = self._resolve_ossfs_paths(volume)
+                if mount_key not in key_to_volume:
+                    key_to_volume[mount_key] = volume
+        for mount_key, volume in key_to_volume.items():
+            self._ensure_ossfs_mounted(volume)
+        return list(key_to_volume.keys())
+
+    def _validate_ossfs_volume(self, volume) -> None:
+        """
+        Docker-specific validation for OSSFS backend.
+
+        Ensures inline credentials and path semantics are valid.
+        """
+        if not volume.ossfs.access_key_id or not volume.ossfs.access_key_secret:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_OSSFS_CREDENTIALS,
+                    "message": (
+                        "OSSFS inline credentials are required: "
+                        "accessKeyId and accessKeySecret must be provided."
+                    ),
+                },
+            )
+
+        self._resolve_ossfs_paths(volume)
 
     @staticmethod
     def _validate_host_volume(volume, allowed_prefixes: Optional[list[str]]) -> None:
@@ -1239,6 +1549,8 @@ class DockerSandboxService(SandboxService):
           Format (with subPath): ``/var/lib/docker/volumes/…/subdir:/container/path:ro|rw``
           When subPath is specified, the volume's host Mountpoint (obtained from
           ``pvc_inspect_cache``) is used to produce a standard bind mount.
+        - ``ossfs``: host bind mount to pre-mounted OSSFS path.
+          Format: ``/mnt/ossfs/<bucket>/<path>/<subPath?>:/container/path:ro|rw``
 
         Each mount string uses ``:ro`` for read-only and ``:rw`` for read-write
         (default).
@@ -1290,6 +1602,9 @@ class DockerSandboxService(SandboxService):
                     binds.append(
                         f"{volume.pvc.claim_name}:{container_path}:{mode}"
                     )
+            elif volume.ossfs is not None:
+                _, host_path = self._resolve_ossfs_paths(volume)
+                binds.append(f"{host_path}:{container_path}:{mode}")
 
         return binds
 
@@ -1395,6 +1710,12 @@ class DockerSandboxService(SandboxService):
             HTTPException: If sandbox not found or deletion fails
         """
         container = self._get_container_by_sandbox_id(sandbox_id)
+        labels = container.attrs.get("Config", {}).get("Labels") or {}
+        mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+        try:
+            mount_keys: list[str] = json.loads(mount_keys_raw)
+        except (TypeError, json.JSONDecodeError):
+            mount_keys = []
         try:
             try:
                 with self._docker_operation("kill sandbox container", sandbox_id):
@@ -1416,6 +1737,7 @@ class DockerSandboxService(SandboxService):
         finally:
             self._remove_expiration_tracking(sandbox_id)
             self._cleanup_egress_sidecar(sandbox_id)
+            self._release_ossfs_mounts(mount_keys)
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
