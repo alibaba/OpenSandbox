@@ -314,6 +314,28 @@ await using var sandbox = await Sandbox.CreateAsync(options);
 // 离开作用域时自动释放
 ```
 
+## 故障排查（Kubernetes）
+
+### `RunAsync` 连接 Pod IP 超时/被拒绝
+
+如果 OpenSandbox Server 部署在 Kubernetes 集群中，本地客户端通常无法直接访问
+沙箱 Pod IP（例如 `172.x.x.x:44772`）。此时调用 `sandbox.Commands.RunAsync(...)`
+可能出现 socket 超时或连接被拒绝。
+
+建议在 SDK 连接配置中开启服务端代理：
+
+```csharp
+var config = new ConnectionConfig(new ConnectionConfigOptions
+{
+    Domain = "your-opensandbox-server.example.com",
+    ApiKey = "your-api-key",
+    UseServerProxy = true,
+});
+```
+
+启用 `UseServerProxy = true` 后，SDK 会通过 OpenSandbox Server 的代理路径转发
+execd/endpoint 请求，避免客户端直连 Pod IP。
+
 ## 支持的框架
 
 - .NET Standard 2.0（最大兼容性，支持 .NET Framework 4.6.1+、.NET Core 2.0+、Mono、Xamarin 等）

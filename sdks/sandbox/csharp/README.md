@@ -362,6 +362,28 @@ catch (SandboxException ex)
 }
 ```
 
+## Troubleshooting (Kubernetes)
+
+### `RunAsync` fails with connection timeout/refused to Pod IP
+
+If your OpenSandbox server runs in Kubernetes, your local client may not be able to
+directly access sandbox Pod IPs (for example `172.x.x.x:44772`). In this case,
+`sandbox.Commands.RunAsync(...)` can fail with socket timeout/refused errors.
+
+Use server-side proxy mode in the SDK connection config:
+
+```csharp
+var config = new ConnectionConfig(new ConnectionConfigOptions
+{
+    Domain = "your-opensandbox-server.example.com",
+    ApiKey = "your-api-key",
+    UseServerProxy = true,
+});
+```
+
+With `UseServerProxy = true`, the SDK sends execd/endpoint traffic through
+the OpenSandbox server proxy path, avoiding direct client -> Pod IP access.
+
 ## Supported Frameworks
 
 - .NET Standard 2.0 (for maximum compatibility with .NET Framework 4.6.1+, .NET Core 2.0+, Mono, Xamarin, etc.)
