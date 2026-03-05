@@ -58,6 +58,7 @@ try {
     console.error(
       `Sandbox Error: [${err.error.code}] ${err.error.message ?? ""}`,
     );
+    console.error(`Request ID: ${err.requestId ?? "N/A"}`);
   } else {
     console.error(err);
   }

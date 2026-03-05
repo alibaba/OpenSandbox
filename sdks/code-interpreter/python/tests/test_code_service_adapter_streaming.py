@@ -52,7 +52,12 @@ class _SseTransport(httpx.AsyncBaseTransport):
             )
             return httpx.Response(200, headers={"Content-Type": "text/event-stream"}, content=sse, request=request)
 
-        return httpx.Response(400, content=b"bad", request=request)
+        return httpx.Response(
+            400,
+            headers={"x-request-id": "req-code-123"},
+            content=b"bad",
+            request=request,
+        )
 
 
 def test_code_execution_converter_includes_context() -> None:
@@ -115,5 +120,6 @@ async def test_run_code_non_200_raises_api_exception() -> None:
     endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
     adapter = CodesAdapter(endpoint, cfg)
 
-    with pytest.raises(SandboxApiException):
+    with pytest.raises(SandboxApiException) as ei:
         await adapter.run("other")
+    assert ei.value.request_id == "req-code-123"

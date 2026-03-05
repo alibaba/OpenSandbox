@@ -19,6 +19,8 @@ package com.alibaba.opensandbox.e2e;
 import static org.junit.jupiter.api.Assertions.*;
 
 import com.alibaba.opensandbox.sandbox.Sandbox;
+import com.alibaba.opensandbox.sandbox.config.ConnectionConfig;
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException;
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.*;
 import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.*;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.*;
@@ -315,8 +317,7 @@ public class SandboxE2ETest extends BaseE2ETest {
             assertNull(readMarker.getError(), "Failed to read marker file");
             assertEquals(1, readMarker.getLogs().getStdout().size());
             assertEquals(
-                    "opensandbox-e2e-marker",
-                    readMarker.getLogs().getStdout().get(0).getText());
+                    "opensandbox-e2e-marker", readMarker.getLogs().getStdout().get(0).getText());
 
             // Step 2: Write a file from inside the sandbox to the mounted path
             Execution writeResult =
@@ -344,8 +345,7 @@ public class SandboxE2ETest extends BaseE2ETest {
                                             .build());
             assertNull(readBack.getError());
             assertEquals(1, readBack.getLogs().getStdout().size());
-            assertEquals(
-                    "written-from-sandbox", readBack.getLogs().getStdout().get(0).getText());
+            assertEquals("written-from-sandbox", readBack.getLogs().getStdout().get(0).getText());
 
             // Step 4: Verify the mount path is a proper directory
             Execution dirCheck =
@@ -407,8 +407,7 @@ public class SandboxE2ETest extends BaseE2ETest {
             assertNull(readMarker.getError(), "Failed to read marker file on read-only mount");
             assertEquals(1, readMarker.getLogs().getStdout().size());
             assertEquals(
-                    "opensandbox-e2e-marker",
-                    readMarker.getLogs().getStdout().get(0).getText());
+                    "opensandbox-e2e-marker", readMarker.getLogs().getStdout().get(0).getText());
 
             // Step 2: Verify writing is denied on read-only mount
             Execution writeResult =
@@ -421,8 +420,7 @@ public class SandboxE2ETest extends BaseE2ETest {
                                                             + containerMountPath
                                                             + "/should-fail.txt")
                                             .build());
-            assertNotNull(
-                    writeResult.getError(), "Write should fail on read-only mount");
+            assertNotNull(writeResult.getError(), "Write should fail on read-only mount");
         } finally {
             try {
                 roSandbox.kill();
@@ -470,9 +468,7 @@ public class SandboxE2ETest extends BaseE2ETest {
                                             .build());
             assertNull(readMarker.getError(), "Failed to read marker file from PVC volume");
             assertEquals(1, readMarker.getLogs().getStdout().size());
-            assertEquals(
-                    "pvc-marker-data",
-                    readMarker.getLogs().getStdout().get(0).getText());
+            assertEquals("pvc-marker-data", readMarker.getLogs().getStdout().get(0).getText());
 
             // Step 2: Write a file from inside the sandbox to the named volume
             Execution writeResult =
@@ -494,14 +490,11 @@ public class SandboxE2ETest extends BaseE2ETest {
                             .run(
                                     RunCommandRequest.builder()
                                             .command(
-                                                    "cat "
-                                                            + containerMountPath
-                                                            + "/pvc-output.txt")
+                                                    "cat " + containerMountPath + "/pvc-output.txt")
                                             .build());
             assertNull(readBack.getError());
             assertEquals(1, readBack.getLogs().getStdout().size());
-            assertEquals(
-                    "written-to-pvc", readBack.getLogs().getStdout().get(0).getText());
+            assertEquals("written-to-pvc", readBack.getLogs().getStdout().get(0).getText());
 
             // Step 4: Verify the mount path is a proper directory
             Execution dirCheck =
@@ -562,9 +555,7 @@ public class SandboxE2ETest extends BaseE2ETest {
                                             .build());
             assertNull(readMarker.getError(), "Failed to read marker file on read-only PVC mount");
             assertEquals(1, readMarker.getLogs().getStdout().size());
-            assertEquals(
-                    "pvc-marker-data",
-                    readMarker.getLogs().getStdout().get(0).getText());
+            assertEquals("pvc-marker-data", readMarker.getLogs().getStdout().get(0).getText());
 
             // Step 2: Verify writing is denied on read-only mount
             Execution writeResult =
@@ -577,8 +568,7 @@ public class SandboxE2ETest extends BaseE2ETest {
                                                             + containerMountPath
                                                             + "/should-fail.txt")
                                             .build());
-            assertNotNull(
-                    writeResult.getError(), "Write should fail on read-only PVC mount");
+            assertNotNull(writeResult.getError(), "Write should fail on read-only PVC mount");
         } finally {
             try {
                 roSandbox.kill();
@@ -627,9 +617,7 @@ public class SandboxE2ETest extends BaseE2ETest {
                                             .build());
             assertNull(readMarker.getError(), "Failed to read subpath marker file");
             assertEquals(1, readMarker.getLogs().getStdout().size());
-            assertEquals(
-                    "pvc-subpath-marker",
-                    readMarker.getLogs().getStdout().get(0).getText());
+            assertEquals("pvc-subpath-marker", readMarker.getLogs().getStdout().get(0).getText());
 
             // Step 2: Verify only subPath contents are visible (not the full volume)
             Execution lsResult =
@@ -665,15 +653,11 @@ public class SandboxE2ETest extends BaseE2ETest {
                             .commands()
                             .run(
                                     RunCommandRequest.builder()
-                                            .command(
-                                                    "cat "
-                                                            + containerMountPath
-                                                            + "/output.txt")
+                                            .command("cat " + containerMountPath + "/output.txt")
                                             .build());
             assertNull(readBack.getError());
             assertEquals(1, readBack.getLogs().getStdout().size());
-            assertEquals(
-                    "subpath-write-test", readBack.getLogs().getStdout().get(0).getText());
+            assertEquals("subpath-write-test", readBack.getLogs().getStdout().get(0).getText());
         } finally {
             try {
                 subpathSandbox.kill();
@@ -1209,5 +1193,40 @@ public class SandboxE2ETest extends BaseE2ETest {
             Thread.sleep(1000);
         }
         assertTrue(healthy, "Sandbox should be healthy after resume");
+    }
+
+    @Test
+    @Order(9)
+    @DisplayName("X-Request-ID passthrough on server error")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testXRequestIdPassthroughOnServerError() {
+        String requestId = "e2e-java-server-" + System.currentTimeMillis();
+        String missingSandboxId = "missing-" + requestId;
+
+        ConnectionConfig cfg =
+                ConnectionConfig.builder()
+                        .apiKey(sharedConnectionConfig.getApiKey())
+                        .domain(sharedConnectionConfig.getDomain())
+                        .protocol(sharedConnectionConfig.getProtocol())
+                        .requestTimeout(sharedConnectionConfig.getRequestTimeout())
+                        .headers(Map.of("X-Request-ID", requestId))
+                        .build();
+
+        SandboxApiException ex =
+                assertThrows(
+                        SandboxApiException.class,
+                        () -> {
+                            Sandbox connected =
+                                    Sandbox.connector()
+                                            .connectionConfig(cfg)
+                                            .sandboxId(missingSandboxId)
+                                            .connect();
+                            try {
+                                connected.getInfo();
+                            } finally {
+                                connected.close();
+                            }
+                        });
+        assertEquals(requestId, ex.getRequestId());
     }
 }

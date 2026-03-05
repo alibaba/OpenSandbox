@@ -32,6 +32,7 @@ from opensandbox.adapters.converter.execution_event_dispatcher import (
     ExecutionEventDispatcher,
 )
 from opensandbox.adapters.converter.response_handler import (
+    extract_request_id,
     handle_api_error,
     require_parsed,
 )
@@ -287,6 +288,7 @@ class CodesAdapter(Codes):
                     raise SandboxApiException(
                         message=f"Failed to run code. Status code: {response.status_code}",
                         status_code=response.status_code,
+                        request_id=extract_request_id(response.headers),
                     )
 
                 dispatcher = ExecutionEventDispatcher(execution, handlers)

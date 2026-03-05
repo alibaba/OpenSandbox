@@ -15,6 +15,8 @@
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 import {
+  ConnectionConfig,
+  SandboxApiException,
   Sandbox,
   DEFAULT_EXECD_PORT,
   SandboxManager,
@@ -27,6 +29,9 @@ import {
 } from "@alibaba-group/opensandbox";
 
 import {
+  TEST_API_KEY,
+  TEST_DOMAIN,
+  TEST_PROTOCOL,
   assertEndpointHasPort,
   assertRecentTimestampMs,
   createConnectionConfig,
@@ -755,4 +760,28 @@ test("05 sandbox pause + resume", async () => {
   const echo = await sandbox.commands.run("echo resume-ok");
   expect(echo.error).toBeUndefined();
   expect(echo.logs.stdout[0]?.text).toBe("resume-ok");
+});
+
+test("06 x-request-id passthrough on server error", async () => {
+  const requestId = `e2e-js-server-${Date.now()}`;
+  const missingSandboxId = `missing-${requestId}`;
+  const connectionConfig = new ConnectionConfig({
+    domain: TEST_DOMAIN,
+    protocol: TEST_PROTOCOL === "https" ? "https" : "http",
+    apiKey: TEST_API_KEY,
+    requestTimeoutSeconds: 180,
+    headers: { "X-Request-ID": requestId },
+  });
+
+  try {
+    const connected = await Sandbox.connect({
+      sandboxId: missingSandboxId,
+      connectionConfig,
+    });
+    await connected.getInfo();
+    throw new Error("expected server call to fail");
+  } catch (err) {
+    expect(err).toBeInstanceOf(SandboxApiException);
+    expect((err as SandboxApiException).requestId).toBe(requestId);
+  }
 });

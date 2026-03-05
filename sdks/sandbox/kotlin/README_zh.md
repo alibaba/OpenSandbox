@@ -65,6 +65,7 @@ public class QuickStart {
         } catch (SandboxException e) {
             // 处理 Sandbox 特定异常
             System.err.println("沙箱错误: [" + e.getError().getCode() + "] " + e.getError().getMessage());
+            System.err.println("Request ID: " + e.getRequestId());
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -237,6 +238,10 @@ ConnectionPool sharedPool = new ConnectionPool(50, 30, TimeUnit.SECONDS);
 ConnectionConfig sharedConfig = ConnectionConfig.builder()
     .apiKey("your-key")
     .domain("api.opensandbox.io")
+    .headers(Map.of(
+        "X-Custom-Header", "value",
+        "X-Request-ID", "trace-123"
+    ))
     .connectionPool(sharedPool) // 注入共享连接池
     .build();
 ```

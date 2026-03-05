@@ -33,7 +33,10 @@ from opensandbox.adapters.converter.filesystem_model_converter import (
 from opensandbox.adapters.converter.metrics_model_converter import (
     MetricsModelConverter,
 )
-from opensandbox.adapters.converter.response_handler import handle_api_error
+from opensandbox.adapters.converter.response_handler import (
+    handle_api_error,
+    require_parsed,
+)
 from opensandbox.adapters.converter.sandbox_model_converter import (
     SandboxModelConverter,
 )
@@ -76,10 +79,12 @@ def test_handle_api_error_raises_with_parsed_message() -> None:
     class Resp:
         status_code = 400
         parsed = Parsed()
+        headers = {"X-Request-ID": "req-123"}
 
     with pytest.raises(SandboxApiException) as ei:
         handle_api_error(Resp(), "Op")
     assert "bad request" in str(ei.value)
+    assert ei.value.request_id == "req-123"
 
 
 def test_handle_api_error_noop_on_success() -> None:
@@ -88,6 +93,17 @@ def test_handle_api_error_noop_on_success() -> None:
         parsed = None
 
     handle_api_error(Resp(), "Op")
+
+
+def test_require_parsed_includes_request_id_on_invalid_payload() -> None:
+    class Resp:
+        status_code = 200
+        parsed = None
+        headers = {"x-request-id": "req-456"}
+
+    with pytest.raises(SandboxApiException) as ei:
+        require_parsed(Resp(), expected_type=str, operation_name="Op")
+    assert ei.value.request_id == "req-456"
 
 
 def test_exception_converter_maps_common_types() -> None:

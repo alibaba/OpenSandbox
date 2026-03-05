@@ -27,7 +27,15 @@ open class SandboxException(
     message: String? = null,
     cause: Throwable? = null,
     val error: SandboxError,
-) : RuntimeException(message, cause)
+    val requestId: String? = null,
+) : RuntimeException(message, cause) {
+    // Keep the old constructor signature for binary compatibility with already-compiled clients.
+    constructor(
+        message: String?,
+        cause: Throwable?,
+        error: SandboxError,
+    ) : this(message = message, cause = cause, error = error, requestId = null)
+}
 
 /**
  * Thrown when the Sandbox API returns an error response (e.g., HTTP 4xx or 5xx) or meet unexpected error when calling api.
@@ -37,7 +45,16 @@ class SandboxApiException(
     cause: Throwable? = null,
     val statusCode: Int? = null,
     error: SandboxError = SandboxError(SandboxError.UNEXPECTED_RESPONSE),
-) : SandboxException(message, cause, error)
+    requestId: String? = null,
+) : SandboxException(message, cause, error, requestId) {
+    // Keep the old constructor signature for binary compatibility with already-compiled clients.
+    constructor(
+        message: String?,
+        cause: Throwable?,
+        statusCode: Int?,
+        error: SandboxError,
+    ) : this(message = message, cause = cause, statusCode = statusCode, error = error, requestId = null)
+}
 
 /**
  * Thrown when an unexpected internal error occurs within the SDK

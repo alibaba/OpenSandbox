@@ -74,6 +74,15 @@ private fun Exception.toApiException(): SandboxApiException {
             else -> 0 to null
         }
 
+    val requestId =
+        when (rawResponse) {
+            is ClientError<*> -> rawResponse.headers.extractRequestId()
+            is ServerError<*> -> rawResponse.headers.extractRequestId()
+            is ExecdClientError<*> -> rawResponse.headers.extractRequestId()
+            is ExecdServerError<*> -> rawResponse.headers.extractRequestId()
+            else -> null
+        }
+
     val errorBody =
         when (rawResponse) {
             is ClientError<*> -> rawResponse.body
@@ -95,7 +104,14 @@ private fun Exception.toApiException(): SandboxApiException {
         statusCode = statusCode,
         cause = this,
         error = sandboxError,
+        requestId = requestId,
     )
+}
+
+private fun Map<String, List<String>>.extractRequestId(): String? {
+    return entries.firstOrNull { (key, _) ->
+        key.equals("X-Request-ID", ignoreCase = true)
+    }?.value?.firstOrNull()?.takeIf { it.isNotBlank() }
 }
 
 fun parseSandboxError(body: Any?): SandboxError? {

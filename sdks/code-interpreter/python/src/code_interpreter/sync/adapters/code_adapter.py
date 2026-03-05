@@ -26,6 +26,7 @@ from opensandbox.adapters.converter.exception_converter import (
     ExceptionConverter,
 )
 from opensandbox.adapters.converter.response_handler import (
+    extract_request_id,
     handle_api_error,
     require_parsed,
 )
@@ -252,6 +253,7 @@ class CodesAdapterSync(CodesSync):
                     raise SandboxApiException(
                         message=f"Failed to run code. Status code: {response.status_code}",
                         status_code=response.status_code,
+                        request_id=extract_request_id(response.headers),
                     )
 
                 for line in response.iter_lines():

@@ -85,6 +85,41 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
     }
 
     [Fact(Timeout = 2 * 60 * 1000)]
+    public async Task Sandbox_XRequestId_Passthrough_OnServerError()
+    {
+        var requestId = $"e2e-csharp-server-{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+        var missingSandboxId = $"missing-{requestId}";
+        var baseConfig = _fixture.ConnectionConfig;
+        var config = new ConnectionConfig(new ConnectionConfigOptions
+        {
+            Domain = baseConfig.Domain,
+            Protocol = baseConfig.Protocol,
+            ApiKey = baseConfig.ApiKey,
+            RequestTimeoutSeconds = baseConfig.RequestTimeoutSeconds,
+            Headers = new Dictionary<string, string> { ["X-Request-ID"] = requestId }
+        });
+
+        var ex = await Assert.ThrowsAsync<SandboxApiException>(async () =>
+        {
+            var connected = await Sandbox.ConnectAsync(new SandboxConnectOptions
+            {
+                ConnectionConfig = config,
+                SandboxId = missingSandboxId
+            });
+            try
+            {
+                await connected.GetInfoAsync();
+            }
+            finally
+            {
+                await connected.DisposeAsync();
+            }
+        });
+
+        Assert.Equal(requestId, ex.RequestId);
+    }
+
+    [Fact(Timeout = 2 * 60 * 1000)]
     public async Task Sandbox_Create_With_NetworkPolicy()
     {
         var policySandbox = await Sandbox.CreateAsync(new SandboxCreateOptions

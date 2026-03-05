@@ -58,6 +58,8 @@ async def main():
     except SandboxException as e:
         # Handle Sandbox specific exceptions
         print(f"Sandbox Error: [{e.error.code}] {e.error.message}")
+        # Server logs can be correlated by this request id (if available)
+        print(f"Request ID: {e.request_id}")
     except Exception as e:
         print(f"Error: {e}")
 
@@ -265,7 +267,10 @@ import httpx
 config = ConnectionConfig(
     api_key="your-key",
     domain="api.opensandbox.io",
-    headers={"X-Custom-Header": "value"},
+    headers={
+        "X-Custom-Header": "value",
+        "X-Request-ID": "trace-123",
+    },
     transport=httpx.AsyncHTTPTransport(
         limits=httpx.Limits(
             max_connections=100,

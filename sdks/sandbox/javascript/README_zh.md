@@ -55,6 +55,7 @@ try {
 } catch (err) {
   if (err instanceof SandboxException) {
     console.error(`沙箱错误: [${err.error.code}] ${err.error.message ?? ""}`);
+    console.error(`Request ID: ${err.requestId ?? "N/A"}`);
   } else {
     console.error(err);
   }

@@ -100,6 +100,7 @@ internal class FilesystemAdapter(
                         message = message,
                         statusCode = response.code,
                         error = sandboxError ?: SandboxError(UNEXPECTED_RESPONSE),
+                        requestId = response.header("X-Request-ID"),
                     )
                 }
 
@@ -127,6 +128,7 @@ internal class FilesystemAdapter(
                         message = message,
                         statusCode = response.code,
                         error = sandboxError ?: SandboxError(UNEXPECTED_RESPONSE),
+                        requestId = response.header("X-Request-ID"),
                     )
                 }
                 return response.body?.bytes() ?: ByteArray(0)
@@ -154,6 +156,7 @@ internal class FilesystemAdapter(
                         message = message,
                         statusCode = response.code,
                         error = sandboxError ?: SandboxError(UNEXPECTED_RESPONSE),
+                        requestId = response.header("X-Request-ID"),
                     )
                 } catch (e: Exception) {
                     response.close()
@@ -236,6 +239,7 @@ internal class FilesystemAdapter(
                         message = message,
                         statusCode = response.code,
                         error = sandboxError ?: SandboxError(UNEXPECTED_RESPONSE),
+                        requestId = response.header("X-Request-ID"),
                     )
                 }
             }

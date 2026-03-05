@@ -818,7 +818,8 @@ class TestCodeInterpreterE2ESync:
                 SupportedLanguage.GO,
             ],
         ) as (python_c1, java_c1, go_c1):
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+            from concurrent.futures import ThreadPoolExecutor
+            from concurrent.futures import TimeoutError as FutureTimeout
 
             labels = ["Python", "Java", "Go"]
 

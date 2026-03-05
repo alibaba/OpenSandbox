@@ -55,6 +55,7 @@ try
 catch (SandboxException ex)
 {
     Console.Error.WriteLine($"Sandbox Error: [{ex.Error.Code}] {ex.Error.Message}");
+    Console.Error.WriteLine($"Request ID: {ex.RequestId}");
 }
 ```
 

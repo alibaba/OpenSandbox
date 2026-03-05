@@ -180,6 +180,11 @@ def _convert_httpx_error_to_api_exception(e: Exception) -> SandboxApiException:
     response = getattr(e, "response", None)
     status_code = response.status_code if response else 0
     content = response.content if response else b""
+    request_id = None
+    if response is not None:
+        from opensandbox.adapters.converter.response_handler import extract_request_id
+
+        request_id = extract_request_id(response.headers)
 
     # Try to parse error body
     sandbox_error = _parse_error_body(content)
@@ -189,6 +194,7 @@ def _convert_httpx_error_to_api_exception(e: Exception) -> SandboxApiException:
         status_code=status_code,
         cause=e,
         error=sandbox_error,
+        request_id=request_id,
     )
 
 

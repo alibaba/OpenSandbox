@@ -50,10 +50,12 @@ class SandboxException(Exception):
         message: str | None = None,
         cause: Exception | None = None,
         error: SandboxError | None = None,
+        request_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.__cause__ = cause
         self.error = error or SandboxError(SandboxError.INTERNAL_UNKNOWN_ERROR)
+        self.request_id = request_id
 
 
 class SandboxApiException(SandboxException):
@@ -68,9 +70,13 @@ class SandboxApiException(SandboxException):
         cause: Exception | None = None,
         status_code: int | None = None,
         error: SandboxError | None = None,
+        request_id: str | None = None,
     ) -> None:
         super().__init__(
-            message, cause, error or SandboxError(SandboxError.UNEXPECTED_RESPONSE)
+            message,
+            cause,
+            error or SandboxError(SandboxError.UNEXPECTED_RESPONSE),
+            request_id=request_id,
         )
         self.status_code = status_code
 

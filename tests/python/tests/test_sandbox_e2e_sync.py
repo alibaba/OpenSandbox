@@ -25,8 +25,11 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from io import BytesIO
 
+import httpx
 import pytest
 from opensandbox import SandboxSync
+from opensandbox.config.connection_sync import ConnectionConfigSync
+from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.execd import (
     ExecutionComplete,
     ExecutionError,
@@ -42,9 +45,22 @@ from opensandbox.models.filesystem import (
     SetPermissionEntry,
     WriteEntry,
 )
-from opensandbox.models.sandboxes import Host, NetworkPolicy, NetworkRule, PVC, SandboxImageSpec, Volume
+from opensandbox.models.sandboxes import (
+    PVC,
+    Host,
+    NetworkPolicy,
+    NetworkRule,
+    SandboxImageSpec,
+    Volume,
+)
 
-from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
+from tests.base_e2e_test import (
+    TEST_API_KEY,
+    TEST_DOMAIN,
+    TEST_PROTOCOL,
+    create_connection_config_sync,
+    get_sandbox_image,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1105,3 +1121,31 @@ class TestSandboxE2ESync:
         assert echo.error is None
         assert len(echo.logs.stdout) == 1
         assert echo.logs.stdout[0].text == "resume-ok"
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(8)
+    def test_07_x_request_id_passthrough_on_server_error(self) -> None:
+        request_id = f"e2e-py-sync-server-{int(time.time() * 1000)}"
+        missing_sandbox_id = f"missing-{request_id}"
+        cfg = ConnectionConfigSync(
+            domain=TEST_DOMAIN,
+            api_key=TEST_API_KEY,
+            request_timeout=timedelta(minutes=3),
+            protocol=TEST_PROTOCOL,
+            headers={"X-Request-ID": request_id},
+            transport=httpx.HTTPTransport(
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                    keepalive_expiry=15,
+                )
+            ),
+        )
+
+        try:
+            with pytest.raises(SandboxApiException) as ei:
+                connected = SandboxSync.connect(missing_sandbox_id, connection_config=cfg)
+                connected.get_info()
+            assert ei.value.request_id == request_id
+        finally:
+            cfg.transport.close()

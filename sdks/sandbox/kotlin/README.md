@@ -64,6 +64,7 @@ public class QuickStart {
         } catch (SandboxException e) {
             // Handle Sandbox specific exceptions
             System.err.println("Sandbox Error: [" + e.getError().getCode() + "] " + e.getError().getMessage());
+            System.err.println("Request ID: " + e.getRequestId());
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -236,6 +237,10 @@ ConnectionPool sharedPool = new ConnectionPool(50, 30, TimeUnit.SECONDS);
 ConnectionConfig sharedConfig = ConnectionConfig.builder()
     .apiKey("your-key")
     .domain("api.opensandbox.io")
+    .headers(Map.of(
+        "X-Custom-Header", "value",
+        "X-Request-ID", "trace-123"
+    ))
     .connectionPool(sharedPool) // Inject shared pool
     .build();
 ```

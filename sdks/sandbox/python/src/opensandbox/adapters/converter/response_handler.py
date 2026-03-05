@@ -35,6 +35,23 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
 
+
+def extract_request_id(headers: Any) -> str | None:
+    """
+    Extract X-Request-ID from response headers in a case-insensitive way.
+    """
+    if not headers:
+        return None
+    try:
+        # httpx.Headers supports case-insensitive lookup.
+        value = headers.get("X-Request-ID") or headers.get("x-request-id")
+        if isinstance(value, str):
+            value = value.strip()
+        return value or None
+    except Exception:
+        return None
+
+
 def _status_code_to_int(status_code: Any) -> int:
     """
     Normalize status_code from openapi-python-client responses to a plain int.
@@ -63,17 +80,20 @@ def require_parsed(response_obj: Any, expected_type: type[T], operation_name: st
     - parsed payload must match the expected type
     """
     status_code = _status_code_to_int(getattr(response_obj, "status_code", 0))
+    request_id = extract_request_id(getattr(response_obj, "headers", None))
 
     parsed = getattr(response_obj, "parsed", None)
     if parsed is None:
         raise SandboxApiException(
             message=f"{operation_name} failed: empty response",
             status_code=status_code,
+            request_id=request_id,
         )
     if not isinstance(parsed, expected_type):
         raise SandboxApiException(
             message=f"{operation_name} failed: unexpected response type",
             status_code=status_code,
+            request_id=request_id,
         )
     return parsed
 
@@ -92,6 +112,7 @@ def handle_api_error(response_obj: Any, operation_name: str = "API call") -> Non
         SandboxApiException: If the response indicates an error
     """
     status_code = _status_code_to_int(getattr(response_obj, "status_code", 0))
+    request_id = extract_request_id(getattr(response_obj, "headers", None))
 
     logger.debug(f"{operation_name} response: status={status_code}")
 
@@ -109,4 +130,5 @@ def handle_api_error(response_obj: Any, operation_name: str = "API call") -> Non
         raise SandboxApiException(
             message=error_message,
             status_code=status_code,
+            request_id=request_id,
         )

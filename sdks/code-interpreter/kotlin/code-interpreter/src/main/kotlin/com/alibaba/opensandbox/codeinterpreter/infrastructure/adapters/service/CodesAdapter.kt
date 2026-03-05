@@ -126,6 +126,7 @@ class CodesAdapter(
                         message = message,
                         statusCode = response.code,
                         error = sandboxError ?: SandboxError(UNEXPECTED_RESPONSE),
+                        requestId = response.header("X-Request-ID"),
                     )
                 }
 

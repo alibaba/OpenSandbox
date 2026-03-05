@@ -29,7 +29,10 @@ from opensandbox.adapters.converter.exception_converter import (
 from opensandbox.adapters.converter.execution_converter import (
     ExecutionConverter,
 )
-from opensandbox.adapters.converter.response_handler import handle_api_error
+from opensandbox.adapters.converter.response_handler import (
+    extract_request_id,
+    handle_api_error,
+)
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.exceptions import InvalidArgumentException, SandboxApiException
 from opensandbox.models.execd import (
@@ -136,6 +139,7 @@ class CommandsAdapterSync(CommandsSync):
                     raise SandboxApiException(
                         message=f"Failed to run command. Status code: {response.status_code}",
                         status_code=response.status_code,
+                        request_id=extract_request_id(response.headers),
                     )
 
                 for line in response.iter_lines():

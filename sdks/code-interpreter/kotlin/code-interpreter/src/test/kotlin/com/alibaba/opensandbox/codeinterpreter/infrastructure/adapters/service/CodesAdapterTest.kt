@@ -19,12 +19,14 @@ package com.alibaba.opensandbox.codeinterpreter.infrastructure.adapters.service
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.RunCodeRequest
 import com.alibaba.opensandbox.sandbox.HttpClientProvider
 import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.ExecutionHandlers
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -132,5 +134,21 @@ class CodesAdapterTest {
         assertEquals("DELETE", request.method)
         assertEquals("/code", request.requestUrl?.encodedPath)
         assertEquals("exec-123", request.requestUrl?.queryParameter("id"))
+    }
+
+    @Test
+    fun `run should expose request id on api exception`() {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(500)
+                .addHeader("X-Request-ID", "req-kotlin-code-123")
+                .setBody("""{"code":"INTERNAL_ERROR","message":"boom"}"""),
+        )
+
+        val request = RunCodeRequest.builder().code("print('boom')").build()
+        val ex = assertThrows(SandboxApiException::class.java) { codesAdapter.run(request) }
+
+        assertEquals(500, ex.statusCode)
+        assertEquals("req-kotlin-code-123", ex.requestId)
     }
 }
