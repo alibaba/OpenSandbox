@@ -17,6 +17,7 @@ Agent-sandbox workload provider implementation.
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Callable
 from threading import Lock
@@ -45,6 +46,7 @@ from src.services.k8s.workload_provider import WorkloadProvider
 from src.services.runtime_resolver import SecureRuntimeResolver
 
 logger = logging.getLogger(__name__)
+DNS_1035_LABEL_RE = re.compile(r"^[a-z]([-a-z0-9]*[a-z0-9])?$")
 
 
 class AgentSandboxProvider(WorkloadProvider):
@@ -122,6 +124,10 @@ class AgentSandboxProvider(WorkloadProvider):
                 sandbox_id,
             )
 
+        # agent-sandbox controller creates a Service with the same name.
+        # Ensure the workload name is DNS-1035 compatible to avoid service creation failures.
+        workload_name = self._resolve_workload_name(sandbox_id)
+
         pod_spec = self._build_pod_spec(
             image_spec=image_spec,
             entrypoint=entrypoint,
@@ -139,7 +145,7 @@ class AgentSandboxProvider(WorkloadProvider):
             "apiVersion": f"{self.group}/{self.version}",
             "kind": "Sandbox",
             "metadata": {
-                "name": sandbox_id,
+                "name": workload_name,
                 "namespace": namespace,
                 "labels": labels,
             },
@@ -177,6 +183,11 @@ class AgentSandboxProvider(WorkloadProvider):
             "name": created["metadata"]["name"],
             "uid": created["metadata"]["uid"],
         }
+
+    def _resolve_workload_name(self, sandbox_id: str) -> str:
+        if DNS_1035_LABEL_RE.match(sandbox_id):
+            return sandbox_id
+        return self.legacy_resource_name(sandbox_id)
 
     def _build_pod_spec(
         self,
@@ -599,4 +610,3 @@ class AgentSandboxProvider(WorkloadProvider):
             return Endpoint(endpoint=f"{service_fqdn}:{port}")
 
         return None
-

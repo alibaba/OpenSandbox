@@ -84,6 +84,35 @@ class TestAgentSandboxProvider:
         assert "containers" in body["spec"]["podTemplate"]["spec"]
         assert "volumes" in body["spec"]["podTemplate"]["spec"]
 
+    def test_create_workload_prefixes_name_when_sandbox_id_is_not_dns_1035(
+        self, mock_k8s_client
+    ):
+        provider = AgentSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        sandbox_id = "19fa7291-431b-4636-8251-e8d8e2646f35"
+        prefixed_name = f"sandbox-{sandbox_id}"
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": prefixed_name, "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+
+        result = provider.create_workload(
+            sandbox_id=sandbox_id,
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={"FOO": "bar"},
+            resource_limits={"cpu": "1", "memory": "1Gi"},
+            labels={"opensandbox.io/id": sandbox_id},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+        )
+
+        assert result == {"name": prefixed_name, "uid": "test-uid"}
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        assert body["metadata"]["name"] == prefixed_name
+
     def test_get_workload_returns_none_on_404(self, mock_k8s_client):
         """
         Test case: Verify None returned on 404 exception
