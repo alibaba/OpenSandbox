@@ -16,7 +16,7 @@ Thank you for your interest in contributing to OpenSandbox! This guide will help
 
 ## Code of Conduct
 
-OpenSandbox adheres to a [Code of Conduct](../CODE_OF_CONDUCT.md) that we expect all contributors to follow. Please read it before contributing to ensure a welcoming and inclusive environment for everyone.
+OpenSandbox adheres to a [Code of Conduct](CODE_OF_CONDUCT.md) that we expect all contributors to follow. Please read it before contributing to ensure a welcoming and inclusive environment for everyone.
 
 ## Getting Started
 
@@ -37,7 +37,7 @@ There are many ways to contribute to OpenSandbox:
 1. **Search Existing Issues**: Check if your bug report or feature request already exists
 2. **Check Roadmap**: Review the project roadmap to see if your idea aligns with project goals
 3. **Discuss Major Changes**: For significant changes, open an issue first or submit an [OSEP](oseps/README.md) to discuss your approach
-4. **Review Architecture**: Read [docs/architecture.md](architecture.md) to understand the system design
+4. **Review Architecture**: Read [docs/architecture.md](docs/architecture.md) to understand the system design
 
 ## Development Environment Setup
 
@@ -46,16 +46,19 @@ There are many ways to contribute to OpenSandbox:
 Different components have different requirements:
 
 #### For Server (Python)
+
 - **Python 3.10+**
 - **uv** - Python package manager ([installation guide](https://github.com/astral-sh/uv))
 - **Docker** - For running sandboxes locally
 
 #### For execd (Go)
+
 - **Go 1.24+**
 - **Make** - Build automation (optional)
 - **Docker** - For building container images
 
 #### For SDKs
+
 - **Python SDK**: Python 3.10+, uv
 - **Java/Kotlin SDK**: JDK 17+, Gradle
 
@@ -81,7 +84,7 @@ nano ~/.sandbox.toml
 uv run python -m src.main
 ```
 
-See [server/DEVELOPMENT.md](../server/DEVELOPMENT.md) for detailed server development guide.
+See [server/DEVELOPMENT.md](server/DEVELOPMENT.md) for detailed server development guide.
 
 #### execd Development
 
@@ -99,11 +102,12 @@ go build -o bin/execd .
 ./bin/execd --jupyter-host=http://localhost:8888 --port=44772
 ```
 
-See [components/execd/DEVELOPMENT.md](../components/execd/DEVELOPMENT.md) for detailed execd development guide.
+See [components/execd/DEVELOPMENT.md](components/execd/DEVELOPMENT.md) for detailed execd development guide.
 
 #### SDK Development
 
 **Python SDK:**
+
 ```bash
 cd sdks/sandbox/python
 uv sync
@@ -111,6 +115,7 @@ uv run pytest
 ```
 
 **Java/Kotlin SDK:**
+
 ```bash
 cd sdks/sandbox/kotlin
 ./gradlew build
@@ -190,6 +195,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/) specifica
 ```
 
 **Types:**
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
@@ -201,6 +207,7 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/) specifica
 - `ci`: CI/CD changes
 
 **Examples:**
+
 ```
 feat(server): add Kubernetes runtime support
 fix(execd): resolve memory leak in session cleanup
@@ -249,6 +256,7 @@ def create_sandbox(
 ```
 
 **Running Linter:**
+
 ```bash
 cd server
 uv run ruff check src tests
@@ -275,6 +283,7 @@ result, _ := someOperation()
 ```
 
 **Running Formatter:**
+
 ```bash
 cd components/execd
 gofmt -w .
@@ -348,6 +357,7 @@ async def test_invalid_timeout():
 ```
 
 **Running Tests:**
+
 ```bash
 cd server
 uv run pytest
@@ -371,6 +381,7 @@ func TestController_Execute_Python(t *testing.T) {
 ```
 
 **Running Tests:**
+
 ```bash
 cd components/execd
 go test ./pkg/...
@@ -419,19 +430,23 @@ When creating a PR, fill out the template:
 
 ```markdown
 # Summary
+
 - What is changing and why?
 
 # Testing
+
 - [ ] Not run (explain why)
 - [ ] Unit tests
 - [ ] Integration tests
 - [ ] e2e / manual verification
 
 # Breaking Changes
+
 - [ ] None
 - [ ] Yes (describe impact and migration path)
 
 # Checklist
+
 - [ ] Linked Issue or clearly described motivation
 - [ ] Added/updated docs (if needed)
 - [ ] Added/updated tests (if needed)
@@ -442,6 +457,7 @@ When creating a PR, fill out the template:
 ### Pull Request Guidelines
 
 **Do:**
+
 - Keep PRs focused and reasonably sized (< 500 lines if possible)
 - Write clear PR descriptions with motivation and context
 - Link related issues
@@ -450,6 +466,7 @@ When creating a PR, fill out the template:
 - Ensure CI passes before requesting review
 
 **Don't:**
+
 - Mix multiple unrelated changes in one PR
 - Submit PRs with failing tests
 - Ignore code review feedback
@@ -469,18 +486,21 @@ When creating a PR, fill out the template:
 ### GitHub Issues
 
 Use GitHub Issues for:
+
 - Bug reports
 - Feature requests
 - Documentation improvements
 - Questions about implementation
 
 **Bug Report Template:**
+
 ```markdown
 **Description**
 A clear description of the bug.
 
 **To Reproduce**
 Steps to reproduce the behavior:
+
 1. Create sandbox with...
 2. Execute command...
 3. See error
@@ -489,6 +509,7 @@ Steps to reproduce the behavior:
 What you expected to happen.
 
 **Environment**
+
 - OpenSandbox version:
 - Runtime (Docker/K8s):
 - OS:
@@ -501,6 +522,7 @@ Logs, screenshots, or other relevant information.
 ### GitHub Discussions
 
 Use GitHub Discussions for:
+
 - General questions
 - Design discussions
 - Brainstorming ideas
@@ -516,16 +538,17 @@ Use GitHub Discussions for:
 
 ### Documentation
 
-- [Architecture Overview](architecture.md)
-- [Server Development Guide](../server/DEVELOPMENT.md)
-- [execd Development Guide](../components/execd/DEVELOPMENT.md)
-- [OpenAPI Specifications](../specs/README.md)
-- [Python SDK Documentation](../sdks/sandbox/python/README.md)
-- [Java/Kotlin SDK Documentation](../sdks/sandbox/kotlin/README.md)
+- [Architecture Overview](docs/architecture.md)
+- [Server Development Guide](server/DEVELOPMENT.md)
+- [execd Development Guide](components/execd/DEVELOPMENT.md)
+- [OpenAPI Specifications](specs/README.md)
+- [Python SDK Documentation](sdks/sandbox/python/README.md)
+- [Java/Kotlin SDK Documentation](sdks/sandbox/kotlin/README.md)
 
 ### Examples
 
-Browse [examples/](../examples/) for real-world usage patterns:
+Browse [examples/](examples/) for real-world usage patterns:
+
 - Code Interpreter integration
 - AI Coding Agent integrations (Claude Code, Gemini CLI, etc.)
 - Browser automation (Chrome, Playwright)
@@ -547,4 +570,4 @@ If you have suggestions for improving this contributing guide, please open an is
 
 ## License
 
-By contributing to OpenSandbox, you agree that your contributions will be licensed under the [Apache 2.0 License](../LICENSE).
+By contributing to OpenSandbox, you agree that your contributions will be licensed under the [Apache 2.0 License](LICENSE).
