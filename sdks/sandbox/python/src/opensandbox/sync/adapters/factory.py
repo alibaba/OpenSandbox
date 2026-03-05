@@ -23,12 +23,14 @@ from opensandbox.sync.adapters.command_adapter import CommandsAdapterSync
 from opensandbox.sync.adapters.filesystem_adapter import FilesystemAdapterSync
 from opensandbox.sync.adapters.health_adapter import HealthAdapterSync
 from opensandbox.sync.adapters.metrics_adapter import MetricsAdapterSync
+from opensandbox.sync.adapters.pools_adapter import PoolsAdapterSync
 from opensandbox.sync.adapters.sandboxes_adapter import SandboxesAdapterSync
 from opensandbox.sync.services import (
     CommandsSync,
     FilesystemSync,
     HealthSync,
     MetricsSync,
+    PoolsSync,
     SandboxesSync,
 )
 
@@ -39,6 +41,9 @@ class AdapterFactorySync:
 
     def create_sandbox_service(self) -> SandboxesSync:
         return SandboxesAdapterSync(self.connection_config)
+
+    def create_pool_service(self) -> PoolsSync:
+        return PoolsAdapterSync(self.connection_config)
 
     def create_filesystem_service(self, endpoint: SandboxEndpoint) -> FilesystemSync:
         return FilesystemAdapterSync(self.connection_config, endpoint)
