@@ -16,9 +16,13 @@ Make sure your server host has:
 
 - `ossfs` installed
 - FUSE support enabled
-- writable `storage.ossfs_mount_root` configured (default `/mnt/ossfs`)
+- writable local mount root for OSSFS (default `storage.ossfs_mount_root=/mnt/ossfs`)
 
-Example config:
+`storage.ossfs_mount_root` is **optional** if you use the default `/mnt/ossfs`.
+Even with on-demand mounting, the runtime still needs a deterministic host-side
+base directory to place dynamic mounts (`<mount_root>/<bucket>/<ossfs.path>`).
+
+Optional config example:
 
 ```toml
 [runtime]
@@ -58,7 +62,6 @@ export OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
 export OSS_PATH=/               # optional, default "/"
 export OSS_ACCESS_KEY_ID=your-ak
 export OSS_ACCESS_KEY_SECRET=your-sk
-# export OSS_SECURITY_TOKEN=... # optional (STS)
 ```
 
 ## Run
@@ -82,6 +85,7 @@ sandbox = await Sandbox.create(
                 bucket="your-bucket",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
                 path="/datasets",
+                # version="1.0",   # optional, default is "1.0"
                 accessKeyId="your-ak",
                 accessKeySecret="your-sk",
             ),
@@ -97,6 +101,8 @@ sandbox = await Sandbox.create(
 
 - This example uses **inline credentials** (`accessKeyId`/`accessKeySecret`) as implemented in current OSSFS support.
 - Mounting is **on-demand** in Docker runtime (mount-or-reuse), not pre-mounted for all buckets.
+- `ossfs.version` exists in API/SDK with enum `"1.0" | "2.0"`, and defaults to `"1.0"` when omitted.
+- Current Docker runtime implementation does not yet branch mount behavior by `version`; the field is reserved for runtime compatibility evolution.
 
 ## References
 
