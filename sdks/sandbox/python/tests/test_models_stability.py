@@ -21,6 +21,7 @@ import pytest
 
 from opensandbox.models.filesystem import MoveEntry, WriteEntry
 from opensandbox.models.sandboxes import (
+    OSSFS,
     PVC,
     Host,
     SandboxFilter,
@@ -103,6 +104,16 @@ def test_pvc_backend_rejects_blank_claim_name() -> None:
 
     with pytest.raises(ValueError, match="blank"):
         PVC(claimName="   ")
+
+
+def test_ossfs_backend_default_version_is_2_0() -> None:
+    backend = OSSFS(
+        bucket="bucket-test-3",
+        endpoint="oss-cn-hangzhou.aliyuncs.com",
+        accessKeyId="ak",
+        accessKeySecret="sk",
+    )
+    assert backend.version == "2.0"
 
 
 def test_volume_with_host_backend() -> None:

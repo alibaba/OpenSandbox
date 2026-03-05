@@ -33,15 +33,15 @@ class OSSFS:
 
     The runtime mounts a host-side OSS path under `storage.ossfs_mount_root`
     and bind-mounts the resolved path into the sandbox container.
+    Prefix selection is expressed via `Volume.subPath`.
 
         Attributes:
             bucket (str): OSS bucket name.
             endpoint (str): OSS endpoint (e.g., `oss-cn-hangzhou.aliyuncs.com`).
             access_key_id (str): OSS access key ID for inline credentials mode.
             access_key_secret (str): OSS access key secret for inline credentials mode.
-            path (str | Unset): Path prefix inside the bucket. Defaults to `/`. Default: '/'.
             version (OSSFSVersion | Unset): ossfs major version used by runtime mount integration. Default:
-                OSSFSVersion.VALUE_0.
+                OSSFSVersion.VALUE_1.
             options (list[str] | Unset): Additional ossfs mount options.
             security_token (str | Unset): Optional STS security token for temporary credentials.
     """
@@ -50,8 +50,7 @@ class OSSFS:
     endpoint: str
     access_key_id: str
     access_key_secret: str
-    path: str | Unset = "/"
-    version: OSSFSVersion | Unset = OSSFSVersion.VALUE_0
+    version: OSSFSVersion | Unset = OSSFSVersion.VALUE_1
     options: list[str] | Unset = UNSET
     security_token: str | Unset = UNSET
 
@@ -63,8 +62,6 @@ class OSSFS:
         access_key_id = self.access_key_id
 
         access_key_secret = self.access_key_secret
-
-        path = self.path
 
         version: str | Unset = UNSET
         if not isinstance(self.version, Unset):
@@ -86,8 +83,6 @@ class OSSFS:
                 "accessKeySecret": access_key_secret,
             }
         )
-        if path is not UNSET:
-            field_dict["path"] = path
         if version is not UNSET:
             field_dict["version"] = version
         if options is not UNSET:
@@ -108,8 +103,6 @@ class OSSFS:
 
         access_key_secret = d.pop("accessKeySecret")
 
-        path = d.pop("path", UNSET)
-
         _version = d.pop("version", UNSET)
         version: OSSFSVersion | Unset
         if isinstance(_version, Unset):
@@ -126,7 +119,6 @@ class OSSFS:
             endpoint=endpoint,
             access_key_id=access_key_id,
             access_key_secret=access_key_secret,
-            path=path,
             version=version,
             options=options,
             security_token=security_token,

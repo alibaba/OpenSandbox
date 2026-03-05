@@ -329,7 +329,7 @@ class StorageConfig(BaseModel):
         description=(
             "Host-side root directory where OSSFS mounts are resolved. "
             "Resolved OSSFS host paths are built as "
-            "'ossfs_mount_root/<bucket>/<ossfs.path>/<volume.subPath?>'."
+            "'ossfs_mount_root/<bucket>/<volume.subPath?>'."
         ),
     )
 

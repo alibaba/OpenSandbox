@@ -419,8 +419,7 @@ class TestEnsureVolumesValid:
             ossfs=OSSFS(
                 bucket="bucket-test-3",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                path="/folder",
-                access_key_id="AKIDEXAMPLE",
+                    access_key_id="AKIDEXAMPLE",
                 access_key_secret="SECRETEXAMPLE",
             ),
             mount_path="/mnt/data",

@@ -782,6 +782,7 @@ export interface components {
             readOnly: boolean;
             /**
              * @description Optional subdirectory under the backend path to mount.
+             *     For `ossfs` backend, this field is used as the bucket prefix.
              *     Must be a relative path without '..' components.
              */
             subPath?: string;
@@ -823,6 +824,7 @@ export interface components {
          *
          *     The runtime mounts a host-side OSS path under `storage.ossfs_mount_root`
          *     and bind-mounts the resolved path into the sandbox container.
+         *     Prefix selection is expressed via `Volume.subPath`.
          */
         OSSFS: {
             /** @description OSS bucket name. */
@@ -830,13 +832,8 @@ export interface components {
             /** @description OSS endpoint (e.g., `oss-cn-hangzhou.aliyuncs.com`). */
             endpoint: string;
             /**
-             * @description Path prefix inside the bucket. Defaults to `/`.
-             * @default /
-             */
-            path: string;
-            /**
              * @description ossfs major version used by runtime mount integration.
-             * @default 1.0
+             * @default 2.0
              * @enum {string}
              */
             version: "1.0" | "2.0";
