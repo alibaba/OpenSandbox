@@ -42,8 +42,9 @@ class OSSFS:
             access_key_secret (str): OSS access key secret for inline credentials mode.
             version (OSSFSVersion | Unset): ossfs major version used by runtime mount integration. Default:
                 OSSFSVersion.VALUE_1.
-            options (list[str] | Unset): Additional ossfs mount options.
-            security_token (str | Unset): Optional STS security token for temporary credentials.
+            options (list[str] | Unset): Additional ossfs mount options. Runtime encoding depends on version:
+                `1.0` -> `ossfs ... -o <option>`, `2.0` -> `ossfs2 config line --<option>`.
+                Provide raw option payloads without leading `-`.
     """
 
     bucket: str
@@ -52,7 +53,6 @@ class OSSFS:
     access_key_secret: str
     version: OSSFSVersion | Unset = OSSFSVersion.VALUE_1
     options: list[str] | Unset = UNSET
-    security_token: str | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         bucket = self.bucket
@@ -71,8 +71,6 @@ class OSSFS:
         if not isinstance(self.options, Unset):
             options = self.options
 
-        security_token = self.security_token
-
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
@@ -87,8 +85,6 @@ class OSSFS:
             field_dict["version"] = version
         if options is not UNSET:
             field_dict["options"] = options
-        if security_token is not UNSET:
-            field_dict["securityToken"] = security_token
 
         return field_dict
 
@@ -112,8 +108,6 @@ class OSSFS:
 
         options = cast(list[str], d.pop("options", UNSET))
 
-        security_token = d.pop("securityToken", UNSET)
-
         ossfs = cls(
             bucket=bucket,
             endpoint=endpoint,
@@ -121,7 +115,6 @@ class OSSFS:
             access_key_secret=access_key_secret,
             version=version,
             options=options,
-            security_token=security_token,
         )
 
         return ossfs

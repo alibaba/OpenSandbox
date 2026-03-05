@@ -996,7 +996,12 @@ components:
           default: "2.0"
         options:
           type: array
-          description: Additional ossfs mount options.
+          description: |
+            Additional ossfs mount options.
+            Runtime encodes options by `version`:
+            - `1.0`: mounts with `ossfs ... -o <option>`
+            - `2.0`: mounts with `ossfs2 mount ... -c <config-file>` and encodes options as `--<option>` lines in the config file
+            Option values must be provided as raw payloads without leading `-`.
           items:
             type: string
         accessKeyId:
@@ -1006,10 +1011,6 @@ components:
         accessKeySecret:
           type: string
           description: OSS access key secret for inline credentials mode.
-          minLength: 1
-        securityToken:
-          type: string
-          description: Optional STS security token for temporary credentials.
           minLength: 1
       additionalProperties: false
 

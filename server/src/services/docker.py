@@ -1030,6 +1030,21 @@ class DockerSandboxService(SandboxService):
             return None
         return endpoint[start:end]
 
+    @staticmethod
+    def _normalize_oss_endpoint_url(endpoint: str) -> str:
+        """Normalize endpoint to full URL expected by OSSFS CLIs."""
+        endpoint = endpoint.strip()
+        if endpoint.startswith("http://") or endpoint.startswith("https://"):
+            return endpoint
+        return f"https://{endpoint}"
+
+    @staticmethod
+    def _normalize_ossfs_option(raw_option: str) -> str:
+        option = str(raw_option).strip()
+        if not option:
+            return ""
+        return option
+
     def _resolve_ossfs_paths(self, volume) -> tuple[str, str]:
         """
         Resolve OSSFS base mount path and bind path.
@@ -1069,8 +1084,82 @@ class DockerSandboxService(SandboxService):
 
         return backend_path, backend_path
 
+    def _build_ossfs_v1_command(
+        self,
+        volume,
+        source: str,
+        backend_path: str,
+        endpoint_url: str,
+        passwd_file: str,
+        region: Optional[str],
+    ) -> list[str]:
+        cmd: list[str] = [
+            "ossfs",
+            source,
+            backend_path,
+            "-o",
+            f"url={endpoint_url}",
+            "-o",
+            f"passwd_file={passwd_file}",
+        ]
+        if region:
+            cmd.extend(["-o", "sigv4", "-o", f"region={region}"])
+        if volume.ossfs.options:
+            for raw_opt in volume.ossfs.options:
+                opt = self._normalize_ossfs_option(raw_opt)
+                if opt:
+                    cmd.extend(["-o", opt])
+        return cmd
+
+    def _build_ossfs_v2_config_lines(
+        self,
+        volume,
+        endpoint_url: str,
+        prefix: str,
+    ) -> list[str]:
+        conf_lines: list[str] = [
+            f"--oss_endpoint={endpoint_url}",
+            f"--oss_bucket={volume.ossfs.bucket}",
+            f"--oss_access_key_id={volume.ossfs.access_key_id}",
+            f"--oss_access_key_secret={volume.ossfs.access_key_secret}",
+        ]
+        if prefix:
+            normalized_prefix = prefix if prefix.endswith("/") else f"{prefix}/"
+            conf_lines.append(f"--oss_bucket_prefix={normalized_prefix}")
+        if volume.ossfs.options:
+            for raw_opt in volume.ossfs.options:
+                opt = self._normalize_ossfs_option(raw_opt)
+                if opt:
+                    conf_lines.append(f"--{opt}")
+        return conf_lines
+
+    @staticmethod
+    def _build_ossfs_v2_mount_command(backend_path: str, conf_file: str) -> list[str]:
+        return ["ossfs2", "mount", backend_path, "-c", conf_file]
+
+    @staticmethod
+    def _run_ossfs_mount_command(cmd: list[str], volume_name: str) -> None:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.OSSFS_MOUNT_FAILED,
+                    "message": (
+                        f"Volume '{volume_name}': failed to mount OSSFS backend. "
+                        f"stderr={result.stderr.strip() or 'unknown error'}"
+                    ),
+                },
+            )
+
     def _mount_ossfs_backend_path(self, volume, backend_path: str) -> None:
-        """Mount OSS bucket/path to backend_path with ossfs."""
+        """Mount OSS bucket/path to backend_path with version-specific OSSFS arguments."""
         access_key_id = volume.ossfs.access_key_id
         access_key_secret = volume.ossfs.access_key_secret
         if not access_key_id or not access_key_secret:
@@ -1088,53 +1177,57 @@ class DockerSandboxService(SandboxService):
 
         bucket = volume.ossfs.bucket
         prefix = (volume.sub_path or "").strip("/")
-        source = f"{bucket}:{prefix}" if prefix else bucket
+        source = f"{bucket}:/{prefix}" if prefix else bucket
         endpoint = volume.ossfs.endpoint
-        region = self._derive_oss_region(endpoint)
+        endpoint_url = self._normalize_oss_endpoint_url(endpoint)
 
-        passwd_file = os.path.join(
-            tempfile.gettempdir(),
-            f"opensandbox-ossfs-inline-{uuid4().hex}",
-        )
+        passwd_file: Optional[str] = None
+        conf_file: Optional[str] = None
+        version = volume.ossfs.version or "2.0"
         try:
-            with open(passwd_file, "w", encoding="utf-8") as f:
-                # ossfs passwd_file format: bucket:accessKeyId:accessKeySecret
-                f.write(f"{bucket}:{access_key_id}:{access_key_secret}")
-            os.chmod(passwd_file, 0o600)
-
-            cmd: list[str] = [
-                "ossfs",
-                source,
-                backend_path,
-                "-o",
-                f"url=http://{endpoint}",
-                "-o",
-                f"passwd_file={passwd_file}",
-            ]
-            if region:
-                cmd.extend(["-o", "sigv4", "-o", f"region={region}"])
-            if volume.ossfs.options:
-                for opt in volume.ossfs.options:
-                    cmd.extend(["-o", opt])
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-            if result.returncode != 0:
+            if version == "1.0":
+                region = self._derive_oss_region(endpoint)
+                passwd_file = os.path.join(
+                    tempfile.gettempdir(),
+                    f"opensandbox-ossfs-inline-{uuid4().hex}",
+                )
+                with open(passwd_file, "w", encoding="utf-8") as f:
+                    # ossfs passwd_file format: bucket:accessKeyId:accessKeySecret
+                    f.write(f"{bucket}:{access_key_id}:{access_key_secret}")
+                os.chmod(passwd_file, 0o600)
+                cmd = self._build_ossfs_v1_command(
+                    volume=volume,
+                    source=source,
+                    backend_path=backend_path,
+                    endpoint_url=endpoint_url,
+                    passwd_file=passwd_file,
+                    region=region,
+                )
+            elif version == "2.0":
+                conf_lines = self._build_ossfs_v2_config_lines(
+                    volume=volume,
+                    endpoint_url=endpoint_url,
+                    prefix=prefix,
+                )
+                conf_file = os.path.join(
+                    tempfile.gettempdir(),
+                    f"opensandbox-ossfs2-{uuid4().hex}.conf",
+                )
+                with open(conf_file, "w", encoding="utf-8") as f:
+                    f.write("\n".join(conf_lines) + "\n")
+                os.chmod(conf_file, 0o600)
+                cmd = self._build_ossfs_v2_mount_command(backend_path, conf_file)
+            else:
                 raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
-                        "code": SandboxErrorCodes.OSSFS_MOUNT_FAILED,
+                        "code": SandboxErrorCodes.INVALID_OSSFS_VERSION,
                         "message": (
-                            f"Volume '{volume.name}': failed to mount OSSFS backend. "
-                            f"stderr={result.stderr.strip() or 'unknown error'}"
+                            f"Volume '{volume.name}': unsupported OSSFS version '{version}'."
                         ),
                     },
                 )
+            self._run_ossfs_mount_command(cmd, volume.name)
         except OSError as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1146,10 +1239,16 @@ class DockerSandboxService(SandboxService):
                 },
             ) from exc
         finally:
-            try:
-                os.remove(passwd_file)
-            except OSError:
-                pass
+            if passwd_file:
+                try:
+                    os.remove(passwd_file)
+                except OSError:
+                    pass
+            if conf_file:
+                try:
+                    os.remove(conf_file)
+                except OSError:
+                    pass
 
     def _ensure_ossfs_mounted(self, volume_or_mount_key) -> str:
         """Ensure OSSFS backend path is mounted and return mount key."""

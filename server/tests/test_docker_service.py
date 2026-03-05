@@ -831,6 +831,117 @@ class TestDockerVolumeValidation:
         assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc_info.value.detail["code"] == SandboxErrorCodes.OSSFS_MOUNT_FAILED
 
+    def test_ossfs_v1_mount_command_uses_o_options(self, mock_docker):
+        """OSSFS 1.0 should build mount command with -o style options."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="1.0",
+                options=["allow_other", "umask=0022"],
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+            sub_path="task-001",
+        )
+        backend_path = "/mnt/ossfs/bucket-test-3/task-001"
+
+        with patch("src.services.docker.os.makedirs"):
+            with patch("src.services.docker.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stderr="")
+                service._mount_ossfs_backend_path(volume, backend_path)
+
+        cmd = mock_run.call_args.args[0]
+        assert "bucket-test-3:/task-001" in cmd
+        assert "-o" in cmd
+        assert "allow_other" in cmd
+        assert "umask=0022" in cmd
+        assert "--allow_other" not in cmd
+
+    def test_ossfs_v2_mount_command_uses_config_file(self, mock_docker):
+        """OSSFS 2.0 should mount by ossfs2 config file."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="2.0",
+                options=["allow_other", "umask=0022"],
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+            sub_path="task-001",
+        )
+        backend_path = "/mnt/ossfs/bucket-test-3/task-001"
+
+        with patch("src.services.docker.os.makedirs"):
+            with patch("src.services.docker.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stderr="")
+                service._mount_ossfs_backend_path(volume, backend_path)
+
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == "ossfs2"
+        assert cmd[1] == "mount"
+        assert cmd[2] == backend_path
+        assert cmd[3] == "-c"
+        assert cmd[4].endswith(".conf")
+
+    def test_ossfs_v2_config_contains_required_lines(self, mock_docker):
+        """OSSFS 2.0 config should encode endpoint/bucket/creds/options/prefix."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="2.0",
+                options=["allow_other", "umask=0022"],
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+            sub_path="task-001",
+        )
+
+        conf_lines = service._build_ossfs_v2_config_lines(
+            volume=volume,
+            endpoint_url="http://oss-cn-hangzhou.aliyuncs.com",
+            prefix="task-001",
+        )
+        assert "--oss_endpoint=http://oss-cn-hangzhou.aliyuncs.com" in conf_lines
+        assert "--oss_bucket=bucket-test-3" in conf_lines
+        assert "--oss_access_key_id=AKIDEXAMPLE" in conf_lines
+        assert "--oss_access_key_secret=SECRETEXAMPLE" in conf_lines
+        assert "--oss_bucket_prefix=task-001/" in conf_lines
+        assert "--allow_other" in conf_lines
+        assert "--umask=0022" in conf_lines
+
+    def test_normalize_oss_endpoint_url_defaults_to_https(self, mock_docker):
+        """Endpoint without scheme should default to https for ossfs2."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+
+        assert (
+            service._normalize_oss_endpoint_url("oss-cn-hangzhou.aliyuncs.com")
+            == "https://oss-cn-hangzhou.aliyuncs.com"
+        )
+
     def test_ossfs_volume_binds_passed_to_docker(self, mock_docker):
         """OSSFS volume should be converted to host bind path and passed to Docker."""
         mock_client = MagicMock()

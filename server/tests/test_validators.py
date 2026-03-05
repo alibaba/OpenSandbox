@@ -506,6 +506,44 @@ class TestEnsureVolumesValid:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_OSSFS_CREDENTIALS
 
+    def test_ossfs_v1_options_reject_prefixed_entries(self):
+        """OSSFS options should reject prefixed entries for 1.0."""
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="1.0",
+                options=["--allow_other"],
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            ensure_volumes_valid([volume])
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_OSSFS_OPTION
+
+    def test_ossfs_v2_options_reject_prefixed_entries(self):
+        """OSSFS options should reject prefixed entries for 2.0."""
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="2.0",
+                options=["-o allow_other"],
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            ensure_volumes_valid([volume])
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_OSSFS_OPTION
+
     def test_invalid_pvc_name_rejected_by_pydantic(self):
         """Invalid PVC name should be rejected by Pydantic pattern validation."""
         from pydantic import ValidationError
