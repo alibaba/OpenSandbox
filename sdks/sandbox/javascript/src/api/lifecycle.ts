@@ -758,7 +758,7 @@ export interface components {
         /**
          * @description Storage mount definition for a sandbox. Each volume entry contains:
          *     - A unique name identifier
-         *     - Exactly one backend struct (host, pvc, etc.) with backend-specific fields
+         *     - Exactly one backend struct (host, pvc, ossfs, etc.) with backend-specific fields
          *     - Common mount settings (mountPath, readOnly, subPath)
          */
         Volume: {
@@ -769,6 +769,7 @@ export interface components {
             name: string;
             host?: components["schemas"]["Host"];
             pvc?: components["schemas"]["PVC"];
+            ossfs?: components["schemas"]["OSSFS"];
             /**
              * @description Absolute path inside the container where the volume is mounted.
              *     Must start with '/'.
@@ -800,17 +801,53 @@ export interface components {
             path: string;
         };
         /**
-         * @description Kubernetes PersistentVolumeClaim mount backend. References an existing
-         *     PVC in the same namespace as the sandbox pod.
+         * @description Platform-managed named volume backend. A runtime-neutral abstraction
+         *     for referencing a pre-existing, platform-managed named volume.
          *
-         *     Only available in Kubernetes runtime.
+         *     - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+         *     - Docker: maps to a Docker named volume (created via `docker volume create`).
+         *
+         *     The volume must already exist on the target platform before sandbox
+         *     creation.
          */
         PVC: {
             /**
-             * @description Name of the PersistentVolumeClaim in the same namespace.
-             *     Must be a valid Kubernetes resource name.
+             * @description Name of the volume on the target platform.
+             *     In Kubernetes this is the PVC name; in Docker this is the named
+             *     volume name. Must be a valid DNS label.
              */
             claimName: string;
+        };
+        /**
+         * @description Alibaba Cloud OSS mount backend via ossfs.
+         *
+         *     The runtime mounts a host-side OSS path under `storage.ossfs_mount_root`
+         *     and bind-mounts the resolved path into the sandbox container.
+         */
+        OSSFS: {
+            /** @description OSS bucket name. */
+            bucket: string;
+            /** @description OSS endpoint (e.g., `oss-cn-hangzhou.aliyuncs.com`). */
+            endpoint: string;
+            /**
+             * @description Path prefix inside the bucket. Defaults to `/`.
+             * @default /
+             */
+            path: string;
+            /**
+             * @description ossfs major version used by runtime mount integration.
+             * @default 1.0
+             * @enum {string}
+             */
+            version: "1.0" | "2.0";
+            /** @description Additional ossfs mount options. */
+            options?: string[];
+            /** @description OSS access key ID for inline credentials mode. */
+            accessKeyId: string;
+            /** @description OSS access key secret for inline credentials mode. */
+            accessKeySecret: string;
+            /** @description Optional STS security token for temporary credentials. */
+            securityToken?: string;
         };
     };
     responses: {
