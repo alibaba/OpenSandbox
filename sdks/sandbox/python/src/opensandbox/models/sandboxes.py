@@ -203,11 +203,6 @@ class OSSFS(BaseModel):
         alias="accessKeySecret",
         description="OSS access key secret for inline credentials mode.",
     )
-    security_token: str | None = Field(
-        default=None,
-        alias="securityToken",
-        description="Optional STS security token for temporary credentials.",
-    )
     model_config = ConfigDict(populate_by_name=True)
 
     @model_validator(mode="after")

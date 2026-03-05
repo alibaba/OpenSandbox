@@ -97,10 +97,13 @@ sandbox = await Sandbox.create(
 
 ## 说明
 
-- 当前实现使用**内联凭据**（`accessKeyId` / `accessKeySecret`）。
+- 当前实现仅支持**内联凭据**（`accessKeyId` / `accessKeySecret`）。
 - Docker 运行时采用**按需挂载**（mount-or-reuse），不是预挂载所有 bucket。
 - API/SDK 中 `ossfs.version` 字段存在，枚举为 `"1.0"` / `"2.0"`，省略时默认 `"2.0"`。
-- 当前 Docker 运行时尚未基于 `version` 做差异化挂载逻辑；该字段主要用于后续运行时兼容演进。
+- Docker 运行时已按 `version` 区分挂载参数编码：
+  - `1.0`：通过 `ossfs ... -o <option>` 挂载。
+  - `2.0`：通过 `ossfs2 mount ... -c <config-file>` 挂载，`options` 以 `--<option>` 配置项写入配置文件。
+- `options` 必须是**不带前缀 `-` 的原始参数值**（例如：`allow_other`、`umask=0022`）。
 
 ## 参考
 

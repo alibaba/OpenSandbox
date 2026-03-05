@@ -97,10 +97,13 @@ sandbox = await Sandbox.create(
 
 ## Notes
 
-- This example uses **inline credentials** (`accessKeyId`/`accessKeySecret`) as implemented in current OSSFS support.
+- Current implementation supports **inline credentials only** (`accessKeyId`/`accessKeySecret`).
 - Mounting is **on-demand** in Docker runtime (mount-or-reuse), not pre-mounted for all buckets.
 - `ossfs.version` exists in API/SDK with enum `"1.0" | "2.0"`, and defaults to `"2.0"` when omitted.
-- Current Docker runtime implementation does not yet branch mount behavior by `version`; the field is reserved for runtime compatibility evolution.
+- Docker runtime now applies **version-specific mount argument encoding**:
+  - `1.0`: mounts via `ossfs ... -o <option>`.
+  - `2.0`: mounts via `ossfs2 mount ... -c <config-file>` where options are written as `--<option>` config lines.
+- `options` values must be **raw payloads** without leading `-` (for example: `allow_other`, `umask=0022`).
 
 ## References
 

@@ -843,8 +843,6 @@ export interface components {
             accessKeyId: string;
             /** @description OSS access key secret for inline credentials mode. */
             accessKeySecret: string;
-            /** @description Optional STS security token for temporary credentials. */
-            securityToken?: string;
         };
     };
     responses: {

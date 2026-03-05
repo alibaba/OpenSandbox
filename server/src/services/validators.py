@@ -442,6 +442,18 @@ def ensure_valid_ossfs_volume(ossfs: "OSSFS") -> None:
                         "message": "OSSFS options must be non-empty strings.",
                     },
                 )
+            normalized = opt.strip()
+            if normalized.startswith("-"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_OSSFS_OPTION,
+                        "message": (
+                            "OSSFS options must be raw option payloads without '-' prefix "
+                            "(e.g. 'allow_other', 'uid=1000')."
+                        ),
+                    },
+                )
 
     if not ossfs.access_key_id or not ossfs.access_key_secret:
         raise HTTPException(

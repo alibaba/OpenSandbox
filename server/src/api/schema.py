@@ -183,7 +183,11 @@ class OSSFS(BaseModel):
     )
     options: Optional[List[str]] = Field(
         None,
-        description="Additional ossfs mount options.",
+        description=(
+            "Additional ossfs mount options. Runtime encodes options by version: "
+            "1.0 => 'ossfs ... -o <option>', 2.0 => 'ossfs2 config line --<option>'. "
+            "Provide raw option payloads without leading '-'."
+        ),
     )
     access_key_id: Optional[str] = Field(
         None,
@@ -195,12 +199,6 @@ class OSSFS(BaseModel):
         None,
         alias="accessKeySecret",
         description="OSS access key secret for inline credentials mode.",
-        min_length=1,
-    )
-    security_token: Optional[str] = Field(
-        None,
-        alias="securityToken",
-        description="Optional STS security token for temporary credentials.",
         min_length=1,
     )
     class Config:
