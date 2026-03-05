@@ -6,7 +6,7 @@ This example demonstrates how to use the new SDK `ossfs` volume model to mount A
 
 1. **Basic read-write mount** on an OSSFS backend.
 2. **Cross-sandbox sharing** on the same OSSFS backend path.
-3. **Two mounts, same backend path, different `subPath`**.
+3. **Two mounts, different OSS prefixes via `subPath`**.
 
 ## Prerequisites
 
@@ -20,7 +20,7 @@ Make sure your server host has:
 
 `storage.ossfs_mount_root` is **optional** if you use the default `/mnt/ossfs`.
 Even with on-demand mounting, the runtime still needs a deterministic host-side
-base directory to place dynamic mounts (`<mount_root>/<bucket>/<ossfs.path>`).
+base directory to place dynamic mounts (`<mount_root>/<bucket>/<subPath?>`).
 
 Optional config example:
 
@@ -59,7 +59,6 @@ export SANDBOX_IMAGE=ubuntu
 
 export OSS_BUCKET=your-bucket
 export OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
-export OSS_PATH=/               # optional, default "/"
 export OSS_ACCESS_KEY_ID=your-ak
 export OSS_ACCESS_KEY_SECRET=your-sk
 ```
@@ -84,8 +83,7 @@ sandbox = await Sandbox.create(
             ossfs=OSSFS(
                 bucket="your-bucket",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                path="/datasets",
-                # version="1.0",   # optional, default is "1.0"
+                # version="2.0",   # optional, default is "2.0"
                 accessKeyId="your-ak",
                 accessKeySecret="your-sk",
             ),
@@ -101,7 +99,7 @@ sandbox = await Sandbox.create(
 
 - This example uses **inline credentials** (`accessKeyId`/`accessKeySecret`) as implemented in current OSSFS support.
 - Mounting is **on-demand** in Docker runtime (mount-or-reuse), not pre-mounted for all buckets.
-- `ossfs.version` exists in API/SDK with enum `"1.0" | "2.0"`, and defaults to `"1.0"` when omitted.
+- `ossfs.version` exists in API/SDK with enum `"1.0" | "2.0"`, and defaults to `"2.0"` when omitted.
 - Current Docker runtime implementation does not yet branch mount behavior by `version`; the field is reserved for runtime compatibility evolution.
 
 ## References

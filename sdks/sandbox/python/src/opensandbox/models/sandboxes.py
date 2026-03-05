@@ -185,12 +185,8 @@ class OSSFS(BaseModel):
 
     bucket: str = Field(description="OSS bucket name.")
     endpoint: str = Field(description="OSS endpoint (e.g., oss-cn-hangzhou.aliyuncs.com).")
-    path: str = Field(
-        default="/",
-        description="Path prefix inside bucket. Defaults to '/'.",
-    )
     version: Literal["1.0", "2.0"] = Field(
-        default="1.0",
+        default="2.0",
         description="ossfs major version used by runtime mount integration.",
     )
     options: list[str] | None = Field(

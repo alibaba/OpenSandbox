@@ -1034,8 +1034,9 @@ class DockerSandboxService(SandboxService):
         """
         Resolve OSSFS base mount path and bind path.
 
-        - base path = ossfs_mount_root/<bucket>/<ossfs.path>
-        - bind path = base path (+ subPath when present)
+        For OSSFS, ``volume.subPath`` represents the bucket prefix.
+        The backend mount path and bind path are identical:
+        - path = ossfs_mount_root/<bucket>/<subPath?>
         """
         mount_root = (self.app_config.storage.ossfs_mount_root or "").strip()
         if not mount_root.startswith("/"):
@@ -1051,8 +1052,8 @@ class DockerSandboxService(SandboxService):
 
         mount_root = posixpath.normpath(mount_root)
         bucket_root = posixpath.normpath(posixpath.join(mount_root, volume.ossfs.bucket))
-        ossfs_path = (volume.ossfs.path or "/").lstrip("/")
-        backend_path = posixpath.normpath(posixpath.join(bucket_root, ossfs_path))
+        prefix = (volume.sub_path or "").lstrip("/")
+        backend_path = posixpath.normpath(posixpath.join(bucket_root, prefix))
 
         bucket_prefix = bucket_root if bucket_root.endswith("/") else bucket_root + "/"
         if backend_path != bucket_root and not backend_path.startswith(bucket_prefix):
@@ -1061,27 +1062,12 @@ class DockerSandboxService(SandboxService):
                 detail={
                     "code": SandboxErrorCodes.INVALID_SUB_PATH,
                     "message": (
-                        f"Volume '{volume.name}': ossfs.path resolves outside bucket root."
+                        f"Volume '{volume.name}': resolved OSSFS prefix escapes bucket root."
                     ),
                 },
             )
 
-        bind_path = backend_path
-        if volume.sub_path:
-            bind_path = posixpath.normpath(posixpath.join(backend_path, volume.sub_path))
-            backend_prefix = backend_path if backend_path.endswith("/") else backend_path + "/"
-            if bind_path != backend_path and not bind_path.startswith(backend_prefix):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "code": SandboxErrorCodes.INVALID_SUB_PATH,
-                        "message": (
-                            f"Volume '{volume.name}': resolved subPath escapes OSSFS base path."
-                        ),
-                    },
-                )
-
-        return backend_path, bind_path
+        return backend_path, backend_path
 
     def _mount_ossfs_backend_path(self, volume, backend_path: str) -> None:
         """Mount OSS bucket/path to backend_path with ossfs."""
@@ -1101,7 +1087,7 @@ class DockerSandboxService(SandboxService):
         os.makedirs(backend_path, exist_ok=True)
 
         bucket = volume.ossfs.bucket
-        prefix = (volume.ossfs.path or "/").strip("/")
+        prefix = (volume.sub_path or "").strip("/")
         source = f"{bucket}:{prefix}" if prefix else bucket
         endpoint = volume.ossfs.endpoint
         region = self._derive_oss_region(endpoint)
@@ -1495,8 +1481,8 @@ class DockerSandboxService(SandboxService):
           Format (with subPath): ``/var/lib/docker/volumes/…/subdir:/container/path:ro|rw``
           When subPath is specified, the volume's host Mountpoint (obtained from
           ``pvc_inspect_cache``) is used to produce a standard bind mount.
-        - ``ossfs``: host bind mount to pre-mounted OSSFS path.
-          Format: ``/mnt/ossfs/<bucket>/<path>/<subPath?>:/container/path:ro|rw``
+        - ``ossfs``: host bind mount to runtime-mounted OSSFS path.
+          Format: ``/mnt/ossfs/<bucket>/<subPath?>:/container/path:ro|rw``
 
         Each mount string uses ``:ro`` for read-only and ``:rw`` for read-write
         (default).

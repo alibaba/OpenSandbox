@@ -22,7 +22,7 @@ into sandboxes on Docker runtime.
 Scenarios:
 1) Basic read-write mount on OSSFS backend.
 2) Cross-sandbox data sharing on same OSSFS backend path.
-3) Two volumes share one OSSFS backend path but use different subPath values.
+3) Two volumes use different OSS prefixes via subPath.
 """
 
 import asyncio
@@ -56,7 +56,6 @@ def build_ossfs() -> OSSFS:
     return OSSFS(
         bucket=_required_env("OSS_BUCKET"),
         endpoint=_required_env("OSS_ENDPOINT"),
-        path=os.getenv("OSS_PATH", "/"),
         accessKeyId=_required_env("OSS_ACCESS_KEY_ID"),
         accessKeySecret=_required_env("OSS_ACCESS_KEY_SECRET"),
     )
@@ -153,7 +152,7 @@ async def demo_cross_sandbox_sharing(config: ConnectionConfig, image: str, run_i
 
 async def demo_subpath_mounts(config: ConnectionConfig, image: str, run_id: str) -> None:
     print("\n" + "=" * 60)
-    print("Scenario 3: Same Backend Path + Different subPath")
+    print("Scenario 3: Different OSS Prefixes via subPath")
     print("=" * 60)
     setup = await Sandbox.create(
         image=image,
@@ -223,7 +222,6 @@ async def main() -> None:
     print(f"Sandbox image      : {image}")
     print(f"OSS bucket         : {_required_env('OSS_BUCKET')}")
     print(f"OSS endpoint       : {_required_env('OSS_ENDPOINT')}")
-    print(f"OSS path           : {os.getenv('OSS_PATH', '/')}")
 
     await demo_basic_mount(config, image, run_id)
     await demo_cross_sandbox_sharing(config, image, run_id)

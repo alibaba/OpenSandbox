@@ -724,7 +724,7 @@ class TestBuildVolumeBinds:
         assert "my-shared-volume:/mnt/data:ro" in binds
 
     def test_ossfs_volume_with_subpath(self, mock_docker):
-        """OSSFS volume should resolve host path with ossfs.path + subPath."""
+        """OSSFS volume should resolve host path using subPath as OSS prefix."""
         mock_docker.from_env.return_value = MagicMock()
         service = DockerSandboxService(config=_app_config())
         volume = Volume(
@@ -732,7 +732,6 @@ class TestBuildVolumeBinds:
             ossfs=OSSFS(
                 bucket="bucket-test-3",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                path="/folder",
                 access_key_id="AKIDEXAMPLE",
                 access_key_secret="SECRETEXAMPLE",
             ),
@@ -741,7 +740,7 @@ class TestBuildVolumeBinds:
             sub_path="task-001",
         )
         binds = service._build_volume_binds([volume])
-        assert binds == ["/mnt/ossfs/bucket-test-3/folder/task-001:/mnt/data:rw"]
+        assert binds == ["/mnt/ossfs/bucket-test-3/task-001:/mnt/data:rw"]
 
 
 @patch("src.services.docker.docker")
@@ -789,7 +788,6 @@ class TestDockerVolumeValidation:
             OSSFS(
                 bucket="bucket-test-3",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                path="/folder",
                 access_key_id=None,
                 access_key_secret=None,
             )
@@ -814,7 +812,6 @@ class TestDockerVolumeValidation:
                     ossfs=OSSFS(
                         bucket="bucket-test-3",
                         endpoint="oss-cn-hangzhou.aliyuncs.com",
-                        path="/folder",
                         access_key_id="AKIDEXAMPLE",
                         access_key_secret="SECRETEXAMPLE",
                     ),
@@ -857,7 +854,6 @@ class TestDockerVolumeValidation:
                     ossfs=OSSFS(
                         bucket="bucket-test-3",
                         endpoint="oss-cn-hangzhou.aliyuncs.com",
-                        path="/folder",
                         access_key_id="AKIDEXAMPLE",
                         access_key_secret="SECRETEXAMPLE",
                     ),
@@ -881,11 +877,11 @@ class TestDockerVolumeValidation:
         assert mock_run.called
         host_config_call = mock_client.api.create_host_config.call_args
         binds = host_config_call.kwargs["binds"]
-        assert binds[0] == "/mnt/ossfs/bucket-test-3/folder/task-001:/mnt/data:ro"
+        assert binds[0] == "/mnt/ossfs/bucket-test-3/task-001:/mnt/data:ro"
         create_call = mock_client.api.create_container.call_args
         labels = create_call.kwargs["labels"]
         assert SANDBOX_OSSFS_MOUNTS_LABEL in labels
-        assert labels[SANDBOX_OSSFS_MOUNTS_LABEL] == '["/mnt/ossfs/bucket-test-3/folder"]'
+        assert labels[SANDBOX_OSSFS_MOUNTS_LABEL] == '["/mnt/ossfs/bucket-test-3/task-001"]'
 
     def test_prepare_ossfs_mounts_reuses_mount_key(self, mock_docker):
         """Two OSSFS volumes on same base path should mount once and share refs."""
@@ -897,7 +893,6 @@ class TestDockerVolumeValidation:
                 ossfs=OSSFS(
                     bucket="bucket-test-3",
                     endpoint="oss-cn-hangzhou.aliyuncs.com",
-                    path="/folder",
                     access_key_id="AKIDEXAMPLE",
                     access_key_secret="SECRETEXAMPLE",
                 ),
@@ -909,12 +904,11 @@ class TestDockerVolumeValidation:
                 ossfs=OSSFS(
                     bucket="bucket-test-3",
                     endpoint="oss-cn-hangzhou.aliyuncs.com",
-                    path="/folder",
                     access_key_id="AKIDEXAMPLE",
                     access_key_secret="SECRETEXAMPLE",
                 ),
                 mount_path="/mnt/data-b",
-                sub_path="task-002",
+                sub_path="task-001",
             ),
         ]
 
@@ -924,14 +918,14 @@ class TestDockerVolumeValidation:
                     mock_run.return_value = MagicMock(returncode=0, stderr="")
                     mount_keys = service._prepare_ossfs_mounts(volumes)
 
-        mount_key = "/mnt/ossfs/bucket-test-3/folder"
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
         assert mount_keys == [mount_key]
         assert service._ossfs_mount_ref_counts[mount_key] == 1
         assert mock_run.call_count == 1
 
     def test_delete_sandbox_releases_ossfs_mount(self, mock_docker):
         """Deleting sandbox should release and unmount tracked OSSFS mount."""
-        mount_key = "/mnt/ossfs/bucket-test-3/folder"
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
         mock_container = MagicMock()
         mock_container.attrs = {
             "Config": {
@@ -959,7 +953,7 @@ class TestDockerVolumeValidation:
 
     def test_release_ossfs_mount_untracked_key_does_not_unmount(self, mock_docker):
         """Untracked mount key must not trigger unmount command."""
-        mount_key = "/mnt/ossfs/bucket-test-3/folder"
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
         mock_docker.from_env.return_value = MagicMock()
         service = DockerSandboxService(config=_app_config())
 
@@ -972,7 +966,7 @@ class TestDockerVolumeValidation:
 
     def test_restore_existing_sandboxes_rebuilds_ossfs_refs(self, mock_docker):
         """Service startup rebuilds OSSFS mount refs from container labels."""
-        mount_key = "/mnt/ossfs/bucket-test-3/folder"
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
         expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
         container = MagicMock()
         container.attrs = {
@@ -995,7 +989,7 @@ class TestDockerVolumeValidation:
 
     def test_delete_one_sandbox_after_restart_keeps_shared_mount(self, mock_docker):
         """After restart, deleting one of two users must not unmount shared OSSFS mount."""
-        mount_key = "/mnt/ossfs/bucket-test-3/folder"
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
         expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
         container_a = MagicMock()
         container_a.attrs = {

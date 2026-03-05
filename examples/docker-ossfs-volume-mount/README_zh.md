@@ -6,7 +6,7 @@
 
 1. **基础读写挂载**（OSSFS backend）。
 2. **跨沙箱共享数据**（同一 OSSFS backend path）。
-3. **同一 backend path + 不同 `subPath` 挂载**。
+3. **通过 `subPath` 挂载不同 OSS prefix**。
 
 ## 前置条件
 
@@ -20,7 +20,7 @@
 
 `storage.ossfs_mount_root` 是**可选配置**（使用默认值时可不写）。
 即使是按需动态挂载，运行时仍需要一个确定的宿主机根目录来放置挂载点：
-`<mount_root>/<bucket>/<ossfs.path>`。
+`<mount_root>/<bucket>/<subPath?>`。
 
 可选配置示例：
 
@@ -59,7 +59,6 @@ export SANDBOX_IMAGE=ubuntu
 
 export OSS_BUCKET=your-bucket
 export OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
-export OSS_PATH=/               # 可选，默认 "/"
 export OSS_ACCESS_KEY_ID=your-ak
 export OSS_ACCESS_KEY_SECRET=your-sk
 ```
@@ -84,8 +83,7 @@ sandbox = await Sandbox.create(
             ossfs=OSSFS(
                 bucket="your-bucket",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                path="/datasets",
-                # version="1.0",   # 可选，默认 "1.0"
+                # version="2.0",   # 可选，默认 "2.0"
                 accessKeyId="your-ak",
                 accessKeySecret="your-sk",
             ),
@@ -101,7 +99,7 @@ sandbox = await Sandbox.create(
 
 - 当前实现使用**内联凭据**（`accessKeyId` / `accessKeySecret`）。
 - Docker 运行时采用**按需挂载**（mount-or-reuse），不是预挂载所有 bucket。
-- API/SDK 中 `ossfs.version` 字段存在，枚举为 `"1.0"` / `"2.0"`，省略时默认 `"1.0"`。
+- API/SDK 中 `ossfs.version` 字段存在，枚举为 `"1.0"` / `"2.0"`，省略时默认 `"2.0"`。
 - 当前 Docker 运行时尚未基于 `version` 做差异化挂载逻辑；该字段主要用于后续运行时兼容演进。
 
 ## 参考

@@ -154,11 +154,10 @@ Each backend type is defined as a distinct struct with explicit typed fields:
 |-------|------|----------|-------------|
 | `bucket` | string | Yes | OSS bucket name |
 | `endpoint` | string | Yes | OSS endpoint URL (e.g., `oss-cn-hangzhou.aliyuncs.com`) |
-| `path` | string | No | Path prefix within the bucket (default: `/`) |
 | `accessKeyId` | string | Yes | Access key ID for inline authentication |
 | `accessKeySecret` | string | Yes | Access key secret for inline authentication |
 | `securityToken` | string | No | Optional STS token for temporary credentials |
-| `version` | string | No | ossfs version: `1.0` or `2.0` (default: `1.0`) |
+| `version` | string | No | ossfs version: `1.0` or `2.0` (default: `2.0`) |
 | `options` | []string | No | Mount options list (e.g., `["allow_other", "umask=0022"]`) |
 
 **`pvc`** - Platform-managed named volume:
@@ -181,7 +180,7 @@ Additional backends (e.g., `s3`) can be added by defining new structs following 
 Validation rules for each backend struct to reduce runtime-only failures:
 
 - **`host`**: `path` must be an absolute path (e.g., `/data/opensandbox/user-a`). Reject relative paths and require normalization before validation.
-- **`ossfs`**: `bucket` must be a valid bucket name. `endpoint` must be a valid OSS endpoint. `accessKeyId` and `accessKeySecret` are required for current MVP. `securityToken` is optional for STS credentials. `version` must be `1.0` or `2.0`; if omitted, defaults to `1.0`. The runtime performs the mount during sandbox creation.
+- **`ossfs`**: `bucket` must be a valid bucket name. `endpoint` must be a valid OSS endpoint. `accessKeyId` and `accessKeySecret` are required for current MVP. `securityToken` is optional for STS credentials. `version` must be `1.0` or `2.0`; if omitted, defaults to `2.0`. In OSSFS backend, `subPath` represents bucket prefix. The runtime performs the mount during sandbox creation.
 - **`pvc`**: `claimName` must be a valid resource name (DNS label: lowercase alphanumeric and hyphens, max 63 characters). The volume identified by `claimName` must already exist on the target platform; the runtime validates existence before container creation. In Kubernetes, the PVC must exist in the same namespace as the sandbox pod. In Docker, a named volume with the given name must exist (created via `docker volume create`); if the volume does not exist, the request fails validation rather than auto-creating it, to maintain explicit volume lifecycle management.
 - **`nfs`**: `server` must be a valid hostname or IP. `path` must be an absolute path (e.g., `/exports/sandbox`).
 
@@ -203,7 +202,7 @@ SubPath provides path-level isolation, not concurrency control. If multiple sand
 - If the resolved host path does not exist, the request fails validation (do not auto-create host directories in MVP to avoid permission and security pitfalls).
 - Allowed host paths are restricted by a server-side allowlist; users must specify a `host.path` under permitted prefixes. The allowlist is an operator-configured policy and should be documented for users of a given deployment.
 - `pvc` backend maps to Docker named volumes. `pvc.claimName` is used as the Docker volume name in the bind string (e.g., `my-volume:/mnt/data:rw`). Docker recognizes non-absolute-path sources as named volume references. The named volume must already exist (created via `docker volume create`); if it does not exist, the request fails validation. When `subPath` is specified, the runtime resolves the volume's host-side `Mountpoint` via `docker volume inspect` and appends the `subPath` to produce a standard bind mount (e.g., `/var/lib/docker/volumes/my-volume/_data/subdir:/mnt/data:rw`). This requires the volume to use the `local` driver; non-local drivers are rejected when `subPath` is present because their `Mountpoint` may not be a real filesystem path. The resolved path must exist on the host; if it does not, the request fails validation.
-- `ossfs` backend requires the runtime to mount OSS via ossfs during sandbox creation. Current MVP uses inline credentials (`accessKeyId`/`accessKeySecret`, optional `securityToken`). `subPath` is supported by resolving and validating `ossfs.path + subPath` on host before bind-mounting into the container. If the runtime does not support ossfs mounting, the request is rejected.
+- `ossfs` backend requires the runtime to mount OSS via ossfs during sandbox creation. Current MVP uses inline credentials (`accessKeyId`/`accessKeySecret`, optional `securityToken`). In OSSFS backend, `subPath` is treated as bucket prefix and is resolved/validated on host before bind-mounting into the container. If the runtime does not support ossfs mounting, the request is rejected.
 
 ### Kubernetes mapping
 - `pvc` backend maps to Kubernetes `persistentVolumeClaim` volume source: `pvc.claimName` → `volumes[].persistentVolumeClaim.claimName`.
@@ -516,7 +515,7 @@ ossfs_mount_root = "/mnt/ossfs"
 - Provider unit tests:
   - Docker `host`: bind mount generation, read-only enforcement, allowlist rejection.
   - Docker `pvc`: named volume bind generation, volume existence validation, read-only enforcement, `claimName` format validation, rejection when volume does not exist, `subPath` resolution via `Mountpoint` for `local` driver, rejection of `subPath` for non-local drivers, rejection when resolved subPath does not exist.
-  - Docker `ossfs`: mount option validation, inline credential validation (`accessKeyId`/`accessKeySecret`), optional STS token propagation, version validation (`1.0`/`2.0`), `ossfs.path + subPath` resolution, mount failure handling.
+  - Docker `ossfs`: mount option validation, inline credential validation (`accessKeyId`/`accessKeySecret`), optional STS token propagation, version validation (`1.0`/`2.0`), `subPath`-as-prefix resolution, mount failure handling.
   - Kubernetes `pvc`: PVC reference validation, volume mount generation.
 - Integration tests:
   - Docker: sandbox creation with `host` volume, sandbox creation with `pvc` (named volume), `pvc` with `subPath` mount, cross-container data sharing via named volume.
@@ -554,4 +553,4 @@ Kubernetes runtime is not implemented in this phase, but API compatibility is pr
   - Runtime unsupported backend -> explicit `UNSUPPORTED_VOLUME_BACKEND`.
 - Keep `subPath` semantics aligned:
   - API meaning remains "`subPath` is mounted under backend path".
-  - Docker resolves to host path (`ossfs.path + subPath`); Kubernetes maps to `volumeMounts.subPath`.
+  - Docker resolves to host path (`subPath` as OSS prefix); Kubernetes maps to `volumeMounts.subPath`.

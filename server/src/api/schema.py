@@ -161,7 +161,8 @@ class OSSFS(BaseModel):
     Alibaba Cloud OSS mount backend via ossfs.
 
     The runtime mounts a host-side OSS path under ``storage.ossfs_mount_root``
-    and then bind-mounts the resolved path into the sandbox container.
+    and then bind-mounts the resolved path into the sandbox container. Prefix
+    selection is expressed via ``Volume.subPath``.
     """
 
     bucket: str = Field(
@@ -176,12 +177,8 @@ class OSSFS(BaseModel):
         description="OSS endpoint, e.g. 'oss-cn-hangzhou.aliyuncs.com'.",
         min_length=1,
     )
-    path: str = Field(
-        "/",
-        description="Path prefix inside the bucket. Defaults to '/'.",
-    )
     version: Literal["1.0", "2.0"] = Field(
-        "1.0",
+        "2.0",
         description="ossfs major version used by runtime mount integration.",
     )
     options: Optional[List[str]] = Field(

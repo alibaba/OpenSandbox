@@ -106,7 +106,6 @@ class TestOSSFS:
         backend = OSSFS(
             bucket="bucket-test-3",
             endpoint="oss-cn-hangzhou.aliyuncs.com",
-            path="/folder",
             version="2.0",
             options=["allow_other"],
             access_key_id="AKIDEXAMPLE",
@@ -115,6 +114,15 @@ class TestOSSFS:
         assert backend.bucket == "bucket-test-3"
         assert backend.version == "2.0"
         assert backend.access_key_id == "AKIDEXAMPLE"
+
+    def test_default_ossfs_version_is_2_0(self):
+        backend = OSSFS(
+            bucket="bucket-test-3",
+            endpoint="oss-cn-hangzhou.aliyuncs.com",
+            access_key_id="AKIDEXAMPLE",
+            access_key_secret="SECRETEXAMPLE",
+        )
+        assert backend.version == "2.0"
 
     def test_inline_credentials_required(self):
         with pytest.raises(ValidationError):
@@ -181,8 +189,7 @@ class TestVolume:
             ossfs=OSSFS(
                 bucket="bucket-test-3",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                path="/folder",
-                access_key_id="AKIDEXAMPLE",
+                    access_key_id="AKIDEXAMPLE",
                 access_key_secret="SECRETEXAMPLE",
             ),
             mount_path="/mnt/data",
@@ -290,8 +297,7 @@ class TestVolume:
             ossfs=OSSFS(
                 bucket="bucket-test-3",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                path="/folder",
-                access_key_id="AKIDEXAMPLE",
+                    access_key_id="AKIDEXAMPLE",
                 access_key_secret="SECRETEXAMPLE",
             ),
             mount_path="/mnt/data",
