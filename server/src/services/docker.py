@@ -32,6 +32,7 @@ import random
 import socket
 import subprocess
 import tarfile
+import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1087,8 +1088,8 @@ class DockerSandboxService(SandboxService):
         - base path = ossfs_mount_root/<bucket>/<ossfs.path>
         - bind path = base path (+ subPath when present)
         """
-        mount_root = self.app_config.storage.ossfs_mount_root
-        if not mount_root or not os.path.isabs(mount_root):
+        mount_root = (self.app_config.storage.ossfs_mount_root or "").strip()
+        if not mount_root.startswith("/"):
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -1099,11 +1100,12 @@ class DockerSandboxService(SandboxService):
                 },
             )
 
-        bucket_root = os.path.normpath(os.path.join(mount_root, volume.ossfs.bucket))
+        mount_root = posixpath.normpath(mount_root)
+        bucket_root = posixpath.normpath(posixpath.join(mount_root, volume.ossfs.bucket))
         ossfs_path = (volume.ossfs.path or "/").lstrip("/")
-        backend_path = os.path.normpath(os.path.join(bucket_root, ossfs_path))
+        backend_path = posixpath.normpath(posixpath.join(bucket_root, ossfs_path))
 
-        bucket_prefix = bucket_root if bucket_root.endswith(os.sep) else bucket_root + os.sep
+        bucket_prefix = bucket_root if bucket_root.endswith("/") else bucket_root + "/"
         if backend_path != bucket_root and not backend_path.startswith(bucket_prefix):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1117,10 +1119,8 @@ class DockerSandboxService(SandboxService):
 
         bind_path = backend_path
         if volume.sub_path:
-            bind_path = os.path.normpath(os.path.join(backend_path, volume.sub_path))
-            backend_prefix = (
-                backend_path if backend_path.endswith(os.sep) else backend_path + os.sep
-            )
+            bind_path = posixpath.normpath(posixpath.join(backend_path, volume.sub_path))
+            backend_prefix = backend_path if backend_path.endswith("/") else backend_path + "/"
             if bind_path != backend_path and not bind_path.startswith(backend_prefix):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -1158,7 +1158,7 @@ class DockerSandboxService(SandboxService):
         region = self._derive_oss_region(endpoint)
 
         passwd_file = os.path.join(
-            "/tmp",
+            tempfile.gettempdir(),
             f"opensandbox-ossfs-inline-{uuid4().hex}",
         )
         try:
