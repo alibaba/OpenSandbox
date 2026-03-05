@@ -59,7 +59,6 @@ def build_ossfs() -> OSSFS:
         path=os.getenv("OSS_PATH", "/"),
         accessKeyId=_required_env("OSS_ACCESS_KEY_ID"),
         accessKeySecret=_required_env("OSS_ACCESS_KEY_SECRET"),
-        securityToken=os.getenv("OSS_SECURITY_TOKEN"),
     )
 
 

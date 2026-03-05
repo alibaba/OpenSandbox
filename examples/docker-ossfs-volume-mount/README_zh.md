@@ -16,9 +16,13 @@
 
 - 已安装 `ossfs`
 - 已启用 FUSE
-- 已配置可写的 `storage.ossfs_mount_root`（默认 `/mnt/ossfs`）
+- 已有可写的 OSSFS 本地挂载根目录（默认 `storage.ossfs_mount_root=/mnt/ossfs`）
 
-示例配置：
+`storage.ossfs_mount_root` 是**可选配置**（使用默认值时可不写）。
+即使是按需动态挂载，运行时仍需要一个确定的宿主机根目录来放置挂载点：
+`<mount_root>/<bucket>/<ossfs.path>`。
+
+可选配置示例：
 
 ```toml
 [runtime]
@@ -58,7 +62,6 @@ export OSS_ENDPOINT=oss-cn-hangzhou.aliyuncs.com
 export OSS_PATH=/               # 可选，默认 "/"
 export OSS_ACCESS_KEY_ID=your-ak
 export OSS_ACCESS_KEY_SECRET=your-sk
-# export OSS_SECURITY_TOKEN=... # 可选，STS 场景
 ```
 
 ## 运行
@@ -82,6 +85,7 @@ sandbox = await Sandbox.create(
                 bucket="your-bucket",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
                 path="/datasets",
+                # version="1.0",   # 可选，默认 "1.0"
                 accessKeyId="your-ak",
                 accessKeySecret="your-sk",
             ),
@@ -97,6 +101,8 @@ sandbox = await Sandbox.create(
 
 - 当前实现使用**内联凭据**（`accessKeyId` / `accessKeySecret`）。
 - Docker 运行时采用**按需挂载**（mount-or-reuse），不是预挂载所有 bucket。
+- API/SDK 中 `ossfs.version` 字段存在，枚举为 `"1.0"` / `"2.0"`，省略时默认 `"1.0"`。
+- 当前 Docker 运行时尚未基于 `version` 做差异化挂载逻辑；该字段主要用于后续运行时兼容演进。
 
 ## 参考
 
