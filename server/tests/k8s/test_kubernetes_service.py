@@ -23,7 +23,7 @@ from fastapi import HTTPException
 
 from src.services.k8s.kubernetes_service import KubernetesSandboxService
 from src.services.constants import SandboxErrorCodes
-from src.api.schema import ListSandboxesRequest
+from src.api.schema import ImageAuth, ListSandboxesRequest
 
 
 class TestKubernetesSandboxServiceInit:
@@ -156,6 +156,22 @@ class TestKubernetesSandboxServiceCreate:
         _, kwargs = mock_wait.call_args
         assert kwargs["timeout_seconds"] == 120
         assert kwargs["poll_interval_seconds"] == 0.5
+
+    def test_create_sandbox_rejects_image_auth_for_k8s_runtime(
+        self, k8s_service, create_sandbox_request
+    ):
+        create_sandbox_request.image.auth = ImageAuth(
+            username="registry-user",
+            password="registry-pass",
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service.create_sandbox(create_sandbox_request)
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+        assert "imagePullSecrets" in exc_info.value.detail["message"]
+        k8s_service.workload_provider.create_workload.assert_not_called()
 
 
 class TestWaitForSandboxReady:

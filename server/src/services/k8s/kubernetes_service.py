@@ -224,6 +224,26 @@ class KubernetesSandboxService(SandboxService):
         """
         # Common validation: egress.image must be configured
         ensure_egress_configured(request.network_policy, self.app_config.egress)
+
+    def _ensure_image_auth_support(self, request: CreateSandboxRequest) -> None:
+        """
+        Validate image auth support for Kubernetes runtime.
+
+        K8s runtime currently does not map per-request image.auth to imagePullSecrets.
+        """
+        if request.image.auth is None:
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    "image.auth is not supported in Kubernetes runtime yet. "
+                    "Use imagePullSecrets via Kubernetes ServiceAccount or sandbox template."
+                ),
+            },
+        )
     
     def create_sandbox(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
         """
@@ -244,6 +264,7 @@ class KubernetesSandboxService(SandboxService):
         ensure_entrypoint(request.entrypoint)
         ensure_metadata_labels(request.metadata)
         self._ensure_network_policy_support(request)
+        self._ensure_image_auth_support(request)
         
         # Generate sandbox ID
         sandbox_id = self.generate_sandbox_id()
