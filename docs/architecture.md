@@ -168,7 +168,7 @@ The Runtime layer implements the Sandbox Lifecycle Spec and manages the orchestr
 The OpenSandbox server is a FastAPI-based service providing:
 
 - **Lifecycle Management**: Create, monitor, pause, resume, and terminate sandboxes
-- **Pluggable Runtimes**: Docker (production-ready), Kubernetes (roadmap)
+- **Pluggable Runtimes**: Docker (production-ready), Kubernetes (production-ready)
 - **Async Provisioning**: Background creation to reduce latency
 - **Automatic Expiration**: Configurable TTL with renewal support
 - **Access Control**: API key authentication
@@ -197,16 +197,16 @@ The OpenSandbox server is a FastAPI-based service providing:
 5. Handle pause/resume operations
 6. Clean up terminated containers
 
-#### Kubernetes Runtime (Roadmap)
+#### Kubernetes Runtime (Ready)
+
+**Features:**
+- Built-in **[BatchSandbox](https://github.com/alibaba/OpenSandbox/tree/main/kubernetes)** runtime with sandbox pooling, high-throughput batch creation, and heterogeneous task orchestration; also compatible with **[SIG agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox)** as an alternative runtime
+- Support for different secure container runtimes (e.g., kata-containers, gVisor)
+- Helm-based deployment for controller and server, see [documentation](https://github.com/alibaba/OpenSandbox/blob/main/kubernetes/charts/opensandbox/README.md)
 
 **Planned Features:**
-- Pod-based sandbox instances
-- Native Kubernetes resource management
-- Multi-tenancy support
-- Horizontal scaling
-- Network policies
-- Persistent volume claims
-- Service mesh integration
+- Unified network storage mounting (ossfs, NAS, custom PVC) in both pooled and non-pooled modes
+- Pause/resume support
 
 #### Custom Runtime
 
