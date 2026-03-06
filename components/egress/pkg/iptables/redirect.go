@@ -16,6 +16,7 @@ package iptables
 
 import (
 	"fmt"
+	"net/netip"
 	"os/exec"
 	"strconv"
 
@@ -24,14 +25,49 @@ import (
 )
 
 // SetupRedirect installs OUTPUT nat redirect for DNS (udp/tcp 53 -> port).
-// Packets carrying mark bypassMark will RETURN (used by the proxy's own upstream
-// queries to avoid redirect loops). Requires CAP_NET_ADMIN inside the namespace.
-func SetupRedirect(port int) error {
+//
+// exemptDst: optional list of destination IP or CIDR; traffic to these is not redirected (direct forward).
+// Packets carrying mark are also RETURNed (proxy's own upstream). Requires CAP_NET_ADMIN.
+func SetupRedirect(port int, exemptDst []string) error {
 	log.Infof("installing iptables DNS redirect: OUTPUT port 53 -> %d (mark %s bypass)", port, constants.MarkHex)
 	targetPort := strconv.Itoa(port)
 
-	rules := [][]string{
-		// Bypass packets marked by the proxy itself (see dnsproxy dialer).
+	var rules [][]string
+	for _, d := range exemptDst {
+		if d == "" {
+			continue
+		}
+		// Exempt by destination: don't redirect DNS to these IPs/CIDRs. Use iptables for IPv4, ip6tables for IPv6 only.
+		if addr, err := netip.ParseAddr(d); err == nil {
+			if addr.Is4() {
+				rules = append(rules,
+					[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", d, "-j", "RETURN"},
+					[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", d, "-j", "RETURN"},
+				)
+			} else {
+				rules = append(rules,
+					[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", d, "-j", "RETURN"},
+					[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", d, "-j", "RETURN"},
+				)
+			}
+			continue
+		}
+		if p, err := netip.ParsePrefix(d); err == nil {
+			if p.Addr().Is4() {
+				rules = append(rules,
+					[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", d, "-j", "RETURN"},
+					[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", d, "-j", "RETURN"},
+				)
+			} else {
+				rules = append(rules,
+					[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", d, "-j", "RETURN"},
+					[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", d, "-j", "RETURN"},
+				)
+			}
+		}
+	}
+	// Bypass packets marked by the proxy itself (see dnsproxy dialer).
+	markAndRedirect := [][]string{
 		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
 		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
 		// Redirect all other DNS traffic to local proxy port.
@@ -43,6 +79,7 @@ func SetupRedirect(port int) error {
 		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
 		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
 	}
+	rules = append(rules, markAndRedirect...)
 
 	for _, args := range rules {
 		if output, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {

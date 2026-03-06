@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
@@ -44,6 +45,12 @@ func main() {
 	}
 
 	allowIPs := AllowIPsForNft("/etc/resolv.conf")
+	// Merge nameserver exempt IPs into nft allow set so proxy traffic to them (no SO_MARK) is allowed in dns+nft mode.
+	for _, s := range dnsproxy.ParseNameserverExemptList() {
+		if addr, err := netip.ParseAddr(s); err == nil && !containsAddr(allowIPs, addr) {
+			allowIPs = append(allowIPs, addr)
+		}
+	}
 
 	mode := parseMode()
 	log.Infof("enforcement mode: %s", mode)
@@ -57,7 +64,11 @@ func main() {
 	}
 	log.Infof("dns proxy started on 127.0.0.1:15353")
 
-	if err := iptables.SetupRedirect(15353); err != nil {
+	exemptDst := dnsproxy.ParseNameserverExemptList()
+	if len(exemptDst) > 0 {
+		log.Infof("nameserver exempt list: %v (proxy upstream in this list will not set SO_MARK)", exemptDst)
+	}
+	if err := iptables.SetupRedirect(15353, exemptDst); err != nil {
 		log.Fatalf("failed to install iptables redirect: %v", err)
 	}
 	log.Infof("iptables redirect configured (OUTPUT 53 -> 15353) with SO_MARK bypass for proxy upstream traffic")
@@ -96,6 +107,15 @@ func isTruthy(v string) bool {
 	default:
 		return false
 	}
+}
+
+func containsAddr(addrs []netip.Addr, a netip.Addr) bool {
+	for _, x := range addrs {
+		if x == a {
+			return true
+		}
+	}
+	return false
 }
 
 func parseMode() string {

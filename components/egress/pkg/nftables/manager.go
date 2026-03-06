@@ -77,6 +77,7 @@ func NewManagerWithOptions(opts Options) *Manager {
 }
 
 // ApplyStatic reconciles static allow/deny IP and CIDR entries into nftables.
+//
 // It creates a dedicated table/chain and overwrites previous state.
 // Uses the same mutex as AddResolvedIPs so a /policy update never overlaps a DNS
 // callback: without this, add-element could run while the table is being deleted/recreated

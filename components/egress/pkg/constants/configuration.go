@@ -23,6 +23,9 @@ const (
 	EnvEgressRules    = "OPENSANDBOX_EGRESS_RULES"
 	EnvEgressLogLevel = "OPENSANDBOX_EGRESS_LOG_LEVEL"
 	EnvMaxNameservers = "OPENSANDBOX_EGRESS_MAX_NS"
+
+	// EnvNameserverExempt comma-separated IP or CIDR; traffic to these nameservers is not redirected (direct forward)
+	EnvNameserverExempt = "OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT"
 )
 
 const (
