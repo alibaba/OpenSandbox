@@ -131,6 +131,29 @@ def test_proxy_rejects_websocket_upgrade(
     assert response.json()["message"] == "Websocket upgrade is not supported yet"
 
 
+def test_proxy_rejects_websocket_upgrade_for_post_and_mixed_case_header(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int) -> Endpoint:
+            return Endpoint(endpoint="10.57.1.91:40109")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    client.app.state.http_client = _FakeAsyncClient()
+
+    response = client.post(
+        "/v1/sandboxes/sbx-123/proxy/44772/ws",
+        headers={**auth_headers, "Upgrade": "WebSocket"},
+        content=b"{}",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["message"] == "Websocket upgrade is not supported yet"
+
+
 def test_proxy_maps_connect_error_to_502(
     client: TestClient,
     auth_headers: dict,

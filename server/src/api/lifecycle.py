@@ -441,6 +441,10 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
     client: httpx.AsyncClient = request.app.state.http_client
 
     try:
+        upgrade_header = request.headers.get("Upgrade", "")
+        if upgrade_header.lower() == "websocket":
+            raise HTTPException(status_code=400, detail="Websocket upgrade is not supported yet")
+
         # Filter headers
         headers = {}
         for key, value in request.headers.items():
@@ -458,13 +462,6 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
             headers=headers,
             content=request.stream(),
         )
-
-        # TODO: support websocket protocol?
-        # since execd component does not have websocket handler currently, we just raise an error here
-        if request.method == "GET" and request.headers.get("Upgrade") == "websocket":
-            raise HTTPException(
-                status_code=400, detail="Websocket upgrade is not supported yet"
-            )
 
         resp = await client.send(req, stream=True)
 
