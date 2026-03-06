@@ -112,6 +112,18 @@ func TestDeleteContext_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetContext_NotFound(t *testing.T) {
+	c := NewController("", "")
+
+	_, err := c.GetContext("missing")
+	if err == nil {
+		t.Fatalf("expected ErrContextNotFound")
+	}
+	if !errors.Is(err, ErrContextNotFound) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestDeleteContext_RemovesCacheOnSuccess(t *testing.T) {
 	sessionID := "sess-123"
 

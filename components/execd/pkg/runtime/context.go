@@ -68,12 +68,15 @@ func (c *Controller) DeleteContext(session string) error {
 	return c.deleteSessionAndCleanup(session)
 }
 
-func (c *Controller) GetContext(session string) CodeContext {
+func (c *Controller) GetContext(session string) (CodeContext, error) {
 	kernel := c.getJupyterKernel(session)
+	if kernel == nil {
+		return CodeContext{}, ErrContextNotFound
+	}
 	return CodeContext{
 		ID:       session,
 		Language: kernel.language,
-	}
+	}, nil
 }
 
 func (c *Controller) ListContext(language string) ([]CodeContext, error) {

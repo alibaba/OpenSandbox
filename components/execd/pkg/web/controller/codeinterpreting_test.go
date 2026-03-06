@@ -15,7 +15,11 @@
 package controller
 
 import (
+	"encoding/json"
+	"net/http"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
@@ -57,5 +61,54 @@ func TestBuildExecuteCodeRequestRespectsLanguage(t *testing.T) {
 
 	if execReq.Language != runtime.Language("python") {
 		t.Fatalf("expected python language, got %s", execReq.Language)
+	}
+}
+
+func TestGetContext_NotFoundReturns404(t *testing.T) {
+	ctx, w := newTestContext(http.MethodGet, "/code/contexts/missing", nil)
+	ctx.Params = append(ctx.Params, gin.Param{Key: "contextId", Value: "missing"})
+	ctrl := NewCodeInterpretingController(ctx)
+
+	previous := codeRunner
+	codeRunner = runtime.NewController("", "")
+	t.Cleanup(func() { codeRunner = previous })
+
+	ctrl.GetContext()
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+
+	var resp model.ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Code != model.ErrorCodeContextNotFound {
+		t.Fatalf("unexpected error code: %s", resp.Code)
+	}
+	if resp.Message != "context missing not found" {
+		t.Fatalf("unexpected message: %s", resp.Message)
+	}
+}
+
+func TestGetContext_MissingIDReturns400(t *testing.T) {
+	ctx, w := newTestContext(http.MethodGet, "/code/contexts/", nil)
+	ctrl := NewCodeInterpretingController(ctx)
+
+	ctrl.GetContext()
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+
+	var resp model.ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Code != model.ErrorCodeMissingQuery {
+		t.Fatalf("unexpected error code: %s", resp.Code)
+	}
+	if resp.Message != "missing path parameter 'contextId'" {
+		t.Fatalf("unexpected message: %s", resp.Message)
 	}
 }
