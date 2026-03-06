@@ -42,6 +42,12 @@ from .sandbox import Sandbox
 from .sandbox_metadata import SandboxMetadata
 from .sandbox_status import SandboxStatus
 from .volume import Volume
+from .create_pool_request import ApiCreatePoolRequest
+from .update_pool_request import ApiUpdatePoolRequest
+from .pool_capacity_spec import ApiPoolCapacitySpec
+from .pool_status import ApiPoolStatus
+from .pool_response import ApiPoolResponse
+from .list_pools_response import ApiListPoolsResponse
 
 __all__ = (
     "CreateSandboxRequest",
@@ -70,4 +76,10 @@ __all__ = (
     "SandboxMetadata",
     "SandboxStatus",
     "Volume",
+    "ApiCreatePoolRequest",
+    "ApiUpdatePoolRequest",
+    "ApiPoolCapacitySpec",
+    "ApiPoolStatus",
+    "ApiPoolResponse",
+    "ApiListPoolsResponse",
 )
