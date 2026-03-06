@@ -7,7 +7,7 @@
 
 ## 特性
 
-- **多语言支持**：预装 Python、Java、Node.js 和 Go 及其多个版本
+- **多语言支持**：预装 Python、Java、Node.js、Go 和 .NET 工具链，覆盖常见沙箱工作负载
 - **版本切换**：无需重新构建，支持运行时快速切换版本
 - **Jupyter 集成**：内置 Jupyter Notebook 并支持多语言内核
 - **多架构支持**：同时支持 amd64 和 arm64 架构
@@ -23,8 +23,11 @@
 | **Java**    | 8, 11, 17, 21                 | `/usr/lib/jvm`         | OpenJDK; 含 Maven 3.9.2 |
 | **Node.js** | v18, v20, v22                 | `/opt/node`            | 官方 Linux 二进制包          |
 | **Go**      | 1.23, 1.24, 1.25              | `/opt/go`              | 官方 Linux 二进制包          |
+| **.NET SDK** | 10.0 通道                     | `/opt/dotnet`          | 通过 `dotnet-install.sh` 安装 |
 
 *> 注意: 版本号可能会随构建时间更新至小版本的最新版。*
+
+.NET SDK 以单一 `10.0` 通道预装，可直接通过 `PATH` 使用；当前不走运行时版本切换脚本。
 
 ## 快速开始
 
@@ -202,6 +205,13 @@ go install github.com/user/package@latest
 
 ```bash
 mvn install dependency:copy-dependencies
+```
+
+**.NET SDK：**
+
+```bash
+dotnet --version
+dotnet new console --framework net10.0
 ```
 
 ## 架构说明

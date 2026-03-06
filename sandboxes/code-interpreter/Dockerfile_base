@@ -25,6 +25,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     MAVEN_VERSION=3.9.2 \
     MAVEN_HOME=/opt/maven \
+    DOTNET_ROOT=/opt/dotnet \
+    DOTNET_CHANNEL=10.0 \
     UV_PYTHON_INSTALL_DIR=/opt/python/versions \
     NODE_ROOT=/opt/node \
     GO_ROOT=/opt/go \
@@ -60,7 +62,15 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     uv python install 3.10 3.11 3.12 3.13 && \
     (uv python install 3.14 || echo "Python 3.14 skipped")
 
-# 5. Install Node.js (18, 20, 22)
+# 5. Install .NET SDK 10
+RUN mkdir -p ${DOTNET_ROOT} && \
+    curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh && \
+    chmod +x /tmp/dotnet-install.sh && \
+    /tmp/dotnet-install.sh --channel ${DOTNET_CHANNEL} --install-dir ${DOTNET_ROOT} && \
+    ${DOTNET_ROOT}/dotnet --version && \
+    rm -f /tmp/dotnet-install.sh
+
+# 6. Install Node.js (18, 20, 22)
 RUN mkdir -p ${NODE_ROOT} && \
     ARCH="" && \
     if [ -z "${TARGETARCH}" ]; then \
@@ -81,7 +91,7 @@ RUN mkdir -p ${NODE_ROOT} && \
         mv node-v${v}-linux-${ARCH} v${v}; \
     done
 
-# 6. Install Go (latest three major versions)
+# 7. Install Go (latest three major versions)
 RUN mkdir -p ${GO_ROOT} && \
     ARCH="" && \
     if [ -z "${TARGETARCH}" ]; then \
@@ -102,9 +112,9 @@ RUN mkdir -p ${GO_ROOT} && \
         mv go ${v}; \
     done
 
-# 7. Configure defaults & env script
+# 8. Configure defaults & env script
 ENV GOROOT=${GO_ROOT}/${GO_V1_25} \
-    PATH="${NODE_ROOT}/v${NODE_V22}/bin:${GO_ROOT}/${GO_V1_25}/bin:${PATH}"
+    PATH="${DOTNET_ROOT}:${NODE_ROOT}/v${NODE_V22}/bin:${GO_ROOT}/${GO_V1_25}/bin:${PATH}"
 
 RUN mkdir -p /opt/opensandbox
 COPY scripts/code-interpreter-env.sh /opt/opensandbox/code-interpreter-env.sh

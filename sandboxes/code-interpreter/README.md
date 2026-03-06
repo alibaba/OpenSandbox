@@ -8,7 +8,7 @@ provide an out-of-the-box multi-language code execution environment.
 
 ## Features
 
-- **Multi-Language Support**: Pre-installed Python, Java, Node.js, and Go with multiple versions
+- **Multi-Language Support**: Pre-installed Python, Java, Node.js, Go, and .NET tooling for common sandbox workloads
 - **Version Switching**: Easy runtime version switching without rebuilding
 - **Jupyter Integration**: Built-in Jupyter Notebook with multi-language kernels
 - **Multi-Architecture**: Supports both amd64 and arm64 architectures
@@ -24,8 +24,12 @@ The image comes pre-installed with the following languages and versions:
 | **Java**    | 8, 11, 17, 21                 | `/usr/lib/jvm`         | OpenJDK; includes Maven 3.9.2            |
 | **Node.js** | v18, v20, v22                 | `/opt/node`            | Official Linux binaries                  |
 | **Go**      | 1.23, 1.24, 1.25              | `/opt/go`              | Official Linux binaries                  |
+| **.NET SDK** | 10.0 channel                 | `/opt/dotnet`          | Installed via `dotnet-install.sh`        |
 
 *> Note: Version numbers may be updated to the latest patch versions at build time.*
+
+The .NET SDK is preinstalled as a single `10.0` channel and is available directly from `PATH`; it does not use the
+runtime version switching helper.
 
 ## Quick Start
 
@@ -204,6 +208,13 @@ go install github.com/user/package@latest
 
 ```bash
 mvn install dependency:copy-dependencies
+```
+
+**.NET SDK:**
+
+```bash
+dotnet --version
+dotnet new console --framework net10.0
 ```
 
 ## Architecture
