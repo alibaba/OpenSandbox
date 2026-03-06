@@ -18,7 +18,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 
 import pytest
+from httpx import HTTPStatusError, Request, Response
 
+from opensandbox.api.lifecycle.errors import UnexpectedStatus
 from opensandbox.adapters.converter.exception_converter import (
     ExceptionConverter,
     parse_sandbox_error,
@@ -88,6 +90,34 @@ def test_exception_converter_maps_common_types() -> None:
     assert isinstance(se2, SandboxInternalException)
 
 
+def test_exception_converter_maps_generated_unexpected_status_to_api_exception() -> (
+    None
+):
+    err = UnexpectedStatus(400, b'{"code":"X","message":"bad"}')
+
+    converted = ExceptionConverter.to_sandbox_exception(err)
+
+    assert isinstance(converted, SandboxApiException)
+    assert converted.status_code == 400
+    assert converted.error is not None
+    assert converted.error.code == "X"
+
+
+def test_exception_converter_maps_httpx_status_error_to_api_exception() -> None:
+    request = Request("GET", "https://example.test")
+    response = Response(
+        502, request=request, content=b'{"code":"UPSTREAM","message":"gateway"}'
+    )
+    err = HTTPStatusError("bad gateway", request=request, response=response)
+
+    converted = ExceptionConverter.to_sandbox_exception(err)
+
+    assert isinstance(converted, SandboxApiException)
+    assert converted.status_code == 502
+    assert converted.error is not None
+    assert converted.error.code == "UPSTREAM"
+
+
 def test_execution_converter_to_api_run_command_request() -> None:
     from opensandbox.api.execd.types import UNSET
 
@@ -115,7 +145,12 @@ def test_execution_converter_to_api_run_command_request() -> None:
     assert d3["command"] == "sleep 10"
     assert d3["timeout"] == 60_000
     # timeout omitted when not set (backward compat)
-    assert "timeout" not in ExecutionConverter.to_api_run_command_request("x", RunCommandOpts()).to_dict()
+    assert (
+        "timeout"
+        not in ExecutionConverter.to_api_run_command_request(
+            "x", RunCommandOpts()
+        ).to_dict()
+    )
 
 
 def test_filesystem_and_metrics_converters() -> None:
@@ -135,7 +170,13 @@ def test_filesystem_and_metrics_converters() -> None:
     entry = FilesystemModelConverter.to_entry_info(fi)
     assert entry.path == "/a"
 
-    api_metrics = Metrics(cpu_count=1.0, cpu_used_pct=2.0, mem_total_mib=3.0, mem_used_mib=4.0, timestamp=5)
+    api_metrics = Metrics(
+        cpu_count=1.0,
+        cpu_used_pct=2.0,
+        mem_total_mib=3.0,
+        mem_used_mib=4.0,
+        timestamp=5,
+    )
     m = MetricsModelConverter.to_sandbox_metrics(api_metrics)
     assert m.cpu_used_percentage == 2.0
 
