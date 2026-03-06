@@ -70,6 +70,7 @@ logging.getLogger().setLevel(
 )
 
 from src.api.lifecycle import router  # noqa: E402
+from src.api.pool import router as pool_router  # noqa: E402
 from src.middleware.auth import AuthMiddleware  # noqa: E402
 from src.middleware.request_id import RequestIdMiddleware  # noqa: E402
 from src.services.runtime_resolver import (  # noqa: E402
@@ -149,6 +150,8 @@ app.add_middleware(RequestIdMiddleware)
 # Include API routes at root and versioned prefix
 app.include_router(router)
 app.include_router(router, prefix="/v1")
+app.include_router(pool_router)
+app.include_router(pool_router, prefix="/v1")
 
 DEFAULT_ERROR_CODE = "GENERAL::UNKNOWN_ERROR"
 DEFAULT_ERROR_MESSAGE = "An unexpected error occurred."

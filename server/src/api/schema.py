@@ -472,3 +472,128 @@ class ErrorResponse(BaseModel):
         ...,
         description="Human-readable error message describing what went wrong and how to fix it",
     )
+
+
+# ============================================================================
+# Pool Models
+# ============================================================================
+
+class PoolCapacitySpec(BaseModel):
+    """
+    Capacity configuration that controls the size of the resource pool.
+    """
+    buffer_max: int = Field(
+        ...,
+        alias="bufferMax",
+        ge=0,
+        description="Maximum number of nodes kept in the warm buffer.",
+    )
+    buffer_min: int = Field(
+        ...,
+        alias="bufferMin",
+        ge=0,
+        description="Minimum number of nodes that must remain in the buffer.",
+    )
+    pool_max: int = Field(
+        ...,
+        alias="poolMax",
+        ge=0,
+        description="Maximum total number of nodes allowed in the entire pool.",
+    )
+    pool_min: int = Field(
+        ...,
+        alias="poolMin",
+        ge=0,
+        description="Minimum total size of the pool.",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class CreatePoolRequest(BaseModel):
+    """
+    Request to create a new pre-warmed resource pool.
+
+    A Pool manages a set of pre-warmed pods that can be rapidly allocated
+    to sandboxes, reducing cold-start latency.
+    """
+    name: str = Field(
+        ...,
+        description="Unique name for the pool (must be a valid Kubernetes resource name).",
+        pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
+        max_length=253,
+    )
+    template: Dict = Field(
+        ...,
+        description=(
+            "Kubernetes PodTemplateSpec defining the pod configuration for pre-warmed nodes. "
+            "Follows the same schema as spec.template in a Kubernetes Deployment."
+        ),
+    )
+    capacity_spec: PoolCapacitySpec = Field(
+        ...,
+        alias="capacitySpec",
+        description="Capacity configuration controlling pool size and buffer behavior.",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class UpdatePoolRequest(BaseModel):
+    """
+    Request to update an existing pool's capacity configuration.
+
+    Only capacity settings can be updated after pool creation.
+    Updating the pod template requires recreating the pool.
+    """
+    capacity_spec: PoolCapacitySpec = Field(
+        ...,
+        alias="capacitySpec",
+        description="New capacity configuration for the pool.",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class PoolStatus(BaseModel):
+    """
+    Observed runtime state of a pool.
+    """
+    total: int = Field(..., description="Total number of nodes in the pool.")
+    allocated: int = Field(..., description="Number of nodes currently allocated to sandboxes.")
+    available: int = Field(..., description="Number of nodes currently available in the pool.")
+    revision: str = Field(..., description="Latest revision identifier of the pool.")
+
+
+class PoolResponse(BaseModel):
+    """
+    Full representation of a Pool resource.
+    """
+    name: str = Field(..., description="Unique pool name.")
+    capacity_spec: PoolCapacitySpec = Field(
+        ...,
+        alias="capacitySpec",
+        description="Capacity configuration of the pool.",
+    )
+    status: Optional[PoolStatus] = Field(
+        None,
+        description="Observed runtime state of the pool. May be absent if not yet reconciled.",
+    )
+    created_at: Optional[datetime] = Field(
+        None,
+        alias="createdAt",
+        description="Pool creation timestamp.",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class ListPoolsResponse(BaseModel):
+    """
+    Collection of pools.
+    """
+    items: List[PoolResponse] = Field(..., description="List of pools.")
