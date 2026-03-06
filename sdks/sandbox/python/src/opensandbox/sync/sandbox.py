@@ -328,9 +328,30 @@ class SandboxSync:
 
             time.sleep(polling_interval.total_seconds())
 
-        error_detail = f"Last error: {last_exception}" if last_exception else "Health check returned false continuously"
+        error_detail = (
+            f"Last error: {last_exception}"
+            if last_exception
+            else "Health check returned false continuously"
+        )
+        connection_detail = (
+            f"ConnectionConfig(domain={self.connection_config.get_domain()}, "
+            f"use_server_proxy={self.connection_config.use_server_proxy})"
+        )
+        if self.connection_config.use_server_proxy:
+            hint = (
+                "Hint: server proxy mode is enabled. Check server-to-sandbox connectivity "
+                "and server API key/auth configuration."
+            )
+        else:
+            hint = (
+                "Hint: direct sandbox endpoint access is enabled. If the SDK cannot directly "
+                "reach sandbox network/ports, set ConnectionConfigSync(use_server_proxy=True). "
+                "For Docker bridge deployments where server runs in a container, also configure "
+                "server [docker].host_ip to a host-reachable address."
+            )
         final_message = (
-            f"Sandbox health check timed out after {timeout.total_seconds()}s ({attempt} attempts). {error_detail}"
+            f"Sandbox health check timed out after {timeout.total_seconds()}s "
+            f"({attempt} attempts). {error_detail}. {connection_detail}. {hint}"
         )
         logger.error(final_message)
         raise SandboxReadyTimeoutException(final_message)
