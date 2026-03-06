@@ -79,6 +79,42 @@ var resumed = await sandbox.ResumeAsync();
 await resumed.RenewAsync(30 * 60);
 ```
 
+### 连接到现有沙箱
+
+当你已经持有一个 `sandboxId`，并希望新建一个绑定到该沙箱的 SDK 实例时，可使用 `ConnectAsync`。
+
+```csharp
+var connected = await Sandbox.ConnectAsync(new SandboxConnectOptions
+{
+    SandboxId = "existing-sandbox-id",
+    ConnectionConfig = config
+});
+```
+
+### 使用已知 Sandbox ID 继续工作
+
+在 `CreateAsync` 成功后，请把 `sandbox.Id` 保存在你自己的应用状态中。之后可以用这个 ID 重新连接，并继续在同一个沙箱里执行 shell 命令。
+
+```csharp
+var sandboxId = "existing-sandbox-id";
+
+await using var connected = await Sandbox.ConnectAsync(new SandboxConnectOptions
+{
+    SandboxId = sandboxId,
+    ConnectionConfig = new ConnectionConfig(new ConnectionConfigOptions
+    {
+        Domain = "api.opensandbox.io",
+        ApiKey = "your-api-key",
+        UseServerProxy = true, // 客户端无法直连 Pod IP 时建议开启
+    })
+});
+
+var execution = await connected.Commands.RunAsync("pwd && ls -la");
+Console.WriteLine(execution.Logs.Stdout.FirstOrDefault()?.Text);
+```
+
+如果你的沙箱镜像里已经预装了 Claude Code 之类的 CLI，也可以用 `connected.Commands.RunAsync(...)` 以同样方式调用。
+
 ### 2. 自定义健康检查
 
 定义自定义逻辑来确定沙箱是否就绪/健康。
