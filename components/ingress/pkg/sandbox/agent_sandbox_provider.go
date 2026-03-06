@@ -16,7 +16,7 @@ package sandbox
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -44,7 +44,7 @@ const (
 )
 
 var (
-	dns1035InvalidChars   = regexp.MustCompile(`[^a-z0-9-]+`)
+	dns1035InvalidChars     = regexp.MustCompile(`[^a-z0-9-]+`)
 	dns1035DuplicateHyphens = regexp.MustCompile(`-+`)
 )
 
@@ -102,7 +102,7 @@ func toDNS1035Label(value, prefix string) string {
 	normalized = dns1035DuplicateHyphens.ReplaceAllString(normalized, "-")
 	normalized = strings.Trim(normalized, "-")
 
-	hash := sha1.Sum([]byte(value))
+	hash := sha256.Sum256([]byte(value))
 	suffix := hex.EncodeToString(hash[:])[:8]
 
 	if normalized == "" {

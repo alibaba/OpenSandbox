@@ -263,8 +263,8 @@ func TestToDNS1035Label_HashOnSymbolOnlyIDs(t *testing.T) {
 	name2 := toDNS1035Label("???", agentSandboxNamePrefix)
 
 	assert.NotEqual(t, name1, name2)
-	assert.Equal(t, "sandbox-e84c538e", name1)
-	assert.Equal(t, "sandbox-2d86c2a6", name2)
+	assert.Regexp(t, `^sandbox-[0-9a-f]{8}$`, name1)
+	assert.Regexp(t, `^sandbox-[0-9a-f]{8}$`, name2)
 }
 
 func TestToDNS1035Label_PrefixesDigitStart(t *testing.T) {

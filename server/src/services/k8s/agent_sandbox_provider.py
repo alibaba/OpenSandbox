@@ -57,7 +57,7 @@ def _to_dns1035_label(value: str, prefix: str = "sandbox") -> str:
     normalized = DNS1035_INVALID_CHARS.sub("-", value.strip().lower())
     normalized = DNS1035_DUPLICATE_HYPHENS.sub("-", normalized).strip("-")
 
-    hash_suffix = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+    hash_suffix = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
 
     if not normalized:
         normalized = f"{prefix}-{hash_suffix}"
