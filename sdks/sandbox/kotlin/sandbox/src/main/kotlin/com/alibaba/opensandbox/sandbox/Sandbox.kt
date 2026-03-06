@@ -516,7 +516,16 @@ class Sandbox internal constructor(
                 "Check returned false continuously"
             }
 
-        val finalMessage = "Sandbox health check timed out after ${timeout.seconds}s ($attempt attempts). $errorDetail"
+        val context = "domain=${httpClientProvider.config.getDomain()}, useServerProxy=${httpClientProvider.config.useServerProxy}"
+        var suggestion =
+            "If this sandbox runs in Docker bridge or remote-network mode, consider enabling useServerProxy=true."
+        if (!httpClientProvider.config.useServerProxy) {
+            suggestion += " You can also configure server-side [docker].host_ip for direct endpoint access."
+        }
+
+        val finalMessage =
+            "Sandbox health check timed out after ${timeout.seconds}s ($attempt attempts). $errorDetail " +
+                "Connection context: $context. $suggestion"
 
         logger.error(finalMessage, lastException)
 
