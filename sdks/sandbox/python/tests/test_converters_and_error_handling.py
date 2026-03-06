@@ -59,6 +59,14 @@ def test_parse_sandbox_error_from_plain_text_string() -> None:
     assert err.message == "not-json"
 
 
+def test_parse_sandbox_error_from_invalid_utf8_bytes_fallback_message() -> None:
+    err = parse_sandbox_error(b"\xff\xfe")
+    assert err is not None
+    assert err.code == "UNEXPECTED_RESPONSE"
+    assert err.message is not None
+    assert "\ufffd" in err.message
+
+
 def test_handle_api_error_raises_with_parsed_message() -> None:
     class Parsed:
         message = "bad request"
@@ -115,7 +123,12 @@ def test_execution_converter_to_api_run_command_request() -> None:
     assert d3["command"] == "sleep 10"
     assert d3["timeout"] == 60_000
     # timeout omitted when not set (backward compat)
-    assert "timeout" not in ExecutionConverter.to_api_run_command_request("x", RunCommandOpts()).to_dict()
+    assert (
+        "timeout"
+        not in ExecutionConverter.to_api_run_command_request(
+            "x", RunCommandOpts()
+        ).to_dict()
+    )
 
 
 def test_filesystem_and_metrics_converters() -> None:
@@ -135,7 +148,13 @@ def test_filesystem_and_metrics_converters() -> None:
     entry = FilesystemModelConverter.to_entry_info(fi)
     assert entry.path == "/a"
 
-    api_metrics = Metrics(cpu_count=1.0, cpu_used_pct=2.0, mem_total_mib=3.0, mem_used_mib=4.0, timestamp=5)
+    api_metrics = Metrics(
+        cpu_count=1.0,
+        cpu_used_pct=2.0,
+        mem_total_mib=3.0,
+        mem_used_mib=4.0,
+        timestamp=5,
+    )
     m = MetricsModelConverter.to_sandbox_metrics(api_metrics)
     assert m.cpu_used_percentage == 2.0
 

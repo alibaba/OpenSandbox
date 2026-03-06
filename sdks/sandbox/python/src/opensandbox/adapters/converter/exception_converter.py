@@ -195,7 +195,12 @@ def _parse_error_body(body: Any) -> SandboxError | None:
     try:
         # Convert bytes to string
         if isinstance(body, bytes):
-            body = body.decode("utf-8")
+            if not body:
+                return None
+            body = body.decode("utf-8", errors="replace")
+
+        if isinstance(body, str) and not body:
+            return None
 
         # Parse JSON string
         if isinstance(body, str):
@@ -219,7 +224,7 @@ def _parse_error_body(body: Any) -> SandboxError | None:
         return None
 
     except Exception as ex:
-        logger.debug(f"Failed to parse error body: {ex}")
+        logger.debug("Failed to parse error body: %s", ex)
         return None
 
 
