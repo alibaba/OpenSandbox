@@ -19,7 +19,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 )
 
@@ -68,5 +70,33 @@ func TestGetBackgroundCommandOutput_MissingID(t *testing.T) {
 	}
 	if resp.Message != "missing command execution id" {
 		t.Fatalf("unexpected message: %s", resp.Message)
+	}
+}
+
+func TestBuildExecuteCommandRequest_MapsUidGidAndTimeout(t *testing.T) {
+	ctrl := &CodeInterpretingController{}
+	uid := int64(1001)
+	gid := int64(1002)
+
+	execReq := ctrl.buildExecuteCommandRequest(model.RunCommandRequest{
+		Command:    "id",
+		Cwd:        "/tmp",
+		TimeoutMs:  2500,
+		Uid:        &uid,
+		Gid:        &gid,
+		Background: true,
+	})
+
+	if execReq.Language != runtime.BackgroundCommand {
+		t.Fatalf("expected background command language, got %s", execReq.Language)
+	}
+	if execReq.Timeout != 2500*time.Millisecond {
+		t.Fatalf("unexpected timeout: %s", execReq.Timeout)
+	}
+	if execReq.Uid == nil || *execReq.Uid != 1001 {
+		t.Fatalf("unexpected uid: %#v", execReq.Uid)
+	}
+	if execReq.Gid == nil || *execReq.Gid != 1002 {
+		t.Fatalf("unexpected gid: %#v", execReq.Gid)
 	}
 }

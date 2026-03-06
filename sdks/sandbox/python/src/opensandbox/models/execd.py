@@ -234,6 +234,14 @@ class RunCommandOpts(BaseModel):
         default=None,
         description="Maximum execution time; server will terminate the command when reached. If omitted, the server will not enforce any timeout.",
     )
+    uid: int | None = Field(
+        default=None,
+        description="Optional POSIX user id for command execution. Only supported on POSIX platforms.",
+    )
+    gid: int | None = Field(
+        default=None,
+        description="Optional POSIX group id for command execution. Only supported on POSIX platforms.",
+    )
 
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 

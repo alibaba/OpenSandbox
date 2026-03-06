@@ -45,6 +45,8 @@ function toRunCommandRequest(command: string, opts?: RunCommandOpts): ApiRunComm
     command,
     cwd: opts?.workingDirectory,
     background: !!opts?.background,
+    uid: opts?.uid,
+    gid: opts?.gid,
   };
   if (opts?.timeoutSeconds != null) {
     body.timeout = Math.round(opts.timeoutSeconds * 1000);

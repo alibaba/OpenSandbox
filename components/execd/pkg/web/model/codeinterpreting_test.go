@@ -58,6 +58,23 @@ func TestRunCommandRequestValidate(t *testing.T) {
 	if err := req.Validate(); err == nil {
 		t.Fatalf("expected validation error when command is empty")
 	}
+
+	req.Command = "ls"
+	req.Uid = int64Ptr(-1)
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected validation error when uid is negative")
+	}
+
+	req.Uid = int64Ptr(42)
+	req.Gid = int64Ptr(4_294_967_296)
+	if err := req.Validate(); err == nil {
+		t.Fatalf("expected validation error when gid exceeds uint32 range")
+	}
+
+	req.Gid = int64Ptr(0)
+	if err := req.Validate(); err != nil {
+		t.Fatalf("expected success with explicit uid/gid: %v", err)
+	}
 }
 
 func TestServerStreamEventToJSON(t *testing.T) {
@@ -75,6 +92,10 @@ func TestServerStreamEventToJSON(t *testing.T) {
 	if decoded.Type != event.Type || decoded.Text != event.Text || decoded.ExecutionCount != event.ExecutionCount {
 		t.Fatalf("unexpected decoded event: %#v", decoded)
 	}
+}
+
+func int64Ptr(value int64) *int64 {
+	return &value
 }
 
 func TestServerStreamEventSummary(t *testing.T) {

@@ -97,6 +97,8 @@ public class CommandsAdapterTests
             var body = await request.Content!.ReadAsStringAsync().ConfigureAwait(false);
             using var doc = JsonDocument.Parse(body);
             doc.RootElement.GetProperty("timeout").GetInt64().Should().Be(2000);
+            doc.RootElement.GetProperty("uid").GetInt64().Should().Be(1001);
+            doc.RootElement.GetProperty("gid").GetInt64().Should().Be(1002);
 
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -107,7 +109,9 @@ public class CommandsAdapterTests
 
         var options = new RunCommandOptions
         {
-            TimeoutSeconds = 2
+            TimeoutSeconds = 2,
+            Uid = 1001,
+            Gid = 1002
         };
 
         await foreach (var _ in adapter.RunStreamAsync("sleep 1", options))

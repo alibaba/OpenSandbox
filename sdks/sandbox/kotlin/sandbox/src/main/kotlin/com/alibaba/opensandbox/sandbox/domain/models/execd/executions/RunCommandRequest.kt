@@ -25,6 +25,8 @@ import kotlin.time.Duration
  * @property background Whether to run in background (detached)
  * @property workingDirectory Directory to execute command in
  * @property timeout Maximum execution time; server will terminate when reached.  Null means the server will not enforce any timeout.
+ * @property uid Optional POSIX user id for command execution. Only supported on POSIX platforms.
+ * @property gid Optional POSIX group id for command execution. Only supported on POSIX platforms.
  * @property handlers Optional execution handlers
  */
 class RunCommandRequest private constructor(
@@ -32,6 +34,8 @@ class RunCommandRequest private constructor(
     val background: Boolean,
     val workingDirectory: String?,
     val timeout: Duration?,
+    val uid: Long?,
+    val gid: Long?,
     val handlers: ExecutionHandlers?,
 ) {
     companion object {
@@ -44,6 +48,8 @@ class RunCommandRequest private constructor(
         private var background: Boolean = false
         private var workingDirectory: String? = null
         private var timeout: Duration? = null
+        private var uid: Long? = null
+        private var gid: Long? = null
         private var handlers: ExecutionHandlers? = null
 
         fun command(command: String): Builder {
@@ -71,6 +77,16 @@ class RunCommandRequest private constructor(
             return this
         }
 
+        fun uid(uid: Long?): Builder {
+            this.uid = uid
+            return this
+        }
+
+        fun gid(gid: Long?): Builder {
+            this.gid = gid
+            return this
+        }
+
         fun handlers(handlers: ExecutionHandlers?): Builder {
             this.handlers = handlers
             return this
@@ -83,6 +99,8 @@ class RunCommandRequest private constructor(
                 background = background,
                 workingDirectory = workingDirectory,
                 timeout = timeout,
+                uid = uid,
+                gid = gid,
                 handlers = handlers,
             )
         }

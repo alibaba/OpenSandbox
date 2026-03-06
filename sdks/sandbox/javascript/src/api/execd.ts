@@ -527,6 +527,18 @@ export interface components {
              * @example 60000
              */
             timeout?: number;
+            /**
+             * Format: int64
+             * @description Optional POSIX user id for command execution. When omitted, the current execd process uid is used. Only supported on POSIX platforms.
+             * @example 1000
+             */
+            uid?: number;
+            /**
+             * Format: int64
+             * @description Optional POSIX group id for command execution. When omitted, the current execd process gid is used. Only supported on POSIX platforms.
+             * @example 1000
+             */
+            gid?: number;
         };
         /** @description Command execution status (foreground or background) */
         CommandStatusResponse: {

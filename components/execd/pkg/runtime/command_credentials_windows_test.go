@@ -1,4 +1,4 @@
-// Copyright 2025 Alibaba Group Holding Ltd.
+// Copyright 2026 Alibaba Group Holding Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build windows
+// +build windows
+
 package runtime
 
-import "errors"
+import (
+	"errors"
+	"os/exec"
+	"testing"
+)
 
-var ErrContextNotFound = errors.New("context not found")
+func TestApplyCommandSysProcAttr_RejectsCredentials(t *testing.T) {
+	cmd := exec.Command("cmd", "/C", "echo ok")
+	uid := uint32(1001)
 
-var ErrCommandCredentialsUnsupported = errors.New("uid/gid are only supported on POSIX platforms")
+	err := applyCommandSysProcAttr(cmd, &ExecuteCodeRequest{Uid: &uid})
+	if !errors.Is(err, ErrCommandCredentialsUnsupported) {
+		t.Fatalf("expected unsupported credentials error, got %v", err)
+	}
+}

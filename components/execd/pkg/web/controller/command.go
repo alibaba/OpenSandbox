@@ -16,10 +16,12 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
+	goruntime "runtime"
 
 	"github.com/alibaba/opensandbox/execd/pkg/flag"
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
@@ -47,6 +49,14 @@ func (c *CodeInterpretingController) RunCommand() {
 		)
 		return
 	}
+	if goruntime.GOOS == "windows" && (request.Uid != nil || request.Gid != nil) {
+		c.RespondError(
+			http.StatusBadRequest,
+			model.ErrorCodeInvalidRequest,
+			runtime.ErrCommandCredentialsUnsupported.Error(),
+		)
+		return
+	}
 
 	ctx, cancel := context.WithCancel(c.ctx.Request.Context())
 	defer cancel()
@@ -58,6 +68,14 @@ func (c *CodeInterpretingController) RunCommand() {
 	c.setupSSEResponse()
 	err = codeRunner.Execute(runCodeRequest)
 	if err != nil {
+		if errors.Is(err, runtime.ErrCommandCredentialsUnsupported) {
+			c.RespondError(
+				http.StatusBadRequest,
+				model.ErrorCodeInvalidRequest,
+				err.Error(),
+			)
+			return
+		}
 		c.RespondError(
 			http.StatusInternalServerError,
 			model.ErrorCodeRuntimeError,
@@ -133,6 +151,8 @@ func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.Ru
 			Code:     request.Command,
 			Cwd:      request.Cwd,
 			Timeout:  timeout,
+			Uid:      toOptionalUint32(request.Uid),
+			Gid:      toOptionalUint32(request.Gid),
 		}
 	} else {
 		return &runtime.ExecuteCodeRequest{
@@ -140,6 +160,16 @@ func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.Ru
 			Code:     request.Command,
 			Cwd:      request.Cwd,
 			Timeout:  timeout,
+			Uid:      toOptionalUint32(request.Uid),
+			Gid:      toOptionalUint32(request.Gid),
 		}
 	}
+}
+
+func toOptionalUint32(value *int64) *uint32 {
+	if value == nil {
+		return nil
+	}
+	converted := uint32(*value)
+	return &converted
 }

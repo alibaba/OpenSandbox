@@ -117,6 +117,14 @@ def test_execution_converter_to_api_run_command_request() -> None:
     # timeout omitted when not set (backward compat)
     assert "timeout" not in ExecutionConverter.to_api_run_command_request("x", RunCommandOpts()).to_dict()
 
+    api4 = ExecutionConverter.to_api_run_command_request(
+        "id",
+        RunCommandOpts(uid=1001, gid=1002),
+    )
+    d4 = api4.to_dict()
+    assert d4["uid"] == 1001
+    assert d4["gid"] == 1002
+
 
 def test_filesystem_and_metrics_converters() -> None:
     from datetime import datetime, timezone

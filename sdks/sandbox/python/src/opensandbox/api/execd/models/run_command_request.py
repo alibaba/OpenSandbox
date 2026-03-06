@@ -37,12 +37,18 @@ class RunCommandRequest:
         background (bool | Unset): Whether to run command in detached mode Default: False.
         timeout (int | Unset): Maximum allowed execution time in milliseconds before the command is forcefully
             terminated by the server. If omitted, the server will not enforce any timeout. Example: 60000.
+        uid (int | Unset): Optional POSIX user id for command execution. When omitted, the current execd process uid is
+            used. Only supported on POSIX platforms. Example: 1000.
+        gid (int | Unset): Optional POSIX group id for command execution. When omitted, the current execd process gid is
+            used. Only supported on POSIX platforms. Example: 1000.
     """
 
     command: str
     cwd: str | Unset = UNSET
     background: bool | Unset = False
     timeout: int | Unset = UNSET
+    uid: int | Unset = UNSET
+    gid: int | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -53,6 +59,10 @@ class RunCommandRequest:
         background = self.background
 
         timeout = self.timeout
+
+        uid = self.uid
+
+        gid = self.gid
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -67,6 +77,10 @@ class RunCommandRequest:
             field_dict["background"] = background
         if timeout is not UNSET:
             field_dict["timeout"] = timeout
+        if uid is not UNSET:
+            field_dict["uid"] = uid
+        if gid is not UNSET:
+            field_dict["gid"] = gid
 
         return field_dict
 
@@ -81,11 +95,17 @@ class RunCommandRequest:
 
         timeout = d.pop("timeout", UNSET)
 
+        uid = d.pop("uid", UNSET)
+
+        gid = d.pop("gid", UNSET)
+
         run_command_request = cls(
             command=command,
             cwd=cwd,
             background=background,
             timeout=timeout,
+            uid=uid,
+            gid=gid,
         )
 
         run_command_request.additional_properties = d

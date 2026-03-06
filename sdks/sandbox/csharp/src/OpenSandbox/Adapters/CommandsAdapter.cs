@@ -66,7 +66,9 @@ internal sealed class CommandsAdapter : IExecdCommands
             Command = command,
             Cwd = options?.WorkingDirectory,
             Background = options?.Background,
-            Timeout = options?.TimeoutSeconds.HasValue == true ? options.TimeoutSeconds.Value * 1000L : null
+            Timeout = options?.TimeoutSeconds.HasValue == true ? options.TimeoutSeconds.Value * 1000L : null,
+            Uid = options?.Uid,
+            Gid = options?.Gid,
         };
 
         var json = JsonSerializer.Serialize(requestBody, JsonOptions);

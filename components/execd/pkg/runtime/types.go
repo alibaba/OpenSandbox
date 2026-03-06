@@ -40,6 +40,8 @@ type ExecuteCodeRequest struct {
 	Timeout  time.Duration     `json:"timeout"`
 	Cwd      string            `json:"cwd"`
 	Envs     map[string]string `json:"envs"`
+	Uid      *uint32           `json:"uid,omitempty"`
+	Gid      *uint32           `json:"gid,omitempty"`
 	Hooks    ExecuteResultHook
 }
 

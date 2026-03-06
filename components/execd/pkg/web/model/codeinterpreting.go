@@ -53,6 +53,10 @@ type RunCommandRequest struct {
 	Background bool   `json:"background,omitempty"`
 	// TimeoutMs caps execution duration; 0 uses server default.
 	TimeoutMs int64 `json:"timeout,omitempty" validate:"omitempty,gte=1"`
+	// Uid selects the POSIX user id for command execution.
+	Uid *int64 `json:"uid,omitempty" validate:"omitempty,gte=0,lte=4294967295"`
+	// Gid selects the POSIX group id for command execution.
+	Gid *int64 `json:"gid,omitempty" validate:"omitempty,gte=0,lte=4294967295"`
 }
 
 func (r *RunCommandRequest) Validate() error {

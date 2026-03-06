@@ -1,4 +1,4 @@
-// Copyright 2025 Alibaba Group Holding Ltd.
+// Copyright 2026 Alibaba Group Holding Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build windows
+// +build windows
+
 package runtime
 
-import "errors"
+import "os/exec"
 
-var ErrContextNotFound = errors.New("context not found")
-
-var ErrCommandCredentialsUnsupported = errors.New("uid/gid are only supported on POSIX platforms")
+func applyCommandSysProcAttr(_ *exec.Cmd, request *ExecuteCodeRequest) error {
+	if request.Uid != nil || request.Gid != nil {
+		return ErrCommandCredentialsUnsupported
+	}
+	return nil
+}

@@ -938,6 +938,20 @@ components:
           format: int64
           description: Maximum allowed execution time in milliseconds before the command is forcefully terminated by the server. If omitted, the server will not enforce any timeout.
           example: 60000
+        uid:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 4294967295
+          description: Optional POSIX user id for command execution. When omitted, the current execd process uid is used. Only supported on POSIX platforms.
+          example: 1000
+        gid:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 4294967295
+          description: Optional POSIX group id for command execution. When omitted, the current execd process gid is used. Only supported on POSIX platforms.
+          example: 1000
 
     CommandStatusResponse:
       type: object

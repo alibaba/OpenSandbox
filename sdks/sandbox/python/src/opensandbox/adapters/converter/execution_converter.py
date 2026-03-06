@@ -58,11 +58,21 @@ class ExecutionConverter:
         if opts.timeout is not None:
             timeout_milliseconds = int(opts.timeout.total_seconds() * 1000)
 
+        uid = UNSET
+        if opts.uid is not None:
+            uid = opts.uid
+
+        gid = UNSET
+        if opts.gid is not None:
+            gid = opts.gid
+
         return ApiRunCommandRequest(
             command=command,
             background=background,
             cwd=cwd,  # Domain uses 'working_directory', API uses 'cwd'
             timeout=timeout_milliseconds,
+            uid=uid,
+            gid=gid,
             # Note: handlers are not included in API request as they are for local processing
         )
 

@@ -63,6 +63,14 @@ export interface RunCommandOpts {
    * If omitted, the server will not enforce any timeout.
    */
   timeoutSeconds?: number;
+  /**
+   * Optional POSIX user id for command execution. Only supported on POSIX platforms.
+   */
+  uid?: number;
+  /**
+   * Optional POSIX group id for command execution. Only supported on POSIX platforms.
+   */
+  gid?: number;
 }
 
 export interface CommandStatus {

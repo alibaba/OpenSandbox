@@ -133,6 +133,18 @@ public class RunCommandRequest
     /// </summary>
     [JsonPropertyName("timeout")]
     public long? Timeout { get; set; }
+
+    /// <summary>
+    /// Gets or sets the POSIX user id for command execution. Only supported on POSIX platforms.
+    /// </summary>
+    [JsonPropertyName("uid")]
+    public long? Uid { get; set; }
+
+    /// <summary>
+    /// Gets or sets the POSIX group id for command execution. Only supported on POSIX platforms.
+    /// </summary>
+    [JsonPropertyName("gid")]
+    public long? Gid { get; set; }
 }
 
 /// <summary>
@@ -155,6 +167,16 @@ public class RunCommandOptions
     /// The server terminates the command when this duration is reached.
     /// </summary>
     public int? TimeoutSeconds { get; set; }
+
+    /// <summary>
+    /// Gets or sets the POSIX user id for command execution. Only supported on POSIX platforms.
+    /// </summary>
+    public long? Uid { get; set; }
+
+    /// <summary>
+    /// Gets or sets the POSIX group id for command execution. Only supported on POSIX platforms.
+    /// </summary>
+    public long? Gid { get; set; }
 }
 
 /// <summary>

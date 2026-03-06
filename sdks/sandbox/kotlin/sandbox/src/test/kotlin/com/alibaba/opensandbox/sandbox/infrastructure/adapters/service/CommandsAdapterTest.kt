@@ -93,6 +93,8 @@ class CommandsAdapterTest {
         val request =
             RunCommandRequest.builder()
                 .command("echo Hello")
+                .uid(1001)
+                .gid(1002)
                 .handlers(handlers)
                 .build()
 
@@ -105,5 +107,8 @@ class CommandsAdapterTest {
         val recordedRequest = mockWebServer.takeRequest()
         assertEquals("/command", recordedRequest.path)
         assertEquals("POST", recordedRequest.method)
+        val requestBody = recordedRequest.body.readUtf8()
+        assertTrue(requestBody.contains("\"uid\":1001"))
+        assertTrue(requestBody.contains("\"gid\":1002"))
     }
 }

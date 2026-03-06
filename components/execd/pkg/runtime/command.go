@@ -71,8 +71,9 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	})
 
 	cmd.Dir = request.Cwd
-	// use a dedicated process group so signals propagate to children.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := applyCommandSysProcAttr(cmd, request); err != nil {
+		return err
+	}
 
 	err = cmd.Start()
 	if err != nil {
@@ -151,7 +152,6 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 // runBackgroundCommand executes shell commands in detached mode.
 func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.CancelFunc, request *ExecuteCodeRequest) error {
 	session := c.newContextID()
-	request.Hooks.OnExecuteInit(session)
 
 	pipe, err := c.combinedOutputDescriptor(session)
 	if err != nil {
@@ -171,10 +171,14 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	cmd := exec.CommandContext(ctx, "bash", "-c", request.Code)
 
 	cmd.Dir = request.Cwd
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdout = pipe
 	cmd.Stderr = pipe
 	cmd.Env = mergeEnvs(os.Environ(), loadExtraEnvFromFile())
+	if err := applyCommandSysProcAttr(cmd, request); err != nil {
+		cancel()
+		return err
+	}
+	request.Hooks.OnExecuteInit(session)
 
 	// use DevNull as stdin so interactive programs exit immediately.
 	cmd.Stdin = os.NewFile(uintptr(syscall.Stdin), os.DevNull)
