@@ -1,0 +1,229 @@
+name: Dify Plugin E2E
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'integrations/dify-plugin/**'
+      - 'tests/e2e/dify_plugin/**'
+      - 'sdks/sandbox/python/**'
+      - 'server/**'
+  push:
+    branches: [main]
+    paths:
+      - 'integrations/dify-plugin/**'
+      - 'tests/e2e/dify_plugin/**'
+      - 'sdks/sandbox/python/**'
+      - 'server/**'
+      - '.github/workflows/dify-plugin-e2e.yml'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DIFY_PORT: "5001"
+  # Use latest stable release tag (check https://github.com/langgenius/dify/releases)
+  DIFY_REF: "1.11.4"
+  DIFY_ADMIN_EMAIL: "admin@example.com"
+  DIFY_ADMIN_PASSWORD: "ChangeMe123!"
+  OPEN_SANDBOX_API_KEY: "opensandbox-e2e-key"
+
+jobs:
+  dify-plugin-e2e:
+    name: Dify Plugin E2E Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      # Cache Dify Docker images to speed up subsequent runs
+      - name: Cache Dify Docker images
+        uses: actions/cache@v4
+        id: dify-cache
+        with:
+          path: /tmp/dify-images
+          key: dify-images-${{ env.DIFY_REF }}-v1
+          restore-keys: |
+            dify-images-${{ env.DIFY_REF }}-
+
+      - name: Load cached Dify images
+        if: steps.dify-cache.outputs.cache-hit == 'true'
+        run: |
+          echo "Loading cached Dify images..."
+          for img in /tmp/dify-images/*.tar; do
+            if [ -f "$img" ]; then
+              docker load -i "$img" || true
+            fi
+          done
+          docker images | grep -E "langgenius|dify" || true
+
+      - name: Build execd image
+        run: |
+          docker build -f components/execd/Dockerfile -t opensandbox/execd:local .
+
+      - name: Create OpenSandbox config
+        run: |
+          cat > ~/.sandbox.toml <<EOF
+          [server]
+          host = "0.0.0.0"
+          port = 8080
+          log_level = "INFO"
+          api_key = "${{ env.OPEN_SANDBOX_API_KEY }}"
+
+          [runtime]
+          type = "docker"
+          execd_image = "opensandbox/execd:local"
+
+          [docker]
+          network_mode = "bridge"
+          EOF
+
+      - name: Install OpenSandbox server dependencies
+        working-directory: server
+        run: uv sync
+
+      - name: Start OpenSandbox server
+        working-directory: server
+        run: |
+          uv run python -m src.main > server.log 2>&1 &
+          echo "OPENSANDBOX_PID=$!" >> $GITHUB_ENV
+
+      - name: Wait for OpenSandbox server
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/health | grep -q healthy; then
+              echo "OpenSandbox server is ready"
+              exit 0
+            fi
+            echo "Waiting for OpenSandbox server... ($i/30)"
+            sleep 2
+          done
+          echo "OpenSandbox server failed to start"
+          cat server/server.log
+          exit 1
+
+      - name: Prepare Dify docker-compose
+        working-directory: tests/e2e/dify_plugin
+        env:
+          DIFY_REF: ${{ env.DIFY_REF }}
+        run: |
+          python prepare_dify_compose.py
+          echo "Dify compose files ready"
+
+      - name: Pull Dify images
+        working-directory: tests/e2e/dify_plugin/.dify
+        run: |
+          docker compose pull --ignore-pull-failures || true
+          echo "Dify images pulled"
+
+      - name: Save Dify images to cache
+        if: steps.dify-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/dify-images
+          # Save main Dify images for caching (versions from 1.11.4 docker-compose)
+          for img in \
+            "langgenius/dify-api:${{ env.DIFY_REF }}" \
+            "langgenius/dify-web:${{ env.DIFY_REF }}" \
+            "langgenius/dify-sandbox:0.2.12" \
+            "langgenius/dify-plugin-daemon:0.5.2-local"; do
+            name=$(echo "$img" | tr '/:' '_')
+            if docker image inspect "$img" >/dev/null 2>&1; then
+              echo "Saving $img..."
+              docker save "$img" -o "/tmp/dify-images/${name}.tar" || true
+            fi
+          done
+          ls -lh /tmp/dify-images/ || true
+
+      - name: Start Dify
+        working-directory: tests/e2e/dify_plugin/.dify
+        run: |
+          docker compose up -d
+          echo "Dify containers starting..."
+
+      - name: Wait for Dify API
+        run: |
+          for i in {1..90}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:${{ env.DIFY_PORT }}/console/api/ping 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "Dify API is ready (HTTP 200)"
+              exit 0
+            fi
+            echo "Waiting for Dify API... ($i/90) HTTP=$HTTP_CODE"
+            sleep 5
+          done
+          echo "Dify API failed to start"
+          docker compose -f tests/e2e/dify_plugin/.dify/docker-compose.yaml logs
+          exit 1
+
+      - name: Install OpenSandbox Python SDK (local)
+        working-directory: sdks/sandbox/python
+        run: |
+          pip install -e .
+
+      - name: Install plugin dependencies
+        working-directory: integrations/dify-plugin/opensandbox
+        run: |
+          pip install -r requirements.txt
+
+      - name: Install e2e test dependencies
+        working-directory: tests/e2e/dify_plugin
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run plugin unit tests
+        working-directory: integrations/dify-plugin/opensandbox
+        env:
+          OPENSANDBOX_BASE_URL: "http://localhost:8080"
+          OPENSANDBOX_API_KEY: ${{ env.OPEN_SANDBOX_API_KEY }}
+          PYTHONPATH: "."
+        run: |
+          python -m unittest discover -s tests -v
+
+      - name: Run E2E test
+        working-directory: tests/e2e/dify_plugin
+        env:
+          DIFY_CONSOLE_API_URL: "http://localhost:${{ env.DIFY_PORT }}"
+          # Plugin runs on host via remote debug, so localhost works
+          OPEN_SANDBOX_BASE_URL: "http://localhost:8080"
+        run: |
+          python run_e2e.py
+
+      - name: Upload OpenSandbox logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opensandbox-server-log
+          path: server/server.log
+          retention-days: 5
+
+      - name: Collect Dify logs
+        if: always()
+        run: |
+          docker compose -f tests/e2e/dify_plugin/.dify/docker-compose.yaml logs > dify.log 2>&1 || true
+
+      - name: Upload Dify logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dify-logs
+          path: dify.log
+          retention-days: 5
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker compose -f tests/e2e/dify_plugin/.dify/docker-compose.yaml down --volumes --remove-orphans || true
+          kill ${{ env.OPENSANDBOX_PID }} 2>/dev/null || true

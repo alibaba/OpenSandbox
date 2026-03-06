@@ -1,0 +1,93 @@
+identity:
+  name: sandbox_create
+  author: OpenSandbox
+  label:
+    en_US: Create Sandbox
+    zh_Hans: 创建 Sandbox
+description:
+  human:
+    en_US: Create a new OpenSandbox instance.
+    zh_Hans: 创建一个新的 OpenSandbox 实例。
+  llm: Create a new OpenSandbox instance and return the sandbox id.
+parameters:
+  - name: image
+    type: string
+    required: true
+    label:
+      en_US: Image
+      zh_Hans: 镜像
+    human_description:
+      en_US: Docker image to run (e.g., python:3.11-slim).
+      zh_Hans: 要运行的 Docker 镜像（例如 python:3.11-slim）。
+    llm_description: Docker image reference to create the sandbox.
+    form: form
+  - name: timeout_minutes
+    type: number
+    required: false
+    label:
+      en_US: Timeout (minutes)
+      zh_Hans: 超时时间（分钟）
+    human_description:
+      en_US: Auto-terminate after this many minutes.
+      zh_Hans: 在指定分钟数后自动终止。
+    llm_description: Sandbox TTL in minutes.
+    form: form
+  - name: ready_timeout_seconds
+    type: number
+    required: false
+    label:
+      en_US: Ready timeout (seconds)
+      zh_Hans: 就绪超时（秒）
+    human_description:
+      en_US: Max time to wait for sandbox readiness.
+      zh_Hans: 等待 sandbox 就绪的最大时间。
+    llm_description: Readiness timeout in seconds.
+    form: form
+  - name: entrypoint
+    type: string
+    required: false
+    label:
+      en_US: Entrypoint
+      zh_Hans: 启动命令
+    human_description:
+      en_US: Entrypoint command string (e.g., "bash -lc 'echo hi'").
+      zh_Hans: 启动命令字符串（例如 "bash -lc 'echo hi'"）。
+    llm_description: Entrypoint command string, optional.
+    form: form
+  - name: env_json
+    type: string
+    required: false
+    label:
+      en_US: Env JSON
+      zh_Hans: 环境变量 JSON
+    human_description:
+      en_US: JSON object of environment variables.
+      zh_Hans: 环境变量的 JSON 对象。
+    llm_description: JSON object string of environment variables.
+    form: form
+  - name: metadata_json
+    type: string
+    required: false
+    label:
+      en_US: Metadata JSON
+      zh_Hans: 元数据 JSON
+    human_description:
+      en_US: JSON object of metadata tags.
+      zh_Hans: 元数据标签的 JSON 对象。
+    llm_description: JSON object string of metadata tags.
+    form: form
+output_schema:
+  type: object
+  properties:
+    sandbox_id:
+      type: string
+      description: Sandbox identifier.
+    state:
+      type: string
+      description: Sandbox state after creation.
+    expires_at:
+      type: string
+      description: Expiration time (RFC3339).
+extra:
+  python:
+    source: tools/sandbox_create.py

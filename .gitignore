@@ -183,10 +183,14 @@ MANIFEST
 
 # Virtual environments
 venv/
+.venv/
 env/
 ENV/
 env.bak/
 venv.bak/
+
+# Dify test artifacts
+.dify/
 
 # Docker
 *.pid
@@ -213,6 +217,9 @@ Thumbs.db
 .env.development.local
 .env.test.local
 .env.production.local
+
+# E2E test configs
+*.e2e.toml
 
 # API keys and secrets
 secrets/
