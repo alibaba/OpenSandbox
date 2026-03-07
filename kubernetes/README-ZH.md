@@ -42,6 +42,12 @@ Pool 自定义资源维护一个预热的计算资源池，以实现快速沙箱
 - 池范围的容量限制，防止资源耗尽
 - 基于需求的自动扩展
 
+## 运行时 API 支持说明
+
+- Kubernetes 运行时当前**不支持** `pause` / `resume` 生命周期 API。
+- 对 Kubernetes 运行时调用这两个 API 会返回 `501 Not Implemented`。
+- OpenSandbox 的 pause/resume 语义是保留容器进程内存态后再恢复；当前 Kubernetes provider 主要覆盖 create/get/list/delete/renew 流程。
+
 
 ## 与 [kubernates-sigs/agent-sandbox](kubernates-sigs/agent-sandbox) 的关系
 

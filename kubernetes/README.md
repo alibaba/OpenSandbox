@@ -42,6 +42,12 @@ Intelligent resource management features:
 - Pool-wide capacity limits to prevent resource exhaustion
 - Automatic scaling based on demand
 
+## Runtime API Support Notes
+
+- `pause` / `resume` lifecycle APIs are currently **not supported** by the Kubernetes runtime.
+- Calling these APIs against Kubernetes runtime returns `501 Not Implemented`.
+- Pause/resume semantics in OpenSandbox mean preserving in-memory process state (container-level suspend/resume). Kubernetes provider currently focuses on create/get/list/delete/renew workflows.
+
 
 ## Relationship with [kubernates-sigs/agent-sandbox](kubernates-sigs/agent-sandbox)
 
