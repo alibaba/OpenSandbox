@@ -40,6 +40,14 @@ from opensandbox.exceptions import (
 
 logger = logging.getLogger(__name__)
 
+HTTPX_NETWORK_ERROR_TYPES = {
+    "ConnectError",
+    "TimeoutException",
+    "NetworkError",
+    "ReadTimeout",
+    "WriteTimeout",
+}
+
 
 class ExceptionConverter:
     """
@@ -134,14 +142,7 @@ def _is_httpx_status_error(e: Exception) -> bool:
 
 def _is_httpx_network_error(e: Exception) -> bool:
     """Check if exception is an httpx network-related error."""
-    error_types = (
-        "ConnectError",
-        "TimeoutException",
-        "NetworkError",
-        "ReadTimeout",
-        "WriteTimeout",
-    )
-    return type(e).__name__ in error_types
+    return type(e).__name__ in HTTPX_NETWORK_ERROR_TYPES
 
 
 def _convert_unexpected_status_to_api_exception(e: Exception) -> SandboxApiException:
