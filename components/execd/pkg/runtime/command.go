@@ -24,6 +24,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"os/user"
 	"strconv"
 	"sync"
 	"syscall"
@@ -33,6 +34,46 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 	"github.com/alibaba/opensandbox/execd/pkg/util/safego"
 )
+
+func buildCredential(uid, gid *uint32) (*syscall.Credential, error) {
+	if uid == nil && gid == nil {
+		return nil, nil
+	}
+
+	cred := &syscall.Credential{}
+	if uid != nil {
+		cred.Uid = *uid
+		// Load user info to get primary GID and supplemental groups
+		u, err := user.LookupId(strconv.FormatUint(uint64(*uid), 10))
+		if err == nil {
+			// Set primary GID if not explicitly provided
+			if gid == nil {
+				primaryGid, err := strconv.ParseUint(u.Gid, 10, 32)
+				if err == nil {
+					cred.Gid = uint32(primaryGid)
+				}
+			}
+
+			// Load supplemental groups
+			gids, err := u.GroupIds()
+			if err == nil {
+				for _, g := range gids {
+					id, err := strconv.ParseUint(g, 10, 32)
+					if err == nil {
+						cred.Groups = append(cred.Groups, uint32(id))
+					}
+				}
+			}
+		}
+	}
+
+	// Override Gid if explicitly provided
+	if gid != nil {
+		cred.Gid = *gid
+	}
+
+	return cred, nil
+}
 
 // runCommand executes shell commands and streams their output.
 func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest) error {
@@ -71,10 +112,19 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	})
 
 	cmd.Dir = request.Cwd
-	// use a dedicated process group so signals propagate to children.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Configure credentials and process group
+	cred, err := buildCredential(request.Uid, request.Gid)
+	if err != nil {
+		log.Error("failed to build credentials: %v", err)
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid:    true,
+		Credential: cred,
+	}
 
 	err = cmd.Start()
+
 	if err != nil {
 		request.Hooks.OnExecuteInit(session)
 		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "CommandExecError", EValue: err.Error()})
@@ -171,8 +221,19 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	cmd := exec.CommandContext(ctx, "bash", "-c", request.Code)
 
 	cmd.Dir = request.Cwd
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Configure credentials and process group
+	cred, err := buildCredential(request.Uid, request.Gid)
+	if err != nil {
+		log.Error("failed to build credentials: %v", err)
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid:    true,
+		Credential: cred,
+	}
+
 	cmd.Stdout = pipe
+
 	cmd.Stderr = pipe
 	cmd.Env = mergeEnvs(os.Environ(), loadExtraEnvFromFile())
 
