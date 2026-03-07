@@ -30,6 +30,18 @@ import json
 import logging
 from typing import Any
 
+from httpx import (
+    ConnectError,
+    HTTPStatusError,
+    NetworkError,
+    ReadTimeout,
+    TimeoutException,
+    WriteTimeout,
+)
+from opensandbox.api.execd.errors import UnexpectedStatus as ExecdUnexpectedStatus
+from opensandbox.api.lifecycle.errors import (
+    UnexpectedStatus as LifecycleUnexpectedStatus,
+)
 from opensandbox.exceptions import (
     InvalidArgumentException,
     SandboxApiException,
@@ -39,6 +51,15 @@ from opensandbox.exceptions import (
 )
 
 logger = logging.getLogger(__name__)
+
+UNEXPECTED_STATUS_TYPES = (LifecycleUnexpectedStatus, ExecdUnexpectedStatus)
+HTTPX_NETWORK_ERROR_TYPES = (
+    ConnectError,
+    TimeoutException,
+    NetworkError,
+    ReadTimeout,
+    WriteTimeout,
+)
 
 
 class ExceptionConverter:
@@ -124,24 +145,17 @@ class ExceptionConverter:
 
 def _is_unexpected_status_error(e: Exception) -> bool:
     """Check if exception is an openapi-python-client UnexpectedStatus error."""
-    return type(e).__name__ == "UnexpectedStatus"
+    return isinstance(e, UNEXPECTED_STATUS_TYPES)
 
 
 def _is_httpx_status_error(e: Exception) -> bool:
     """Check if exception is an httpx HTTPStatusError."""
-    return type(e).__name__ == "HTTPStatusError"
+    return isinstance(e, HTTPStatusError)
 
 
 def _is_httpx_network_error(e: Exception) -> bool:
     """Check if exception is an httpx network-related error."""
-    error_types = (
-        "ConnectError",
-        "TimeoutException",
-        "NetworkError",
-        "ReadTimeout",
-        "WriteTimeout",
-    )
-    return type(e).__name__ in error_types
+    return isinstance(e, HTTPX_NETWORK_ERROR_TYPES)
 
 
 def _convert_unexpected_status_to_api_exception(e: Exception) -> SandboxApiException:
