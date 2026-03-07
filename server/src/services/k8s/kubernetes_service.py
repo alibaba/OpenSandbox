@@ -110,9 +110,6 @@ class KubernetesSandboxService(SandboxService):
             self.workload_provider = create_workload_provider(
                 provider_type=provider_type,
                 k8s_client=self.k8s_client,
-                k8s_config=self.app_config.kubernetes,
-                agent_sandbox_config=self.app_config.agent_sandbox,
-                ingress_config=self.ingress_config,
                 app_config=self.app_config,
             )
             logger.info(

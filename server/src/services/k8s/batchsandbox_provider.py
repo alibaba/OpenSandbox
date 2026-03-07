@@ -31,7 +31,7 @@ from kubernetes.client import (
     ApiException,
 )
 
-from src.config import AppConfig, IngressConfig, INGRESS_MODE_GATEWAY, ExecdInitResources
+from src.config import AppConfig, INGRESS_MODE_GATEWAY
 from src.services.helpers import format_ingress_endpoint
 from src.api.schema import Endpoint, ImageSpec, NetworkPolicy
 from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
@@ -60,26 +60,28 @@ class BatchSandboxProvider(WorkloadProvider):
     def __init__(
         self,
         k8s_client: K8sClient,
-        template_file_path: Optional[str] = None,
-        ingress_config: Optional[IngressConfig] = None,
-        enable_informer: bool = True,
-        informer_factory: Optional[Callable[[str], WorkloadInformer]] = None,
-        informer_resync_seconds: int = 300,
-        informer_watch_timeout_seconds: int = 60,
         app_config: Optional[AppConfig] = None,
-        execd_init_resources: Optional[ExecdInitResources] = None,
+        *,
+        informer_factory: Optional[Callable[[str], WorkloadInformer]] = None,
     ):
         """
         Initialize BatchSandbox provider.
 
+        Configuration is read from app_config (kubernetes.*, ingress). No separate
+        config objects are passed.
+
         Args:
-            k8s_client: Kubernetes client wrapper
-            template_file_path: Optional path to BatchSandbox CR YAML template file
-            app_config: Optional application config for secure runtime
+            k8s_client: Kubernetes client wrapper.
+            app_config: Application config; kubernetes and ingress settings are read from it.
+            informer_factory: Optional custom informer factory (for tests).
         """
         self.k8s_client = k8s_client
         self.custom_api = k8s_client.get_custom_objects_api()
-        self.ingress_config = ingress_config
+        k8s_config = app_config.kubernetes if app_config else None
+        self.ingress_config = app_config.ingress if app_config else None
+        self.execd_init_resources = (
+            k8s_config.execd_init_resources if k8s_config else None
+        )
 
         # Initialize secure runtime resolver
         self.resolver = SecureRuntimeResolver(app_config) if app_config else None
@@ -91,11 +93,23 @@ class BatchSandboxProvider(WorkloadProvider):
         self.group = "sandbox.opensandbox.io"
         self.version = "v1alpha1"
         self.plural = "batchsandboxes"
-        
-        # Template manager
+
+        template_file_path = (
+            k8s_config.batchsandbox_template_file if k8s_config else None
+        )
+        if template_file_path:
+            logger.info("Using BatchSandbox template file: %s", template_file_path)
         self.template_manager = BatchSandboxTemplateManager(template_file_path)
-        self.execd_init_resources = execd_init_resources
-        self._enable_informer = enable_informer
+
+        self._enable_informer = (
+            k8s_config.informer_enabled if k8s_config else True
+        )
+        informer_resync_seconds = (
+            k8s_config.informer_resync_seconds if k8s_config else 300
+        )
+        informer_watch_timeout_seconds = (
+            k8s_config.informer_watch_timeout_seconds if k8s_config else 60
+        )
         self._informer_factory = informer_factory or (
             lambda ns: WorkloadInformer(
                 custom_api=self.custom_api,
