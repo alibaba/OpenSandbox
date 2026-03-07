@@ -91,6 +91,31 @@ var connected = await Sandbox.ConnectAsync(new SandboxConnectOptions
 });
 ```
 
+### Continue Working with a Known Sandbox ID
+
+After `CreateAsync`, persist `sandbox.Id` in your own application state. Later, you can reconnect with that ID and keep
+running shell commands in the same sandbox.
+
+```csharp
+var sandboxId = "existing-sandbox-id";
+
+await using var connected = await Sandbox.ConnectAsync(new SandboxConnectOptions
+{
+    SandboxId = sandboxId,
+    ConnectionConfig = new ConnectionConfig(new ConnectionConfigOptions
+    {
+        Domain = "api.opensandbox.io",
+        ApiKey = "your-api-key",
+        UseServerProxy = true, // Recommended when the client cannot reach Pod IPs directly.
+    })
+});
+
+var execution = await connected.Commands.RunAsync("pwd && ls -la");
+Console.WriteLine(execution.Logs.Stdout.FirstOrDefault()?.Text);
+```
+
+If your sandbox image already contains a CLI such as Claude Code, invoke it the same way with `connected.Commands.RunAsync(...)`.
+
 ### 2. Custom Health Check
 
 Define custom logic to determine whether the sandbox is ready/healthy.
