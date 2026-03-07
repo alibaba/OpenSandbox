@@ -31,7 +31,7 @@ from kubernetes.client import (
     ApiException,
 )
 
-from src.config import AppConfig, IngressConfig, ExecdInitResources
+from src.config import AppConfig
 from src.services.helpers import format_ingress_endpoint
 from src.api.schema import Endpoint, ImageSpec, NetworkPolicy
 from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
@@ -82,17 +82,16 @@ class AgentSandboxProvider(WorkloadProvider):
     def __init__(
         self,
         k8s_client: K8sClient,
-        template_file_path: Optional[str] = None,
-        shutdown_policy: str = "Delete",
-        service_account: Optional[str] = None,
-        ingress_config: Optional[IngressConfig] = None,
-        enable_informer: bool = True,
-        informer_factory: Optional[Callable[[str], WorkloadInformer]] = None,
-        informer_resync_seconds: int = 300,
-        informer_watch_timeout_seconds: int = 60,
         app_config: Optional[AppConfig] = None,
-        execd_init_resources: Optional[ExecdInitResources] = None,
+        *,
+        informer_factory: Optional[Callable[[str], WorkloadInformer]] = None,
     ):
+        """
+        Initialize AgentSandbox provider.
+
+        Configuration is read from app_config (kubernetes.*, agent_sandbox, ingress).
+        No separate config objects are passed.
+        """
         self.k8s_client = k8s_client
         self.custom_api = k8s_client.get_custom_objects_api()
         self.core_api = k8s_client.get_core_v1_api()
@@ -101,12 +100,31 @@ class AgentSandboxProvider(WorkloadProvider):
         self.version = "v1alpha1"
         self.plural = "sandboxes"
 
-        self.shutdown_policy = shutdown_policy
-        self.service_account = service_account
+        k8s_config = app_config.kubernetes if app_config else None
+        agent_config = app_config.agent_sandbox if app_config else None
+        self.shutdown_policy = (
+            agent_config.shutdown_policy if agent_config else "Delete"
+        )
+        self.service_account = (
+            k8s_config.service_account if k8s_config else None
+        )
+        template_file_path = (
+            agent_config.template_file if agent_config else None
+        )
         self.template_manager = AgentSandboxTemplateManager(template_file_path)
-        self.ingress_config = ingress_config
-        self.execd_init_resources = execd_init_resources
-        self._enable_informer = enable_informer
+        self.ingress_config = app_config.ingress if app_config else None
+        self.execd_init_resources = (
+            k8s_config.execd_init_resources if k8s_config else None
+        )
+        self._enable_informer = (
+            k8s_config.informer_enabled if k8s_config else True
+        )
+        informer_resync_seconds = (
+            k8s_config.informer_resync_seconds if k8s_config else 300
+        )
+        informer_watch_timeout_seconds = (
+            k8s_config.informer_watch_timeout_seconds if k8s_config else 60
+        )
         self._informer_factory = informer_factory or (
             lambda ns: WorkloadInformer(
                 custom_api=self.custom_api,

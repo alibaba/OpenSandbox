@@ -22,7 +22,12 @@ from typing import Dict, Any
 import pytest
 
 from src.api.schema import CreateSandboxRequest, ImageSpec, ResourceLimits
-from src.config import KubernetesRuntimeConfig
+from src.config import (
+    AppConfig,
+    AgentSandboxRuntimeConfig,
+    KubernetesRuntimeConfig,
+    RuntimeConfig,
+)
 from src.services.k8s.client import K8sClient
 from src.services.k8s.provider_factory import PROVIDER_TYPE_BATCHSANDBOX
 
@@ -60,6 +65,77 @@ def agent_sandbox_runtime_config():
         service_account="test-sa",
         workload_provider="agent-sandbox",
     )
+
+
+def _make_app_config(
+    *,
+    kubernetes: KubernetesRuntimeConfig,
+    agent_sandbox: AgentSandboxRuntimeConfig | None = None,
+) -> AppConfig:
+    """Build AppConfig for K8s tests."""
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="test-execd:latest"),
+        kubernetes=kubernetes,
+        agent_sandbox=agent_sandbox,
+    )
+
+
+@pytest.fixture
+def app_config(k8s_runtime_config):
+    """Application config for batchsandbox provider tests."""
+    return _make_app_config(kubernetes=k8s_runtime_config)
+
+
+@pytest.fixture
+def app_config_agent_sandbox(agent_sandbox_runtime_config, tmp_path):
+    """Application config for agent-sandbox provider tests."""
+    template_file = tmp_path / "agent_sandbox_template.yaml"
+    template_file.write_text(
+        """
+metadata:
+  annotations:
+    managed-by: opensandbox
+spec:
+  podTemplate:
+    spec:
+      nodeSelector:
+        workload: sandbox
+"""
+    )
+    agent_config = AgentSandboxRuntimeConfig(
+        template_file=str(template_file),
+        shutdown_policy="Retain",
+        ingress_enabled=True,
+    )
+    return _make_app_config(
+        kubernetes=agent_sandbox_runtime_config,
+        agent_sandbox=agent_config,
+    )
+
+
+@pytest.fixture
+def app_config_with_batch_template(tmp_path):
+    """Application config with BatchSandbox template file path set."""
+    template_file = tmp_path / "test_template.yaml"
+    template_file.write_text("""
+apiVersion: execution.alibaba-inc.com/v1alpha1
+kind: BatchSandbox
+metadata:
+  name: test-template
+spec:
+  template:
+    spec:
+      nodeSelector:
+        gpu: "true"
+""")
+    k8s_config = KubernetesRuntimeConfig(
+        kubeconfig_path="/tmp/test-kubeconfig",
+        namespace="test-namespace",
+        service_account="test-sa",
+        workload_provider=PROVIDER_TYPE_BATCHSANDBOX,
+        batchsandbox_template_file=str(template_file),
+    )
+    return _make_app_config(kubernetes=k8s_config)
 
 
 @pytest.fixture

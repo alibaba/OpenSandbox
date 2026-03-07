@@ -24,8 +24,41 @@ import pytest
 from kubernetes.client import ApiException
 
 from src.api.schema import ImageSpec, NetworkPolicy, NetworkRule
-from src.config import ExecdInitResources
+from src.config import (
+    AgentSandboxRuntimeConfig,
+    AppConfig,
+    ExecdInitResources,
+    KubernetesRuntimeConfig,
+    RuntimeConfig,
+)
 from src.services.k8s.agent_sandbox_provider import AgentSandboxProvider
+
+
+def _app_config_agent(
+    *,
+    shutdown_policy: str = "Delete",
+    service_account: str | None = "test-sa",
+    template_file: str | None = None,
+    execd_init_resources: ExecdInitResources | None = None,
+) -> AppConfig:
+    """Build AppConfig for AgentSandboxProvider tests."""
+    k8s = KubernetesRuntimeConfig(
+        kubeconfig_path="/tmp/test-kubeconfig",
+        namespace="test-namespace",
+        service_account=service_account,
+        workload_provider="agent-sandbox",
+        execd_init_resources=execd_init_resources,
+    )
+    agent = AgentSandboxRuntimeConfig(
+        template_file=template_file,
+        shutdown_policy=shutdown_policy,
+        ingress_enabled=True,
+    )
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="test-execd:latest"),
+        kubernetes=k8s,
+        agent_sandbox=agent,
+    )
 
 
 class TestAgentSandboxProvider:
@@ -45,11 +78,11 @@ class TestAgentSandboxProvider:
         """
         Test case: Verify created manifest structure with init mode
         """
-        provider = AgentSandboxProvider(
-            mock_k8s_client,
+        app_config = _app_config_agent(
             shutdown_policy="Delete",
             service_account="agent-sa",
         )
+        provider = AgentSandboxProvider(mock_k8s_client, app_config=app_config)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -494,13 +527,13 @@ class TestAgentSandboxProviderExecdInit:
         """
         Test case: Verify init container applies resources when execd_init_resources is set
         """
-        provider = AgentSandboxProvider(
-            mock_k8s_client,
+        app_config = _app_config_agent(
             execd_init_resources=ExecdInitResources(
                 limits={"cpu": "100m", "memory": "128Mi"},
                 requests={"cpu": "50m", "memory": "64Mi"},
             ),
         )
+        provider = AgentSandboxProvider(mock_k8s_client, app_config=app_config)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}

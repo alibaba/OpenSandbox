@@ -22,8 +22,34 @@ from unittest.mock import MagicMock
 from kubernetes.client import ApiException
 
 from src.api.schema import ImageSpec, NetworkPolicy, NetworkRule
-from src.config import ExecdInitResources
+from src.config import (
+    AppConfig,
+    ExecdInitResources,
+    KubernetesRuntimeConfig,
+    RuntimeConfig,
+)
 from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
+from tests.k8s.fixtures.k8s_fixtures import PROVIDER_TYPE_BATCHSANDBOX
+
+
+def _app_config_batch(
+    *,
+    template_file_path: str | None = None,
+    execd_init_resources: ExecdInitResources | None = None,
+) -> AppConfig:
+    """Build AppConfig for BatchSandboxProvider tests."""
+    k8s = KubernetesRuntimeConfig(
+        kubeconfig_path="/tmp/test-kubeconfig",
+        namespace="test-namespace",
+        service_account="test-sa",
+        workload_provider=PROVIDER_TYPE_BATCHSANDBOX,
+        batchsandbox_template_file=template_file_path,
+        execd_init_resources=execd_init_resources,
+    )
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="test-execd:latest"),
+        kubernetes=k8s,
+    )
 
 
 class TestBatchSandboxProvider:
@@ -35,7 +61,7 @@ class TestBatchSandboxProvider:
         """
         Test case: Verify normal initialization without template
         """
-        provider = BatchSandboxProvider(mock_k8s_client, template_file_path=None)
+        provider = BatchSandboxProvider(mock_k8s_client)
         
         assert provider.k8s_client == mock_k8s_client
         assert provider.template_manager._template is None
@@ -49,8 +75,8 @@ class TestBatchSandboxProvider:
         """
         template_file = tmp_path / "template.yaml"
         template_file.write_text("spec:\n  replicas: 1")
-        
-        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        app_config = _app_config_batch(template_file_path=str(template_file))
+        provider = BatchSandboxProvider(mock_k8s_client, app_config=app_config)
         
         assert provider.template_manager._template is not None
     
@@ -144,13 +170,13 @@ class TestBatchSandboxProvider:
         """
         Test case: Verify init container applies resources when execd_init_resources is configured
         """
-        provider = BatchSandboxProvider(
-            mock_k8s_client,
+        app_config = _app_config_batch(
             execd_init_resources=ExecdInitResources(
                 limits={"cpu": "100m", "memory": "128Mi"},
                 requests={"cpu": "50m", "memory": "64Mi"},
             ),
         )
+        provider = BatchSandboxProvider(mock_k8s_client, app_config=app_config)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
             "metadata": {"name": "test", "uid": "uid"}
@@ -259,7 +285,8 @@ spec:
               mountPath: /data
 """
         )
-        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        app_config = _app_config_batch(template_file_path=str(template_file))
+        provider = BatchSandboxProvider(mock_k8s_client, app_config=app_config)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -317,7 +344,8 @@ spec:
               mountPath: /data
 """
         )
-        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        app_config = _app_config_batch(template_file_path=str(template_file))
+        provider = BatchSandboxProvider(mock_k8s_client, app_config=app_config)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -504,7 +532,6 @@ spec:
         fake_informer = FakeInformer()
         provider = BatchSandboxProvider(
             mock_k8s_client,
-            enable_informer=True,
             informer_factory=lambda ns: fake_informer,
         )
 
@@ -545,7 +572,6 @@ spec:
         fake_informer = FakeInformer()
         provider = BatchSandboxProvider(
             mock_k8s_client,
-            enable_informer=True,
             informer_factory=lambda ns: fake_informer,
         )
         mock_api = mock_k8s_client.get_custom_objects_api()
@@ -592,7 +618,6 @@ spec:
 
         provider = BatchSandboxProvider(
             mock_k8s_client,
-            enable_informer=True,
             informer_factory=factory,
         )
 
@@ -1555,7 +1580,8 @@ spec:
           emptyDir: {}
 """
         )
-        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        app_config = _app_config_batch(template_file_path=str(template_file))
+        provider = BatchSandboxProvider(mock_k8s_client, app_config=app_config)
         mock_api = mock_k8s_client.get_custom_objects_api()
         mock_api.create_namespaced_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
