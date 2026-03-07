@@ -151,10 +151,12 @@ jobs:
             
             ${{ steps.parse_tag.outputs.component == 'opensandbox' && '**Note**: This is an all-in-one chart that bundles controller and server. The packaged chart already includes all dependencies, no need to run `helm dependency build` when installing from release.' || '' }}
             
-            ### What's Changed
+            ### Release Metadata
             
             - Chart version: ${{ steps.chart_version.outputs.version }}
             - App version: ${{ steps.parse_tag.outputs.app_version }}
+            - Detailed code changes are auto-generated from merged pull requests below
+          generate_release_notes: true
           files: |
             ${{ steps.parse_tag.outputs.component }}-*.tgz
           draft: false
