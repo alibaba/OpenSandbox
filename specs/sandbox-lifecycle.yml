@@ -892,7 +892,7 @@ components:
       description: |
         Storage mount definition for a sandbox. Each volume entry contains:
         - A unique name identifier
-        - Exactly one backend struct (host, pvc, etc.) with backend-specific fields
+        - Exactly one backend struct (host, pvc, ossfs, etc.) with backend-specific fields
         - Common mount settings (mountPath, readOnly, subPath)
       required: [name, mountPath]
       properties:
@@ -907,6 +907,8 @@ components:
           $ref: '#/components/schemas/Host'
         pvc:
           $ref: '#/components/schemas/PVC'
+        ossfs:
+          $ref: '#/components/schemas/OSSFS'
         mountPath:
           type: string
           description: |
@@ -922,6 +924,7 @@ components:
           type: string
           description: |
             Optional subdirectory under the backend path to mount.
+            For `ossfs` backend, this field is used as the bucket prefix.
             Must be a relative path without '..' components.
       additionalProperties: false
 
@@ -964,5 +967,50 @@ components:
             volume name. Must be a valid DNS label.
           pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
           maxLength: 253
+      additionalProperties: false
+
+    OSSFS:
+      type: object
+      description: |
+        Alibaba Cloud OSS mount backend via ossfs.
+
+        The runtime mounts a host-side OSS path under `storage.ossfs_mount_root`
+        and bind-mounts the resolved path into the sandbox container.
+        Prefix selection is expressed via `Volume.subPath`.
+      required: [bucket, endpoint, accessKeyId, accessKeySecret]
+      properties:
+        bucket:
+          type: string
+          description: OSS bucket name.
+          pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+          minLength: 3
+          maxLength: 63
+        endpoint:
+          type: string
+          description: OSS endpoint (e.g., `oss-cn-hangzhou.aliyuncs.com`).
+          minLength: 1
+        version:
+          type: string
+          description: ossfs major version used by runtime mount integration.
+          enum: ["1.0", "2.0"]
+          default: "2.0"
+        options:
+          type: array
+          description: |
+            Additional ossfs mount options.
+            Runtime encodes options by `version`:
+            - `1.0`: mounts with `ossfs ... -o <option>`
+            - `2.0`: mounts with `ossfs2 mount ... -c <config-file>` and encodes options as `--<option>` lines in the config file
+            Option values must be provided as raw payloads without leading `-`.
+          items:
+            type: string
+        accessKeyId:
+          type: string
+          description: OSS access key ID for inline credentials mode.
+          minLength: 1
+        accessKeySecret:
+          type: string
+          description: OSS access key secret for inline credentials mode.
+          minLength: 1
       additionalProperties: false
 

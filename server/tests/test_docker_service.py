@@ -13,15 +13,21 @@
 # limitations under the License.
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 from docker.errors import DockerException, NotFound as DockerNotFound
 import pytest
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 
 from src.config import AppConfig, EgressConfig, RuntimeConfig, ServerConfig, StorageConfig, IngressConfig
-from src.services.constants import SANDBOX_ID_LABEL, SandboxErrorCodes
+from src.services.constants import (
+    SANDBOX_EXPIRES_AT_LABEL,
+    SANDBOX_ID_LABEL,
+    SANDBOX_OSSFS_MOUNTS_LABEL,
+    SandboxErrorCodes,
+)
 from src.services.docker import DockerSandboxService, PendingSandbox
 from src.services.helpers import parse_memory_limit, parse_nano_cpus, parse_timestamp
 from src.api.schema import (
@@ -31,6 +37,7 @@ from src.api.schema import (
     ImageSpec,
     NetworkPolicy,
     ListSandboxesRequest,
+    OSSFS,
     PVC,
     ResourceLimits,
     Sandbox,
@@ -716,6 +723,25 @@ class TestBuildVolumeBinds:
         assert "/data/work:/mnt/work:rw" in binds
         assert "my-shared-volume:/mnt/data:ro" in binds
 
+    def test_ossfs_volume_with_subpath(self, mock_docker):
+        """OSSFS volume should resolve host path using subPath as OSS prefix."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+            read_only=False,
+            sub_path="task-001",
+        )
+        binds = service._build_volume_binds([volume])
+        assert binds == ["/mnt/ossfs/bucket-test-3/task-001:/mnt/data:rw"]
+
 
 @patch("src.services.docker.docker")
 class TestDockerVolumeValidation:
@@ -752,6 +778,365 @@ class TestDockerVolumeValidation:
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert exc_info.value.detail["code"] == SandboxErrorCodes.PVC_VOLUME_NOT_FOUND
+
+    def test_ossfs_inline_credentials_missing_rejected(self, mock_docker):
+        """OSSFS with missing inline credentials should be rejected at schema validation."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        with pytest.raises(ValidationError):
+            OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                access_key_id=None,
+                access_key_secret=None,
+            )
+
+    def test_ossfs_mount_failure_rejected(self, mock_docker):
+        """OSSFS mount failure should be rejected."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="oss-data",
+                    ossfs=OSSFS(
+                        bucket="bucket-test-3",
+                        endpoint="oss-cn-hangzhou.aliyuncs.com",
+                        access_key_id="AKIDEXAMPLE",
+                        access_key_secret="SECRETEXAMPLE",
+                    ),
+                    mount_path="/mnt/data",
+                    sub_path="task-001",
+                )
+            ],
+        )
+
+        with patch("src.services.docker.os.path.ismount", return_value=False):
+            with patch("src.services.docker.os.makedirs"):
+                with patch("src.services.docker.subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(returncode=1, stderr="mount failed")
+                    with pytest.raises(HTTPException) as exc_info:
+                        service.create_sandbox(request)
+
+        assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.OSSFS_MOUNT_FAILED
+
+    def test_ossfs_v1_mount_command_uses_o_options(self, mock_docker):
+        """OSSFS 1.0 should build mount command with -o style options."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="1.0",
+                options=["allow_other", "umask=0022"],
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+            sub_path="task-001",
+        )
+        backend_path = "/mnt/ossfs/bucket-test-3/task-001"
+
+        with patch("src.services.docker.os.makedirs"):
+            with patch("src.services.docker.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stderr="")
+                service._mount_ossfs_backend_path(volume, backend_path)
+
+        cmd = mock_run.call_args.args[0]
+        assert "bucket-test-3:/task-001" in cmd
+        assert "-o" in cmd
+        assert "allow_other" in cmd
+        assert "umask=0022" in cmd
+        assert "--allow_other" not in cmd
+
+    def test_ossfs_v2_mount_command_uses_config_file(self, mock_docker):
+        """OSSFS 2.0 should mount by ossfs2 config file."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="2.0",
+                options=["allow_other", "umask=0022"],
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+            sub_path="task-001",
+        )
+        backend_path = "/mnt/ossfs/bucket-test-3/task-001"
+
+        with patch("src.services.docker.os.makedirs"):
+            with patch("src.services.docker.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stderr="")
+                service._mount_ossfs_backend_path(volume, backend_path)
+
+        cmd = mock_run.call_args.args[0]
+        assert cmd[0] == "ossfs2"
+        assert cmd[1] == "mount"
+        assert cmd[2] == backend_path
+        assert cmd[3] == "-c"
+        assert cmd[4].endswith(".conf")
+
+    def test_ossfs_v2_config_contains_required_lines(self, mock_docker):
+        """OSSFS 2.0 config should encode endpoint/bucket/creds/options/prefix."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                version="2.0",
+                options=["allow_other", "umask=0022"],
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+            sub_path="task-001",
+        )
+
+        conf_lines = service._build_ossfs_v2_config_lines(
+            volume=volume,
+            endpoint_url="http://oss-cn-hangzhou.aliyuncs.com",
+            prefix="task-001",
+        )
+        assert "--oss_endpoint=http://oss-cn-hangzhou.aliyuncs.com" in conf_lines
+        assert "--oss_bucket=bucket-test-3" in conf_lines
+        assert "--oss_access_key_id=AKIDEXAMPLE" in conf_lines
+        assert "--oss_access_key_secret=SECRETEXAMPLE" in conf_lines
+        assert "--oss_bucket_prefix=task-001/" in conf_lines
+        assert "--allow_other" in conf_lines
+        assert "--umask=0022" in conf_lines
+
+    def test_normalize_oss_endpoint_url_defaults_to_https(self, mock_docker):
+        """Endpoint without scheme should default to https for ossfs2."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+
+        assert (
+            service._normalize_oss_endpoint_url("oss-cn-hangzhou.aliyuncs.com")
+            == "https://oss-cn-hangzhou.aliyuncs.com"
+        )
+
+    def test_ossfs_volume_binds_passed_to_docker(self, mock_docker):
+        """OSSFS volume should be converted to host bind path and passed to Docker."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.create_host_config.return_value = {}
+        mock_client.api.create_container.return_value = {"Id": "cid"}
+        mock_client.containers.get.return_value = MagicMock()
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="oss-data",
+                    ossfs=OSSFS(
+                        bucket="bucket-test-3",
+                        endpoint="oss-cn-hangzhou.aliyuncs.com",
+                        access_key_id="AKIDEXAMPLE",
+                        access_key_secret="SECRETEXAMPLE",
+                    ),
+                    mount_path="/mnt/data",
+                    read_only=True,
+                    sub_path="task-001",
+                )
+            ],
+        )
+
+        with patch("src.services.docker.os.path.ismount", return_value=False):
+            with patch("src.services.docker.os.makedirs"):
+                with patch("src.services.docker.subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(returncode=0, stderr="")
+                    with patch.object(service, "_ensure_image_available"), patch.object(
+                        service, "_prepare_sandbox_runtime"
+                    ):
+                        response = service.create_sandbox(request)
+
+        assert response.status.state == "Running"
+        assert mock_run.called
+        host_config_call = mock_client.api.create_host_config.call_args
+        binds = host_config_call.kwargs["binds"]
+        assert binds[0] == "/mnt/ossfs/bucket-test-3/task-001:/mnt/data:ro"
+        create_call = mock_client.api.create_container.call_args
+        labels = create_call.kwargs["labels"]
+        assert SANDBOX_OSSFS_MOUNTS_LABEL in labels
+        assert labels[SANDBOX_OSSFS_MOUNTS_LABEL] == '["/mnt/ossfs/bucket-test-3/task-001"]'
+
+    def test_prepare_ossfs_mounts_reuses_mount_key(self, mock_docker):
+        """Two OSSFS volumes on same base path should mount once and share refs."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        volumes = [
+            Volume(
+                name="oss-data-a",
+                ossfs=OSSFS(
+                    bucket="bucket-test-3",
+                    endpoint="oss-cn-hangzhou.aliyuncs.com",
+                    access_key_id="AKIDEXAMPLE",
+                    access_key_secret="SECRETEXAMPLE",
+                ),
+                mount_path="/mnt/data-a",
+                sub_path="task-001",
+            ),
+            Volume(
+                name="oss-data-b",
+                ossfs=OSSFS(
+                    bucket="bucket-test-3",
+                    endpoint="oss-cn-hangzhou.aliyuncs.com",
+                    access_key_id="AKIDEXAMPLE",
+                    access_key_secret="SECRETEXAMPLE",
+                ),
+                mount_path="/mnt/data-b",
+                sub_path="task-001",
+            ),
+        ]
+
+        with patch("src.services.docker.os.path.ismount", return_value=False):
+            with patch("src.services.docker.os.makedirs"):
+                with patch("src.services.docker.subprocess.run") as mock_run:
+                    mock_run.return_value = MagicMock(returncode=0, stderr="")
+                    mount_keys = service._prepare_ossfs_mounts(volumes)
+
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
+        assert mount_keys == [mount_key]
+        assert service._ossfs_mount_ref_counts[mount_key] == 1
+        assert mock_run.call_count == 1
+
+    def test_delete_sandbox_releases_ossfs_mount(self, mock_docker):
+        """Deleting sandbox should release and unmount tracked OSSFS mount."""
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
+        mock_container = MagicMock()
+        mock_container.attrs = {
+            "Config": {
+                "Labels": {
+                    SANDBOX_ID_LABEL: "sandbox-1",
+                    SANDBOX_OSSFS_MOUNTS_LABEL: f'["{mount_key}"]',
+                }
+            },
+            "State": {"Running": True},
+        }
+
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = [mock_container]
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+        service._ossfs_mount_ref_counts[mount_key] = 1
+
+        with patch("src.services.docker.os.path.ismount", return_value=True):
+            with patch("src.services.docker.subprocess.run") as mock_run:
+                mock_run.return_value = MagicMock(returncode=0, stderr="")
+                service.delete_sandbox("sandbox-1")
+
+        assert mount_key not in service._ossfs_mount_ref_counts
+        assert mock_run.called
+
+    def test_release_ossfs_mount_untracked_key_does_not_unmount(self, mock_docker):
+        """Untracked mount key must not trigger unmount command."""
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+
+        with patch("src.services.docker.os.path.ismount", return_value=True):
+            with patch("src.services.docker.subprocess.run") as mock_run:
+                service._release_ossfs_mount(mount_key)
+
+        mock_run.assert_not_called()
+        assert mount_key not in service._ossfs_mount_ref_counts
+
+    def test_restore_existing_sandboxes_rebuilds_ossfs_refs(self, mock_docker):
+        """Service startup rebuilds OSSFS mount refs from container labels."""
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Labels": {
+                    SANDBOX_ID_LABEL: "sandbox-1",
+                    SANDBOX_EXPIRES_AT_LABEL: expires_at,
+                    SANDBOX_OSSFS_MOUNTS_LABEL: f'["{mount_key}"]',
+                }
+            },
+            "State": {"Running": True},
+        }
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = [container]
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        assert service._ossfs_mount_ref_counts[mount_key] == 1
+
+    def test_delete_one_sandbox_after_restart_keeps_shared_mount(self, mock_docker):
+        """After restart, deleting one of two users must not unmount shared OSSFS mount."""
+        mount_key = "/mnt/ossfs/bucket-test-3/task-001"
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
+        container_a = MagicMock()
+        container_a.attrs = {
+            "Config": {
+                "Labels": {
+                    SANDBOX_ID_LABEL: "sandbox-a",
+                    SANDBOX_EXPIRES_AT_LABEL: expires_at,
+                    SANDBOX_OSSFS_MOUNTS_LABEL: f'["{mount_key}"]',
+                }
+            },
+            "State": {"Running": True},
+        }
+        container_b = MagicMock()
+        container_b.attrs = {
+            "Config": {
+                "Labels": {
+                    SANDBOX_ID_LABEL: "sandbox-b",
+                    SANDBOX_EXPIRES_AT_LABEL: expires_at,
+                    SANDBOX_OSSFS_MOUNTS_LABEL: f'["{mount_key}"]',
+                }
+            },
+            "State": {"Running": True},
+        }
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = [container_a, container_b]
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+        assert service._ossfs_mount_ref_counts[mount_key] == 2
+
+        with patch("src.services.docker.os.path.ismount", return_value=True):
+            with patch("src.services.docker.subprocess.run") as mock_run:
+                service.delete_sandbox("sandbox-a")
+
+        assert service._ossfs_mount_ref_counts[mount_key] == 1
+        mock_run.assert_not_called()
 
     def test_pvc_volume_inspect_failure_returns_500(self, mock_docker):
         """Docker API failure during volume inspection should return 500."""

@@ -33,6 +33,8 @@ from .network_policy import NetworkPolicy
 from .network_policy_default_action import NetworkPolicyDefaultAction
 from .network_rule import NetworkRule
 from .network_rule_action import NetworkRuleAction
+from .ossfs import OSSFS
+from .ossfs_version import OSSFSVersion
 from .pagination_info import PaginationInfo
 from .pvc import PVC
 from .renew_sandbox_expiration_request import RenewSandboxExpirationRequest
@@ -61,6 +63,8 @@ __all__ = (
     "NetworkPolicyDefaultAction",
     "NetworkRule",
     "NetworkRuleAction",
+    "OSSFS",
+    "OSSFSVersion",
     "PaginationInfo",
     "PVC",
     "RenewSandboxExpirationRequest",

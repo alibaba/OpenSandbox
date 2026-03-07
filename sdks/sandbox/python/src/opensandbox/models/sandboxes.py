@@ -180,13 +180,47 @@ class PVC(BaseModel):
         return v
 
 
+class OSSFS(BaseModel):
+    """Alibaba Cloud OSS mount backend via ossfs."""
+
+    bucket: str = Field(description="OSS bucket name.")
+    endpoint: str = Field(description="OSS endpoint (e.g., oss-cn-hangzhou.aliyuncs.com).")
+    version: Literal["1.0", "2.0"] = Field(
+        default="2.0",
+        description="ossfs major version used by runtime mount integration.",
+    )
+    options: list[str] | None = Field(
+        default=None,
+        description="Additional ossfs mount options.",
+    )
+    access_key_id: str | None = Field(
+        default=None,
+        alias="accessKeyId",
+        description="OSS access key ID for inline credentials mode.",
+    )
+    access_key_secret: str | None = Field(
+        default=None,
+        alias="accessKeySecret",
+        description="OSS access key secret for inline credentials mode.",
+    )
+    model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="after")
+    def validate_inline_credentials(self) -> "OSSFS":
+        if not self.access_key_id or not self.access_key_secret:
+            raise ValueError(
+                "OSSFS inline credentials are required: accessKeyId and accessKeySecret."
+            )
+        return self
+
+
 class Volume(BaseModel):
     """
     Storage mount definition for a sandbox.
 
     Each volume entry contains:
     - A unique name identifier
-    - Exactly one backend (host, pvc) with backend-specific fields
+    - Exactly one backend (host, pvc, ossfs) with backend-specific fields
     - Common mount settings (mount_path, read_only, sub_path)
 
     Usage:
@@ -216,6 +250,10 @@ class Volume(BaseModel):
     pvc: PVC | None = Field(
         default=None,
         description="Kubernetes PersistentVolumeClaim mount backend.",
+    )
+    ossfs: OSSFS | None = Field(
+        default=None,
+        description="OSSFS mount backend.",
     )
     mount_path: str = Field(
         description="Absolute path inside the container where the volume is mounted.",
@@ -250,16 +288,16 @@ class Volume(BaseModel):
 
     @model_validator(mode="after")
     def validate_exactly_one_backend(self) -> "Volume":
-        """Ensure exactly one backend (host or pvc) is specified."""
-        backends = [self.host, self.pvc]
+        """Ensure exactly one backend (host, pvc, or ossfs) is specified."""
+        backends = [self.host, self.pvc, self.ossfs]
         specified = [b for b in backends if b is not None]
         if len(specified) == 0:
             raise ValueError(
-                "Exactly one backend (host, pvc) must be specified, but none was provided."
+                "Exactly one backend (host, pvc, ossfs) must be specified, but none was provided."
             )
         if len(specified) > 1:
             raise ValueError(
-                "Exactly one backend (host, pvc) must be specified, but multiple were provided."
+                "Exactly one backend (host, pvc, ossfs) must be specified, but multiple were provided."
             )
         return self
 
