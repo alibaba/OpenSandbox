@@ -344,14 +344,21 @@ class OSSFSMixin:
         if not volumes:
             return []
         key_to_volume: dict[str, Any] = {}
+        prepared_mount_keys: list[str] = []
         for volume in volumes:
             if volume.ossfs is not None:
                 mount_key, _ = self._resolve_ossfs_paths(volume)
                 if mount_key not in key_to_volume:
                     key_to_volume[mount_key] = volume
-        for _, volume in key_to_volume.items():
-            self._ensure_ossfs_mounted(volume)
-        return list(key_to_volume.keys())
+        try:
+            for mount_key, volume in key_to_volume.items():
+                self._ensure_ossfs_mounted(volume)
+                prepared_mount_keys.append(mount_key)
+            return list(key_to_volume.keys())
+        except Exception:
+            # Roll back mounts already prepared in this batch.
+            self._release_ossfs_mounts(prepared_mount_keys)
+            raise
 
     def _validate_ossfs_volume(self, volume) -> None:
         """

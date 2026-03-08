@@ -821,12 +821,13 @@ class TestDockerVolumeValidation:
             ],
         )
 
-        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
-            with patch("src.services.ossfs_mixin.os.makedirs"):
-                with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
-                    mock_run.return_value = MagicMock(returncode=1, stderr="mount failed")
-                    with pytest.raises(HTTPException) as exc_info:
-                        service.create_sandbox(request)
+        with patch("src.services.ossfs_mixin.os.name", "posix"):
+            with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
+                with patch("src.services.ossfs_mixin.os.makedirs"):
+                    with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+                        mock_run.return_value = MagicMock(returncode=1, stderr="mount failed")
+                        with pytest.raises(HTTPException) as exc_info:
+                            service.create_sandbox(request)
 
         assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc_info.value.detail["code"] == SandboxErrorCodes.OSSFS_MOUNT_FAILED
@@ -848,7 +849,7 @@ class TestDockerVolumeValidation:
             mount_path="/mnt/data",
         )
 
-        with patch("src.services.docker.os.name", "nt"):
+        with patch("src.services.ossfs_mixin.os.name", "nt"):
             with pytest.raises(HTTPException) as exc_info:
                 service._validate_ossfs_volume(volume)
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
@@ -986,14 +987,15 @@ class TestDockerVolumeValidation:
             ],
         )
 
-        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
-            with patch("src.services.ossfs_mixin.os.makedirs"):
-                with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
-                    mock_run.return_value = MagicMock(returncode=0, stderr="")
-                    with patch.object(service, "_ensure_image_available"), patch.object(
-                        service, "_prepare_sandbox_runtime"
-                    ):
-                        response = service.create_sandbox(request)
+        with patch("src.services.ossfs_mixin.os.name", "posix"):
+            with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
+                with patch("src.services.ossfs_mixin.os.makedirs"):
+                    with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+                        mock_run.return_value = MagicMock(returncode=0, stderr="")
+                        with patch.object(service, "_ensure_image_available"), patch.object(
+                            service, "_prepare_sandbox_runtime"
+                        ):
+                            response = service.create_sandbox(request)
 
         assert response.status.state == "Running"
         assert mock_run.called
@@ -1044,6 +1046,49 @@ class TestDockerVolumeValidation:
         assert mount_keys == [mount_key]
         assert service._ossfs_mount_ref_counts[mount_key] == 1
         assert mock_run.call_count == 1
+
+    def test_prepare_ossfs_mounts_rolls_back_on_partial_failure(self, mock_docker):
+        """If one OSSFS mount fails, already prepared mounts should be rolled back."""
+        mock_docker.from_env.return_value = MagicMock()
+        service = DockerSandboxService(config=_app_config())
+        volumes = [
+            Volume(
+                name="oss-data-a",
+                ossfs=OSSFS(
+                    bucket="bucket-a",
+                    endpoint="oss-cn-hangzhou.aliyuncs.com",
+                    access_key_id="AKIDEXAMPLE",
+                    access_key_secret="SECRETEXAMPLE",
+                ),
+                mount_path="/mnt/data-a",
+            ),
+            Volume(
+                name="oss-data-b",
+                ossfs=OSSFS(
+                    bucket="bucket-b",
+                    endpoint="oss-cn-hangzhou.aliyuncs.com",
+                    access_key_id="AKIDEXAMPLE",
+                    access_key_secret="SECRETEXAMPLE",
+                ),
+                mount_path="/mnt/data-b",
+            ),
+        ]
+
+        mount_key_a = "/mnt/ossfs/bucket-a"
+        mount_key_b = "/mnt/ossfs/bucket-b"
+
+        with patch.object(
+            service,
+            "_ensure_ossfs_mounted",
+            side_effect=[mount_key_a, HTTPException(status_code=500, detail={"code": "E", "message": "boom"})],
+        ) as ensure_mock:
+            with patch.object(service, "_release_ossfs_mounts") as release_mock:
+                with pytest.raises(HTTPException):
+                    service._prepare_ossfs_mounts(volumes)
+
+        assert ensure_mock.call_count == 2
+        release_mock.assert_called_once_with([mount_key_a])
+        assert mount_key_b not in release_mock.call_args.args[0]
 
     def test_delete_sandbox_releases_ossfs_mount(self, mock_docker):
         """Deleting sandbox should release and unmount tracked OSSFS mount."""
