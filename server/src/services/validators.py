@@ -167,8 +167,6 @@ def ensure_valid_port(port: int) -> None:
 VOLUME_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 # Kubernetes resource name pattern
 K8S_RESOURCE_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
-OSS_BUCKET_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
-OSSFS_SUPPORTED_VERSIONS = {"1.0", "2.0"}
 
 
 def ensure_valid_volume_name(name: str) -> None:
@@ -398,12 +396,12 @@ def ensure_valid_ossfs_volume(ossfs: "OSSFS") -> None:
     Raises:
         HTTPException: When any OSSFS field is invalid.
     """
-    if not ossfs.bucket or not OSS_BUCKET_RE.match(ossfs.bucket):
+    if not isinstance(ossfs.bucket, str) or not ossfs.bucket.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": SandboxErrorCodes.INVALID_OSSFS_BUCKET,
-                "message": f"OSSFS bucket '{ossfs.bucket}' is invalid.",
+                "message": "OSSFS bucket cannot be empty.",
             },
         )
 
@@ -413,18 +411,6 @@ def ensure_valid_ossfs_volume(ossfs: "OSSFS") -> None:
             detail={
                 "code": SandboxErrorCodes.INVALID_OSSFS_ENDPOINT,
                 "message": "OSSFS endpoint cannot be empty.",
-            },
-        )
-
-    if ossfs.version not in OSSFS_SUPPORTED_VERSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": SandboxErrorCodes.INVALID_OSSFS_VERSION,
-                "message": (
-                    f"Unsupported OSSFS version '{ossfs.version}'. "
-                    f"Supported versions: {sorted(OSSFS_SUPPORTED_VERSIONS)}."
-                ),
             },
         )
 

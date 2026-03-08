@@ -821,15 +821,38 @@ class TestDockerVolumeValidation:
             ],
         )
 
-        with patch("src.services.docker.os.path.ismount", return_value=False):
-            with patch("src.services.docker.os.makedirs"):
-                with patch("src.services.docker.subprocess.run") as mock_run:
+        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
+            with patch("src.services.ossfs_mixin.os.makedirs"):
+                with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
                     mock_run.return_value = MagicMock(returncode=1, stderr="mount failed")
                     with pytest.raises(HTTPException) as exc_info:
                         service.create_sandbox(request)
 
         assert exc_info.value.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
         assert exc_info.value.detail["code"] == SandboxErrorCodes.OSSFS_MOUNT_FAILED
+
+    def test_ossfs_windows_host_not_supported(self, mock_docker):
+        """OSSFS backend should be rejected when server host is Windows."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_docker.from_env.return_value = mock_client
+        service = DockerSandboxService(config=_app_config())
+        volume = Volume(
+            name="oss-data",
+            ossfs=OSSFS(
+                bucket="bucket-test-3",
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                access_key_id="AKIDEXAMPLE",
+                access_key_secret="SECRETEXAMPLE",
+            ),
+            mount_path="/mnt/data",
+        )
+
+        with patch("src.services.docker.os.name", "nt"):
+            with pytest.raises(HTTPException) as exc_info:
+                service._validate_ossfs_volume(volume)
+        assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
 
     def test_ossfs_v1_mount_command_uses_o_options(self, mock_docker):
         """OSSFS 1.0 should build mount command with -o style options."""
@@ -852,8 +875,8 @@ class TestDockerVolumeValidation:
         )
         backend_path = "/mnt/ossfs/bucket-test-3/task-001"
 
-        with patch("src.services.docker.os.makedirs"):
-            with patch("src.services.docker.subprocess.run") as mock_run:
+        with patch("src.services.ossfs_mixin.os.makedirs"):
+            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stderr="")
                 service._mount_ossfs_backend_path(volume, backend_path)
 
@@ -885,8 +908,8 @@ class TestDockerVolumeValidation:
         )
         backend_path = "/mnt/ossfs/bucket-test-3/task-001"
 
-        with patch("src.services.docker.os.makedirs"):
-            with patch("src.services.docker.subprocess.run") as mock_run:
+        with patch("src.services.ossfs_mixin.os.makedirs"):
+            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stderr="")
                 service._mount_ossfs_backend_path(volume, backend_path)
 
@@ -930,18 +953,6 @@ class TestDockerVolumeValidation:
         assert "--allow_other" in conf_lines
         assert "--umask=0022" in conf_lines
 
-    def test_normalize_oss_endpoint_url_defaults_to_https(self, mock_docker):
-        """Endpoint without scheme should default to https for ossfs2."""
-        mock_client = MagicMock()
-        mock_client.containers.list.return_value = []
-        mock_docker.from_env.return_value = mock_client
-        service = DockerSandboxService(config=_app_config())
-
-        assert (
-            service._normalize_oss_endpoint_url("oss-cn-hangzhou.aliyuncs.com")
-            == "https://oss-cn-hangzhou.aliyuncs.com"
-        )
-
     def test_ossfs_volume_binds_passed_to_docker(self, mock_docker):
         """OSSFS volume should be converted to host bind path and passed to Docker."""
         mock_client = MagicMock()
@@ -975,9 +986,9 @@ class TestDockerVolumeValidation:
             ],
         )
 
-        with patch("src.services.docker.os.path.ismount", return_value=False):
-            with patch("src.services.docker.os.makedirs"):
-                with patch("src.services.docker.subprocess.run") as mock_run:
+        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
+            with patch("src.services.ossfs_mixin.os.makedirs"):
+                with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
                     mock_run.return_value = MagicMock(returncode=0, stderr="")
                     with patch.object(service, "_ensure_image_available"), patch.object(
                         service, "_prepare_sandbox_runtime"
@@ -1023,9 +1034,9 @@ class TestDockerVolumeValidation:
             ),
         ]
 
-        with patch("src.services.docker.os.path.ismount", return_value=False):
-            with patch("src.services.docker.os.makedirs"):
-                with patch("src.services.docker.subprocess.run") as mock_run:
+        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
+            with patch("src.services.ossfs_mixin.os.makedirs"):
+                with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
                     mock_run.return_value = MagicMock(returncode=0, stderr="")
                     mount_keys = service._prepare_ossfs_mounts(volumes)
 
@@ -1054,8 +1065,8 @@ class TestDockerVolumeValidation:
         service = DockerSandboxService(config=_app_config())
         service._ossfs_mount_ref_counts[mount_key] = 1
 
-        with patch("src.services.docker.os.path.ismount", return_value=True):
-            with patch("src.services.docker.subprocess.run") as mock_run:
+        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=True):
+            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stderr="")
                 service.delete_sandbox("sandbox-1")
 
@@ -1068,8 +1079,8 @@ class TestDockerVolumeValidation:
         mock_docker.from_env.return_value = MagicMock()
         service = DockerSandboxService(config=_app_config())
 
-        with patch("src.services.docker.os.path.ismount", return_value=True):
-            with patch("src.services.docker.subprocess.run") as mock_run:
+        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=True):
+            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
                 service._release_ossfs_mount(mount_key)
 
         mock_run.assert_not_called()
@@ -1131,8 +1142,8 @@ class TestDockerVolumeValidation:
         service = DockerSandboxService(config=_app_config())
         assert service._ossfs_mount_ref_counts[mount_key] == 2
 
-        with patch("src.services.docker.os.path.ismount", return_value=True):
-            with patch("src.services.docker.subprocess.run") as mock_run:
+        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=True):
+            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
                 service.delete_sandbox("sandbox-a")
 
         assert service._ossfs_mount_ref_counts[mount_key] == 1

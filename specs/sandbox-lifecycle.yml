@@ -977,12 +977,12 @@ components:
         The runtime mounts a host-side OSS path under `storage.ossfs_mount_root`
         and bind-mounts the resolved path into the sandbox container.
         Prefix selection is expressed via `Volume.subPath`.
+        In Docker runtime, OSSFS backend requires OpenSandbox Server to run on a Linux host with FUSE support.
       required: [bucket, endpoint, accessKeyId, accessKeySecret]
       properties:
         bucket:
           type: string
           description: OSS bucket name.
-          pattern: "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
           minLength: 3
           maxLength: 63
         endpoint:

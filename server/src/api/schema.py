@@ -163,12 +163,12 @@ class OSSFS(BaseModel):
     The runtime mounts a host-side OSS path under ``storage.ossfs_mount_root``
     and then bind-mounts the resolved path into the sandbox container. Prefix
     selection is expressed via ``Volume.subPath``.
+    In Docker runtime, OSSFS backend requires the server host to be Linux with FUSE support.
     """
 
     bucket: str = Field(
         ...,
         description="OSS bucket name.",
-        pattern=r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$",
         min_length=3,
         max_length=63,
     )
