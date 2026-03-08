@@ -533,25 +533,18 @@ class TestEnsureVolumesValid:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.HOST_PATH_NOT_ALLOWED
 
-    def test_ossfs_invalid_version_raises(self):
-        """Unsupported OSSFS version should raise HTTPException."""
-        volume = Volume(
-            name="oss-data",
-            ossfs=OSSFS(
+    def test_ossfs_invalid_version_rejected_by_schema(self):
+        """Unsupported OSSFS version should be rejected by schema validation."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            OSSFS(
                 bucket="bucket-test-3",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                version="1.0",
+                version="3.0",  # type: ignore[arg-type]
                 access_key_id="AKIDEXAMPLE",
                 access_key_secret="SECRETEXAMPLE",
-            ),
-            mount_path="/mnt/data",
-        )
-        # Bypass model-level literal validation to test runtime validator branch.
-        volume.ossfs.version = "3.0"  # type: ignore
-        with pytest.raises(HTTPException) as exc_info:
-            ensure_volumes_valid([volume])
-        assert exc_info.value.status_code == 400
-        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_OSSFS_VERSION
+            )
 
     def test_ossfs_missing_inline_credentials_raises(self):
         """Missing inline credentials should raise HTTPException."""

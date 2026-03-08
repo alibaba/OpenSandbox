@@ -14,6 +14,7 @@
 
 请确保服务端主机满足：
 
+- Linux 主机系统（OpenSandbox Server 运行在 Windows 时不支持 OSSFS backend）
 - 已安装 `ossfs`
 - 已启用 FUSE
 - 已有可写的 OSSFS 本地挂载根目录（默认 `storage.ossfs_mount_root=/mnt/ossfs`）

@@ -132,6 +132,14 @@ def parse_timestamp(timestamp: Optional[str]) -> datetime:
         return datetime.now(timezone.utc)
 
 
+def normalize_external_endpoint_url(endpoint: str, default_scheme: str = "https") -> str:
+    """Normalize host or URL to a full URL with an explicit scheme."""
+    endpoint = endpoint.strip()
+    if endpoint.startswith("http://") or endpoint.startswith("https://"):
+        return endpoint
+    return f"{default_scheme}://{endpoint}"
+
+
 def matches_filter(sandbox: Sandbox, filter_: SandboxFilter) -> bool:
     """Apply state/metadata filters to a sandbox instance."""
     if not filter_:
@@ -192,6 +200,7 @@ __all__ = [
     "parse_memory_limit",
     "parse_nano_cpus",
     "parse_timestamp",
+    "normalize_external_endpoint_url",
     "format_ingress_endpoint",
     "matches_filter",
 ]

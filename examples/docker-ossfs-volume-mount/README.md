@@ -14,6 +14,7 @@ This example demonstrates how to use the new SDK `ossfs` volume model to mount A
 
 Make sure your server host has:
 
+- Linux host OS (OSSFS backend is not supported when OpenSandbox Server runs on Windows)
 - `ossfs` installed
 - FUSE support enabled
 - writable local mount root for OSSFS (default `storage.ossfs_mount_root=/mnt/ossfs`)
