@@ -155,6 +155,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 When contains 'poolRef', enables pool-based creation.
             network_policy: Optional network policy for egress traffic control.
                 When provided, an egress sidecar container will be added to the Pod.
+            egress_image: Container image for the egress sidecar (required when network_policy is set).
         
         Returns:
             Dict with 'name' and 'uid' of created BatchSandbox
@@ -272,8 +273,23 @@ class BatchSandboxProvider(WorkloadProvider):
                 owner_api_version=f"{self.group}/{self.version}",
                 owner_kind="BatchSandbox",
             )
-            self.k8s_client.get_core_v1_api().create_namespaced_secret(namespace=namespace, body=secret)
-            logger.info("Created imagePullSecret for sandbox %s", sandbox_id)
+            try:
+                self.k8s_client.get_core_v1_api().create_namespaced_secret(namespace=namespace, body=secret)
+                logger.info("Created imagePullSecret for sandbox %s", sandbox_id)
+            except Exception:
+                logger.warning("Failed to create imagePullSecret for sandbox %s, rolling back BatchSandbox", sandbox_id)
+                try:
+                    self.custom_api.delete_namespaced_custom_object(
+                        group=self.group,
+                        version=self.version,
+                        namespace=namespace,
+                        plural=self.plural,
+                        name=sandbox_id,
+                        grace_period_seconds=0,
+                    )
+                except Exception as del_exc:
+                    logger.warning("Failed to rollback BatchSandbox %s: %s", sandbox_id, del_exc)
+                raise
 
         informer = self._get_informer(namespace)
         if informer:

@@ -1702,3 +1702,40 @@ spec:
         mock_core_api.create_namespaced_secret.assert_not_called()
         body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
         assert "imagePullSecrets" not in body["spec"]["template"]["spec"]
+
+    def test_create_workload_with_image_auth_secret_failure_rolls_back_batchsandbox(self, mock_k8s_client):
+        """
+        Test case: BatchSandbox is deleted when Secret creation fails
+        """
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "uid-123"}
+        }
+        mock_core_api = mock_k8s_client.get_core_v1_api()
+        mock_core_api.create_namespaced_secret.side_effect = ApiException(status=403)
+
+        with pytest.raises(ApiException):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(
+                    uri="registry.example.com/img:tag",
+                    auth=ImageAuth(username="user", password="pass"),
+                ),
+                entrypoint=["/bin/bash"],
+                env={},
+                resource_limits={},
+                labels={},
+                expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+                execd_image="execd:latest",
+            )
+
+        mock_api.delete_namespaced_custom_object.assert_called_once_with(
+            group=provider.group,
+            version=provider.version,
+            namespace="test-ns",
+            plural=provider.plural,
+            name="test-id",
+            grace_period_seconds=0,
+        )
