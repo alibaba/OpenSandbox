@@ -51,6 +51,7 @@ dependencies = [
     "pyyaml",
     "tomli; python_version < \"3.11\"",
     "uvicorn",
+    "websockets>=14.0",
 ]
 
 [project.urls]
