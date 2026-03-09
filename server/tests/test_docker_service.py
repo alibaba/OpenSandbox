@@ -1203,6 +1203,8 @@ class TestDockerVolumeValidation:
         assert "allow_other" in cmd
         assert "umask=0022" in cmd
         assert "--allow_other" not in cmd
+        assert "sigv4" not in cmd
+        assert not any(str(part).startswith("region=") for part in cmd)
 
     def test_ossfs_v2_mount_command_uses_config_file(self, mock_docker):
         """OSSFS 2.0 should mount by ossfs2 config file."""

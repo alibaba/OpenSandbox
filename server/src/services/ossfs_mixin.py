@@ -34,19 +34,6 @@ logger = logging.getLogger(__name__)
 
 class OSSFSMixin:
     @staticmethod
-    def _derive_oss_region(endpoint: str) -> Optional[str]:
-        """Best-effort derive region from endpoint like oss-cn-hangzhou.aliyuncs.com."""
-        marker = "oss-"
-        idx = endpoint.find(marker)
-        if idx < 0:
-            return None
-        start = idx + len(marker)
-        end = endpoint.find(".", start)
-        if end <= start:
-            return None
-        return endpoint[start:end]
-
-    @staticmethod
     def _normalize_ossfs_option(raw_option: str) -> str:
         option = str(raw_option).strip()
         if not option:
@@ -99,7 +86,6 @@ class OSSFSMixin:
         backend_path: str,
         endpoint_url: str,
         passwd_file: str,
-        region: Optional[str],
     ) -> list[str]:
         cmd: list[str] = [
             "ossfs",
@@ -110,8 +96,6 @@ class OSSFSMixin:
             "-o",
             f"passwd_file={passwd_file}",
         ]
-        if region:
-            cmd.extend(["-o", "sigv4", "-o", f"region={region}"])
         if volume.ossfs.options:
             for raw_opt in volume.ossfs.options:
                 opt = self._normalize_ossfs_option(raw_opt)
@@ -194,7 +178,6 @@ class OSSFSMixin:
         version = volume.ossfs.version or "2.0"
         try:
             if version == "1.0":
-                region = self._derive_oss_region(endpoint)
                 passwd_file = os.path.join(
                     tempfile.gettempdir(),
                     f"opensandbox-ossfs-inline-{uuid4().hex}",
@@ -209,7 +192,6 @@ class OSSFSMixin:
                     backend_path=backend_path,
                     endpoint_url=endpoint_url,
                     passwd_file=passwd_file,
-                    region=region,
                 )
             elif version == "2.0":
                 conf_lines = self._build_ossfs_v2_config_lines(
