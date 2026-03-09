@@ -182,6 +182,59 @@ OpenSandbox provides examples covering SDK usage, agent integrations, browser au
 
 For more details, please refer to [examples](examples/README.md) and the README files in each example directory.
 
+## 中文使用示例
+
+### 快速开始
+
+```bash
+# 1. 安装服务器
+uv pip install opensandbox-server
+
+# 2. 初始化配置
+opensandbox-server init-config ~/.sandbox.toml --example docker
+
+# 3. 启动服务器
+opensandbox-server
+```
+
+### Python SDK 使用示例
+
+```python
+import asyncio
+from datetime import timedelta
+from opensandbox import Sandbox
+
+async def main():
+    # 创建沙箱
+    sandbox = await Sandbox.create(
+        "opensandbox/code-interpreter:v1.0.1",
+        entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+        timeout=timedelta(minutes=10),
+    )
+
+    async with sandbox:
+        # 执行命令
+        execution = await sandbox.commands.run("echo '你好，OpenSandbox!'")
+        print(execution.logs.stdout[0].text)
+
+        # 执行 Python 代码
+        from code_interpreter import CodeInterpreter, SupportedLanguage
+        interpreter = await CodeInterpreter.create(sandbox)
+        result = await interpreter.codes.run(
+            "print('Hello from OpenSandbox!')\nresult = [i**2 for i in range(5)]\nresult",
+            language=SupportedLanguage.PYTHON,
+        )
+        print(result.result[0].text)  # [0, 1, 4, 9, 16]
+
+    # 清理沙箱
+    await sandbox.kill()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+更多中文文档请访问 [中文文档](https://open-sandbox.ai/zh/)
+
 ## Project Structure
 
 | Directory | Description                                                      |
