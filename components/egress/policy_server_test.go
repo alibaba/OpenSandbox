@@ -125,3 +125,48 @@ func TestHandleGet_ReturnsEnforcementMode(t *testing.T) {
 		t.Fatalf("expected enforcementMode dns in response, got: %s", string(body))
 	}
 }
+
+func TestHandlePatch_MergesAndApplies(t *testing.T) {
+	initial := &policy.NetworkPolicy{
+		DefaultAction: policy.ActionDeny,
+		Egress: []policy.EgressRule{
+			{Action: policy.ActionAllow, Target: "example.com"},
+			{Action: policy.ActionDeny, Target: "*.example.com"},
+		},
+	}
+	proxy := &stubProxy{updated: initial}
+	nft := &stubNft{}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+
+	body := `{"egress":[{"action":"deny","target":"blocked.com"},{"action":"allow","target":"example.com"}]}`
+	req := httptest.NewRequest(http.MethodPatch, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if nft.calls != 1 {
+		t.Fatalf("expected nft ApplyStatic called once, got %d", nft.calls)
+	}
+	if proxy.updated == nil {
+		t.Fatalf("expected proxy policy to be updated")
+	}
+	if proxy.updated.DefaultAction != policy.ActionDeny {
+		t.Fatalf("default action should be preserved, got %s", proxy.updated.DefaultAction)
+	}
+	if len(proxy.updated.Egress) != 3 {
+		t.Fatalf("expected 3 egress rules, got %d", len(proxy.updated.Egress))
+	}
+	if proxy.updated.Egress[0].Target != "blocked.com" || proxy.updated.Egress[0].Action != policy.ActionDeny {
+		t.Fatalf("expected first rule to be patched blocked.com deny, got %+v", proxy.updated.Egress[0])
+	}
+	if proxy.updated.Egress[1].Target != "example.com" || proxy.updated.Egress[1].Action != policy.ActionAllow {
+		t.Fatalf("expected second rule to be patched example.com allow, got %+v", proxy.updated.Egress[1])
+	}
+	if proxy.updated.Egress[2].Target != "*.example.com" || proxy.updated.Egress[2].Action != policy.ActionDeny {
+		t.Fatalf("expected base wildcard rule to remain last, got %+v", proxy.updated.Egress[2])
+	}
+}

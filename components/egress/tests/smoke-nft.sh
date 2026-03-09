@@ -94,4 +94,42 @@ else
   pass "DoT 853 blocked"
 fi
 
+info "Rules update: wildcard deny -> patch allow specific (dns+nft)"
+curl -sSf -XPOST "http://127.0.0.1:${POLICY_PORT}/policy" \
+  -d '{"defaultAction":"allow","egress":[{"action":"deny","target":"*.cloudflare.com"}]}'
+
+info "Test: www.cloudflare.com should be blocked initially (deny via wildcard)"
+if run_in_app -I https://www.cloudflare.com --max-time 8 >/dev/null 2>&1; then
+  fail "www.cloudflare.com should be blocked before patch"
+else
+  pass "www.cloudflare.com blocked before patch"
+fi
+
+info "Patching allow for www.cloudflare.com (specific should override earlier deny)"
+curl -sSf -XPATCH "http://127.0.0.1:${POLICY_PORT}/policy" \
+  -d '{"egress":[{"action":"allow","target":"www.cloudflare.com"}]}'
+
+info "Test: www.cloudflare.com should be allowed after patch"
+run_in_app -I https://www.cloudflare.com --max-time 10 >/dev/null 2>&1 || fail "www.cloudflare.com should succeed after patch"
+pass "www.cloudflare.com allowed after patch"
+
+info "Rules update: wildcard allow -> patch deny specific (dns+nft)"
+curl -sSf -XPOST "http://127.0.0.1:${POLICY_PORT}/policy" \
+  -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"*.mozilla.org"}]}'
+
+info "Test: www.mozilla.org should be allowed initially (allow via wildcard)"
+run_in_app -I https://www.mozilla.org --max-time 10 >/dev/null 2>&1 || fail "www.mozilla.org should succeed before patch"
+pass "www.mozilla.org allowed before patch"
+
+info "Patching deny for www.mozilla.org (specific should override earlier allow)"
+curl -sSf -XPATCH "http://127.0.0.1:${POLICY_PORT}/policy" \
+  -d '{"egress":[{"action":"deny","target":"www.mozilla.org"}]}'
+
+info "Test: www.mozilla.org should be blocked after patch"
+if run_in_app -I https://www.mozilla.org --max-time 8 >/dev/null 2>&1; then
+  fail "www.mozilla.org should be blocked after patch"
+else
+  pass "www.mozilla.org blocked after patch"
+fi
+
 info "All smoke tests passed."

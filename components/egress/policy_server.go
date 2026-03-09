@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
@@ -104,6 +105,15 @@ type policyServer struct {
 	token           string
 	enforcementMode string
 	nameserverIPs   []netip.Addr
+	mu              sync.Mutex // serializes read-merge-apply to avoid lost updates across POST/PATCH
+}
+
+type policyStatusResponse struct {
+	Status          string `json:"status,omitempty"`
+	Mode            string `json:"mode,omitempty"`
+	EnforcementMode string `json:"enforcementMode,omitempty"`
+	Reason          string `json:"reason,omitempty"`
+	Policy          any    `json:"policy,omitempty"`
 }
 
 func (s *policyServer) handlePolicy(w http.ResponseWriter, r *http.Request) {
@@ -116,8 +126,10 @@ func (s *policyServer) handlePolicy(w http.ResponseWriter, r *http.Request) {
 		s.handleGet(w)
 	case http.MethodPost, http.MethodPut:
 		s.handlePost(w, r)
+	case http.MethodPatch:
+		s.handlePatch(w, r)
 	default:
-		w.Header().Set("Allow", "GET, POST, PUT")
+		w.Header().Set("Allow", "GET, POST, PUT, PATCH")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
@@ -125,15 +137,18 @@ func (s *policyServer) handlePolicy(w http.ResponseWriter, r *http.Request) {
 func (s *policyServer) handleGet(w http.ResponseWriter) {
 	current := s.proxy.CurrentPolicy()
 	mode := modeFromPolicy(current)
-	writeJSON(w, http.StatusOK, map[string]any{
-		"mode":            mode,
-		"enforcementMode": s.enforcementMode,
-		"policy":          current,
+	writeJSON(w, http.StatusOK, policyStatusResponse{
+		Status:          "ok",
+		Mode:            mode,
+		EnforcementMode: s.enforcementMode,
+		Policy:          current,
 	})
 }
 
 func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
 	if err != nil {
@@ -154,10 +169,10 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 		}
 		s.proxy.UpdatePolicy(def)
 		log.Infof("policy API: proxy and nftables updated to deny_all")
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok",
-			"mode":   "deny_all",
-			"reason": "policy reset to default deny-all",
+		writeJSON(w, http.StatusOK, policyStatusResponse{
+			Status: "ok",
+			Mode:   "deny_all",
+			Reason: "policy reset to default deny-all",
 		})
 		return
 	}
@@ -179,10 +194,71 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	s.proxy.UpdatePolicy(pol)
 	log.Infof("policy API: proxy and nftables updated successfully")
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":          "ok",
-		"mode":            mode,
-		"enforcementMode": s.enforcementMode,
+	writeJSON(w, http.StatusOK, policyStatusResponse{
+		Status:          "ok",
+		Mode:            mode,
+		EnforcementMode: s.enforcementMode,
+	})
+}
+
+// handlePatch adds or replaces egress rules by merging with the current policy.
+// It is a convenience wrapper over the full replace flow: we still read -> merge -> apply.
+// Request body supports {"egress":[{"action":"allow","target":"example.com"}, ...]}.
+func (s *policyServer) handlePatch(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to read body: %v", err), http.StatusBadRequest)
+		return
+	}
+	raw := strings.TrimSpace(string(body))
+	if raw == "" {
+		http.Error(w, "patch body cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	patchPolicy, err := policy.ParsePolicy(raw)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("invalid patch policy: %v", err), http.StatusBadRequest)
+		return
+	}
+	if len(patchPolicy.Egress) == 0 {
+		http.Error(w, "patch must include at least one egress rule", http.StatusBadRequest)
+		return
+	}
+
+	base := s.proxy.CurrentPolicy()
+	if base == nil {
+		base = policy.DefaultDenyPolicy()
+	}
+	baseCopy := *base
+	baseCopy.Egress = append([]policy.EgressRule(nil), base.Egress...)
+
+	merged := mergeEgressRules(baseCopy.Egress, patchPolicy.Egress)
+	newPolicy := &policy.NetworkPolicy{
+		DefaultAction: baseCopy.DefaultAction,
+		Egress:        merged,
+	}
+
+	mode := modeFromPolicy(newPolicy)
+	log.Infof("policy API: patching policy with %d new rule(s), mode=%s, enforcement=%s", len(patchPolicy.Egress), mode, s.enforcementMode)
+	if s.nft != nil {
+		polWithNS := newPolicy.WithExtraAllowIPs(s.nameserverIPs)
+		if err := s.nft.ApplyStatic(r.Context(), polWithNS); err != nil {
+			log.Errorf("policy API: nftables apply failed on patch: %v", err)
+			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+	s.proxy.UpdatePolicy(newPolicy)
+	log.Infof("policy API: patch applied successfully")
+	writeJSON(w, http.StatusOK, policyStatusResponse{
+		Status:          "ok",
+		Mode:            mode,
+		EnforcementMode: s.enforcementMode,
 	})
 }
 
@@ -217,4 +293,30 @@ func modeFromPolicy(p *policy.NetworkPolicy) string {
 	}
 
 	return "enforcing"
+}
+
+// mergeEgressRules joins base rules and additions, deduping by target (last writer wins).
+func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
+	if len(additions) == 0 {
+		return base
+	}
+	out := make([]policy.EgressRule, 0, len(base)+len(additions))
+	seen := make(map[string]struct{})
+
+	// Priority: additions first; base rules only if target not overridden.
+	for _, r := range additions {
+		if _, ok := seen[r.Target]; ok {
+			continue
+		}
+		seen[r.Target] = struct{}{}
+		out = append(out, r)
+	}
+	for _, r := range base {
+		if _, ok := seen[r.Target]; ok {
+			continue
+		}
+		seen[r.Target] = struct{}{}
+		out = append(out, r)
+	}
+	return out
 }
