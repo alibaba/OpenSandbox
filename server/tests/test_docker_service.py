@@ -128,6 +128,62 @@ def test_create_sandbox_applies_security_defaults(mock_docker):
     assert host_config.get("pids_limit") == service.app_config.docker.pids_limit
 
 
+@pytest.mark.parametrize(
+    "runtime_exc, expected_status, expect_wrapped_error",
+    [
+        (
+            RuntimeError("tarfile error"),
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            True,
+        ),
+        (
+            HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "CONFLICT", "message": "conflict error"},
+            ),
+            status.HTTP_409_CONFLICT,
+            False,
+        ),
+    ],
+)
+@patch("src.services.docker.docker")
+def test_prepare_runtime_failure_triggers_cleanup(
+    mock_docker, runtime_exc, expected_status, expect_wrapped_error
+):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_client.api.create_container.return_value = {"Id": "cid"}
+    mock_container = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    mock_docker.from_env.return_value = mock_client
+
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+    )
+
+    with (
+        patch.object(service, "_ensure_image_available"),
+        patch.object(service, "_prepare_sandbox_runtime", side_effect=runtime_exc),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            service.create_sandbox(request)
+
+    mock_container.remove.assert_called_with(force=True)
+
+    assert exc.value.status_code == expected_status
+
+    if expect_wrapped_error:
+        assert str(runtime_exc) in str(exc.value.detail["message"])
+    else:
+        assert exc.value.detail["message"] == runtime_exc.detail["message"]
+
+
 @patch("src.services.docker.docker")
 def test_create_sandbox_rejects_invalid_metadata(mock_docker):
     mock_client = MagicMock()

@@ -1828,7 +1828,7 @@ class DockerSandboxService(SandboxService):
             with self._docker_operation("start sandbox container", sandbox_id):
                 container.start()
             return container
-        except DockerException as exc:
+        except Exception as exc:
             if container is not None:
                 try:
                     with self._docker_operation("cleanup sandbox container", sandbox_id):
@@ -1849,6 +1849,10 @@ class DockerSandboxService(SandboxService):
                         sandbox_id,
                         cleanup_exc,
                     )
+
+            if isinstance(exc, HTTPException):
+                raise exc
+
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
