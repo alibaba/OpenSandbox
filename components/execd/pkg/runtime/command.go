@@ -35,6 +35,15 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/util/safego"
 )
 
+// getShell returns the preferred shell, falling back to sh if bash is not available.
+// This is needed for Alpine-based Docker images that only have sh by default.
+func getShell() string {
+	if _, err := exec.LookPath("bash"); err == nil {
+		return "bash"
+	}
+	return "sh"
+}
+
 func buildCredential(uid, gid *uint32) (*syscall.Credential, error) {
 	if uid == nil && gid == nil {
 		return nil, nil
@@ -93,7 +102,8 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 
 	startAt := time.Now()
 	log.Info("received command: %v", request.Code)
-	cmd := exec.CommandContext(ctx, "bash", "-c", request.Code)
+	shell := getShell()
+	cmd := exec.CommandContext(ctx, shell, "-c", request.Code)
 
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -218,7 +228,8 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 
 	startAt := time.Now()
 	log.Info("received command: %v", request.Code)
-	cmd := exec.CommandContext(ctx, "bash", "-c", request.Code)
+	shell := getShell()
+	cmd := exec.CommandContext(ctx, shell, "-c", request.Code)
 
 	cmd.Dir = request.Cwd
 
