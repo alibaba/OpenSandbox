@@ -20,13 +20,11 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 
-	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
@@ -158,51 +156,6 @@ func (p *Proxy) UpstreamHost() string {
 		return ""
 	}
 	return host
-}
-
-var (
-	exemptListCache []string
-	exemptListOnce  sync.Once
-)
-
-// ParseNameserverExemptList returns IP strings from OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT (comma-separated).
-// Only single IPs are accepted; invalid or CIDR entries are skipped. Result is cached. Used for nft allow set, iptables, and UpstreamInExemptList.
-func ParseNameserverExemptList() []string {
-	exemptListOnce.Do(func() { exemptListCache = parseNameserverExemptListUncached() })
-	return exemptListCache
-}
-
-func parseNameserverExemptListUncached() []string {
-	raw := strings.TrimSpace(os.Getenv(constants.EnvNameserverExempt))
-	if raw == "" {
-		return nil
-	}
-	var out []string
-	for _, s := range strings.Split(raw, ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		if _, err := netip.ParseAddr(s); err == nil {
-			out = append(out, s)
-		}
-	}
-	return out
-}
-
-// UpstreamInExemptList returns true when upstreamHost is in the nameserver exempt list (exact IP match).
-// When true, the proxy should not set SO_MARK so upstream traffic follows normal routing (e.g. via tun).
-func UpstreamInExemptList(upstreamHost string) bool {
-	addr, err := netip.ParseAddr(upstreamHost)
-	if err != nil {
-		return false
-	}
-	for _, s := range ParseNameserverExemptList() {
-		if a, err := netip.ParseAddr(s); err == nil && addr == a {
-			return true
-		}
-	}
-	return false
 }
 
 // UpdatePolicy swaps the in-memory policy used by the proxy.

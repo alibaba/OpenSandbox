@@ -27,28 +27,23 @@ import (
 // SetupRedirect installs OUTPUT nat redirect for DNS (udp/tcp 53 -> port).
 //
 // exemptDst: optional list of destination IPs; traffic to these is not redirected. Packets carrying mark are also RETURNed (proxy's own upstream). Requires CAP_NET_ADMIN.
-func SetupRedirect(port int, exemptDst []string) error {
+func SetupRedirect(port int, exemptDst []netip.Addr) error {
 	log.Infof("installing iptables DNS redirect: OUTPUT port 53 -> %d (mark %s bypass)", port, constants.MarkHex)
 	targetPort := strconv.Itoa(port)
 
 	var rules [][]string
 	for _, d := range exemptDst {
-		if d == "" {
-			continue
-		}
-		addr, err := netip.ParseAddr(d)
-		if err != nil {
-			continue
-		}
+		addr := d
+		dStr := d.String()
 		if addr.Is4() {
 			rules = append(rules,
-				[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", d, "-j", "RETURN"},
-				[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", d, "-j", "RETURN"},
+				[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
+				[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
 			)
 		} else {
 			rules = append(rules,
-				[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", d, "-j", "RETURN"},
-				[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", d, "-j", "RETURN"},
+				[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
+				[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
 			)
 		}
 	}

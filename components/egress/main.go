@@ -46,8 +46,8 @@ func main() {
 
 	allowIPs := AllowIPsForNft("/etc/resolv.conf")
 	// Merge nameserver exempt IPs into nft allow set so proxy traffic to them (no SO_MARK) is allowed in dns+nft mode.
-	for _, s := range dnsproxy.ParseNameserverExemptList() {
-		if addr, err := netip.ParseAddr(s); err == nil && !containsAddr(allowIPs, addr) {
+	for _, addr := range dnsproxy.ParseNameserverExemptList() {
+		if !containsAddr(allowIPs, addr) {
 			allowIPs = append(allowIPs, addr)
 		}
 	}

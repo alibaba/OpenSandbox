@@ -16,14 +16,11 @@ package dnsproxy
 
 import (
 	"net"
-	"reflect"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/miekg/dns"
 
-	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
@@ -221,57 +218,5 @@ func TestMaybeNotifyResolved_NoCallWhenNoAOrAAAA(t *testing.T) {
 		t.Fatal("callback should not be invoked when resp has no A/AAAA")
 	case <-time.After(200 * time.Millisecond):
 		// Expected: no callback
-	}
-}
-
-func resetNameserverExemptCache(t *testing.T) {
-	t.Helper()
-	exemptListCache = nil
-	exemptListOnce = sync.Once{}
-}
-
-func TestParseNameserverExemptList_IPOnly(t *testing.T) {
-	t.Setenv(constants.EnvNameserverExempt, "1.1.1.1, 2001:db8::1 ,invalid, 10.0.0.0/8, ,")
-	resetNameserverExemptCache(t)
-
-	got := ParseNameserverExemptList()
-	want := []string{"1.1.1.1", "2001:db8::1"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("ParseNameserverExemptList() = %v, want %v", got, want)
-	}
-
-	// Cached result should stay the same on subsequent calls.
-	if got2 := ParseNameserverExemptList(); !reflect.DeepEqual(got2, want) {
-		t.Fatalf("cached ParseNameserverExemptList() = %v, want %v", got2, want)
-	}
-}
-
-func TestUpstreamInExemptList_IPOnly(t *testing.T) {
-	t.Setenv(constants.EnvNameserverExempt, "1.1.1.1,2001:db8::1")
-	resetNameserverExemptCache(t)
-
-	if !UpstreamInExemptList("1.1.1.1") {
-		t.Fatalf("expected IPv4 upstream to be exempt")
-	}
-	if !UpstreamInExemptList("2001:db8::1") {
-		t.Fatalf("expected IPv6 upstream to be exempt")
-	}
-	if UpstreamInExemptList("10.0.0.2") {
-		t.Fatalf("unexpected exempt match for non-listed IP")
-	}
-	if UpstreamInExemptList("not-an-ip") {
-		t.Fatalf("invalid IP string should not match")
-	}
-}
-
-func TestUpstreamInExemptList_CIDRIgnored(t *testing.T) {
-	t.Setenv(constants.EnvNameserverExempt, "10.0.0.0/24")
-	resetNameserverExemptCache(t)
-
-	if got := ParseNameserverExemptList(); len(got) != 0 {
-		t.Fatalf("CIDR should be ignored in exempt list, got %v", got)
-	}
-	if UpstreamInExemptList("10.0.0.5") {
-		t.Fatalf("CIDR should not make upstream exempt")
 	}
 }
