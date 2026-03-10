@@ -48,6 +48,71 @@ def test_ensure_metadata_labels_allows_none_or_empty():
     ensure_metadata_labels({})
 
 
+def test_ensure_metadata_labels_rejects_name_too_long():
+    """Label name part exceeding 63 characters should be rejected."""
+    long_name = "a" * 64
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({long_name: "value"})
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
+
+def test_ensure_metadata_labels_rejects_prefix_too_long():
+    """Label prefix (DNS subdomain) exceeding 253 characters should be rejected."""
+    # Build a prefix that is longer than 253 chars: 5 labels of 62 chars = 314 chars
+    label_part = "a" * 62
+    long_prefix = ".".join([label_part] * 5)  # 62*5 + 4 = 314 chars
+    key = f"{long_prefix}/name"
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({key: "value"})
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
+
+def test_ensure_metadata_labels_accepts_key_with_max_length_prefix_and_name():
+    """Valid key where prefix <= 253 chars and name <= 63 chars but total > 253 should be accepted."""
+    # prefix = 4 labels of 62 chars = 62*4 + 3 = 251 chars (valid DNS subdomain)
+    label_part = "a" * 62
+    prefix = ".".join([label_part] * 4)  # 251 chars
+    assert len(prefix) == 251
+    key = f"{prefix}/valid-name"  # total = 251 + 1 + 10 = 262 chars, but prefix <= 253 ✓
+    # This was previously rejected due to the incorrect total-length check.
+    ensure_metadata_labels({key: "value"})  # Should NOT raise
+
+
+def test_ensure_metadata_labels_rejects_invalid_prefix_format():
+    """Label prefix with invalid DNS subdomain characters should be rejected."""
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({"INVALID_PREFIX.io/name": "value"})
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
+
+def test_ensure_metadata_labels_rejects_value_too_long():
+    """Label value exceeding 63 characters should be rejected."""
+    long_value = "a" * 64
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({"app": long_value})
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
+
+def test_ensure_metadata_labels_rejects_non_string_key():
+    """Non-string keys in metadata should be rejected."""
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({1: "value"})  # type: ignore[dict-item]
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
+
+def test_ensure_metadata_labels_rejects_key_with_empty_prefix():
+    """Key with an empty prefix (starts with '/') should be rejected."""
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({"/name": "value"})
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
+
 # ============================================================================
 # Volume Name Validation Tests
 # ============================================================================

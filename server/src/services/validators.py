@@ -59,11 +59,15 @@ LABEL_VALUE_RE = re.compile(r"^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$")
 
 
 def _is_valid_label_key(key: str) -> bool:
-    if len(key) > 253 or "/" in key and len(key.split("/", 1)[0]) > 253:
-        return False
     if "/" in key:
         prefix, name = key.split("/", 1)
         if not prefix or not name:
+            return False
+        # Kubernetes requires the prefix to be a DNS subdomain <= 253 chars.
+        # The name portion is validated separately below (max 63 chars).
+        # Note: the total key length (prefix + "/" + name) may exceed 253 chars
+        # when the prefix uses its full 253-character allowance; this is valid.
+        if len(prefix) > 253:
             return False
         if not DNS_SUBDOMAIN_RE.match(prefix):
             return False
