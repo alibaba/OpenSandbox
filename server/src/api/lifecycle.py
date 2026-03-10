@@ -440,12 +440,20 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
 
     try:
         # Filter headers
+        hop_by_hop = set(HOP_BY_HOP_HEADERS)
+        connection_header = request.headers.get("connection")
+        if connection_header:
+            hop_by_hop.update(
+                header.strip().lower()
+                for header in connection_header.split(",")
+                if header.strip()
+            )
         headers = {}
         for key, value in request.headers.items():
             key_lower = key.lower()
             if (
                 key_lower != "host"
-                and key_lower not in HOP_BY_HOP_HEADERS
+                and key_lower not in hop_by_hop
                 and key_lower not in SENSITIVE_HEADERS
             ):
                 headers[key] = value
