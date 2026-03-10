@@ -466,10 +466,24 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
 
         resp = await client.send(req, stream=True)
 
+        hop_by_hop = set(HOP_BY_HOP_HEADERS)
+        connection_header = resp.headers.get("connection")
+        if connection_header:
+            hop_by_hop.update(
+                header.strip().lower()
+                for header in connection_header.split(",")
+                if header.strip()
+            )
+        response_headers = {
+            key: value
+            for key, value in resp.headers.items()
+            if key.lower() not in hop_by_hop
+        }
+
         return StreamingResponse(
             content=resp.aiter_bytes(),
             status_code=resp.status_code,
-            headers=resp.headers,
+            headers=response_headers,
         )
     except httpx.ConnectError as e:
         raise HTTPException(
