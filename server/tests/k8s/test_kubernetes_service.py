@@ -378,6 +378,61 @@ class TestListSandboxes:
         assert len(response.items) == 1
         assert response.items[0].id == "test-sandbox-123"
         assert response.pagination.total_items == 1
+
+    def test_list_sandboxes_includes_manual_workload_without_id_label(self, k8s_service, mock_workload):
+        """
+        Test case: Workloads without opensandbox.io/id label are still listed.
+
+        Purpose: Ensure manually created BatchSandbox resources are visible in list API
+        and sandbox id falls back to metadata.name.
+        """
+        manual_workload = {
+            "metadata": {
+                "name": "manual-batchsandbox",
+                "uid": "manual-uid",
+                "labels": {
+                    "team": "manual",
+                },
+                "annotations": mock_workload["metadata"]["annotations"].copy(),
+                "creationTimestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            "spec": {
+                "template": {
+                    "spec": {
+                        "containers": [
+                            {
+                                "name": "sandbox",
+                                "image": "python:3.11",
+                                "command": ["/bin/sh", "-c", "sleep 3600"],
+                            }
+                        ]
+                    }
+                }
+            },
+            "status": {},
+        }
+        k8s_service.workload_provider.list_workloads.return_value = [manual_workload]
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_expiration.return_value = (
+            datetime.now(timezone.utc) + timedelta(hours=1)
+        )
+
+        from src.api.schema import PaginationRequest
+        request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=20))
+        response = k8s_service.list_sandboxes(request)
+
+        assert len(response.items) == 1
+        assert response.items[0].id == "manual-batchsandbox"
+        assert response.items[0].metadata == {"team": "manual"}
+        k8s_service.workload_provider.list_workloads.assert_called_once_with(
+            namespace=k8s_service.namespace,
+            label_selector="",
+        )
     
     def test_list_sandboxes_with_pagination(self, k8s_service, mock_workload):
         """
