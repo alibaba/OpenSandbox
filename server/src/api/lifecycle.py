@@ -428,7 +428,7 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
     and asynchronously proxies the request to it.
     """
 
-    endpoint = sandbox_service.get_endpoint(sandbox_id, port)
+    endpoint = sandbox_service.get_endpoint(sandbox_id, port, resolve_internal=True)
 
     target_host = endpoint.endpoint
     query_string = request.url.query
