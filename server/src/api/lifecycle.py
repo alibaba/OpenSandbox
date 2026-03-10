@@ -19,12 +19,19 @@ This module defines FastAPI routes that map to the OpenAPI specification endpoin
 All business logic is delegated to the service layer that backs each operation.
 """
 
-from typing import List, Optional
+import logging
+from collections.abc import Mapping
+from typing import List, Optional, cast
 
+import anyio
 import httpx
-from fastapi import APIRouter, Header, Query, Request, status
+import websockets
+from websockets.asyncio.client import ClientConnection
+from websockets.typing import Origin
+from fastapi import APIRouter, Header, Query, Request, WebSocket, status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import Response, StreamingResponse
+from starlette.websockets import WebSocketDisconnect
 
 from src.api.schema import (
     CreateSandboxRequest,
@@ -59,11 +66,236 @@ SENSITIVE_HEADERS = {
     "cookie",
 }
 
+WEBSOCKET_HANDSHAKE_HEADERS = {
+    "origin",
+    "sec-websocket-extensions",
+    "sec-websocket-key",
+    "sec-websocket-protocol",
+    "sec-websocket-version",
+}
+
 # Initialize router
 router = APIRouter(tags=["Sandboxes"])
+logger = logging.getLogger(__name__)
 
 # Initialize service based on configuration from config.toml (defaults to docker)
 sandbox_service = create_sandbox_service()
+
+
+def _build_proxy_target_url(
+    endpoint: Endpoint,
+    full_path: str,
+    query_string: str,
+    *,
+    websocket: bool = False,
+) -> str:
+    """Build the backend URL from an endpoint plus optional path/query suffix."""
+    scheme = "ws" if websocket else "http"
+    base = endpoint.endpoint.rstrip("/")
+    normalized_path = full_path.lstrip("/")
+    url = f"{scheme}://{base}"
+    if normalized_path:
+        url = f"{url}/{normalized_path}"
+    if query_string:
+        url = f"{url}?{query_string}"
+    return url
+
+
+def _filter_proxy_headers(
+    headers: Mapping[str, str],
+    endpoint_headers: Optional[dict[str, str]] = None,
+    *,
+    extra_excluded: Optional[set[str]] = None,
+) -> dict[str, str]:
+    """Drop transport/auth headers while preserving app-level headers."""
+    excluded = set(HOP_BY_HOP_HEADERS) | set(SENSITIVE_HEADERS)
+    if extra_excluded:
+        excluded.update(extra_excluded)
+
+    forwarded: dict[str, str] = {}
+    for key, value in headers.items():
+        key_lower = key.lower()
+        if key_lower != "host" and key_lower not in excluded:
+            forwarded[key] = value
+
+    if endpoint_headers:
+        forwarded.update(endpoint_headers)
+    return forwarded
+
+
+async def _proxy_http_request(
+    request: Request,
+    sandbox_id: str,
+    port: int,
+    full_path: str,
+) -> StreamingResponse:
+    endpoint = sandbox_service.get_endpoint(sandbox_id, port)
+    target_url = _build_proxy_target_url(endpoint, full_path, request.url.query)
+    client: httpx.AsyncClient = request.app.state.http_client
+
+    try:
+        upgrade_header = request.headers.get("Upgrade", "")
+        if upgrade_header.lower() == "websocket":
+            raise HTTPException(
+                status_code=400, detail="Websocket upgrade is not supported yet"
+            )
+
+        headers = _filter_proxy_headers(request.headers, endpoint.headers)
+        req = client.build_request(
+            method=request.method,
+            url=target_url,
+            headers=headers,
+            content=request.stream(),
+        )
+
+        resp = await client.send(req, stream=True)
+
+        return StreamingResponse(
+            content=resp.aiter_bytes(),
+            status_code=resp.status_code,
+            headers=resp.headers,
+        )
+    except httpx.ConnectError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not connect to the backend sandbox {endpoint}: {e}",
+        ) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"An internal error occurred in the proxy: {e}"
+        ) from e
+
+
+async def _relay_client_messages(
+    websocket: WebSocket,
+    backend: ClientConnection,
+    cancel_scope: anyio.CancelScope,
+) -> None:
+    try:
+        while True:
+            message = await websocket.receive()
+            if message["type"] == "websocket.receive":
+                if message.get("text") is not None:
+                    await backend.send(message["text"])
+                elif message.get("bytes") is not None:
+                    await backend.send(message["bytes"])
+            elif message["type"] == "websocket.disconnect":
+                await backend.close(
+                    code=message.get("code", status.WS_1000_NORMAL_CLOSURE),
+                    reason=message.get("reason") or "",
+                )
+                return
+    except WebSocketDisconnect as exc:
+        await backend.close(code=exc.code, reason=getattr(exc, "reason", "") or "")
+    finally:
+        cancel_scope.cancel()
+
+
+async def _relay_backend_messages(
+    websocket: WebSocket,
+    backend: ClientConnection,
+    cancel_scope: anyio.CancelScope,
+) -> None:
+    try:
+        while True:
+            payload = await backend.recv()
+            if isinstance(payload, bytes):
+                await websocket.send_bytes(payload)
+            else:
+                await websocket.send_text(payload)
+    except websockets.ConnectionClosed as exc:
+        try:
+            await websocket.close(
+                code=exc.code or status.WS_1000_NORMAL_CLOSURE,
+                reason=exc.reason or "",
+            )
+        except RuntimeError:
+            pass
+    finally:
+        cancel_scope.cancel()
+
+
+async def _proxy_websocket_request(
+    websocket: WebSocket,
+    sandbox_id: str,
+    port: int,
+    full_path: str,
+) -> None:
+    try:
+        endpoint = sandbox_service.get_endpoint(sandbox_id, port)
+    except HTTPException as exc:
+        logger.warning(
+            "Rejecting websocket proxy request for sandbox=%s port=%s: %s",
+            sandbox_id,
+            port,
+            exc.detail,
+        )
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        return
+
+    target_url = _build_proxy_target_url(
+        endpoint,
+        full_path,
+        websocket.url.query,
+        websocket=True,
+    )
+    headers = _filter_proxy_headers(
+        websocket.headers,
+        endpoint.headers,
+        extra_excluded=WEBSOCKET_HANDSHAKE_HEADERS,
+    )
+    subprotocols = list(websocket.scope.get("subprotocols", []))
+    origin = cast(Origin | None, websocket.headers.get("origin"))
+
+    try:
+        async with websockets.connect(
+            target_url,
+            additional_headers=headers or None,
+            subprotocols=subprotocols or None,
+            origin=origin,
+        ) as backend:
+            await websocket.accept(subprotocol=backend.subprotocol)
+            async with anyio.create_task_group() as task_group:
+                task_group.start_soon(
+                    _relay_client_messages,
+                    websocket,
+                    backend,
+                    task_group.cancel_scope,
+                )
+                task_group.start_soon(
+                    _relay_backend_messages,
+                    websocket,
+                    backend,
+                    task_group.cancel_scope,
+                )
+    except websockets.InvalidStatus as exc:
+        logger.warning(
+            "Backend websocket handshake failed for sandbox=%s port=%s: %s",
+            sandbox_id,
+            port,
+            exc,
+        )
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+    except OSError as exc:
+        logger.warning(
+            "Could not connect websocket proxy for sandbox=%s port=%s: %s",
+            sandbox_id,
+            port,
+            exc,
+        )
+        await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+    except Exception:
+        logger.exception(
+            "Unexpected websocket proxy failure for sandbox=%s port=%s",
+            sandbox_id,
+            port,
+        )
+        try:
+            await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
+        except RuntimeError:
+            pass
 
 
 # ============================================================================
@@ -419,66 +651,44 @@ async def get_sandbox_endpoint(
 
 
 @router.api_route(
+    "/sandboxes/{sandbox_id}/proxy/{port}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+)
+async def proxy_sandbox_endpoint_root(request: Request, sandbox_id: str, port: int):
+    """Proxy HTTP requests targeting the backend root path."""
+    return await _proxy_http_request(request, sandbox_id, port, "")
+
+
+@router.api_route(
     "/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
 )
-async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port: int, full_path: str):
-    """
-    Receives all incoming requests, determines the target sandbox from path parameter,
-    and asynchronously proxies the request to it.
-    """
+async def proxy_sandbox_endpoint_request(
+    request: Request,
+    sandbox_id: str,
+    port: int,
+    full_path: str,
+):
+    """Proxy HTTP requests to sandbox-backed services."""
+    return await _proxy_http_request(request, sandbox_id, port, full_path)
 
-    endpoint = sandbox_service.get_endpoint(sandbox_id, port)
 
-    target_host = endpoint.endpoint
-    query_string = request.url.query
-    target_url = (
-        f"http://{target_host}/{full_path}?{query_string}"
-        if query_string
-        else f"http://{target_host}/{full_path}"
-    )
+@router.websocket("/sandboxes/{sandbox_id}/proxy/{port}")
+async def proxy_sandbox_endpoint_root_websocket(
+    websocket: WebSocket,
+    sandbox_id: str,
+    port: int,
+):
+    """Proxy websocket requests targeting the backend root path."""
+    await _proxy_websocket_request(websocket, sandbox_id, port, "")
 
-    client: httpx.AsyncClient = request.app.state.http_client
 
-    try:
-        upgrade_header = request.headers.get("Upgrade", "")
-        if upgrade_header.lower() == "websocket":
-            raise HTTPException(status_code=400, detail="Websocket upgrade is not supported yet")
-
-        # Filter headers
-        headers = {}
-        for key, value in request.headers.items():
-            key_lower = key.lower()
-            if (
-                key_lower != "host"
-                and key_lower not in HOP_BY_HOP_HEADERS
-                and key_lower not in SENSITIVE_HEADERS
-            ):
-                headers[key] = value
-
-        req = client.build_request(
-            method=request.method,
-            url=target_url,
-            headers=headers,
-            content=request.stream(),
-        )
-
-        resp = await client.send(req, stream=True)
-
-        return StreamingResponse(
-            content=resp.aiter_bytes(),
-            status_code=resp.status_code,
-            headers=resp.headers,
-        )
-    except httpx.ConnectError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not connect to the backend sandbox {endpoint}: {e}",
-        )
-    except HTTPException:
-        # Preserve explicit HTTP exceptions raised above (e.g. websocket upgrade not supported).
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"An internal error occurred in the proxy: {e}"
-        )
+@router.websocket("/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}")
+async def proxy_sandbox_endpoint_request_websocket(
+    websocket: WebSocket,
+    sandbox_id: str,
+    port: int,
+    full_path: str,
+):
+    """Proxy websocket requests to sandbox-backed services."""
+    await _proxy_websocket_request(websocket, sandbox_id, port, full_path)
