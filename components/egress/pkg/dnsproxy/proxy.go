@@ -25,6 +25,7 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/alibaba/opensandbox/egress/pkg/events"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
@@ -41,6 +42,9 @@ type Proxy struct {
 
 	// optional; called in goroutine when A/AAAA are present
 	onResolved func(domain string, ips []nftables.ResolvedIP)
+
+	// optional broadcaster to notify blocked hostnames
+	blockedBroadcaster *events.Broadcaster
 }
 
 // New builds a proxy with resolved upstream; listenAddr can be empty for default.
@@ -109,6 +113,7 @@ func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	currentPolicy := p.policy
 	p.policyMu.RUnlock()
 	if currentPolicy != nil && currentPolicy.Evaluate(domain) == policy.ActionDeny {
+		p.publishBlocked(domain)
 		resp := new(dns.Msg)
 		resp.SetRcode(r, dns.RcodeNameError)
 		_ = w.WriteMsg(resp)
@@ -177,6 +182,21 @@ func (p *Proxy) CurrentPolicy() *policy.NetworkPolicy {
 // Called in a goroutine; pass nil to disable. Only used when L2 dynamic IP is enabled (e.g. dns+nft mode).
 func (p *Proxy) SetOnResolved(fn func(domain string, ips []nftables.ResolvedIP)) {
 	p.onResolved = fn
+}
+
+// SetBlockedBroadcaster wires a broadcaster used to notify blocked hostnames.
+func (p *Proxy) SetBlockedBroadcaster(b *events.Broadcaster) {
+	p.blockedBroadcaster = b
+}
+
+func (p *Proxy) publishBlocked(domain string) {
+	if p.blockedBroadcaster == nil {
+		return
+	}
+	p.blockedBroadcaster.Publish(events.BlockedEvent{
+		Hostname:  domain,
+		Timestamp: time.Now().UTC(),
+	})
 }
 
 // extractResolvedIPs parses A and AAAA records from resp.Answer into ResolvedIP slice.

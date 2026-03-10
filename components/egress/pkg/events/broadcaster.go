@@ -1,0 +1,117 @@
+// Copyright 2026 Alibaba Group Holding Ltd.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package events
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"github.com/alibaba/opensandbox/egress/pkg/log"
+)
+
+const defaultQueueSize = 128
+
+// BlockedEvent describes a blocked hostname notification.
+type BlockedEvent struct {
+	Hostname  string    `json:"hostname"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// Subscriber consumes blocked events.
+type Subscriber interface {
+	HandleBlocked(ctx context.Context, ev BlockedEvent)
+}
+
+// BroadcasterConfig defines queue sizing for the broadcaster.
+type BroadcasterConfig struct {
+	QueueSize int
+}
+
+// Broadcaster fans out blocked events to one or more subscribers via channels.
+type Broadcaster struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	mu          sync.RWMutex
+	subscribers []chan BlockedEvent
+	queueSize   int
+}
+
+// NewBroadcaster builds a broadcaster with the given queue size (defaults to 128).
+func NewBroadcaster(ctx context.Context, cfg BroadcasterConfig) *Broadcaster {
+	if cfg.QueueSize <= 0 {
+		cfg.QueueSize = defaultQueueSize
+	}
+	cctx, cancel := context.WithCancel(ctx)
+	return &Broadcaster{
+		ctx:       cctx,
+		cancel:    cancel,
+		queueSize: cfg.QueueSize,
+	}
+}
+
+// AddSubscriber registers a new subscriber with its own buffered queue and worker.
+func (b *Broadcaster) AddSubscriber(sub Subscriber) {
+	if sub == nil {
+		return
+	}
+	ch := make(chan BlockedEvent, b.queueSize)
+
+	b.mu.Lock()
+	b.subscribers = append(b.subscribers, ch)
+	b.mu.Unlock()
+
+	go func() {
+		for {
+			select {
+			case <-b.ctx.Done():
+				return
+			case ev, ok := <-ch:
+				if !ok {
+					return
+				}
+				sub.HandleBlocked(b.ctx, ev)
+			}
+		}
+	}()
+}
+
+// Publish sends an event to all subscribers; drops and logs when a subscriber queue is full.
+func (b *Broadcaster) Publish(event BlockedEvent) {
+	b.mu.RLock()
+	subs := append([]chan BlockedEvent(nil), b.subscribers...)
+	b.mu.RUnlock()
+
+	for _, ch := range subs {
+		select {
+		case ch <- event:
+		default:
+			log.Warnf("[events] blocked-event queue full; dropping hostname %s", event.Hostname)
+		}
+	}
+}
+
+// Close stops all workers and closes subscriber queues.
+func (b *Broadcaster) Close() {
+	b.cancel()
+
+	b.mu.Lock()
+	for _, ch := range b.subscribers {
+		close(ch)
+	}
+	b.subscribers = nil
+	b.mu.Unlock()
+}

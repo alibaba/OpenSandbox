@@ -23,6 +23,7 @@ const (
 	EnvEgressRules    = "OPENSANDBOX_EGRESS_RULES"
 	EnvEgressLogLevel = "OPENSANDBOX_EGRESS_LOG_LEVEL"
 	EnvMaxNameservers = "OPENSANDBOX_EGRESS_MAX_NS"
+	EnvBlockedWebhook = "OPENSANDBOX_EGRESS_DENY_WEBHOOK"
 
 	// EnvNameserverExempt comma-separated IPs; proxy upstream to these is not marked and is allowed in nft allow set
 	EnvNameserverExempt = "OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT"

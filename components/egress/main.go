@@ -24,6 +24,7 @@ import (
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
+	"github.com/alibaba/opensandbox/egress/pkg/events"
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
@@ -63,6 +64,14 @@ func main() {
 		log.Fatalf("failed to start dns proxy: %v", err)
 	}
 	log.Infof("dns proxy started on 127.0.0.1:15353")
+
+	if blockWebhookURL := strings.TrimSpace(os.Getenv(constants.EnvBlockedWebhook)); blockWebhookURL != "" {
+		blockedBroadcaster := events.NewBroadcaster(ctx, events.BroadcasterConfig{QueueSize: 256})
+		blockedBroadcaster.AddSubscriber(events.NewWebhookSubscriber(blockWebhookURL))
+		proxy.SetBlockedBroadcaster(blockedBroadcaster)
+		defer blockedBroadcaster.Close()
+		log.Infof("blocked hostname webhook enabled: %s", blockWebhookURL)
+	}
 
 	exemptDst := dnsproxy.ParseNameserverExemptList()
 	if len(exemptDst) > 0 {
