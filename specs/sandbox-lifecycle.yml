@@ -375,6 +375,61 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /sandboxes/{sandboxId}/logs:
+    get:
+      tags: [Sandboxes]
+      summary: Stream sandbox logs
+      description: |
+        Returns a plain-text stream of the combined stdout and stderr output of
+        the sandbox's main process.
+
+        Use `follow=true` to keep the connection open and receive new log lines
+        as they are produced (similar to `docker logs -f`).  The server closes
+        the stream when the sandbox exits.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: follow
+          in: query
+          description: |
+            If true, keep the connection open and stream new log lines until
+            the sandbox exits.
+          schema:
+            type: boolean
+            default: false
+        - name: tail
+          in: query
+          description: |
+            Return only the last *N* lines of existing log output before
+            streaming new lines.  Omit or set to 0 to return all lines.
+          schema:
+            type: integer
+            minimum: 1
+        - name: timestamps
+          in: query
+          description: |
+            If true, prefix each log line with an RFC3339Nano timestamp.
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: |
+            Log stream started successfully.
+
+            The response body is a plain-text stream of log lines.  Each chunk
+            may contain one or more newline-terminated lines.
+          content:
+            text/plain:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
   securitySchemes:
     apiKeyAuth:

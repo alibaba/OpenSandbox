@@ -418,6 +418,50 @@ async def get_sandbox_endpoint(
     return endpoint
 
 
+@router.get(
+    "/sandboxes/{sandbox_id}/logs",
+    responses={
+        200: {"description": "Sandbox log stream", "content": {"text/plain": {}}},
+        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
+        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
+        404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
+        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+    },
+)
+def get_sandbox_logs(
+    sandbox_id: str,
+    follow: bool = Query(False, description="If true, stream logs until the sandbox exits"),
+    tail: Optional[int] = Query(None, description="Return only the last N lines. Omit to return all lines.", ge=1),
+    timestamps: bool = Query(False, description="If true, prefix each log line with an RFC3339 timestamp"),
+) -> StreamingResponse:
+    """
+    Stream stdout/stderr logs for a sandbox.
+
+    Returns a plain-text stream of the combined stdout and stderr output of the
+    sandbox's main process.  Use ``follow=true`` to keep the connection open and
+    receive new log lines as they are produced (similar to ``docker logs -f``).
+
+    Args:
+        sandbox_id: Unique sandbox identifier
+        follow: If true, keep the connection open and stream new log lines.
+        tail: Number of lines from the end of the log to return.
+        timestamps: If true, prefix each log line with an RFC3339 timestamp.
+
+    Returns:
+        StreamingResponse: Plain-text log stream.
+
+    Raises:
+        HTTPException: If the sandbox is not found or logs cannot be retrieved.
+    """
+    log_gen = sandbox_service.get_logs(
+        sandbox_id,
+        follow=follow,
+        tail=tail,
+        timestamps=timestamps,
+    )
+    return StreamingResponse(content=log_gen, media_type="text/plain")
+
+
 @router.api_route(
     "/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],

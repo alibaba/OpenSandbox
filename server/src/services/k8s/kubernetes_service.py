@@ -22,7 +22,7 @@ using Kubernetes resources for sandbox lifecycle management.
 import logging
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Iterator, Optional, Dict, Any
 
 from fastapi import HTTPException, status
 
@@ -679,6 +679,87 @@ class KubernetesSandboxService(SandboxService):
                 },
             ) from e
     
+    def get_logs(
+        self,
+        sandbox_id: str,
+        follow: bool = False,
+        tail: Optional[int] = None,
+        timestamps: bool = False,
+    ) -> Iterator[bytes]:
+        """
+        Stream logs from the Kubernetes Pod(s) that back a sandbox.
+
+        Finds pods labelled with the sandbox ID and streams their logs via
+        the Kubernetes API.  When *follow* is True the generator keeps
+        streaming until the pod terminates.
+
+        Args:
+            sandbox_id: Unique sandbox identifier
+            follow: If True, keep streaming until the pod exits.
+            tail: Number of lines from the end to return. None means all lines.
+            timestamps: If True, prepend each log line with a timestamp.
+
+        Yields:
+            bytes: Log output chunks.
+
+        Raises:
+            HTTPException: If no pod is found for the sandbox or the API call
+                fails.
+        """
+        try:
+            core_v1_api = self.k8s_client.get_core_v1_api()
+            pods = core_v1_api.list_namespaced_pod(
+                namespace=self.namespace,
+                label_selector=f"{SANDBOX_ID_LABEL}={sandbox_id}",
+            )
+
+            if not pods.items:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={
+                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
+                        "message": f"No pods found for sandbox '{sandbox_id}'",
+                    },
+                )
+
+            pod_name = pods.items[0].metadata.name
+
+            if follow:
+                # Streaming mode: _preload_content=False gives a raw HTTP response.
+                response = core_v1_api.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=self.namespace,
+                    follow=True,
+                    tail_lines=tail,
+                    timestamps=timestamps,
+                    _preload_content=False,
+                )
+                for chunk in response.stream(amt=4096):
+                    if chunk:
+                        yield chunk
+            else:
+                log_text = core_v1_api.read_namespaced_pod_log(
+                    name=pod_name,
+                    namespace=self.namespace,
+                    follow=False,
+                    tail_lines=tail,
+                    timestamps=timestamps,
+                )
+                if log_text:
+                    yield log_text.encode("utf-8") if isinstance(log_text, str) else log_text
+
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Error retrieving logs for sandbox %s: %s", sandbox_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.K8S_API_ERROR,
+                    "message": f"Failed to retrieve logs for sandbox '{sandbox_id}': {str(exc)}",
+                },
+            ) from exc
+
     def _build_sandbox_from_workload(self, workload: Any) -> Sandbox:
         """
         Build Sandbox object from Kubernetes workload.

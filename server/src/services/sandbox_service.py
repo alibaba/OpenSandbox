@@ -21,6 +21,7 @@ This module defines the abstract interface for sandbox services.
 
 from abc import ABC, abstractmethod
 import socket
+from typing import Iterator, Optional
 from uuid import uuid4
 
 from src.api.schema import (
@@ -220,5 +221,30 @@ class SandboxService(ABC):
 
         Raises:
             HTTPException: If sandbox not found or endpoint not available
+        """
+        pass
+
+    @abstractmethod
+    def get_logs(
+        self,
+        sandbox_id: str,
+        follow: bool = False,
+        tail: Optional[int] = None,
+        timestamps: bool = False,
+    ) -> Iterator[bytes]:
+        """
+        Stream sandbox logs (stdout and stderr).
+
+        Args:
+            sandbox_id: Unique sandbox identifier
+            follow: If True, keep streaming until the sandbox exits.
+            tail: Number of lines from the end to return. None means all logs.
+            timestamps: If True, prefix each log line with an RFC3339 timestamp.
+
+        Returns:
+            Iterator[bytes]: A byte-stream of log output chunks.
+
+        Raises:
+            HTTPException: If the sandbox is not found or logs cannot be retrieved.
         """
         pass
