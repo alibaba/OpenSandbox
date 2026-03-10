@@ -12,8 +12,8 @@ configs:
       execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.6"
 
       [egress]
-      image = "opensandbox/egress:v1.0.1"
-      # image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.1"
+      image = "opensandbox/egress:v1.0.2"
+      # image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.2"
 
       [docker]
       network_mode = "bridge"
