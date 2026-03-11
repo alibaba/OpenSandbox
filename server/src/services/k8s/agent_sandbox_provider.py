@@ -33,7 +33,7 @@ from kubernetes.client import (
 
 from src.config import AppConfig, IngressConfig, ExecdInitResources
 from src.services.helpers import format_ingress_endpoint
-from src.api.schema import Endpoint, ImageSpec, NetworkPolicy
+from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.egress_helper import (
@@ -43,6 +43,7 @@ from src.services.k8s.egress_helper import (
     serialize_security_context_to_dict,
 )
 from src.services.k8s.informer import WorkloadInformer
+from src.services.k8s.volume_helper import apply_volumes_to_pod_spec
 from src.services.k8s.workload_provider import WorkloadProvider
 from src.services.runtime_resolver import SecureRuntimeResolver
 
@@ -155,7 +156,16 @@ class AgentSandboxProvider(WorkloadProvider):
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
+        volumes: Optional[List[Volume]] = None,
     ) -> Dict[str, Any]:
+        # Pool mode does not support volumes
+        if extensions and extensions.get("poolRef"):
+            if volumes:
+                raise ValueError(
+                    "Pool mode does not support volumes. "
+                    "Remove 'volumes' from request or use template mode."
+                )
+
         if self.runtime_class:
             logger.info(
                 "Using Kubernetes RuntimeClass '%s' for sandbox %s",
@@ -172,6 +182,10 @@ class AgentSandboxProvider(WorkloadProvider):
             network_policy=network_policy,
             egress_image=egress_image,
         )
+
+        # Add user-specified volumes if provided
+        if volumes:
+            apply_volumes_to_pod_spec(pod_spec, volumes)
 
         if self.service_account:
             pod_spec["serviceAccountName"] = self.service_account

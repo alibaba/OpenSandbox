@@ -25,6 +25,7 @@ from src.api.schema import ImageSpec, ImageAuth, NetworkPolicy, NetworkRule
 from src.config import ExecdInitResources
 from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from src.services.k8s.image_pull_secret_helper import IMAGE_AUTH_SECRET_PREFIX
+from src.services.k8s.volume_helper import apply_volumes_to_pod_spec
 
 
 class TestBatchSandboxProvider:
@@ -1739,3 +1740,339 @@ spec:
             name="test-id",
             grace_period_seconds=0,
         )
+
+    # ===== Volume Support Tests =====
+
+    def test_create_workload_with_pvc_volume(self, mock_k8s_client):
+        """
+        Test creating workload with PVC volume mount.
+
+        Verifies:
+        - PVC volume is correctly added to pod spec
+        - Volume mount is added to main container
+        - claimName is correctly set
+        """
+        from src.api.schema import Volume, PVC
+
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        expires_at = datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
+
+        volumes = [
+            Volume(
+                name="data-volume",
+                pvc=PVC(claim_name="my-pvc"),
+                mount_path="/mnt/data",
+                read_only=False,
+            )
+        ]
+
+        result = provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=expires_at,
+            execd_image="execd:latest",
+            volumes=volumes,
+        )
+
+        assert result == {"name": "test-id", "uid": "test-uid"}
+
+        # Verify API call
+        call_args = mock_api.create_namespaced_custom_object.call_args
+        body = call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        # Check volume definition
+        volumes_list = pod_spec.get("volumes", [])
+        pvc_volume = next((v for v in volumes_list if v["name"] == "data-volume"), None)
+        assert pvc_volume is not None
+        assert pvc_volume["persistentVolumeClaim"]["claimName"] == "my-pvc"
+
+        # Check volume mount in main container
+        main_container = pod_spec["containers"][0]
+        mounts = main_container.get("volumeMounts", [])
+        data_mount = next((m for m in mounts if m["name"] == "data-volume"), None)
+        assert data_mount is not None
+        assert data_mount["mountPath"] == "/mnt/data"
+        assert data_mount["readOnly"] is False
+
+    def test_create_workload_with_pvc_volume_readonly(self, mock_k8s_client):
+        """
+        Test creating workload with read-only PVC volume mount.
+        """
+        from src.api.schema import Volume, PVC
+
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        volumes = [
+            Volume(
+                name="models-volume",
+                pvc=PVC(claim_name="models-pvc"),
+                mount_path="/mnt/models",
+                read_only=True,
+            )
+        ]
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest",
+            volumes=volumes,
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        main_container = pod_spec["containers"][0]
+        mounts = main_container.get("volumeMounts", [])
+        models_mount = next((m for m in mounts if m["name"] == "models-volume"), None)
+        assert models_mount is not None
+        assert models_mount["readOnly"] is True
+
+    def test_create_workload_with_pvc_volume_subpath(self, mock_k8s_client):
+        """
+        Test creating workload with PVC volume mount with subPath.
+        """
+        from src.api.schema import Volume, PVC
+
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        volumes = [
+            Volume(
+                name="data-volume",
+                pvc=PVC(claim_name="shared-pvc"),
+                mount_path="/mnt/data",
+                sub_path="task-001",
+                read_only=False,
+            )
+        ]
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest",
+            volumes=volumes,
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        main_container = pod_spec["containers"][0]
+        mounts = main_container.get("volumeMounts", [])
+        data_mount = next((m for m in mounts if m["name"] == "data-volume"), None)
+        assert data_mount is not None
+        assert data_mount.get("subPath") == "task-001"
+
+    def test_create_workload_with_host_volume(self, mock_k8s_client):
+        """
+        Test creating workload with hostPath volume mount.
+        """
+        from src.api.schema import Volume, Host
+
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        volumes = [
+            Volume(
+                name="host-volume",
+                host=Host(path="/data/shared"),
+                mount_path="/mnt/host",
+                read_only=True,
+            )
+        ]
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest",
+            volumes=volumes,
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        # Check volume definition
+        volumes_list = pod_spec.get("volumes", [])
+        host_volume = next((v for v in volumes_list if v["name"] == "host-volume"), None)
+        assert host_volume is not None
+        assert host_volume["hostPath"]["path"] == "/data/shared"
+        assert host_volume["hostPath"]["type"] == "DirectoryOrCreate"
+
+        # Check volume mount
+        main_container = pod_spec["containers"][0]
+        mounts = main_container.get("volumeMounts", [])
+        host_mount = next((m for m in mounts if m["name"] == "host-volume"), None)
+        assert host_mount is not None
+        assert host_mount["mountPath"] == "/mnt/host"
+        assert host_mount["readOnly"] is True
+
+    def test_create_workload_with_multiple_volumes(self, mock_k8s_client):
+        """
+        Test creating workload with multiple volumes (PVC and hostPath).
+        """
+        from src.api.schema import Volume, PVC, Host
+
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_api = mock_k8s_client.get_custom_objects_api()
+        mock_api.create_namespaced_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        volumes = [
+            Volume(
+                name="pvc-volume",
+                pvc=PVC(claim_name="data-pvc"),
+                mount_path="/mnt/data",
+                read_only=False,
+            ),
+            Volume(
+                name="host-volume",
+                host=Host(path="/tmp/cache"),
+                mount_path="/mnt/cache",
+                read_only=True,
+            ),
+        ]
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest",
+            volumes=volumes,
+        )
+
+        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        # Check both volumes exist
+        volumes_list = pod_spec.get("volumes", [])
+        assert len([v for v in volumes_list if v["name"] in ("pvc-volume", "host-volume")]) == 2
+
+        # Check both mounts exist
+        main_container = pod_spec["containers"][0]
+        mounts = main_container.get("volumeMounts", [])
+        mount_names = {m["name"] for m in mounts}
+        assert "pvc-volume" in mount_names
+        assert "host-volume" in mount_names
+
+    def test_create_workload_pool_mode_rejects_volumes(self, mock_k8s_client):
+        """
+        Test that pool mode rejects volumes with clear error message.
+        """
+        from src.api.schema import Volume, PVC
+
+        provider = BatchSandboxProvider(mock_k8s_client)
+
+        volumes = [
+            Volume(
+                name="data-volume",
+                pvc=PVC(claim_name="my-pvc"),
+                mount_path="/mnt/data",
+            )
+        ]
+
+        with pytest.raises(ValueError, match="Pool mode does not support volumes"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="python:3.11"),
+                entrypoint=["/bin/bash"],
+                env={},
+                resource_limits={},
+                labels={},
+                expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+                execd_image="execd:latest",
+                extensions={"poolRef": "my-pool"},
+                volumes=volumes,
+            )
+
+    def test_apply_volumes_to_pod_spec_empty_volumes(self, mock_k8s_client):
+        """
+        Test apply_volumes_to_pod_spec with empty volumes list.
+        """
+        pod_spec = {
+            "containers": [{"name": "main", "volumeMounts": []}],
+            "volumes": [],
+        }
+
+        apply_volumes_to_pod_spec(pod_spec, [])
+
+        # Should not modify pod_spec
+        assert pod_spec["volumes"] == []
+        assert pod_spec["containers"][0]["volumeMounts"] == []
+
+    def test_apply_volumes_to_pod_spec_no_containers(self, mock_k8s_client):
+        """
+        Test apply_volumes_to_pod_spec with no containers returns early without error.
+        """
+        from src.api.schema import Volume, PVC
+
+        pod_spec = {"volumes": []}
+        volumes = [Volume(name="test", pvc=PVC(claim_name="pvc"), mount_path="/mnt")]
+
+        # Should not raise exception
+        apply_volumes_to_pod_spec(pod_spec, volumes)
+
+        # Pod spec should remain unchanged (no containers to mount to)
+        assert pod_spec["volumes"] == []
+
+    def test_apply_volumes_to_pod_spec_duplicate_internal_volume(self, mock_k8s_client):
+        """
+        Test apply_volumes_to_pod_spec rejects volume names that collide with internal volumes.
+        """
+        from src.api.schema import Volume, PVC
+
+        pod_spec = {
+            "containers": [{"name": "sandbox", "volumeMounts": []}],
+            "volumes": [{"name": "opensandbox-bin", "emptyDir": {}}],
+        }
+        volumes = [Volume(name="opensandbox-bin", pvc=PVC(claim_name="pvc"), mount_path="/mnt")]
+
+        # Should raise ValueError for duplicate volume name
+        with pytest.raises(ValueError) as exc_info:
+            apply_volumes_to_pod_spec(pod_spec, volumes)
+
+        assert "conflicts with an internal volume" in str(exc_info.value)

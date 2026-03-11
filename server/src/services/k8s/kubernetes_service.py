@@ -50,6 +50,7 @@ from src.services.validators import (
     ensure_egress_configured,
     ensure_future_expiration,
     ensure_metadata_labels,
+    ensure_volumes_valid,
 )
 from src.services.k8s.client import K8sClient
 from src.services.k8s.provider_factory import create_workload_provider
@@ -294,6 +295,12 @@ class KubernetesSandboxService(SandboxService):
             if request.network_policy:
                 egress_image = self.app_config.egress.image if self.app_config.egress else None
             
+            # Validate volumes before creating workload
+            ensure_volumes_valid(
+                request.volumes,
+                self.app_config.storage.allowed_host_paths or None,
+            )
+            
             # Create workload
             workload_info = self.workload_provider.create_workload(
                 sandbox_id=sandbox_id,
@@ -308,6 +315,7 @@ class KubernetesSandboxService(SandboxService):
                 extensions=request.extensions,
                 network_policy=request.network_policy,
                 egress_image=egress_image,
+                volumes=request.volumes,
             )
             
             logger.info(

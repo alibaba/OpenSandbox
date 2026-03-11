@@ -20,7 +20,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from src.api.schema import Endpoint, ImageSpec, NetworkPolicy
+from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 
 
 class WorkloadProvider(ABC):
@@ -46,10 +46,11 @@ class WorkloadProvider(ABC):
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
+        volumes: Optional[List[Volume]] = None,
     ) -> Dict[str, Any]:
         """
         Create a new workload resource.
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
             namespace: Kubernetes namespace
@@ -65,10 +66,11 @@ class WorkloadProvider(ABC):
             network_policy: Optional network policy for egress traffic control.
                 When provided, an egress sidecar container will be added to the Pod.
             egress_image: Optional egress sidecar image. Required when network_policy is provided.
-            
+            volumes: Optional list of volume mounts for the sandbox.
+
         Returns:
             Dict containing workload metadata (name, uid, etc.)
-            
+
         Raises:
             ApiException: If creation fails
         """

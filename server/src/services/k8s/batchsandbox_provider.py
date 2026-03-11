@@ -33,7 +33,7 @@ from kubernetes.client import (
 
 from src.config import AppConfig, IngressConfig, INGRESS_MODE_GATEWAY, ExecdInitResources
 from src.services.helpers import format_ingress_endpoint
-from src.api.schema import Endpoint, ImageSpec, NetworkPolicy
+from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 from src.services.k8s.image_pull_secret_helper import (
     build_image_pull_secret,
     build_image_pull_secret_name,
@@ -47,6 +47,7 @@ from src.services.k8s.egress_helper import (
     serialize_security_context_to_dict,
 )
 from src.services.k8s.informer import WorkloadInformer
+from src.services.k8s.volume_helper import apply_volumes_to_pod_spec
 from src.services.k8s.workload_provider import WorkloadProvider
 from src.services.runtime_resolver import SecureRuntimeResolver
 
@@ -132,15 +133,16 @@ class BatchSandboxProvider(WorkloadProvider):
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
+        volumes: Optional[List[Volume]] = None,
     ) -> Dict[str, Any]:
         """
         Create a BatchSandbox workload.
-        
+
         Supports both template-based and pool-based creation:
         - Template mode (default): Creates workload with user-specified image, resources, and env
         - Pool mode (when extensions contains 'poolRef'): Creates workload from pre-warmed pool,
           only entrypoint and env can be customized
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
             namespace: Kubernetes namespace
@@ -156,9 +158,13 @@ class BatchSandboxProvider(WorkloadProvider):
             network_policy: Optional network policy for egress traffic control.
                 When provided, an egress sidecar container will be added to the Pod.
             egress_image: Container image for the egress sidecar (required when network_policy is set).
-        
+            volumes: Optional list of volume mounts for the sandbox.
+
         Returns:
             Dict with 'name' and 'uid' of created BatchSandbox
+
+        Raises:
+            SandboxError: If pool mode is used with volumes (not supported).
         """
         extensions = extensions or {}
 
@@ -172,6 +178,12 @@ class BatchSandboxProvider(WorkloadProvider):
 
         # If poolRef is provided and not empty, create workload from pool
         if extensions.get("poolRef"):
+            # Pool mode does not support volumes
+            if volumes:
+                raise ValueError(
+                    "Pool mode does not support volumes. "
+                    "Remove 'volumes' from request or use template mode."
+                )
             # When using pool, only entrypoint and env can be customized
             return self._create_workload_from_pool(
                 batchsandbox_name=sandbox_id,
@@ -230,7 +242,11 @@ class BatchSandboxProvider(WorkloadProvider):
             network_policy=network_policy,
             egress_image=egress_image,
         )
-        
+
+        # Add user-specified volumes if provided
+        if volumes:
+            apply_volumes_to_pod_spec(pod_spec, volumes)
+
         # Build runtime-generated BatchSandbox manifest
         # This contains only the essential runtime fields
         runtime_manifest = {
@@ -643,7 +659,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 result["securityContext"] = security_context_dict
         
         return result
-    
+
     def _get_informer(self, namespace: str) -> Optional[WorkloadInformer]:
         if not self._enable_informer:
             return None
