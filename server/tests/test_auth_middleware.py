@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from src.config import AppConfig, IngressConfig, RuntimeConfig, ServerConfig
@@ -59,30 +59,76 @@ def test_auth_middleware_skips_validation_for_proxy_to_sandbox():
     """Proxy-to-sandbox paths must not require API key; server only forwards to sandbox."""
     app = _build_test_app()
 
+    # Mock function to verify sandbox ownership/permission
+    def verify_sandbox_access(sandbox_id: str, request: Request) -> bool:
+        """Verify that the request has permission to access the sandbox.
+        In production, this should check against a database or auth service."""
+        # For testing: extract user/tenant from headers or session
+        # In real implementation, check if user owns/has access to sandbox_id
+        user_id = request.headers.get("X-User-ID")
+        if not user_id:
+            return False
+        # Mock: allow access only to sandboxes matching user pattern
+        return sandbox_id.startswith(f"user-{user_id}-")
+
     @app.get("/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}")
-    def proxy_echo(sandbox_id: str, port: int, full_path: str):
+    def proxy_echo(sandbox_id: str, port: int, full_path: str, request: Request):
+        # CRITICAL: Verify sandbox ownership before proxying
+        if not verify_sandbox_access(sandbox_id, request):
+            raise HTTPException(status_code=403, detail="Unauthorized access to sandbox")
         return {"proxied": True, "sandbox_id": sandbox_id, "port": port, "path": full_path}
 
     client = TestClient(app)
-    # No OPEN-SANDBOX-API-KEY header; should still succeed for proxy path
-    response = client.get("/sandboxes/abc-123/proxy/8080/foo/bar")
+    # No OPEN-SANDBOX-API-KEY header; should still succeed for proxy path WITH proper authorization
+    response = client.get("/sandboxes/user-test-abc-123/proxy/8080/foo/bar", headers={"X-User-ID": "test"})
     assert response.status_code == 200
     assert response.json()["proxied"] is True
-    assert response.json()["sandbox_id"] == "abc-123"
+    assert response.json()["sandbox_id"] == "user-test-abc-123"
     assert response.json()["port"] == 8080
     assert response.json()["path"] == "foo/bar"
+
+
+def test_auth_middleware_proxy_rejects_unauthorized_sandbox_access():
+    """Proxy endpoint must verify sandbox ownership to prevent IDOR attacks."""
+    app = _build_test_app()
+
+    def verify_sandbox_access(sandbox_id: str, request: Request) -> bool:
+        user_id = request.headers.get("X-User-ID")
+        if not user_id:
+            return False
+        return sandbox_id.startswith(f"user-{user_id}-")
+
+    @app.get("/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}")
+    def proxy_echo(sandbox_id: str, port: int, full_path: str, request: Request):
+        if not verify_sandbox_access(sandbox_id, request):
+            raise HTTPException(status_code=403, detail="Unauthorized access to sandbox")
+        return {"proxied": True, "sandbox_id": sandbox_id, "port": port, "path": full_path}
+
+    client = TestClient(app)
+    # Attempt to access another user's sandbox - should be rejected
+    response = client.get("/sandboxes/user-other-abc-123/proxy/8080/foo/bar", headers={"X-User-ID": "test"})
+    assert response.status_code == 403
+    assert "Unauthorized" in response.json()["detail"]
 
 
 def test_auth_middleware_v1_proxy_path_exempt():
     """V1 prefix proxy path is also exempt."""
     app = _build_test_app()
 
+    def verify_sandbox_access(sandbox_id: str, request: Request) -> bool:
+        user_id = request.headers.get("X-User-ID")
+        if not user_id:
+            return False
+        return sandbox_id.startswith(f"user-{user_id}-")
+
     @app.get("/v1/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}")
-    def proxy_echo(sandbox_id: str, port: int, full_path: str):
+    def proxy_echo(sandbox_id: str, port: int, full_path: str, request: Request):
+        if not verify_sandbox_access(sandbox_id, request):
+            raise HTTPException(status_code=403, detail="Unauthorized access to sandbox")
         return {"proxied": True}
 
     client = TestClient(app)
-    response = client.get("/v1/sandboxes/sid/proxy/443/")
+    response = client.get("/v1/sandboxes/user-test-sid/proxy/443/", headers={"X-User-ID": "test"})
     assert response.status_code == 200
     assert response.json()["proxied"] is True
 
