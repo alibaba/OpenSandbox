@@ -17,6 +17,7 @@ package runtime
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -60,13 +61,21 @@ func (c *Controller) storeCommandKernel(sessionID string, kernel *commandKernel)
 }
 
 // stdLogDescriptor creates temporary files for capturing command output.
+// It ensures the temp directory exists before opening files, so that commands
+// continue to work even after the /tmp directory has been removed and recreated.
 func (c *Controller) stdLogDescriptor(session string) (io.WriteCloser, io.WriteCloser, error) {
+	logDir := os.TempDir()
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, nil, fmt.Errorf("failed to create temp dir %s: %w", logDir, err)
+	}
+
 	stdout, err := os.OpenFile(c.stdoutFileName(session), os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 	if err != nil {
 		return nil, nil, err
 	}
 	stderr, err := os.OpenFile(c.stderrFileName(session), os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 	if err != nil {
+		stdout.Close()
 		return nil, nil, err
 	}
 
@@ -74,6 +83,10 @@ func (c *Controller) stdLogDescriptor(session string) (io.WriteCloser, io.WriteC
 }
 
 func (c *Controller) combinedOutputDescriptor(session string) (io.WriteCloser, error) {
+	logDir := os.TempDir()
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create temp dir %s: %w", logDir, err)
+	}
 	return os.OpenFile(c.combinedOutputFileName(session), os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 }
 

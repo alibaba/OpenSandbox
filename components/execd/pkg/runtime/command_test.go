@@ -253,3 +253,60 @@ func TestRunCommand_Error(t *testing.T) {
 		t.Fatalf("unexpected error payload: %+v", gotErr)
 	}
 }
+
+// TestStdLogDescriptor_AutoCreatesTempDir verifies that stdLogDescriptor
+// recreates the temp directory when it has been deleted, rather than failing.
+// Regression test for https://github.com/alibaba/OpenSandbox/issues/400.
+func TestStdLogDescriptor_AutoCreatesTempDir(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("TMPDIR env var has no effect on Windows")
+	}
+
+	// Point os.TempDir() at a path that does not yet exist.
+	missingDir := filepath.Join(t.TempDir(), "deleted_tmp")
+	t.Setenv("TMPDIR", missingDir)
+
+	c := NewController("", "")
+	stdout, stderr, err := c.stdLogDescriptor("test-session")
+	if err != nil {
+		t.Fatalf("stdLogDescriptor failed with missing temp dir: %v", err)
+	}
+	stdout.Close()
+	stderr.Close()
+
+	// The directory must have been created.
+	info, err := os.Stat(missingDir)
+	if err != nil {
+		t.Fatalf("expected temp dir to be created, stat error: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", missingDir)
+	}
+}
+
+// TestCombinedOutputDescriptor_AutoCreatesTempDir verifies that
+// combinedOutputDescriptor also recreates the temp directory when missing.
+// Regression test for https://github.com/alibaba/OpenSandbox/issues/400.
+func TestCombinedOutputDescriptor_AutoCreatesTempDir(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("TMPDIR env var has no effect on Windows")
+	}
+
+	missingDir := filepath.Join(t.TempDir(), "deleted_tmp")
+	t.Setenv("TMPDIR", missingDir)
+
+	c := NewController("", "")
+	f, err := c.combinedOutputDescriptor("test-session")
+	if err != nil {
+		t.Fatalf("combinedOutputDescriptor failed with missing temp dir: %v", err)
+	}
+	f.Close()
+
+	info, err := os.Stat(missingDir)
+	if err != nil {
+		t.Fatalf("expected temp dir to be created, stat error: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected %s to be a directory", missingDir)
+	}
+}
