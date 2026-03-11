@@ -1778,6 +1778,7 @@ class DockerSandboxService(SandboxService):
         )
 
         sidecar_container = None
+        sidecar_id: Optional[str] = None
         try:
             with self._docker_operation("create egress sidecar", sandbox_id):
                 sidecar_resp = self.docker_client.api.create_container(
@@ -1802,19 +1803,36 @@ class DockerSandboxService(SandboxService):
             with self._docker_operation("start egress sidecar", sandbox_id):
                 sidecar_container.start()
             return sidecar_container
-        except Exception:
+        except Exception as exc:
             if sidecar_container is not None:
                 try:
-                    sidecar_container.remove(force=True)
-                except DockerException:
-                    logger.warning("Failed to cleanup egress sidecar for sandbox %s", sandbox_id)
+                    with self._docker_operation("cleanup egress sidecar", sandbox_id):
+                        sidecar_container.remove(force=True)
+                except DockerException as cleanup_exc:
+                    logger.warning(
+                        "Failed to cleanup egress sidecar for sandbox %s: %s",
+                        sandbox_id,
+                        cleanup_exc,
+                    )
+            elif sidecar_id:
+                try:
+                    with self._docker_operation("cleanup egress sidecar (API)", sandbox_id):
+                        self.docker_client.api.remove_container(sidecar_id, force=True)
+                except DockerException as cleanup_exc:
+                    logger.warning(
+                        "Failed to cleanup egress sidecar for sandbox %s: %s",
+                        sandbox_id,
+                        cleanup_exc,
+                    )
+            if isinstance(exc, HTTPException):
+                raise exc
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
                     "code": SandboxErrorCodes.CONTAINER_START_FAILED,
                     "message": "Egress sidecar container failed to start.",
                 },
-            )
+            ) from exc
 
     def _create_and_start_container(
         self,
