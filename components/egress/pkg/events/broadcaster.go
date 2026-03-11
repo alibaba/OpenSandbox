@@ -17,6 +17,7 @@ package events
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/log"
@@ -48,6 +49,7 @@ type Broadcaster struct {
 	mu          sync.RWMutex
 	subscribers []chan BlockedEvent
 	queueSize   int
+	closed      atomic.Bool
 }
 
 // NewBroadcaster builds a broadcaster with the given queue size (defaults to 128).
@@ -91,11 +93,14 @@ func (b *Broadcaster) AddSubscriber(sub Subscriber) {
 
 // Publish sends an event to all subscribers; drops and logs when a subscriber queue is full.
 func (b *Broadcaster) Publish(event BlockedEvent) {
-	b.mu.RLock()
-	subs := append([]chan BlockedEvent(nil), b.subscribers...)
-	b.mu.RUnlock()
+	if b.closed.Load() {
+		return
+	}
 
-	for _, ch := range subs {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	for _, ch := range b.subscribers {
 		select {
 		case ch <- event:
 		default:
@@ -106,12 +111,19 @@ func (b *Broadcaster) Publish(event BlockedEvent) {
 
 // Close stops all workers and closes subscriber queues.
 func (b *Broadcaster) Close() {
+	if b.closed.Load() {
+		return
+	}
+
 	b.cancel()
 
 	b.mu.Lock()
-	for _, ch := range b.subscribers {
+	defer b.mu.Unlock()
+	subs := b.subscribers
+	b.subscribers = nil
+
+	for _, ch := range subs {
 		close(ch)
 	}
-	b.subscribers = nil
-	b.mu.Unlock()
+	b.closed.Store(true)
 }

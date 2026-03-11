@@ -70,7 +70,7 @@ func main() {
 		blockedBroadcaster.AddSubscriber(events.NewWebhookSubscriber(blockWebhookURL))
 		proxy.SetBlockedBroadcaster(blockedBroadcaster)
 		defer blockedBroadcaster.Close()
-		log.Infof("blocked hostname webhook enabled: %s", blockWebhookURL)
+		log.Infof("denied hostname webhook enabled")
 	}
 
 	exemptDst := dnsproxy.ParseNameserverExemptList()
