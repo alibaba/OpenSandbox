@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -193,8 +194,13 @@ func (p *Proxy) publishBlocked(domain string) {
 	if p.blockedBroadcaster == nil {
 		return
 	}
+	normalized := strings.ToLower(strings.TrimSuffix(domain, "."))
+	if normalized == "" {
+		return
+	}
+
 	p.blockedBroadcaster.Publish(events.BlockedEvent{
-		Hostname:  domain,
+		Hostname:  normalized,
 		Timestamp: time.Now().UTC(),
 	})
 }
