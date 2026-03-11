@@ -61,6 +61,39 @@ except ImportError:
 VOLUME_NAME = "opensandbox-pvc-demo"
 
 
+def validate_volume_name(volume_name: str) -> None:
+    """
+    Validate Docker volume name to prevent injection attacks.
+    
+    Docker volume names must follow specific rules to prevent security issues
+    like command injection or path traversal attacks. This validation ensures
+    that even if VOLUME_NAME becomes user-controlled in the future, the script
+    remains secure.
+    
+    Raises:
+        ValueError: If the volume name is invalid or contains suspicious patterns.
+    """
+    import re
+    
+    if not volume_name:
+        raise ValueError("Volume name cannot be empty")
+    
+    # Docker volume names must start with alphanumeric and contain only [a-zA-Z0-9_.-]
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$', volume_name):
+        raise ValueError(
+            f"Invalid volume name '{volume_name}'. "
+            "Volume names must start with alphanumeric and contain only [a-zA-Z0-9_.-]"
+        )
+    
+    # Prevent excessively long names (Docker limit is typically 255 characters)
+    if len(volume_name) > 255:
+        raise ValueError(f"Volume name too long: {len(volume_name)} characters (max 255)")
+    
+    # Extra safety: ensure no path traversal patterns even though regex should catch them
+    if '..' in volume_name or '/' in volume_name or '\\' in volume_name:
+        raise ValueError(f"Volume name '{volume_name}' contains invalid path characters")
+
+
 async def print_exec(sandbox: Sandbox, command: str) -> str | None:
     """Run a command in the sandbox and print/return stdout."""
     result = await sandbox.commands.run(command)
@@ -75,6 +108,9 @@ async def print_exec(sandbox: Sandbox, command: str) -> str | None:
 
 def ensure_named_volume() -> None:
     """Create the Docker named volume and seed it with test data."""
+    # Validate volume name before using in subprocess commands
+    validate_volume_name(VOLUME_NAME)
+    
     print(f"  Ensuring Docker named volume '{VOLUME_NAME}' exists...")
     subprocess.run(
         ["docker", "volume", "rm", VOLUME_NAME],
