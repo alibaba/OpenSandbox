@@ -347,6 +347,123 @@ def test_egress_sidecar_injection_and_capabilities(mock_docker):
     assert labels.get("opensandbox.io/http-port")
 
 
+# ---------------------------------------------------------------------------
+# User-defined network tests
+# ---------------------------------------------------------------------------
+
+@patch("src.services.docker.docker")
+def test_network_policy_rejected_on_user_defined_network(mock_docker):
+    """networkPolicy must be rejected when network_mode is a user-defined named network."""
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "my-custom-net"
+    cfg.egress = EgressConfig(image="egress:latest")
+    service = DockerSandboxService(config=cfg)
+
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+        networkPolicy=NetworkPolicy(default_action="deny", egress=[]),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        service.create_sandbox(request)
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "my-custom-net" in exc.value.detail["message"]
+
+
+@patch("src.services.docker.docker")
+def test_create_sandbox_fails_when_user_defined_network_not_found(mock_docker):
+    """create_sandbox raises 400 with a clear message when the named network does not exist."""
+    from docker.errors import NotFound as DockerNotFound
+
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_client.networks.get.side_effect = DockerNotFound("network not found")
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "missing-net"
+    service = DockerSandboxService(config=cfg)
+
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        service.create_sandbox(request)
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "missing-net" in exc.value.detail["message"]
+    assert "docker network create" in exc.value.detail["message"]
+
+
+@patch("src.services.docker.docker")
+def test_create_sandbox_user_defined_network_uses_correct_network_mode(mock_docker):
+    """Containers created on a user-defined network use the network name as network_mode."""
+
+    def host_cfg_side_effect(**kwargs):
+        return kwargs
+
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_client.networks.get.return_value = MagicMock()  # network exists
+    mock_client.api.create_host_config.side_effect = host_cfg_side_effect
+    mock_client.api.create_container.return_value = {"Id": "main-id"}
+    mock_client.containers.get.return_value = MagicMock(id="main-id")
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "my-app-net"
+    service = DockerSandboxService(config=cfg)
+
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+    )
+
+    with patch.object(service, "_ensure_image_available"), patch.object(service, "_prepare_sandbox_runtime"):
+        service.create_sandbox(request)
+
+    call_kwargs = mock_client.api.create_container.call_args.kwargs
+    assert call_kwargs["host_config"]["network_mode"] == "my-app-net"
+
+
+@patch("src.services.docker.docker")
+def test_validate_network_skipped_for_builtin_modes(mock_docker):
+    """_validate_network_exists does NOT call the Docker API for host or bridge modes."""
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    for mode in ("host", "bridge", "none"):
+        mock_client.networks.get.reset_mock()
+        cfg = _app_config()
+        cfg.docker.network_mode = mode
+        service = DockerSandboxService(config=cfg)
+        service._validate_network_exists()
+        mock_client.networks.get.assert_not_called()
+
+
 def test_expire_cleans_sidecar():
     service = DockerSandboxService(config=_app_config())
     mock_container = MagicMock()

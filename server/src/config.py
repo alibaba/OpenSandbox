@@ -378,9 +378,9 @@ class SecureRuntimeConfig(BaseModel):
 class DockerConfig(BaseModel):
     """Docker runtime specific settings."""
 
-    network_mode: Literal["host", "bridge"] = Field(
+    network_mode: str = Field(
         default="host",
-        description="Docker network mode for sandbox containers (host, bridge, ...).",
+        description="Docker network mode for sandbox containers (host, bridge, or a custom user-defined network name).",
     )
     api_timeout: Optional[int] = Field(
         default=None,
