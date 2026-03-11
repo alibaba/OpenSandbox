@@ -75,31 +75,60 @@ async def print_exec(sandbox: Sandbox, command: str) -> str | None:
 
 def ensure_named_volume() -> None:
     """Create the Docker named volume and seed it with test data."""
+    import re
+    
+    # Validate volume name contains only safe characters (alphanumeric, dash, underscore)
+    if not re.match(r'^[a-zA-Z0-9_-]+$', VOLUME_NAME):
+        raise ValueError(f"Invalid volume name: {VOLUME_NAME}")
+    
     print(f"  Ensuring Docker named volume '{VOLUME_NAME}' exists...")
     subprocess.run(
         ["docker", "volume", "rm", VOLUME_NAME],
         capture_output=True,
+        shell=False,
     )
     subprocess.run(
         ["docker", "volume", "create", VOLUME_NAME],
         check=True,
         capture_output=True,
+        shell=False,
     )
     # Seed the volume with a marker file and subpath test data
+    # Use separate commands instead of shell concatenation for better security
     subprocess.run(
-        [
-            "docker", "run", "--rm",
-            "-v", f"{VOLUME_NAME}:/data",
-            "alpine",
-            "sh", "-c",
-            "echo 'hello-from-named-volume' > /data/marker.txt && "
-            "mkdir -p /data/datasets/train && "
-            "echo 'id,value' > /data/datasets/train/data.csv && "
-            "echo '1,100' >> /data/datasets/train/data.csv && "
-            "echo '2,200' >> /data/datasets/train/data.csv",
-        ],
+        ["docker", "run", "--rm", "-v", f"{VOLUME_NAME}:/data", "alpine", 
+         "sh", "-c", "echo 'hello-from-named-volume' > /data/marker.txt"],
         check=True,
         capture_output=True,
+        shell=False,
+    )
+    subprocess.run(
+        ["docker", "run", "--rm", "-v", f"{VOLUME_NAME}:/data", "alpine",
+         "sh", "-c", "mkdir -p /data/datasets/train"],
+        check=True,
+        capture_output=True,
+        shell=False,
+    )
+    subprocess.run(
+        ["docker", "run", "--rm", "-v", f"{VOLUME_NAME}:/data", "alpine",
+         "sh", "-c", "echo 'id,value' > /data/datasets/train/data.csv"],
+        check=True,
+        capture_output=True,
+        shell=False,
+    )
+    subprocess.run(
+        ["docker", "run", "--rm", "-v", f"{VOLUME_NAME}:/data", "alpine",
+         "sh", "-c", "echo '1,100' >> /data/datasets/train/data.csv"],
+        check=True,
+        capture_output=True,
+        shell=False,
+    )
+    subprocess.run(
+        ["docker", "run", "--rm", "-v", f"{VOLUME_NAME}:/data", "alpine",
+         "sh", "-c", "echo '2,200' >> /data/datasets/train/data.csv"],
+        check=True,
+        capture_output=True,
+        shell=False,
     )
     print(f"  Created volume '{VOLUME_NAME}' with marker.txt and datasets/train/")
 
