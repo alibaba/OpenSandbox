@@ -138,8 +138,6 @@ class DockerSandboxService(SandboxService):
 
         self.execd_image = runtime_config.execd_image
         self.network_mode = (self.app_config.docker.network_mode or HOST_NETWORK_MODE).lower()
-        if self.network_mode not in {HOST_NETWORK_MODE, BRIDGE_NETWORK_MODE}:
-            raise ValueError(f"Unsupported Docker network_mode '{self.network_mode}'.")
         self._execd_archive_cache: Optional[bytes] = None
         self._api_timeout = self._resolve_api_timeout()
         try:
@@ -861,7 +859,7 @@ class DockerSandboxService(SandboxService):
             host_config_kwargs = self._base_host_config_kwargs(
                 mem_limit, nano_cpus, self.network_mode
             )
-            if self.network_mode == BRIDGE_NETWORK_MODE:
+            if self.network_mode != HOST_NETWORK_MODE:
                 host_execd_port, host_http_port = self._allocate_distinct_host_ports()
                 port_bindings = {
                     "44772": ("0.0.0.0", host_execd_port),
@@ -1506,7 +1504,8 @@ class DockerSandboxService(SandboxService):
         if self.network_mode == HOST_NETWORK_MODE:
             return Endpoint(endpoint=f"{public_host}:{port}")
 
-        if self.network_mode == BRIDGE_NETWORK_MODE:
+        # For bridge or any user-defined network, use port bindings
+        if self.network_mode != HOST_NETWORK_MODE:
             container = self._get_container_by_sandbox_id(sandbox_id)
             labels = container.attrs.get("Config", {}).get("Labels") or {}
             execd_host_port = self._parse_host_port_label(
