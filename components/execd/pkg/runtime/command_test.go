@@ -28,6 +28,7 @@ import (
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
@@ -37,46 +38,32 @@ func TestReadFromPos_SplitsOnCRAndLF(t *testing.T) {
 	mutex := &sync.Mutex{}
 
 	initial := "line1\nprog 10%\rprog 20%\rprog 30%\nlast\n"
-	if err := os.WriteFile(logFile, []byte(initial), 0o644); err != nil {
-		t.Fatalf("write initial file: %v", err)
-	}
+	require.NoError(t, os.WriteFile(logFile, []byte(initial), 0o644))
 
 	var got []string
 	c := &Controller{}
 	nextPos := c.readFromPos(mutex, logFile, 0, func(s string) { got = append(got, s) }, false)
 
 	want := []string{"line1", "prog 10%", "prog 20%", "prog 30%", "last"}
-	if len(got) != len(want) {
-		t.Fatalf("unexpected token count: got %d want %d", len(got), len(want))
-	}
+	require.Len(t, got, len(want))
 	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("token[%d]: got %q want %q", i, got[i], want[i])
-		}
+		require.Equal(t, want[i], got[i], "token[%d] mismatch", i)
 	}
 
 	// append more content and ensure incremental read only yields the new part
 	appendPart := "tail1\r\ntail2\n"
 	f, err := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		t.Fatalf("open append: %v", err)
-	}
-	if _, err := f.WriteString(appendPart); err != nil {
-		f.Close()
-		t.Fatalf("append write: %v", err)
-	}
+	require.NoError(t, err)
+	_, err = f.WriteString(appendPart)
+	require.NoError(t, err, "append write")
 	_ = f.Close()
 
 	got = got[:0]
 	c.readFromPos(mutex, logFile, nextPos, func(s string) { got = append(got, s) }, false)
 	want = []string{"tail1", "tail2"}
-	if len(got) != len(want) {
-		t.Fatalf("incremental token count: got %d want %d", len(got), len(want))
-	}
+	require.Len(t, got, len(want))
 	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("incremental token[%d]: got %q want %q", i, got[i], want[i])
-		}
+		require.Equal(t, want[i], got[i], "incremental token[%d] mismatch", i)
 	}
 }
 
@@ -86,20 +73,14 @@ func TestReadFromPos_LongLine(t *testing.T) {
 
 	// construct a single line larger than the default 64KB, but under 5MB
 	longLine := strings.Repeat("x", 256*1024) + "\n" // 256KB
-	if err := os.WriteFile(logFile, []byte(longLine), 0o644); err != nil {
-		t.Fatalf("write long line: %v", err)
-	}
+	require.NoError(t, os.WriteFile(logFile, []byte(longLine), 0o644))
 
 	var got []string
 	c := &Controller{}
 	c.readFromPos(&sync.Mutex{}, logFile, 0, func(s string) { got = append(got, s) }, false)
 
-	if len(got) != 1 {
-		t.Fatalf("expected one token, got %d", len(got))
-	}
-	if got[0] != strings.TrimSuffix(longLine, "\n") {
-		t.Fatalf("long line mismatch: got %d chars want %d chars", len(got[0]), len(longLine)-1)
-	}
+	require.Len(t, got, 1, "expected one token")
+	require.Equal(t, strings.TrimSuffix(longLine, "\n"), got[0], "long line mismatch")
 }
 
 func TestReadFromPos_FlushesTrailingLine(t *testing.T) {
@@ -159,7 +140,7 @@ func TestRunCommand_Echo(t *testing.T) {
 				stderrLines = append(stderrLines, s)
 			},
 			OnExecuteError: func(err *execute.ErrorOutput) {
-				t.Fatalf("unexpected error hook: %+v", err)
+				require.Failf(t, "unexpected error hook", "%+v", err)
 			},
 			OnExecuteComplete: func(_ time.Duration) {
 				completeCh <- struct{}{}
@@ -167,25 +148,17 @@ func TestRunCommand_Echo(t *testing.T) {
 		},
 	}
 
-	if err := c.runCommand(ctx, req); err != nil {
-		t.Fatalf("runCommand returned error: %v", err)
-	}
+	require.NoError(t, c.runCommand(ctx, req))
 
 	select {
 	case <-completeCh:
 	case <-time.After(2 * time.Second):
-		t.Fatalf("timeout waiting for completion hook")
+		require.Fail(t, "timeout waiting for completion hook")
 	}
 
-	if sessionID == "" {
-		t.Fatalf("expected session id to be set")
-	}
-	if len(stdoutLines) != 1 || stdoutLines[0] != "hello" {
-		t.Fatalf("unexpected stdout: %#v", stdoutLines)
-	}
-	if len(stderrLines) != 1 || stderrLines[0] != "errline" {
-		t.Fatalf("unexpected stderr: %#v", stderrLines)
-	}
+	require.NotEmpty(t, sessionID, "expected session id to be set")
+	require.Equal(t, []string{"hello"}, stdoutLines)
+	require.Equal(t, []string{"errline"}, stderrLines)
 }
 
 func TestRunCommand_Error(t *testing.T) {
@@ -227,31 +200,20 @@ func TestRunCommand_Error(t *testing.T) {
 		},
 	}
 
-	if err := c.runCommand(ctx, req); err != nil {
-		t.Fatalf("runCommand returned error: %v", err)
-	}
+	require.NoError(t, c.runCommand(ctx, req))
 
 	select {
 	case <-completeCh:
 	case <-time.After(2 * time.Second):
-		t.Fatalf("timeout waiting for completion hook")
+		require.Fail(t, "timeout waiting for completion hook")
 	}
 
-	if sessionID == "" {
-		t.Fatalf("expected session id to be set")
-	}
-	if len(stdoutLines) == 0 || stdoutLines[0] != "before" {
-		t.Fatalf("unexpected stdout: %#v", stdoutLines)
-	}
-	if len(stderrLines) != 0 {
-		t.Fatalf("expected no stderr, got %#v", stderrLines)
-	}
-	if gotErr == nil {
-		t.Fatalf("expected error hook to be called")
-	}
-	if gotErr.EName != "CommandExecError" || gotErr.EValue != "3" {
-		t.Fatalf("unexpected error payload: %+v", gotErr)
-	}
+	require.NotEmpty(t, sessionID, "expected session id to be set")
+	require.Equal(t, []string{"before"}, stdoutLines)
+	require.Empty(t, stderrLines, "expected no stderr")
+	require.NotNil(t, gotErr, "expected error hook to be called")
+	require.Equal(t, "CommandExecError", gotErr.EName)
+	require.Equal(t, "3", gotErr.EValue)
 }
 
 // TestStdLogDescriptor_AutoCreatesTempDir verifies that stdLogDescriptor
@@ -268,20 +230,14 @@ func TestStdLogDescriptor_AutoCreatesTempDir(t *testing.T) {
 
 	c := NewController("", "")
 	stdout, stderr, err := c.stdLogDescriptor("test-session")
-	if err != nil {
-		t.Fatalf("stdLogDescriptor failed with missing temp dir: %v", err)
-	}
+	require.NoError(t, err)
 	stdout.Close()
 	stderr.Close()
 
 	// The directory must have been created.
 	info, err := os.Stat(missingDir)
-	if err != nil {
-		t.Fatalf("expected temp dir to be created, stat error: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("expected %s to be a directory", missingDir)
-	}
+	require.NoError(t, err, "expected temp dir to be created, stat error")
+	require.True(t, info.IsDir(), "expected %s to be a directory", missingDir)
 }
 
 // TestCombinedOutputDescriptor_AutoCreatesTempDir verifies that
@@ -297,16 +253,10 @@ func TestCombinedOutputDescriptor_AutoCreatesTempDir(t *testing.T) {
 
 	c := NewController("", "")
 	f, err := c.combinedOutputDescriptor("test-session")
-	if err != nil {
-		t.Fatalf("combinedOutputDescriptor failed with missing temp dir: %v", err)
-	}
+	require.NoError(t, err)
 	f.Close()
 
 	info, err := os.Stat(missingDir)
-	if err != nil {
-		t.Fatalf("expected temp dir to be created, stat error: %v", err)
-	}
-	if !info.IsDir() {
-		t.Fatalf("expected %s to be a directory", missingDir)
-	}
+	require.NoError(t, err, "expected temp dir to be created, stat error")
+	require.True(t, info.IsDir(), "expected %s to be a directory", missingDir)
 }

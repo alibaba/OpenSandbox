@@ -23,6 +23,7 @@ import (
 
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildExecuteCommandRequestForwardsEnvs(t *testing.T) {
@@ -36,15 +37,9 @@ func TestBuildExecuteCommandRequestForwardsEnvs(t *testing.T) {
 
 	execReq := ctrl.buildExecuteCommandRequest(req)
 
-	if execReq.Language != runtime.Command {
-		t.Fatalf("expected runtime.Command, got %s", execReq.Language)
-	}
-	if !reflect.DeepEqual(execReq.Envs, envs) {
-		t.Fatalf("expected envs to be forwarded, got %#v", execReq.Envs)
-	}
-	if execReq.Cwd != "/tmp" {
-		t.Fatalf("expected Cwd to be forwarded, got %s", execReq.Cwd)
-	}
+	require.Equal(t, runtime.Command, execReq.Language)
+	require.True(t, reflect.DeepEqual(execReq.Envs, envs), "expected envs to be forwarded")
+	require.Equal(t, "/tmp", execReq.Cwd)
 }
 
 func TestBuildExecuteCommandRequestForwardsEnvsBackground(t *testing.T) {
@@ -58,12 +53,8 @@ func TestBuildExecuteCommandRequestForwardsEnvsBackground(t *testing.T) {
 
 	execReq := ctrl.buildExecuteCommandRequest(req)
 
-	if execReq.Language != runtime.BackgroundCommand {
-		t.Fatalf("expected runtime.BackgroundCommand, got %s", execReq.Language)
-	}
-	if !reflect.DeepEqual(execReq.Envs, envs) {
-		t.Fatalf("expected envs to be forwarded, got %#v", execReq.Envs)
-	}
+	require.Equal(t, runtime.BackgroundCommand, execReq.Language)
+	require.True(t, reflect.DeepEqual(execReq.Envs, envs), "expected envs to be forwarded")
 }
 
 func setupCommandController(method, path string) (*CodeInterpretingController, *httptest.ResponseRecorder) {
@@ -77,20 +68,12 @@ func TestGetCommandStatus_MissingID(t *testing.T) {
 
 	ctrl.GetCommandStatus()
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
-	}
+	require.Equal(t, http.StatusBadRequest, w.Code)
 
 	var resp model.ErrorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-	if resp.Code != model.ErrorCodeInvalidRequest {
-		t.Fatalf("unexpected error code: %s", resp.Code)
-	}
-	if resp.Message != "missing command execution id" {
-		t.Fatalf("unexpected message: %s", resp.Message)
-	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, model.ErrorCodeInvalidRequest, resp.Code)
+	require.Equal(t, "missing command execution id", resp.Message)
 }
 
 func TestGetBackgroundCommandOutput_MissingID(t *testing.T) {
@@ -98,18 +81,10 @@ func TestGetBackgroundCommandOutput_MissingID(t *testing.T) {
 
 	ctrl.GetBackgroundCommandOutput()
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
-	}
+	require.Equal(t, http.StatusBadRequest, w.Code)
 
 	var resp model.ErrorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to parse response: %v", err)
-	}
-	if resp.Code != model.ErrorCodeMissingQuery {
-		t.Fatalf("unexpected error code: %s", resp.Code)
-	}
-	if resp.Message != "missing command execution id" {
-		t.Fatalf("unexpected message: %s", resp.Message)
-	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, model.ErrorCodeMissingQuery, resp.Code)
+	require.Equal(t, "missing command execution id", resp.Message)
 }

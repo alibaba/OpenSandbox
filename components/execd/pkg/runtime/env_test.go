@@ -19,13 +19,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoadExtraEnvFromFileUnset(t *testing.T) {
 	t.Setenv("EXECD_ENVS", "")
-	if got := loadExtraEnvFromFile(); got != nil {
-		t.Fatalf("expected nil when EXECD_ENVS unset, got %#v", got)
-	}
+	require.Nil(t, loadExtraEnvFromFile(), "expected nil when EXECD_ENVS unset")
 }
 
 func TestLoadExtraEnvFromFileParsesAndExpands(t *testing.T) {
@@ -44,24 +44,15 @@ func TestLoadExtraEnvFromFileParsesAndExpands(t *testing.T) {
 		"",
 	}, "\n")
 
-	if err := os.WriteFile(envFile, []byte(content), 0o644); err != nil {
-		t.Fatalf("write env file: %v", err)
-	}
+	require.NoError(t, os.WriteFile(envFile, []byte(content), 0o644))
 
 	got := loadExtraEnvFromFile()
-	if len(got) != 3 {
-		t.Fatalf("expected 3 entries, got %#v", got)
-	}
-
-	if got["FOO"] != "bar" {
-		t.Fatalf("FOO mismatch, got %q", got["FOO"])
-	}
-	if got["PATH"] != "/opt/base/bin" {
-		t.Fatalf("PATH expansion mismatch, got %q", got["PATH"])
-	}
-	if val, ok := got["EMPTY"]; !ok || val != "" {
-		t.Fatalf("EMPTY mismatch, got %q (present=%v)", val, ok)
-	}
+	require.Len(t, got, 3)
+	require.Equal(t, "bar", got["FOO"])
+	require.Equal(t, "/opt/base/bin", got["PATH"])
+	val, ok := got["EMPTY"]
+	require.True(t, ok)
+	require.Equal(t, "", val)
 }
 
 func TestLoadExtraEnvFromFileMissingFile(t *testing.T) {
@@ -69,9 +60,7 @@ func TestLoadExtraEnvFromFileMissingFile(t *testing.T) {
 	envFile := filepath.Join(dir, "does-not-exist")
 	t.Setenv("EXECD_ENVS", envFile)
 
-	if got := loadExtraEnvFromFile(); got != nil {
-		t.Fatalf("expected nil for missing file, got %#v", got)
-	}
+	require.Nil(t, loadExtraEnvFromFile(), "expected nil for missing file")
 }
 
 func TestMergeEnvsOverlaysExtra(t *testing.T) {
@@ -87,18 +76,10 @@ func TestMergeEnvsOverlaysExtra(t *testing.T) {
 		}
 	}
 
-	if len(got) != 3 {
-		t.Fatalf("expected 3 entries, got %#v", got)
-	}
-	if got["A"] != "1" {
-		t.Fatalf("A mismatch, got %q", got["A"])
-	}
-	if got["B"] != "override" {
-		t.Fatalf("B mismatch, got %q", got["B"])
-	}
-	if got["C"] != "3" {
-		t.Fatalf("C mismatch, got %q", got["C"])
-	}
+	require.Len(t, got, 3)
+	require.Equal(t, "1", got["A"])
+	require.Equal(t, "override", got["B"])
+	require.Equal(t, "3", got["C"])
 }
 
 func TestMergeExtraEnvsMergesAndOverrides(t *testing.T) {
@@ -107,18 +88,10 @@ func TestMergeExtraEnvsMergesAndOverrides(t *testing.T) {
 
 	got := mergeExtraEnvs(fromFile, fromRequest)
 
-	if len(got) != 3 {
-		t.Fatalf("expected 3 entries, got %#v", got)
-	}
-	if got["A"] != "1" {
-		t.Fatalf("A mismatch, got %q", got["A"])
-	}
-	if got["B"] != "override" {
-		t.Fatalf("B mismatch, got %q", got["B"])
-	}
-	if got["C"] != "3" {
-		t.Fatalf("C mismatch, got %q", got["C"])
-	}
+	require.Len(t, got, 3)
+	require.Equal(t, "1", got["A"])
+	require.Equal(t, "override", got["B"])
+	require.Equal(t, "3", got["C"])
 }
 
 func TestMergeExtraEnvsHandlesNilFromFile(t *testing.T) {
@@ -126,7 +99,6 @@ func TestMergeExtraEnvsHandlesNilFromFile(t *testing.T) {
 
 	got := mergeExtraEnvs(nil, fromRequest)
 
-	if len(got) != 1 || got["ONLY"] != "request" {
-		t.Fatalf("unexpected merge result: %#v", got)
-	}
+	require.Len(t, got, 1)
+	require.Equal(t, "request", got["ONLY"])
 }
