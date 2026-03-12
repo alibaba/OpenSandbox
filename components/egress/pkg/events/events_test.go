@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/stretchr/testify/require"
 )
 
@@ -103,6 +104,11 @@ func TestWebhookSubscriberSendsPayload(t *testing.T) {
 		gotMethod  string
 		gotPayload webhookPayload
 	)
+	const (
+		sandboxIDInitial = "sandbox-test"
+		sandboxIDLater   = "sandbox-updated"
+	)
+	t.Setenv(constants.ENVSandboxID, sandboxIDInitial)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotMethod = r.Method
@@ -115,6 +121,7 @@ func TestWebhookSubscriberSendsPayload(t *testing.T) {
 
 	sub := NewWebhookSubscriber(server.URL)
 	require.NotNil(t, sub, "webhook subscriber should not be nil")
+	t.Setenv(constants.ENVSandboxID, sandboxIDLater)
 
 	ts := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	ev := BlockedEvent{Hostname: "Example.com.", Timestamp: ts}
@@ -123,5 +130,6 @@ func TestWebhookSubscriberSendsPayload(t *testing.T) {
 	require.Equal(t, http.MethodPost, gotMethod, "expected POST")
 	require.Equal(t, ev.Hostname, gotPayload.Hostname, "expected hostname")
 	require.Equal(t, webhookSource, gotPayload.Source, "expected source")
+	require.Equal(t, sandboxIDInitial, gotPayload.SandboxID, "expected sandboxId captured at init")
 	require.NotEmpty(t, gotPayload.Timestamp, "expected timestamp to be set")
 }

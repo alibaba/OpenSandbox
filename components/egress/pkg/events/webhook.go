@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 )
 
@@ -40,12 +42,14 @@ type WebhookSubscriber struct {
 	timeout    time.Duration
 	maxRetries int
 	backoff    time.Duration
+	sandboxID  string
 }
 
 type webhookPayload struct {
 	Hostname  string `json:"hostname"`
 	Timestamp string `json:"timestamp"`
 	Source    string `json:"source"`
+	SandboxID string `json:"sandboxId"`
 }
 
 // NewWebhookSubscriber builds a webhook subscriber with hardcoded timeout/retry settings.
@@ -59,6 +63,7 @@ func NewWebhookSubscriber(url string) *WebhookSubscriber {
 		timeout:    defaultWebhookTimeout,
 		maxRetries: defaultWebhookRetries,
 		backoff:    defaultWebhookBackoff,
+		sandboxID:  os.Getenv(constants.ENVSandboxID),
 	}
 }
 
@@ -68,6 +73,7 @@ func (w *WebhookSubscriber) HandleBlocked(ctx context.Context, ev BlockedEvent) 
 		Hostname:  ev.Hostname,
 		Timestamp: ev.Timestamp.UTC().Format(time.RFC3339),
 		Source:    webhookSource,
+		SandboxID: w.sandboxID,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
