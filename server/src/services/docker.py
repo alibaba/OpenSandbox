@@ -1778,7 +1778,7 @@ class DockerSandboxService(SandboxService):
         )
 
         sidecar_container = None
-        sidecar_id: Optional[str] = None
+        sidecar_container_id: Optional[str] = None
         try:
             with self._docker_operation("create egress sidecar", sandbox_id):
                 sidecar_resp = self.docker_client.api.create_container(
@@ -1790,8 +1790,8 @@ class DockerSandboxService(SandboxService):
                     # Expose the ports that have host bindings so Docker publishes them in bridge mode.
                     ports=["44772", "8080"],
                 )
-            sidecar_id = sidecar_resp.get("Id")
-            if not sidecar_id:
+            sidecar_container_id = sidecar_resp.get("Id")
+            if not sidecar_container_id:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail={
@@ -1799,7 +1799,7 @@ class DockerSandboxService(SandboxService):
                         "message": "Docker did not return an egress sidecar container ID.",
                     },
                 )
-            sidecar_container = self.docker_client.containers.get(sidecar_id)
+            sidecar_container = self.docker_client.containers.get(sidecar_container_id)
             with self._docker_operation("start egress sidecar", sandbox_id):
                 sidecar_container.start()
             return sidecar_container
@@ -1814,10 +1814,10 @@ class DockerSandboxService(SandboxService):
                         sandbox_id,
                         cleanup_exc,
                     )
-            elif sidecar_id:
+            elif sidecar_container_id:
                 try:
                     with self._docker_operation("cleanup egress sidecar (API)", sandbox_id):
-                        self.docker_client.api.remove_container(sidecar_id, force=True)
+                        self.docker_client.api.remove_container(sidecar_container_id, force=True)
                 except DockerException as cleanup_exc:
                     logger.warning(
                         "Failed to cleanup egress sidecar for sandbox %s: %s",
