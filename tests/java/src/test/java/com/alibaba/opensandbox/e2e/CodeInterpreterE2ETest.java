@@ -22,9 +22,9 @@ import com.alibaba.opensandbox.codeinterpreter.CodeInterpreter;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.CodeContext;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.RunCodeRequest;
 import com.alibaba.opensandbox.codeinterpreter.domain.models.execd.executions.SupportedLanguage;
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.*;
 import com.alibaba.opensandbox.sandbox.Sandbox;
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.*;
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.*;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -591,16 +591,15 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
     }
 
     /**
-     * Run a code request with a per-execution timeout so that a single hanging
-     * SSE stream cannot block the entire test for the full JUnit timeout.
+     * Run a code request with a per-execution timeout so that a single hanging SSE stream cannot
+     * block the entire test for the full JUnit timeout.
      */
     private Execution runWithTimeout(RunCodeRequest request, Duration timeout) {
         try {
             return CompletableFuture.supplyAsync(() -> codeInterpreter.codes().run(request))
                     .get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
-            throw new AssertionError(
-                    "Code execution did not complete within " + timeout, e);
+            throw new AssertionError("Code execution did not complete within " + timeout, e);
         } catch (ExecutionException e) {
             Throwable cause = e.getCause();
             if (cause instanceof RuntimeException) {
@@ -943,8 +942,11 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         // Verify the interrupt was effective: execution finished much faster
         // than the full 20 s run.  Terminal events (complete/error) may or may
         // not arrive depending on how quickly the server closed the stream.
-        assertTrue(elapsed < 90_000,
-                "Execution should have finished promptly after interrupt (elapsed=" + elapsed + "ms)");
+        assertTrue(
+                elapsed < 90_000,
+                "Execution should have finished promptly after interrupt (elapsed="
+                        + elapsed
+                        + "ms)");
 
         // Test 2: Java long-running execution with interrupt
         logger.info("Testing Java interrupt functionality");

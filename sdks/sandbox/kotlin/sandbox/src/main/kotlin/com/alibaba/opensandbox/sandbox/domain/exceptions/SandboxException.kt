@@ -89,6 +89,54 @@ class InvalidArgumentException(
     )
 
 /**
+ * Thrown when acquire is called with FAIL_FAST policy and no idle sandbox is available.
+ */
+class PoolEmptyException(
+    message: String? = "No idle sandbox available and policy is FAIL_FAST",
+    cause: Throwable? = null,
+) : SandboxException(
+        message = message,
+        cause = cause,
+        error = SandboxError(SandboxError.POOL_EMPTY, message),
+    )
+
+/**
+ * Thrown when the pool state store is unavailable during idle take/put/lock operations.
+ */
+class PoolStateStoreUnavailableException(
+    message: String? = null,
+    cause: Throwable? = null,
+) : SandboxException(
+        message = message,
+        cause = cause,
+        error = SandboxError(SandboxError.POOL_STATE_STORE_UNAVAILABLE, message),
+    )
+
+/**
+ * Thrown when atomic take or lock-update conflicts occur in the state store.
+ */
+class PoolStateStoreContentionException(
+    message: String? = null,
+    cause: Throwable? = null,
+) : SandboxException(
+        message = message,
+        cause = cause,
+        error = SandboxError(SandboxError.POOL_STATE_STORE_CONTENTION, message),
+    )
+
+/**
+ * Thrown when acquire is called while pool is not in RUNNING state.
+ */
+class PoolNotRunningException(
+    message: String? = "Pool is not running",
+    cause: Throwable? = null,
+) : SandboxException(
+        message = message,
+        cause = cause,
+        error = SandboxError(SandboxError.POOL_NOT_RUNNING, message),
+    )
+
+/**
  * Defines standardized common error codes and messages for the Sandbox SDK.
  */
 data class SandboxError(
@@ -101,5 +149,17 @@ data class SandboxError(
         const val UNHEALTHY = "UNHEALTHY"
         const val INVALID_ARGUMENT = "INVALID_ARGUMENT"
         const val UNEXPECTED_RESPONSE = "UNEXPECTED_RESPONSE"
+
+        /** Pool-specific: no idle sandbox and policy is FAIL_FAST. */
+        const val POOL_EMPTY = "POOL_EMPTY"
+
+        /** Pool state store unavailable during operations. */
+        const val POOL_STATE_STORE_UNAVAILABLE = "POOL_STATE_STORE_UNAVAILABLE"
+
+        /** Pool state store contention (atomic take or lock conflicts). */
+        const val POOL_STATE_STORE_CONTENTION = "POOL_STATE_STORE_CONTENTION"
+
+        /** Pool is not in RUNNING state when acquire is requested. */
+        const val POOL_NOT_RUNNING = "POOL_NOT_RUNNING"
     }
 }
