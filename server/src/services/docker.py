@@ -63,6 +63,7 @@ from src.services.constants import (
     SANDBOX_EXPIRES_AT_LABEL,
     SANDBOX_HTTP_PORT_LABEL,
     SANDBOX_ID_LABEL,
+    SANDBOX_OSSFS_MOUNTS_LABEL,
     SandboxErrorCodes,
 )
 from src.services.helpers import (
@@ -71,6 +72,7 @@ from src.services.helpers import (
     parse_nano_cpus,
     parse_timestamp,
 )
+from src.services.ossfs_mixin import OSSFSMixin
 from src.services.sandbox_service import SandboxService
 from src.services.runtime_resolver import SecureRuntimeResolver
 from src.services.validators import (
@@ -111,7 +113,7 @@ class PendingSandbox:
     status: SandboxStatus
 
 
-class DockerSandboxService(SandboxService):
+class DockerSandboxService(OSSFSMixin, SandboxService):
     """
     Docker-based implementation of SandboxService.
 
@@ -187,6 +189,8 @@ class DockerSandboxService(SandboxService):
         self._pending_sandboxes: Dict[str, PendingSandbox] = {}
         self._pending_lock = Lock()
         self._pending_cleanup_timers: Dict[str, Timer] = {}
+        self._ossfs_mount_lock = Lock()
+        self._ossfs_mount_ref_counts: Dict[str, int] = {}
         self._restore_existing_sandboxes()
 
         # Initialize secure runtime resolver
@@ -294,6 +298,7 @@ class DockerSandboxService(SandboxService):
 
     def _expire_sandbox(self, sandbox_id: str) -> None:
         """Timer callback to terminate expired sandboxes."""
+        mount_keys: list[str] = []
         try:
             container = self._get_container_by_sandbox_id(sandbox_id)
         except HTTPException as exc:
@@ -303,6 +308,15 @@ class DockerSandboxService(SandboxService):
                 )
             self._remove_expiration_tracking(sandbox_id)
             return
+
+        labels = container.attrs.get("Config", {}).get("Labels") or {}
+        mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+        try:
+            parsed_mount_keys = json.loads(mount_keys_raw)
+            if isinstance(parsed_mount_keys, list):
+                mount_keys = [key for key in parsed_mount_keys if isinstance(key, str) and key]
+        except (TypeError, json.JSONDecodeError):
+            mount_keys = []
 
         try:
             state = container.attrs.get("State", {})
@@ -319,6 +333,7 @@ class DockerSandboxService(SandboxService):
         self._remove_expiration_tracking(sandbox_id)
         # Ensure sidecar is also cleaned up on expiration
         self._cleanup_egress_sidecar(sandbox_id)
+        self._release_ossfs_mounts(mount_keys)
 
     def _restore_existing_sandboxes(self) -> None:
         """On startup, rebuild expiration timers for containers already running."""
@@ -330,6 +345,7 @@ class DockerSandboxService(SandboxService):
 
         restored = 0
         seen_sidecars: set[str] = set()
+        restored_mount_refs: dict[str, int] = {}
         now = datetime.now(timezone.utc)
         for container in containers:
             labels = container.attrs.get("Config", {}).get("Labels") or {}
@@ -358,6 +374,15 @@ class DockerSandboxService(SandboxService):
                 continue
 
             self._schedule_expiration(sandbox_id, expires_at)
+            mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+            try:
+                mount_keys = json.loads(mount_keys_raw)
+            except (TypeError, json.JSONDecodeError):
+                mount_keys = []
+            if isinstance(mount_keys, list):
+                for key in mount_keys:
+                    if isinstance(key, str) and key:
+                        restored_mount_refs[key] = restored_mount_refs.get(key, 0) + 1
             restored += 1
 
         # Cleanup orphan sidecars (no matching sandbox container)
@@ -374,6 +399,8 @@ class DockerSandboxService(SandboxService):
 
         if restored:
             logger.info("Restored expiration timers for %d sandbox(es).", restored)
+        with self._ossfs_mount_lock:
+            self._ossfs_mount_ref_counts = restored_mount_refs
 
     def _fetch_execd_archive(self) -> bytes:
         """Fetch (and memoize) the execd archive from the platform container."""
@@ -712,6 +739,12 @@ class DockerSandboxService(SandboxService):
             return
 
         for container in containers:
+            labels = container.attrs.get("Config", {}).get("Labels") or {}
+            mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+            try:
+                mount_keys: list[str] = json.loads(mount_keys_raw)
+            except (TypeError, json.JSONDecodeError):
+                mount_keys = []
             try:
                 with self._docker_operation("cleanup failed sandbox container", sandbox_id):
                     container.remove(force=True)
@@ -722,6 +755,8 @@ class DockerSandboxService(SandboxService):
                     container.id,
                     exc,
                 )
+            finally:
+                self._release_ossfs_mounts(mount_keys)
         # Always attempt to cleanup sidecar as well
         self._cleanup_egress_sidecar(sandbox_id)
 
@@ -830,6 +865,14 @@ class DockerSandboxService(SandboxService):
         image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
         mem_limit, nano_cpus = self._resolve_resource_limits(request)
 
+        # Prepare OSSFS mounts first so binds can reference mounted host paths.
+        ossfs_mount_keys = self._prepare_ossfs_mounts(request.volumes)
+        if ossfs_mount_keys:
+            labels[SANDBOX_OSSFS_MOUNTS_LABEL] = json.dumps(
+                ossfs_mount_keys,
+                separators=(",", ":"),
+            )
+
         # Build volume bind mounts from request volumes.
         # pvc_inspect_cache carries Docker volume inspect data from the
         # validation phase, avoiding a redundant API call.
@@ -896,6 +939,7 @@ class DockerSandboxService(SandboxService):
                         sandbox_id,
                         cleanup_exc,
                     )
+            self._release_ossfs_mounts(ossfs_mount_keys)
             raise
 
         status_info = SandboxStatus(
@@ -972,6 +1016,8 @@ class DockerSandboxService(SandboxService):
             elif volume.pvc is not None:
                 vol_info = self._validate_pvc_volume(volume)
                 pvc_inspect_cache[volume.pvc.claim_name] = vol_info
+            elif volume.ossfs is not None:
+                self._validate_ossfs_volume(volume)
 
         return pvc_inspect_cache
 
@@ -1193,6 +1239,8 @@ class DockerSandboxService(SandboxService):
           Format (with subPath): ``/var/lib/docker/volumes/…/subdir:/container/path:ro|rw``
           When subPath is specified, the volume's host Mountpoint (obtained from
           ``pvc_inspect_cache``) is used to produce a standard bind mount.
+        - ``ossfs``: host bind mount to runtime-mounted OSSFS path.
+          Format: ``/mnt/ossfs/<bucket>/<subPath?>:/container/path:ro|rw``
 
         Each mount string uses ``:ro`` for read-only and ``:rw`` for read-write
         (default).
@@ -1244,6 +1292,9 @@ class DockerSandboxService(SandboxService):
                     binds.append(
                         f"{volume.pvc.claim_name}:{container_path}:{mode}"
                     )
+            elif volume.ossfs is not None:
+                _, host_path = self._resolve_ossfs_paths(volume)
+                binds.append(f"{host_path}:{container_path}:{mode}")
 
         return binds
 
@@ -1349,6 +1400,12 @@ class DockerSandboxService(SandboxService):
             HTTPException: If sandbox not found or deletion fails
         """
         container = self._get_container_by_sandbox_id(sandbox_id)
+        labels = container.attrs.get("Config", {}).get("Labels") or {}
+        mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+        try:
+            mount_keys: list[str] = json.loads(mount_keys_raw)
+        except (TypeError, json.JSONDecodeError):
+            mount_keys = []
         try:
             try:
                 with self._docker_operation("kill sandbox container", sandbox_id):
@@ -1370,6 +1427,7 @@ class DockerSandboxService(SandboxService):
         finally:
             self._remove_expiration_tracking(sandbox_id)
             self._cleanup_egress_sidecar(sandbox_id)
+            self._release_ossfs_mounts(mount_keys)
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         """

@@ -7,6 +7,7 @@ Examples for common OpenSandbox use cases. Each subdirectory contains runnable c
 - <img src="https://kubernetes.io/icons/favicon-32.png" alt="Kubernetes" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**agent-sandbox**](agent-sandbox): Create a kubernetes-sigs/agent-sandbox instance and run a command
 - 🧪 [**code-interpreter**](code-interpreter): Code Interpreter SDK singleton example
 - 💾 [**host-volume-mount**](host-volume-mount): Mount host directories into sandboxes (read-write, read-only, subpath)
+- ☁️ [**docker-ossfs-volume-mount**](docker-ossfs-volume-mount): Mount OSSFS volumes in Docker runtime (inline credentials, subpath, sharing)
 - 🎯 [**rl-training**](rl-training): Reinforcement learning training loop inside a sandbox
 - <img src="https://img.shields.io/badge/-%20-D97757?logo=claude&logoColor=white&style=flat-square" alt="Claude" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**claude-code**](claude-code): Call Claude (Anthropic) API/CLI within the sandbox
 - <img src="https://cli.iflow.cn/img/favicon.ico" alt="iFlow" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**iflow-cli**](iflow-cli): CLI invocation template for iFlow/custom HTTP LLM services

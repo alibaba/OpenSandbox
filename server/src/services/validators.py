@@ -31,7 +31,7 @@ import re
 from src.services.constants import SandboxErrorCodes
 
 if TYPE_CHECKING:
-    from src.api.schema import NetworkPolicy, Volume
+    from src.api.schema import NetworkPolicy, OSSFS, Volume
     from src.config import EgressConfig
 
 
@@ -390,6 +390,70 @@ def ensure_valid_pvc_name(claim_name: str) -> None:
         )
 
 
+def ensure_valid_ossfs_volume(ossfs: "OSSFS") -> None:
+    """
+    Validate OSSFS backend fields.
+
+    Args:
+        ossfs: OSSFS backend model.
+
+    Raises:
+        HTTPException: When any OSSFS field is invalid.
+    """
+    if not isinstance(ossfs.bucket, str) or not ossfs.bucket.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_OSSFS_BUCKET,
+                "message": "OSSFS bucket cannot be empty.",
+            },
+        )
+
+    if not ossfs.endpoint.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_OSSFS_ENDPOINT,
+                "message": "OSSFS endpoint cannot be empty.",
+            },
+        )
+
+    if ossfs.options is not None:
+        for opt in ossfs.options:
+            if not isinstance(opt, str) or not opt.strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_OSSFS_OPTION,
+                        "message": "OSSFS options must be non-empty strings.",
+                    },
+                )
+            normalized = opt.strip()
+            if normalized.startswith("-"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_OSSFS_OPTION,
+                        "message": (
+                            "OSSFS options must be raw option payloads without '-' prefix "
+                            "(e.g. 'allow_other', 'uid=1000')."
+                        ),
+                    },
+                )
+
+    if not ossfs.access_key_id or not ossfs.access_key_secret:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_OSSFS_CREDENTIALS,
+                "message": (
+                    "OSSFS inline credentials are required: "
+                    "accessKeyId and accessKeySecret must be provided."
+                ),
+            },
+        )
+
+
 def ensure_egress_configured(
     network_policy: Optional["NetworkPolicy"],
     egress_config: Optional["EgressConfig"],
@@ -432,7 +496,7 @@ def ensure_volumes_valid(
     - Exactly one backend per volume
     - Valid mount paths
     - Valid subPaths
-    - Backend-specific validation (host path, pvc name)
+    - Backend-specific validation (host path, pvc name, ossfs config)
 
     Args:
         volumes: List of volumes to validate (optional).
@@ -470,6 +534,7 @@ def ensure_volumes_valid(
         backends_specified = sum([
             volume.host is not None,
             volume.pvc is not None,
+            volume.ossfs is not None,
         ])
 
         if backends_specified == 0:
@@ -477,7 +542,10 @@ def ensure_volumes_valid(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": SandboxErrorCodes.INVALID_VOLUME_BACKEND,
-                    "message": f"Volume '{volume.name}' must specify exactly one backend (host, pvc), but none was provided.",
+                    "message": (
+                        f"Volume '{volume.name}' must specify exactly one backend "
+                        "(host, pvc, ossfs), but none was provided."
+                    ),
                 },
             )
 
@@ -486,7 +554,10 @@ def ensure_volumes_valid(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": SandboxErrorCodes.INVALID_VOLUME_BACKEND,
-                    "message": f"Volume '{volume.name}' must specify exactly one backend (host, pvc), but multiple were provided.",
+                    "message": (
+                        f"Volume '{volume.name}' must specify exactly one backend "
+                        "(host, pvc, ossfs), but multiple were provided."
+                    ),
                 },
             )
 
@@ -496,6 +567,9 @@ def ensure_volumes_valid(
 
         if volume.pvc is not None:
             ensure_valid_pvc_name(volume.pvc.claim_name)
+
+        if volume.ossfs is not None:
+            ensure_valid_ossfs_volume(volume.ossfs)
 
 
 __all__ = [
@@ -509,5 +583,6 @@ __all__ = [
     "ensure_valid_sub_path",
     "ensure_valid_host_path",
     "ensure_valid_pvc_name",
+    "ensure_valid_ossfs_volume",
     "ensure_volumes_valid",
 ]

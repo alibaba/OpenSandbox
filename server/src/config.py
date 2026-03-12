@@ -292,6 +292,14 @@ class StorageConfig(BaseModel):
             "Each entry must be an absolute path (e.g., '/data/opensandbox')."
         ),
     )
+    ossfs_mount_root: str = Field(
+        default="/mnt/ossfs",
+        description=(
+            "Host-side root directory where OSSFS mounts are resolved. "
+            "Resolved OSSFS host paths are built as "
+            "'ossfs_mount_root/<bucket>/<volume.subPath?>'."
+        ),
+    )
 
 
 class EgressConfig(BaseModel):

@@ -90,7 +90,6 @@ jobs:
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
-      JAVA_VERSION: "17.0.14+7"
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -102,24 +101,17 @@ jobs:
           uv --version
           uv run python --version
 
-      - name: Set up JDK
-        run: |
-          # Adoptium Temurin JDK 17 for Linux x64
-          JAVA_MAJOR="${JAVA_VERSION%%.*}"
-          JAVA_URL_VERSION=$(echo "${JAVA_VERSION}" | sed 's/+/%2B/')
-          JAVA_DIR="/home/admin/.local/jdk-${JAVA_VERSION}"
-          if [ -x "${JAVA_DIR}/bin/java" ]; then
-            echo "JDK ${JAVA_VERSION} already cached"
-          else
-            echo "Downloading Temurin JDK ${JAVA_VERSION}..."
-            mkdir -p /home/admin/.local
-            curl -fsSL "https://api.adoptium.net/v3/binary/version/jdk-${JAVA_URL_VERSION}/linux/x64/jdk/hotspot/normal/eclipse?project=jdk" \
-              | tar -xzf - -C /home/admin/.local/
-          fi
-          echo "${JAVA_DIR}/bin" >> "$GITHUB_PATH"
-          echo "JAVA_HOME=${JAVA_DIR}" >> "$GITHUB_ENV"
-          export PATH="${JAVA_DIR}/bin:${PATH}"
-          java -version
+      - name: Set up JDK 8
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "8"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
 
       - name: Clean up previous E2E resources
         run: |
@@ -131,6 +123,7 @@ jobs:
           GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-user-home
         run: |
           set -e
+          export GRADLE_OPTS="-Dorg.gradle.java.installations.auto-detect=true -Dorg.gradle.java.installations.auto-download=false -Dorg.gradle.java.installations.paths=${JAVA_HOME_8_X64},${JAVA_HOME_17_X64}"
 
           # Create config file
           cat <<EOF > ~/.sandbox.toml
