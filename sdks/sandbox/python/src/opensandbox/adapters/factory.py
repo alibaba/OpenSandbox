@@ -28,6 +28,7 @@ from opensandbox.adapters.command_adapter import CommandsAdapter
 from opensandbox.adapters.filesystem_adapter import FilesystemAdapter
 from opensandbox.adapters.health_adapter import HealthAdapter
 from opensandbox.adapters.metrics_adapter import MetricsAdapter
+from opensandbox.adapters.pools_adapter import PoolsAdapter
 from opensandbox.adapters.sandboxes_adapter import SandboxesAdapter
 from opensandbox.config import ConnectionConfig
 from opensandbox.models.sandboxes import SandboxEndpoint
@@ -35,6 +36,7 @@ from opensandbox.services.command import Commands
 from opensandbox.services.filesystem import Filesystem
 from opensandbox.services.health import Health
 from opensandbox.services.metrics import Metrics
+from opensandbox.services.pool import Pools
 from opensandbox.services.sandbox import Sandboxes
 
 
@@ -111,3 +113,11 @@ class AdapterFactory:
             Service for collecting sandbox resource usage metrics
         """
         return MetricsAdapter(self.connection_config, endpoint)
+
+    def create_pool_service(self) -> Pools:
+        """Create a pool management service for CRUD operations on resource pools.
+
+        Returns:
+            Service for creating, listing, updating, and deleting pre-warmed pools
+        """
+        return PoolsAdapter(self.connection_config)
