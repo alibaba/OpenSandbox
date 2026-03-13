@@ -1,7 +1,7 @@
 ---
 title: Pause and Resume via Rootfs Snapshot
 authors:
-  - "@opensandbox-maintainers"
+  - "@fengcone"
 creation-date: 2026-03-11
 last-updated: 2026-03-13
 status: draft
@@ -155,7 +155,8 @@ SandboxSnapshot (new, one per sandboxId)
   |- spec.sourcePodName
   |- spec.sourceNodeName
   |- spec.imageUri
-  |- spec.imagePullSecretName
+  |- spec.snapshotPushSecretName
+  |- spec.resumeImagePullSecretName
   |- spec.resumeTemplate
   |- status.phase                 # Pending | Committing | Pushing | Ready | Failed
   |- status.readyAt
@@ -181,7 +182,7 @@ sequenceDiagram
 
     Client->>Server: POST /sandboxes/{id}/pause
     Server->>Batch: Read live BatchSandbox and Pod info
-    Server->>Snapshot: Create/Update SandboxSnapshot\n(sandboxId, podName, nodeName, imageUri, imagePullSecretRef)
+    Server->>Snapshot: Create/Update SandboxSnapshot\n(sandboxId, podName, nodeName, imageUri, pushSecretRef, resumePullSecretRef)
     Server-->>Client: 202 Accepted
     Ctrl->>Job: Create same-node commit Job Pod
     Job->>Registry: Push snapshot image
@@ -225,6 +226,9 @@ sequenceDiagram
   This revision only supports `Rootfs`.
 - Snapshot image URI should be stable for the single retained snapshot, for
   example `<snapshotRegistry>/<sandboxId>:snapshot`.
+- Snapshot push authentication and resume-time image pull authentication are
+  modeled separately. They may reference the same Kubernetes Secret in some
+  deployments, but the design must not assume they are identical.
 - Because the original `BatchSandbox` is deleted, resume cannot rely on
   `imageUri` alone. `SandboxSnapshot` must retain enough `resumeTemplate`
   information for the server to reconstruct a new `BatchSandbox`.
@@ -263,7 +267,8 @@ Suggested request shape:
 pausePolicy:
   snapshotType: Rootfs
   snapshotRegistry: registry.example.com/sandbox-snapshots
-  imagePullSecretName: snapshot-registry-secret
+  snapshotPushSecretName: snapshot-registry-push-secret
+  resumeImagePullSecretName: snapshot-registry-pull-secret
 ```
 
 `pausePolicy.snapshotType` is reserved for future expansion and currently only
@@ -276,9 +281,10 @@ Pause policy remains part of the live sandbox workload definition:
 
 ```go
 type PausePolicy struct {
-    SnapshotType       string `json:"snapshotType,omitempty"` // Rootfs today, VMSnapshot reserved
-    SnapshotRegistry    string `json:"snapshotRegistry"`
-    ImagePullSecretName string `json:"imagePullSecretName,omitempty"`
+    SnapshotType              string `json:"snapshotType,omitempty"` // Rootfs today, VMSnapshot reserved
+    SnapshotRegistry          string `json:"snapshotRegistry"`
+    SnapshotPushSecretName    string `json:"snapshotPushSecretName,omitempty"`
+    ResumeImagePullSecretName string `json:"resumeImagePullSecretName,omitempty"`
 }
 
 type BatchSandboxSpec struct {
@@ -305,15 +311,16 @@ const (
 )
 
 type SandboxSnapshotSpec struct {
-    SandboxID              string               `json:"sandboxId"`
-    Policy                 SnapshotPolicy       `json:"policy"`
-    SourceBatchSandboxName string               `json:"sourceBatchSandboxName"`
-    SourcePodName          string               `json:"sourcePodName"`
-    SourceNodeName         string               `json:"sourceNodeName"`
-    ImageURI               string               `json:"imageUri"`
-    ImagePullSecretName    string               `json:"imagePullSecretName,omitempty"`
-    ResumeTemplate         *runtime.RawExtension `json:"resumeTemplate,omitempty"`
-    PausedAt               metav1.Time          `json:"pausedAt"`
+    SandboxID                 string                `json:"sandboxId"`
+    Policy                    SnapshotPolicy        `json:"policy"`
+    SourceBatchSandboxName    string                `json:"sourceBatchSandboxName"`
+    SourcePodName             string                `json:"sourcePodName"`
+    SourceNodeName            string                `json:"sourceNodeName"`
+    ImageURI                  string                `json:"imageUri"`
+    SnapshotPushSecretName    string                `json:"snapshotPushSecretName,omitempty"`
+    ResumeImagePullSecretName string                `json:"resumeImagePullSecretName,omitempty"`
+    ResumeTemplate            *runtime.RawExtension `json:"resumeTemplate,omitempty"`
+    PausedAt                  metav1.Time           `json:"pausedAt"`
 }
 
 type SandboxSnapshotStatus struct {
@@ -336,6 +343,10 @@ Key rules:
 - `policy.type` must be set to `Rootfs` in this revision
 - `SourcePodName` and `SourceNodeName` are mandatory because the commit workflow
   is bound to a concrete live Pod
+- `SnapshotPushSecretName` is used only for the in-container registry push
+  performed by the commit Job
+- `ResumeImagePullSecretName` is used only when reconstructing the resumed
+  workload so kubelet can pull the retained snapshot image
 - `ResumeTemplate` must preserve enough information to reconstruct a new
   `BatchSandbox` after the original workload has been deleted
 
@@ -371,7 +382,8 @@ The pause flow is:
            - sourcePodName
            - sourceNodeName
            - target imageUri
-           - imagePullSecretName
+           - snapshotPushSecretName
+           - resumeImagePullSecretName
            - resumeTemplate
            - pausedAt
            - status.phase = Pending
@@ -406,27 +418,56 @@ spec:
     spec:
       restartPolicy: Never
       nodeName: <sourceNodeName>
-      imagePullSecrets:
-        - name: <imagePullSecretName>
       containers:
         - name: committer
           image: <committerImage>
           command: ["/bin/sh", "-c"]
           args:
             - |
-              ctr -n k8s.io images commit <containerID> <imageUri>
-              ctr -n k8s.io images push <imageUri>
+              snapshot-committer \
+                --containerd-namespace k8s.io \
+                --container-id <containerID> \
+                --target-image <imageUri> \
+                --registry-auth-file /var/run/opensandbox/registry/.dockerconfigjson
           volumeMounts:
             - name: containerd-sock
               mountPath: /run/containerd/containerd.sock
+            - name: snapshot-push-auth
+              mountPath: /var/run/opensandbox/registry
+              readOnly: true
       volumes:
         - name: containerd-sock
           hostPath:
             path: /run/containerd/containerd.sock
             type: Socket
+        - name: snapshot-push-auth
+          secret:
+            secretName: <snapshotPushSecretName>
 ```
 
 The controller resolves the source container ID from `SourcePodName`.
+
+`snapshot-committer` in this example is a logical role, not a required product
+name. The implementation may be a small in-house binary, a thin wrapper around
+existing container tooling, or another committer client, as long as it
+performs the following responsibilities explicitly:
+
+- commit the source container rootfs into a snapshot image
+- read the mounted registry auth config from the Secret volume
+- push the snapshot image to `spec.imageUri`
+- return a clear success/failure signal so the controller can update
+  `SandboxSnapshot.status.phase`
+
+Important auth semantics:
+
+- `imagePullSecrets` on the Job Pod, if needed for the `committerImage`, only
+  affects kubelet pulling the Job image. It does not authenticate registry
+  operations performed by the process inside the container.
+- `snapshotPushSecretName` is mounted into the committer container and must be
+  consumed explicitly by the snapshot push client as registry auth config.
+- `resumeImagePullSecretName` is not used by the commit Job. It is propagated
+  to the resumed workload template so kubelet can pull `snapshot.spec.imageUri`
+  during resume.
 
 ### 7. Resume flow
 
@@ -443,6 +484,7 @@ The resume flow is:
            - replicas = 1
            - template reconstructed from snapshot.spec.resumeTemplate
            - template image = snapshot.spec.imageUri
+           - template imagePullSecrets = snapshot.spec.resumeImagePullSecretName
            - labels preserve sandboxId
 5. Server  Aggregate sandbox state as Resuming while the new BatchSandbox is
            starting
