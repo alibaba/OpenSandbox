@@ -21,6 +21,7 @@ from opensandbox.sync.services.command import CommandsSync
 from opensandbox.sync.services.filesystem import FilesystemSync
 from opensandbox.sync.services.health import HealthSync
 from opensandbox.sync.services.metrics import MetricsSync
+from opensandbox.sync.services.pool import PoolsSync
 from opensandbox.sync.services.sandbox import SandboxesSync
 
 __all__ = [
@@ -28,5 +29,6 @@ __all__ = [
     "FilesystemSync",
     "HealthSync",
     "MetricsSync",
+    "PoolsSync",
     "SandboxesSync",
 ]
