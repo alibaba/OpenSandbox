@@ -46,7 +46,7 @@ func getShell() string {
 
 func buildCredential(uid, gid *uint32) (*syscall.Credential, error) {
 	if uid == nil && gid == nil {
-		return nil, nil
+		return nil, nil //nolint:nilnil
 	}
 
 	cred := &syscall.Credential{}
@@ -105,9 +105,21 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	shell := getShell()
 	cmd := exec.CommandContext(ctx, shell, "-c", request.Code)
 
+	// Configure credentials and process group
+	cred, err := buildCredential(request.Uid, request.Gid)
+	if err != nil {
+		return fmt.Errorf("failed to build credential: %w", err)
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid:    true,
+		Credential: cred,
+	}
+
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.Env = mergeEnvs(os.Environ(), loadExtraEnvFromFile())
+	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
+	cmd.Env = mergeEnvs(os.Environ(), extraEnv)
+	cmd.Dir = request.Cwd
 
 	done := make(chan struct{}, 1)
 	var wg sync.WaitGroup
@@ -121,20 +133,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		c.tailStdPipe(stderrPath, request.Hooks.OnExecuteStderr, done)
 	})
 
-	cmd.Dir = request.Cwd
-
-	// Configure credentials and process group
-	cred, err := buildCredential(request.Uid, request.Gid)
-	if err != nil {
-		log.Error("failed to build credentials: %v", err)
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid:    true,
-		Credential: cred,
-	}
-
 	err = cmd.Start()
-
 	if err != nil {
 		request.Hooks.OnExecuteInit(session)
 		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "CommandExecError", EValue: err.Error()})
@@ -230,9 +229,7 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	log.Info("received command: %v", request.Code)
 	shell := getShell()
 	cmd := exec.CommandContext(ctx, shell, "-c", request.Code)
-
 	cmd.Dir = request.Cwd
-
 	// Configure credentials and process group
 	cred, err := buildCredential(request.Uid, request.Gid)
 	if err != nil {
@@ -244,9 +241,9 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	}
 
 	cmd.Stdout = pipe
-
 	cmd.Stderr = pipe
-	cmd.Env = mergeEnvs(os.Environ(), loadExtraEnvFromFile())
+	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
+	cmd.Env = mergeEnvs(os.Environ(), extraEnv)
 
 	// use DevNull as stdin so interactive programs exit immediately.
 	cmd.Stdin = os.NewFile(uintptr(syscall.Stdin), os.DevNull)

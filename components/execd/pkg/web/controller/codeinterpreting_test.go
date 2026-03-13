@@ -23,6 +23,7 @@ import (
 
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
+	"github.com/stretchr/testify/require"
 )
 
 func TestBuildExecuteCodeRequestDefaultsToCommand(t *testing.T) {
@@ -37,12 +38,9 @@ func TestBuildExecuteCodeRequestDefaultsToCommand(t *testing.T) {
 
 	execReq := ctrl.buildExecuteCodeRequest(req)
 
-	if execReq.Language != runtime.Command {
-		t.Fatalf("expected default language %s, got %s", runtime.Command, execReq.Language)
-	}
-	if execReq.Context != "session-1" || execReq.Code != "echo 1" {
-		t.Fatalf("unexpected execute request: %#v", execReq)
-	}
+	require.Equal(t, runtime.Command, execReq.Language, "expected default language")
+	require.Equal(t, "session-1", execReq.Context)
+	require.Equal(t, "echo 1", execReq.Code)
 }
 
 func TestBuildExecuteCodeRequestRespectsLanguage(t *testing.T) {
@@ -59,9 +57,7 @@ func TestBuildExecuteCodeRequestRespectsLanguage(t *testing.T) {
 
 	execReq := ctrl.buildExecuteCodeRequest(req)
 
-	if execReq.Language != runtime.Language("python") {
-		t.Fatalf("expected python language, got %s", execReq.Language)
-	}
+	require.Equal(t, runtime.Language("python"), execReq.Language)
 }
 
 func TestGetContext_NotFoundReturns404(t *testing.T) {
@@ -75,20 +71,12 @@ func TestGetContext_NotFoundReturns404(t *testing.T) {
 
 	ctrl.GetContext()
 
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected status %d, got %d", http.StatusNotFound, w.Code)
-	}
+	require.Equal(t, http.StatusNotFound, w.Code)
 
 	var resp model.ErrorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if resp.Code != model.ErrorCodeContextNotFound {
-		t.Fatalf("unexpected error code: %s", resp.Code)
-	}
-	if resp.Message != "context missing not found" {
-		t.Fatalf("unexpected message: %s", resp.Message)
-	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, model.ErrorCodeContextNotFound, resp.Code)
+	require.Equal(t, "context missing not found", resp.Message)
 }
 
 func TestGetContext_MissingIDReturns400(t *testing.T) {
@@ -97,18 +85,10 @@ func TestGetContext_MissingIDReturns400(t *testing.T) {
 
 	ctrl.GetContext()
 
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, w.Code)
-	}
+	require.Equal(t, http.StatusBadRequest, w.Code)
 
 	var resp model.ErrorResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-	if resp.Code != model.ErrorCodeMissingQuery {
-		t.Fatalf("unexpected error code: %s", resp.Code)
-	}
-	if resp.Message != "missing path parameter 'contextId'" {
-		t.Fatalf("unexpected message: %s", resp.Message)
-	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Equal(t, model.ErrorCodeMissingQuery, resp.Code)
+	require.Equal(t, "missing path parameter 'contextId'", resp.Message)
 }

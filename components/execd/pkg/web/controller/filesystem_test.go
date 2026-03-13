@@ -25,6 +25,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
+	"github.com/stretchr/testify/require"
 )
 
 func newFilesystemController(t *testing.T, method, rawURL string, body []byte) (*FilesystemController, *httptest.ResponseRecorder) {
@@ -37,65 +38,45 @@ func newFilesystemController(t *testing.T, method, rawURL string, body []byte) (
 func TestFilesystemControllerGetFilesInfo(t *testing.T) {
 	tmpDir := t.TempDir()
 	target := filepath.Join(tmpDir, "foo.txt")
-	if err := os.WriteFile(target, []byte("demo"), 0o644); err != nil {
-		t.Fatalf("write temp file: %v", err)
-	}
+	require.NoError(t, os.WriteFile(target, []byte("demo"), 0o644))
 
 	query := fmt.Sprintf("/files/info?path=%s", url.QueryEscape(target))
 	ctrl, rec := newFilesystemController(t, http.MethodGet, query, nil)
 
 	ctrl.GetFilesInfo()
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 	var resp map[string]model.FileInfo
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	info, ok := resp[target]
-	if !ok {
-		t.Fatalf("response missing entry for %s", target)
-	}
-	if info.Path == "" || info.Size == 0 {
-		t.Fatalf("unexpected file info: %#v", info)
-	}
+	require.True(t, ok, "response missing entry for %s", target)
+	require.NotEmpty(t, info.Path)
+	require.NotZero(t, info.Size)
 }
 
 func TestFilesystemControllerSearchFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	a := filepath.Join(tmpDir, "alpha.txt")
 	b := filepath.Join(tmpDir, "beta.log")
-	if err := os.WriteFile(a, []byte("alpha"), 0o644); err != nil {
-		t.Fatalf("write alpha: %v", err)
-	}
-	if err := os.WriteFile(b, []byte("beta"), 0o644); err != nil {
-		t.Fatalf("write beta: %v", err)
-	}
+	require.NoError(t, os.WriteFile(a, []byte("alpha"), 0o644))
+	require.NoError(t, os.WriteFile(b, []byte("beta"), 0o644))
 
 	rawURL := fmt.Sprintf("/files/search?path=%s&pattern=%s", url.QueryEscape(tmpDir), url.QueryEscape("*.txt"))
 	ctrl, rec := newFilesystemController(t, http.MethodGet, rawURL, nil)
 
 	ctrl.SearchFiles()
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 	var files []model.FileInfo
-	if err := json.Unmarshal(rec.Body.Bytes(), &files); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(files) != 1 || files[0].Path != a {
-		t.Fatalf("expected only %s, got %#v", a, files)
-	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &files))
+	require.Len(t, files, 1)
+	require.Equal(t, a, files[0].Path)
 }
 
 func TestFilesystemControllerReplaceContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	target := filepath.Join(tmpDir, "content.txt")
-	if err := os.WriteFile(target, []byte("hello world"), 0o644); err != nil {
-		t.Fatalf("write temp file: %v", err)
-	}
+	require.NoError(t, os.WriteFile(target, []byte("hello world"), 0o644))
 
 	body, err := json.Marshal(map[string]model.ReplaceFileContentItem{
 		target: {
@@ -103,24 +84,16 @@ func TestFilesystemControllerReplaceContent(t *testing.T) {
 			New: "universe",
 		},
 	})
-	if err != nil {
-		t.Fatalf("marshal body: %v", err)
-	}
+	require.NoError(t, err)
 
 	ctrl, rec := newFilesystemController(t, http.MethodPost, "/files/replace", body)
 
 	ctrl.ReplaceContent()
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusOK, rec.Code)
 	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	if string(data) != "hello universe" {
-		t.Fatalf("unexpected content: %s", string(data))
-	}
+	require.NoError(t, err)
+	require.Equal(t, "hello universe", string(data))
 }
 
 func TestFilesystemControllerSearchFilesHandlesAbsentDir(t *testing.T) {
@@ -129,9 +102,7 @@ func TestFilesystemControllerSearchFilesHandlesAbsentDir(t *testing.T) {
 
 	ctrl.SearchFiles()
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d", rec.Code)
-	}
+	require.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 func TestReplaceContentFailsUnknownFile(t *testing.T) {
@@ -145,7 +116,5 @@ func TestReplaceContentFailsUnknownFile(t *testing.T) {
 
 	ctrl.ReplaceContent()
 
-	if rec.Code != http.StatusNotFound && rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected failure status, got %d", rec.Code)
-	}
+	require.Contains(t, []int{http.StatusNotFound, http.StatusInternalServerError}, rec.Code, "expected failure status")
 }

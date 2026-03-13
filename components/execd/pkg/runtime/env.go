@@ -79,3 +79,20 @@ func mergeEnvs(base []string, extra map[string]string) []string {
 
 	return out
 }
+
+// mergeExtraEnvs merges environment maps from file and request-level overrides.
+func mergeExtraEnvs(fromFile, fromRequest map[string]string) map[string]string {
+	if len(fromRequest) == 0 {
+		return fromFile
+	}
+
+	merged := make(map[string]string, len(fromFile)+len(fromRequest))
+	for k, v := range fromFile {
+		merged[k] = v
+	}
+	for k, v := range fromRequest {
+		merged[k] = v
+	}
+
+	return merged
+}

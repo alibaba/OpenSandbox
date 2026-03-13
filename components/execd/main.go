@@ -17,6 +17,8 @@ package main
 import (
 	"fmt"
 
+	"github.com/alibaba/opensandbox/internal/version"
+
 	_ "go.uber.org/automaxprocs/maxprocs"
 
 	"github.com/alibaba/opensandbox/execd/pkg/flag"
@@ -24,7 +26,6 @@ import (
 	_ "github.com/alibaba/opensandbox/execd/pkg/util/safego"
 	"github.com/alibaba/opensandbox/execd/pkg/web"
 	"github.com/alibaba/opensandbox/execd/pkg/web/controller"
-	"github.com/alibaba/opensandbox/internal/version"
 )
 
 // main initializes and starts the execd server.

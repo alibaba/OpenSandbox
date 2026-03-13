@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Copyright 2025 Alibaba Group Holding Ltd.
 #
@@ -45,13 +45,25 @@ elif [ $# -ge 1 ] && [ "$1" = "-c" ]; then
 	CMD="$*"
 fi
 
+SHELL_BIN="${BOOTSTRAP_SHELL:-}"
+if [ -z "$SHELL_BIN" ]; then
+	if command -v bash >/dev/null 2>&1; then
+		SHELL_BIN="$(command -v bash)"
+	elif command -v sh >/dev/null 2>&1; then
+		SHELL_BIN="$(command -v sh)"
+	else
+		echo "error: neither bash nor sh found in PATH" >&2
+		exit 1
+	fi
+fi
+
 set -x
 if [ "$CMD" != "" ]; then
-	exec bash -c "$CMD"
+	exec "$SHELL_BIN" -c "$CMD"
 fi
 
 if [ $# -eq 0 ]; then
-	exec bash
+	exec "$SHELL_BIN"
 fi
 
 exec "$@"

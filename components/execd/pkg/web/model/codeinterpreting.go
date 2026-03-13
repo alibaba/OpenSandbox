@@ -16,6 +16,7 @@ package model
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -53,11 +54,21 @@ type RunCommandRequest struct {
 	Background bool   `json:"background,omitempty"`
 	// TimeoutMs caps execution duration; 0 uses server default.
 	TimeoutMs int64 `json:"timeout,omitempty" validate:"omitempty,gte=1"`
+
+	Uid  *uint32           `json:"uid,omitempty"`
+	Gid  *uint32           `json:"gid,omitempty"`
+	Envs map[string]string `json:"envs,omitempty"`
 }
 
 func (r *RunCommandRequest) Validate() error {
 	validate := validator.New()
-	return validate.Struct(r)
+	if err := validate.Struct(r); err != nil {
+		return err
+	}
+	if r.Gid != nil && r.Uid == nil {
+		return errors.New("uid is required when gid is provided")
+	}
+	return nil
 }
 
 type ServerStreamEventType string
