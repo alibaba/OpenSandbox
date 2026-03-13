@@ -1,4 +1,4 @@
-# Copyright 2026 Alibaba Group Holding Ltd.
+# Copyright 2025 Alibaba Group Holding Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@
 
 import logging
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from kubernetes import watch
-from kubernetes.client import ApiException, CustomObjectsApi
+from kubernetes.client import ApiException
 
 logger = logging.getLogger(__name__)
 
@@ -29,23 +29,28 @@ class WorkloadInformer:
 
     def __init__(
         self,
-        custom_api: CustomObjectsApi,
-        group: str,
-        version: str,
-        plural: str,
-        namespace: str,
+        list_fn: Callable[..., Any],
         resync_period_seconds: int = 300,
         watch_timeout_seconds: int = 60,
         enable_watch: bool = True,
+        thread_name: str = "workload-informer",
     ):
-        self.custom_api = custom_api
-        self.group = group
-        self.version = version
-        self.plural = plural
-        self.namespace = namespace
+        """
+        Args:
+            list_fn: Callable that lists the custom resource, with signature
+                     ``list_fn(**kwargs) -> dict``.  Typically a bound method
+                     like ``custom_api.list_namespaced_custom_object``.
+            resync_period_seconds: Full-resync interval when watch is disabled.
+            watch_timeout_seconds: Per-stream watch timeout before restart.
+            enable_watch: When False only the initial list is performed.
+            thread_name: Name for the background thread, used in stack traces
+                         and debuggers.  Should be unique per informer instance.
+        """
+        self.list_fn = list_fn
         self.resync_period_seconds = resync_period_seconds
         self.watch_timeout_seconds = watch_timeout_seconds
         self.enable_watch = enable_watch
+        self._thread_name = thread_name
 
         self._cache: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.RLock()
@@ -66,7 +71,7 @@ class WorkloadInformer:
 
         self._thread = threading.Thread(
             target=self._run,
-            name=f"workload-informer-{self.plural}-{self.namespace}",
+            name=self._thread_name,
             daemon=True,
         )
         self._thread.start()
@@ -78,13 +83,14 @@ class WorkloadInformer:
     def get(self, name: str) -> Optional[Dict[str, Any]]:
         """Return cached object by name, if present."""
         with self._lock:
-            obj = self._cache.get(name)
-            if obj:
-                return obj
-        return None
+            return self._cache.get(name)
 
     def update_cache(self, obj: Dict[str, Any]) -> None:
-        """Upsert a single object into the cache."""
+        """Upsert a single object into the cache.
+
+        Only advances ``_resource_version`` if the incoming version is strictly
+        newer, preventing a stale API response from rolling back the watch cursor.
+        """
         metadata = obj.get("metadata", {})
         name = metadata.get("name")
         if not name:
@@ -92,8 +98,28 @@ class WorkloadInformer:
 
         with self._lock:
             self._cache[name] = obj
-            if metadata.get("resourceVersion"):
-                self._resource_version = metadata["resourceVersion"]
+            self._advance_resource_version(metadata.get("resourceVersion"))
+
+    def _advance_resource_version(self, rv: Optional[str]) -> None:
+        """Advance ``_resource_version`` only when *rv* is strictly newer.
+
+        K8s resourceVersions are opaque strings but etcd encodes them as
+        monotonically increasing integers.  If the conversion fails we skip the
+        update (conservative: keep the current, newer cursor).
+
+        Must be called with ``self._lock`` already held.
+        """
+        if not rv:
+            return
+        if self._resource_version is None:
+            self._resource_version = rv
+            return
+        try:
+            if int(rv) > int(self._resource_version):
+                self._resource_version = rv
+        except ValueError:
+            # Non-integer resourceVersion — skip to avoid downgrade.
+            pass
 
     def _run(self) -> None:
         backoff = 1.0
@@ -105,6 +131,7 @@ class WorkloadInformer:
 
                 if not self.enable_watch:
                     self._stop_event.wait(self.resync_period_seconds)
+                    self._has_synced = False  # trigger a fresh list on next loop
                     continue
 
                 self._run_watch_loop()
@@ -115,28 +142,19 @@ class WorkloadInformer:
                     self._resource_version = None
                     self._has_synced = False
                 else:
-                    logger.warning(
-                        "Informer watch error for %s: %s", self.plural, exc, exc_info=True
-                    )
+                    logger.warning("Informer watch error: %s", exc, exc_info=True)
                     self._has_synced = False
                     self._stop_event.wait(min(backoff, 30.0))
                     backoff = min(backoff * 2, 30.0)
             except Exception as exc:  # pragma: no cover - defensive
-                logger.warning(
-                    "Unexpected informer error for %s: %s", self.plural, exc, exc_info=True
-                )
+                logger.warning("Unexpected informer error: %s", exc, exc_info=True)
                 self._has_synced = False
                 self._stop_event.wait(min(backoff, 30.0))
                 backoff = min(backoff * 2, 30.0)
 
     def _full_resync(self) -> None:
         """Perform a full list to refresh the cache."""
-        resp = self.custom_api.list_namespaced_custom_object(
-            group=self.group,
-            version=self.version,
-            namespace=self.namespace,
-            plural=self.plural,
-        )
+        resp = self.list_fn()
 
         # list response is a dict for CustomObjectsApi
         items = resp.get("items", []) if isinstance(resp, dict) else []
@@ -152,8 +170,7 @@ class WorkloadInformer:
 
         with self._lock:
             self._cache = new_cache
-            if resource_version:
-                self._resource_version = resource_version
+            self._advance_resource_version(resource_version)
             self._has_synced = True
 
     def _run_watch_loop(self) -> None:
@@ -161,11 +178,7 @@ class WorkloadInformer:
         w = watch.Watch()
         try:
             for event in w.stream(
-                self.custom_api.list_namespaced_custom_object,
-                group=self.group,
-                version=self.version,
-                namespace=self.namespace,
-                plural=self.plural,
+                self.list_fn,
                 resource_version=self._resource_version,
                 timeout_seconds=self.watch_timeout_seconds,
             ):
@@ -197,5 +210,4 @@ class WorkloadInformer:
                 self._cache.pop(name, None)
             else:
                 self._cache[name] = obj
-            if metadata.get("resourceVersion"):
-                self._resource_version = metadata["resourceVersion"]
+            self._advance_resource_version(metadata.get("resourceVersion"))

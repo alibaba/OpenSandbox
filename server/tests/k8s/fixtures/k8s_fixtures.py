@@ -37,6 +37,14 @@ def mock_k8s_client():
     client.get_core_v1_api.return_value = mock_core_api
     client.custom_api = mock_custom_api
     client.core_api = mock_core_api
+    # Unified resource operation methods
+    client.create_custom_object = MagicMock(return_value={"metadata": {"name": "test", "uid": "uid"}})
+    client.get_custom_object = MagicMock(return_value=None)
+    client.list_custom_objects = MagicMock(return_value=[])
+    client.delete_custom_object = MagicMock()
+    client.patch_custom_object = MagicMock()
+    client.create_secret = MagicMock()
+    client.list_pods = MagicMock(return_value=[])
     return client
 
 

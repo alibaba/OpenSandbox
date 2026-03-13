@@ -13,102 +13,285 @@
 # limitations under the License.
 
 """
-Kubernetes client wrapper for managing cluster connections and API access.
+Kubernetes client wrapper that provides a unified interface for all K8s resource
+operations. All API access goes through this class.
 """
 
-from typing import Optional
+import logging
+import threading
+from functools import partial
+from typing import Any, Dict, List, Optional, Tuple
+
 from kubernetes import client, config
-from kubernetes.client import CoreV1Api, CustomObjectsApi, NodeV1Api
+from kubernetes.client import ApiException, CoreV1Api, CustomObjectsApi, NodeV1Api
 
 from src.config import KubernetesRuntimeConfig
+from src.services.k8s.informer import WorkloadInformer
+from src.services.k8s.rate_limiter import TokenBucketRateLimiter
+
+logger = logging.getLogger(__name__)
+
+# Type alias for informer cache key
+_InformerKey = Tuple[str, str, str, str]  # (group, version, plural, namespace)
 
 
 class K8sClient:
     """
-    Wrapper for Kubernetes API client with configuration management.
-    
-    Handles both in-cluster and kubeconfig-based authentication.
+    Unified Kubernetes API client.
+
+    Encapsulates all cluster resource operations (CustomObject, Secret, Pod,
+    RuntimeClass). Callers never hold raw API handles directly.
     """
-    
+
     def __init__(self, k8s_config: KubernetesRuntimeConfig):
-        """
-        Initialize Kubernetes client.
-
-        Args:
-            k8s_config: Kubernetes runtime configuration
-
-        Raises:
-            Exception: If unable to load Kubernetes configuration
-        """
         self.config = k8s_config
         self._load_config()
         self._core_v1_api: Optional[CoreV1Api] = None
         self._custom_objects_api: Optional[CustomObjectsApi] = None
         self._node_v1_api: Optional[NodeV1Api] = None
-    
+        # Informer pool: key -> WorkloadInformer
+        self._informers: Dict[_InformerKey, WorkloadInformer] = {}
+        self._informers_lock = threading.Lock()
+        # Rate limiters (None = unlimited)
+        self._read_limiter: Optional[TokenBucketRateLimiter] = (
+            TokenBucketRateLimiter(qps=k8s_config.read_qps, burst=k8s_config.read_burst)
+            if k8s_config.read_qps > 0
+            else None
+        )
+        self._write_limiter: Optional[TokenBucketRateLimiter] = (
+            TokenBucketRateLimiter(qps=k8s_config.write_qps, burst=k8s_config.write_burst)
+            if k8s_config.write_qps > 0
+            else None
+        )
+
+    # ------------------------------------------------------------------
+    # Internal API handle accessors (lazy singletons)
+    # ------------------------------------------------------------------
+
     def _load_config(self) -> None:
-        """
-        Load Kubernetes configuration from kubeconfig or in-cluster.
-        
-        Raises:
-            Exception: If configuration loading fails
-        """
+        """Load kubeconfig from file path or in-cluster service account."""
         try:
             if self.config.kubeconfig_path:
-                # Load from kubeconfig file
                 config.load_kube_config(config_file=self.config.kubeconfig_path)
             else:
-                # Load in-cluster config (when running inside K8s)
                 config.load_incluster_config()
         except Exception as e:
             raise Exception(f"Failed to load Kubernetes configuration: {e}") from e
-    
+
     def get_core_v1_api(self) -> CoreV1Api:
-        """
-        Get CoreV1Api client instance.
-        
-        Returns:
-            CoreV1Api: Kubernetes Core V1 API client
-        """
         if self._core_v1_api is None:
             self._core_v1_api = client.CoreV1Api()
         return self._core_v1_api
-    
-    def get_custom_objects_api(self) -> CustomObjectsApi:
-        """
-        Get CustomObjectsApi client instance for CRD operations.
 
-        Returns:
-            CustomObjectsApi: Kubernetes Custom Objects API client
-        """
+    def get_custom_objects_api(self) -> CustomObjectsApi:
         if self._custom_objects_api is None:
             self._custom_objects_api = client.CustomObjectsApi()
         return self._custom_objects_api
 
     def get_node_v1_api(self) -> NodeV1Api:
-        """
-        Get NodeV1Api client instance for RuntimeClass operations.
-
-        Returns:
-            NodeV1Api: Kubernetes Node V1 API client
-        """
         if self._node_v1_api is None:
             self._node_v1_api = client.NodeV1Api()
         return self._node_v1_api
 
-    async def read_runtime_class(self, name: str):
+    # ------------------------------------------------------------------
+    # Internal informer pool management
+    # ------------------------------------------------------------------
+
+    def _get_informer(self, group: str, version: str, plural: str, namespace: str) -> Optional[WorkloadInformer]:
+        """Return the informer for this resource+namespace, starting it lazily."""
+        if not self.config.informer_enabled:
+            return None
+
+        key: _InformerKey = (group, version, plural, namespace)
+        with self._informers_lock:
+            informer = self._informers.get(key)
+            if informer is None:
+                list_fn = partial(
+                    self.get_custom_objects_api().list_namespaced_custom_object,
+                    group=group,
+                    version=version,
+                    namespace=namespace,
+                    plural=plural,
+                )
+                informer = WorkloadInformer(
+                    list_fn=list_fn,
+                    resync_period_seconds=self.config.informer_resync_seconds,
+                    watch_timeout_seconds=self.config.informer_watch_timeout_seconds,
+                    thread_name=f"workload-informer-{plural}-{namespace}",
+                )
+                self._informers[key] = informer
+                try:
+                    informer.start()
+                except Exception as exc:  # pragma: no cover - defensive
+                    logger.warning("Failed to start informer for %s/%s: %s", plural, namespace, exc)
+                    self._informers.pop(key, None)
+                    return None
+        return informer
+
+    # ------------------------------------------------------------------
+    # CustomObject operations
+    # ------------------------------------------------------------------
+
+    def create_custom_object(
+        self,
+        group: str,
+        version: str,
+        namespace: str,
+        plural: str,
+        body: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Create a namespaced custom resource."""
+        if self._write_limiter:
+            self._write_limiter.acquire()
+        return self.get_custom_objects_api().create_namespaced_custom_object(
+            group=group,
+            version=version,
+            namespace=namespace,
+            plural=plural,
+            body=body,
+        )
+
+    def get_custom_object(
+        self,
+        group: str,
+        version: str,
+        namespace: str,
+        plural: str,
+        name: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Get a namespaced custom resource by name.
+
+        Tries the informer cache first when available and synced.
+        Returns None on 404.
         """
-        Read a RuntimeClass from the cluster.
+        informer = self._get_informer(group, version, plural, namespace)
+        if informer and informer.has_synced:
+            cached = informer.get(name)
+            if cached is not None:
+                return cached
 
-        Args:
-            name: RuntimeClass name
+        if self._read_limiter:
+            self._read_limiter.acquire()
+        try:
+            obj = self.get_custom_objects_api().get_namespaced_custom_object(
+                group=group,
+                version=version,
+                namespace=namespace,
+                plural=plural,
+                name=name,
+            )
+            if informer:
+                informer.update_cache(obj)
+            return obj
+        except ApiException as e:
+            if e.status == 404:
+                return None
+            raise
 
-        Returns:
-            The RuntimeClass object
+    def list_custom_objects(
+        self,
+        group: str,
+        version: str,
+        namespace: str,
+        plural: str,
+        label_selector: str = "",
+    ) -> List[Dict[str, Any]]:
+        """List namespaced custom resources, returning the items list."""
+        if self._read_limiter:
+            self._read_limiter.acquire()
+        try:
+            resp = self.get_custom_objects_api().list_namespaced_custom_object(
+                group=group,
+                version=version,
+                namespace=namespace,
+                plural=plural,
+                label_selector=label_selector,
+            )
+            return resp.get("items", [])
+        except ApiException as e:
+            if e.status == 404:
+                return []
+            raise
 
-        Raises:
-            ApiException: If the RuntimeClass does not exist
-        """
-        # Note: Kubernetes client is synchronous, but we wrap it in an async method
-        # for compatibility with async contexts
+    def delete_custom_object(
+        self,
+        group: str,
+        version: str,
+        namespace: str,
+        plural: str,
+        name: str,
+        grace_period_seconds: int = 0,
+    ) -> None:
+        """Delete a namespaced custom resource."""
+        if self._write_limiter:
+            self._write_limiter.acquire()
+        self.get_custom_objects_api().delete_namespaced_custom_object(
+            group=group,
+            version=version,
+            namespace=namespace,
+            plural=plural,
+            name=name,
+            grace_period_seconds=grace_period_seconds,
+        )
+
+    def patch_custom_object(
+        self,
+        group: str,
+        version: str,
+        namespace: str,
+        plural: str,
+        name: str,
+        body: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Patch a namespaced custom resource."""
+        if self._write_limiter:
+            self._write_limiter.acquire()
+        return self.get_custom_objects_api().patch_namespaced_custom_object(
+            group=group,
+            version=version,
+            namespace=namespace,
+            plural=plural,
+            name=name,
+            body=body,
+        )
+
+    # ------------------------------------------------------------------
+    # Secret operations
+    # ------------------------------------------------------------------
+
+    def create_secret(self, namespace: str, body: Any) -> Any:
+        """Create a namespaced Secret."""
+        if self._write_limiter:
+            self._write_limiter.acquire()
+        return self.get_core_v1_api().create_namespaced_secret(
+            namespace=namespace,
+            body=body,
+        )
+
+    # ------------------------------------------------------------------
+    # Pod operations
+    # ------------------------------------------------------------------
+
+    def list_pods(
+        self,
+        namespace: str,
+        label_selector: str = "",
+    ) -> List[Any]:
+        """List pods in a namespace, returning the items list."""
+        if self._read_limiter:
+            self._read_limiter.acquire()
+        resp = self.get_core_v1_api().list_namespaced_pod(
+            namespace=namespace,
+            label_selector=label_selector,
+        )
+        return resp.items
+
+    # ------------------------------------------------------------------
+    # RuntimeClass operations
+    # ------------------------------------------------------------------
+
+    def read_runtime_class(self, name: str) -> Any:
+        """Read a RuntimeClass from the cluster."""
+        if self._read_limiter:
+            self._read_limiter.acquire()
         return self.get_node_v1_api().read_runtime_class(name)

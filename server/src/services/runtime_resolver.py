@@ -23,6 +23,7 @@ This module provides:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Optional
 
@@ -233,8 +234,8 @@ async def _validate_k8s_runtime_class(
         return
 
     try:
-        # Use the K8sClient's read_runtime_class method
-        await k8s_client.read_runtime_class(runtime_class_name)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, k8s_client.read_runtime_class, runtime_class_name)
         logger.info("Kubernetes RuntimeClass '%s' is available.", runtime_class_name)
     except ApiException as exc:
         if exc.status == 404:

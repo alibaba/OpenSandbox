@@ -216,6 +216,38 @@ class KubernetesRuntimeConfig(BaseModel):
             "[Beta] Watch timeout (seconds) before restarting the informer stream."
         ),
     )
+    read_qps: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Maximum read requests per second to the Kubernetes API (get/list). "
+            "0 means unlimited (no rate limiting)."
+        ),
+    )
+    read_burst: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Burst size for the read rate limiter. "
+            "0 means use read_qps as burst (minimum 1)."
+        ),
+    )
+    write_qps: float = Field(
+        default=0.0,
+        ge=0,
+        description=(
+            "Maximum write requests per second to the Kubernetes API (create/delete/patch). "
+            "0 means unlimited (no rate limiting)."
+        ),
+    )
+    write_burst: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Burst size for the write rate limiter. "
+            "0 means use write_qps as burst (minimum 1)."
+        ),
+    )
     namespace: Optional[str] = Field(
         default=None,
         description="Namespace used for sandbox workloads.",

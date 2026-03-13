@@ -126,9 +126,9 @@ class TestAgentSandboxServiceInit:
             mock_provider_factory.assert_called_once()
             call_kwargs = mock_provider_factory.call_args.kwargs
             assert call_kwargs["provider_type"] == "agent-sandbox"
-            assert call_kwargs["agent_sandbox_config"].template_file == "/tmp/template.yaml"
-            assert call_kwargs["agent_sandbox_config"].shutdown_policy == "Retain"
-            assert call_kwargs["k8s_config"] == agent_sandbox_runtime_config
+            assert call_kwargs["app_config"].agent_sandbox.template_file == "/tmp/template.yaml"
+            assert call_kwargs["app_config"].agent_sandbox.shutdown_policy == "Retain"
+            assert call_kwargs["app_config"].kubernetes == agent_sandbox_runtime_config
 
     def test_init_without_kubernetes_config_raises_error(self):
         """

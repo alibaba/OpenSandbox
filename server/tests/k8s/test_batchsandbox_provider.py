@@ -22,10 +22,32 @@ from unittest.mock import MagicMock
 from kubernetes.client import ApiException
 
 from src.api.schema import ImageSpec, ImageAuth, NetworkPolicy, NetworkRule
-from src.config import ExecdInitResources
+from src.config import AppConfig, ExecdInitResources, KubernetesRuntimeConfig, RuntimeConfig
 from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from src.services.k8s.image_pull_secret_helper import IMAGE_AUTH_SECRET_PREFIX
 from src.services.k8s.volume_helper import apply_volumes_to_pod_spec
+
+
+def _app_config_with_template(template_file_path: str) -> AppConfig:
+    """Build an AppConfig with a batchsandbox_template_file set."""
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="execd:test"),
+        kubernetes=KubernetesRuntimeConfig(
+            namespace="test-ns",
+            batchsandbox_template_file=template_file_path,
+        ),
+    )
+
+
+def _app_config_with_execd_resources(execd_init_resources: ExecdInitResources) -> AppConfig:
+    """Build an AppConfig with execd_init_resources set."""
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="execd:test"),
+        kubernetes=KubernetesRuntimeConfig(
+            namespace="test-ns",
+            execd_init_resources=execd_init_resources,
+        ),
+    )
 
 
 class TestBatchSandboxProvider:
@@ -37,7 +59,7 @@ class TestBatchSandboxProvider:
         """
         Test case: Verify normal initialization without template
         """
-        provider = BatchSandboxProvider(mock_k8s_client, template_file_path=None)
+        provider = BatchSandboxProvider(mock_k8s_client)
         
         assert provider.k8s_client == mock_k8s_client
         assert provider.template_manager._template is None
@@ -52,7 +74,7 @@ class TestBatchSandboxProvider:
         template_file = tmp_path / "template.yaml"
         template_file.write_text("spec:\n  replicas: 1")
         
-        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
+        provider = BatchSandboxProvider(mock_k8s_client, _app_config_with_template(str(template_file)))
         
         assert provider.template_manager._template is not None
     
@@ -73,8 +95,7 @@ class TestBatchSandboxProvider:
         Test case: Verify created manifest structure is correct
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
         
@@ -95,7 +116,7 @@ class TestBatchSandboxProvider:
         assert result == {"name": "test-id", "uid": "test-uid"}
         
         # Verify API call
-        call_args = mock_api.create_namespaced_custom_object.call_args
+        call_args = mock_k8s_client.create_custom_object.call_args
         body = call_args.kwargs["body"]
         
         assert body["apiVersion"] == "sandbox.opensandbox.io/v1alpha1"
@@ -114,8 +135,7 @@ class TestBatchSandboxProvider:
         Test case: Verify execd init container built correctly without resources when not configured
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test", "uid": "uid"}
         }
         
@@ -131,7 +151,7 @@ class TestBatchSandboxProvider:
             execd_image="execd:test"
         )
         
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         init_container = body["spec"]["template"]["spec"]["initContainers"][0]
         
         assert init_container["name"] == "execd-installer"
@@ -148,13 +168,12 @@ class TestBatchSandboxProvider:
         """
         provider = BatchSandboxProvider(
             mock_k8s_client,
-            execd_init_resources=ExecdInitResources(
+            _app_config_with_execd_resources(ExecdInitResources(
                 limits={"cpu": "100m", "memory": "128Mi"},
                 requests={"cpu": "50m", "memory": "64Mi"},
-            ),
+            )),
         )
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test", "uid": "uid"}
         }
 
@@ -170,7 +189,7 @@ class TestBatchSandboxProvider:
             execd_image="execd:test",
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         init_container = body["spec"]["template"]["spec"]["initContainers"][0]
         assert init_container["resources"]["limits"] == {"cpu": "100m", "memory": "128Mi"}
         assert init_container["resources"]["requests"] == {"cpu": "50m", "memory": "64Mi"}
@@ -180,8 +199,7 @@ class TestBatchSandboxProvider:
         Test case: Verify user entrypoint is wrapped with bootstrap
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
         }
         
@@ -197,7 +215,7 @@ class TestBatchSandboxProvider:
             execd_image="execd:latest"
         )
         
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         main_container = body["spec"]["template"]["spec"]["containers"][0]
         
         assert main_container["command"] == [
@@ -212,8 +230,7 @@ class TestBatchSandboxProvider:
         Also verifies EXECD environment variable is automatically injected.
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
         }
         
@@ -229,7 +246,7 @@ class TestBatchSandboxProvider:
             execd_image="execd:latest"
         )
         
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         env_vars = body["spec"]["template"]["spec"]["containers"][0]["env"]
         
         # Should have user env vars plus EXECD
@@ -261,9 +278,8 @@ spec:
               mountPath: /data
 """
         )
-        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        provider = BatchSandboxProvider(mock_k8s_client, _app_config_with_template(str(template_file)))
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
         }
 
@@ -279,7 +295,7 @@ spec:
             execd_image="execd:latest"
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         spec = body["spec"]["template"]["spec"]
 
         volume_names = [v["name"] for v in spec["volumes"]]
@@ -319,9 +335,8 @@ spec:
               mountPath: /data
 """
         )
-        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        provider = BatchSandboxProvider(mock_k8s_client, _app_config_with_template(str(template_file)))
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
         }
 
@@ -337,7 +352,7 @@ spec:
             execd_image="execd:latest"
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         spec = body["spec"]["template"]["spec"]
 
         volume_names = [v["name"] for v in spec["volumes"]]
@@ -353,8 +368,7 @@ spec:
         Test case: Verify resource limits set correctly
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
         }
         
@@ -370,7 +384,7 @@ spec:
             execd_image="execd:latest"
         )
         
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         resources = body["spec"]["template"]["spec"]["containers"][0]["resources"]
         
         assert resources["limits"] == {"cpu": "1", "memory": "1Gi"}
@@ -381,8 +395,7 @@ spec:
         Test case: Verify resources not set when resource limits are empty
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
         }
         
@@ -398,7 +411,7 @@ spec:
             execd_image="execd:latest"
         )
         
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         container = body["spec"]["template"]["spec"]["containers"][0]
         
         assert "resources" not in container
@@ -412,8 +425,7 @@ spec:
         Test case: Verify successfully querying existing sandbox
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.get_namespaced_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
+        mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
         result = provider.get_workload("test-id", "test-ns")
         
@@ -425,11 +437,7 @@ spec:
         Test case: Verify None returned when not found
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.get_namespaced_custom_object.side_effect = [
-            ApiException(status=404),
-            ApiException(status=404),
-        ]
+        mock_k8s_client.get_custom_object.return_value = None
         
         result = provider.get_workload("test-id", "test-ns")
         
@@ -437,31 +445,27 @@ spec:
 
     def test_get_workload_falls_back_to_legacy_name(self, mock_k8s_client):
         """
-        Test case: Verify legacy sandbox-<id> name is used when primary lookup 404s
+        Test case: Verify legacy sandbox-<id> name is used when primary lookup returns None
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.get_namespaced_custom_object.side_effect = [
-            ApiException(status=404),
+        mock_k8s_client.get_custom_object.side_effect = [
+            None,
             {"metadata": {"name": "sandbox-test-id"}},
         ]
         
         result = provider.get_workload("test-id", "test-ns")
         
         assert result["metadata"]["name"] == "sandbox-test-id"
-        assert mock_api.get_namespaced_custom_object.call_args_list[0].kwargs["name"] == "test-id"
-        assert mock_api.get_namespaced_custom_object.call_args_list[1].kwargs["name"] == "sandbox-test-id"
+        assert mock_k8s_client.get_custom_object.call_args_list[0].kwargs["name"] == "test-id"
+        assert mock_k8s_client.get_custom_object.call_args_list[1].kwargs["name"] == "sandbox-test-id"
     
     def test_get_workload_handles_404_gracefully(self, mock_k8s_client):
         """
-        Test case: Verify None returned on 404 exception
+        Test case: Verify None returned when not found
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
         
-        # Mock 404 exception
-        error = ApiException(status=404)
-        mock_api.get_namespaced_custom_object.side_effect = [error, error]
+        mock_k8s_client.get_custom_object.return_value = None
         
         result = provider.get_workload("test-id", "test-ns")
         
@@ -472,86 +476,48 @@ spec:
         Test case: Verify non-404 exceptions are re-raised
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
         
         # Mock 500 exception
         error = ApiException(status=500)
-        mock_api.get_namespaced_custom_object.side_effect = error
+        mock_k8s_client.get_custom_object.side_effect = error
         
         with pytest.raises(ApiException) as exc_info:
             provider.get_workload("test-id", "test-ns")
         
         assert exc_info.value.status == 500
 
-    def test_get_workload_prefers_informer_cache(self, mock_k8s_client, monkeypatch):
+    def test_get_workload_prefers_informer_cache(self, mock_k8s_client):
         """
-        Test case: Use informer cache when synced to avoid direct API call
+        Test case: get_workload calls k8s_client.get_custom_object and returns result
         """
         cached = {"metadata": {"name": "test-id"}}
+        mock_k8s_client.get_custom_object.return_value = cached
 
-        class FakeInformer:
-            def __init__(self):
-                self.started = False
-                self.has_synced = True
-
-            def start(self):
-                self.started = True
-
-            def get(self, name):
-                return cached if name == "test-id" else None
-
-            def update_cache(self, obj):
-                self.updated = obj
-
-        fake_informer = FakeInformer()
-        provider = BatchSandboxProvider(
-            mock_k8s_client,
-            enable_informer=True,
-            informer_factory=lambda ns: fake_informer,
-        )
+        provider = BatchSandboxProvider(mock_k8s_client)
 
         result = provider.get_workload("test-id", "test-ns")
 
         assert result == cached
-        assert fake_informer.started is True
-        mock_k8s_client.get_custom_objects_api().get_namespaced_custom_object.assert_not_called()
+        mock_k8s_client.get_custom_object.assert_called()
     
     def test_get_workload_logs_unexpected_errors(self, mock_k8s_client):
         """
         Test case: Verify unexpected errors are re-raised
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.get_namespaced_custom_object.side_effect = RuntimeError("Unexpected")
+        mock_k8s_client.get_custom_object.side_effect = RuntimeError("Unexpected")
         
         with pytest.raises(RuntimeError, match="Unexpected"):
             provider.get_workload("test-id", "test-ns")
 
     def test_create_workload_updates_informer_cache(self, mock_k8s_client):
         """
-        Test case: informer cache is updated immediately after create
+        Test case: create_workload returns name and uid from created resource
         """
         created_body = {"metadata": {"name": "test-id", "uid": "test-uid"}}
+        mock_k8s_client.create_custom_object.return_value = created_body
 
-        class FakeInformer:
-            def __init__(self):
-                self.started = False
-                self.updated = None
-
-            def start(self):
-                self.started = True
-
-            def update_cache(self, obj):
-                self.updated = obj
-
-        fake_informer = FakeInformer()
-        provider = BatchSandboxProvider(
-            mock_k8s_client,
-            enable_informer=True,
-            informer_factory=lambda ns: fake_informer,
-        )
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = created_body
+        provider = BatchSandboxProvider(mock_k8s_client)
 
         expires_at = datetime(2025, 12, 31, tzinfo=timezone.utc)
 
@@ -568,42 +534,6 @@ spec:
         )
 
         assert result == {"name": "test-id", "uid": "test-uid"}
-        assert fake_informer.updated == created_body
-        assert fake_informer.started is True
-
-    def test_get_informer_single_instance_per_namespace(self, mock_k8s_client):
-        """
-        Test case: informer is created only once per namespace even with repeated calls
-        """
-
-        class FakeInformer:
-            def __init__(self):
-                self.started = 0
-
-            def start(self):
-                self.started += 1
-
-            def update_cache(self, obj):
-                self.updated = obj
-
-        factory_calls = {"count": 0}
-
-        def factory(ns):
-            factory_calls["count"] += 1
-            return FakeInformer()
-
-        provider = BatchSandboxProvider(
-            mock_k8s_client,
-            enable_informer=True,
-            informer_factory=factory,
-        )
-
-        informer1 = provider._get_informer("test-ns")
-        informer2 = provider._get_informer("test-ns")
-
-        assert informer1 is informer2
-        assert factory_calls["count"] == 1
-        assert informer1.started == 1
     
     # ===== Workload List Tests =====
     
@@ -614,8 +544,7 @@ spec:
         Test case: Verify list query returns results
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.return_value = mock_batchsandbox_list_response
+        mock_k8s_client.list_custom_objects.return_value = mock_batchsandbox_list_response["items"]
         
         result = provider.list_workloads("test-ns", "opensandbox.io/id")
         
@@ -624,11 +553,10 @@ spec:
     
     def test_list_workloads_returns_empty_on_404(self, mock_k8s_client):
         """
-        Test case: Verify empty list returned on 404
+        Test case: Verify empty list returned when no items
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.list_namespaced_custom_object.side_effect = ApiException(status=404)
+        mock_k8s_client.list_custom_objects.return_value = []
         
         result = provider.list_workloads("test-ns", "opensandbox.io/id")
         
@@ -643,12 +571,11 @@ spec:
         Test case: Verify successfully deleting existing sandbox
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.get_namespaced_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
+        mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
         provider.delete_workload("test-id", "test-ns")
         
-        mock_api.delete_namespaced_custom_object.assert_called_once_with(
+        mock_k8s_client.delete_custom_object.assert_called_once_with(
             group="sandbox.opensandbox.io",
             version="v1alpha1",
             namespace="test-ns",
@@ -662,11 +589,7 @@ spec:
         Test case: Verify exception raised when not found
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.get_namespaced_custom_object.side_effect = [
-            ApiException(status=404),
-            ApiException(status=404),
-        ]
+        mock_k8s_client.get_custom_object.return_value = None
         
         with pytest.raises(Exception) as exc_info:
             provider.delete_workload("test-id", "test-ns")
@@ -680,12 +603,11 @@ spec:
         Test case: Verify immediate deletion (grace period = 0)
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.get_namespaced_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
+        mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
         provider.delete_workload("test-id", "test-ns")
         
-        call_kwargs = mock_api.delete_namespaced_custom_object.call_args.kwargs
+        call_kwargs = mock_k8s_client.delete_custom_object.call_args.kwargs
         assert call_kwargs["grace_period_seconds"] == 0
     
     # ===== Expiration Time Management Tests =====
@@ -697,13 +619,12 @@ spec:
         Test case: Verify expiration time update
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.get_namespaced_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
+        mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
         expires_at = datetime(2025, 12, 31, 0, 0, 0, tzinfo=timezone.utc)
         provider.update_expiration("test-id", "test-ns", expires_at)
         
-        call_kwargs = mock_api.patch_namespaced_custom_object.call_args.kwargs
+        call_kwargs = mock_k8s_client.patch_custom_object.call_args.kwargs
         assert call_kwargs["body"] == {
             "spec": {"expireTime": "2025-12-31T00:00:00+00:00"}
         }
@@ -965,8 +886,7 @@ spec:
         This verifies backward compatibility - no error is raised.
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test-id", "uid": "test-uid"}
         }
         
@@ -987,7 +907,7 @@ spec:
         assert result == {"name": "sandbox-test-id", "uid": "test-uid"}
         
         # Verify poolRef is used
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         assert body["spec"]["poolRef"] == "my-pool"
     
     def test_create_workload_poolref_ignores_resource_limits(self, mock_k8s_client):
@@ -998,8 +918,7 @@ spec:
         This verifies backward compatibility - no error is raised.
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test-id", "uid": "test-uid"}
         }
         
@@ -1020,7 +939,7 @@ spec:
         assert result == {"name": "sandbox-test-id", "uid": "test-uid"}
         
         # Verify poolRef is used
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         assert body["spec"]["poolRef"] == "my-pool"
     
     def test_create_workload_poolref_allows_entrypoint_and_env(self, mock_k8s_client):
@@ -1030,8 +949,7 @@ spec:
         Verifies taskTemplate structure is correctly generated with user's entrypoint and env.
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test-id", "uid": "test-uid"}
         }
         
@@ -1051,7 +969,7 @@ spec:
         assert result == {"name": "sandbox-test-id", "uid": "test-uid"}
         
         # Verify the call
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         assert body["spec"]["poolRef"] == "my-pool"
         assert "taskTemplate" in body["spec"]
         
@@ -1197,8 +1115,7 @@ spec:
         - No template field (pool mode doesn't use pod template)
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
         
@@ -1217,7 +1134,7 @@ spec:
             extensions={"poolRef": "test-pool"}
         )
         
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         
         # Verify basic structure
         assert body["apiVersion"] == "sandbox.opensandbox.io/v1alpha1"
@@ -1243,8 +1160,7 @@ class TestBatchSandboxProviderEgress:
         Test case: Verify no sidecar is added when network_policy is None
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1264,7 +1180,7 @@ class TestBatchSandboxProviderEgress:
             egress_image=None,
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
         containers = pod_spec["containers"]
         
@@ -1279,8 +1195,7 @@ class TestBatchSandboxProviderEgress:
         Test case: Verify egress sidecar is added when network_policy is provided
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1304,7 +1219,7 @@ class TestBatchSandboxProviderEgress:
             egress_image="opensandbox/egress:v1.0.3",
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
         containers = pod_spec["containers"]
         
@@ -1331,8 +1246,7 @@ class TestBatchSandboxProviderEgress:
         Test case: Verify IPv6 disable sysctls are added to Pod spec
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1356,7 +1270,7 @@ class TestBatchSandboxProviderEgress:
             egress_image="opensandbox/egress:v1.0.3",
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
         
         # Verify securityContext with sysctls exists
@@ -1380,8 +1294,7 @@ class TestBatchSandboxProviderEgress:
         Test case: Verify main container drops NET_ADMIN when network_policy is enabled
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1405,7 +1318,7 @@ class TestBatchSandboxProviderEgress:
             egress_image="opensandbox/egress:v1.0.3",
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
         containers = pod_spec["containers"]
         
@@ -1424,8 +1337,7 @@ class TestBatchSandboxProviderEgress:
         Test case: Verify no sidecar is added when egress_image is None even if network_policy exists
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1449,7 +1361,7 @@ class TestBatchSandboxProviderEgress:
             egress_image=None,
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
         containers = pod_spec["containers"]
         
@@ -1462,8 +1374,7 @@ class TestBatchSandboxProviderEgress:
         Test case: Verify sidecar environment variable contains serialized network policy
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1490,7 +1401,7 @@ class TestBatchSandboxProviderEgress:
             egress_image="opensandbox/egress:v1.0.3",
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
         containers = pod_spec["containers"]
         
@@ -1513,8 +1424,7 @@ class TestBatchSandboxProviderEgress:
         Test case: Verify main container has no securityContext when network_policy is None
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1534,7 +1444,7 @@ class TestBatchSandboxProviderEgress:
             egress_image=None,
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
         containers = pod_spec["containers"]
         
@@ -1557,9 +1467,8 @@ spec:
           emptyDir: {}
 """
         )
-        provider = BatchSandboxProvider(mock_k8s_client, str(template_file))
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        provider = BatchSandboxProvider(mock_k8s_client, _app_config_with_template(str(template_file)))
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1583,7 +1492,7 @@ spec:
             egress_image="opensandbox/egress:v1.0.3",
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
         containers = pod_spec["containers"]
         
@@ -1617,8 +1526,7 @@ spec:
         Test case: imagePullSecrets is injected into pod spec when image auth is provided
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
         }
 
@@ -1637,7 +1545,7 @@ spec:
             execd_image="execd:latest",
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pull_secrets = body["spec"]["template"]["spec"].get("imagePullSecrets")
         assert pull_secrets == [{"name": f"{IMAGE_AUTH_SECRET_PREFIX}-test-id"}]
 
@@ -1646,11 +1554,9 @@ spec:
         Test case: a kubernetes.io/dockerconfigjson Secret is created with correct ownerReference
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-abc"}
         }
-        mock_core_api = mock_k8s_client.get_core_v1_api()
 
         provider.create_workload(
             sandbox_id="test-id",
@@ -1667,8 +1573,8 @@ spec:
             execd_image="execd:latest",
         )
 
-        mock_core_api.create_namespaced_secret.assert_called_once()
-        call_kwargs = mock_core_api.create_namespaced_secret.call_args.kwargs
+        mock_k8s_client.create_secret.assert_called_once()
+        call_kwargs = mock_k8s_client.create_secret.call_args.kwargs
         assert call_kwargs["namespace"] == "test-ns"
         secret = call_kwargs["body"]
         assert secret.type == "kubernetes.io/dockerconfigjson"
@@ -1682,11 +1588,9 @@ spec:
         Test case: no Secret is created when image auth is absent
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
         }
-        mock_core_api = mock_k8s_client.get_core_v1_api()
 
         provider.create_workload(
             sandbox_id="test-id",
@@ -1700,8 +1604,8 @@ spec:
             execd_image="execd:latest",
         )
 
-        mock_core_api.create_namespaced_secret.assert_not_called()
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        mock_k8s_client.create_secret.assert_not_called()
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         assert "imagePullSecrets" not in body["spec"]["template"]["spec"]
 
     def test_create_workload_with_image_auth_secret_failure_rolls_back_batchsandbox(self, mock_k8s_client):
@@ -1709,12 +1613,10 @@ spec:
         Test case: BatchSandbox is deleted when Secret creation fails
         """
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
         }
-        mock_core_api = mock_k8s_client.get_core_v1_api()
-        mock_core_api.create_namespaced_secret.side_effect = ApiException(status=403)
+        mock_k8s_client.create_secret.side_effect = ApiException(status=403)
 
         with pytest.raises(ApiException):
             provider.create_workload(
@@ -1732,7 +1634,7 @@ spec:
                 execd_image="execd:latest",
             )
 
-        mock_api.delete_namespaced_custom_object.assert_called_once_with(
+        mock_k8s_client.delete_custom_object.assert_called_once_with(
             group=provider.group,
             version=provider.version,
             namespace="test-ns",
@@ -1755,8 +1657,7 @@ spec:
         from src.api.schema import Volume, PVC
 
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1787,8 +1688,7 @@ spec:
         assert result == {"name": "test-id", "uid": "test-uid"}
 
         # Verify API call
-        call_args = mock_api.create_namespaced_custom_object.call_args
-        body = call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
 
         # Check volume definition
@@ -1812,8 +1712,7 @@ spec:
         from src.api.schema import Volume, PVC
 
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1839,7 +1738,7 @@ spec:
             volumes=volumes,
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
 
         main_container = pod_spec["containers"][0]
@@ -1855,8 +1754,7 @@ spec:
         from src.api.schema import Volume, PVC
 
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1883,7 +1781,7 @@ spec:
             volumes=volumes,
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
 
         main_container = pod_spec["containers"][0]
@@ -1899,8 +1797,7 @@ spec:
         from src.api.schema import Volume, Host
 
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1926,7 +1823,7 @@ spec:
             volumes=volumes,
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
 
         # Check volume definition
@@ -1951,8 +1848,7 @@ spec:
         from src.api.schema import Volume, PVC, Host
 
         provider = BatchSandboxProvider(mock_k8s_client)
-        mock_api = mock_k8s_client.get_custom_objects_api()
-        mock_api.create_namespaced_custom_object.return_value = {
+        mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
 
@@ -1984,7 +1880,7 @@ spec:
             volumes=volumes,
         )
 
-        body = mock_api.create_namespaced_custom_object.call_args.kwargs["body"]
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["template"]["spec"]
 
         # Check both volumes exist

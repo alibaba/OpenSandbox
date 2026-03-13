@@ -30,6 +30,7 @@ from src.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
     Endpoint,
+    ImageSpec,
     ListSandboxesRequest,
     ListSandboxesResponse,
     PaginationInfo,
@@ -89,7 +90,6 @@ class KubernetesSandboxService(SandboxService):
 
         self.namespace = self.app_config.kubernetes.namespace
         self.execd_image = runtime_config.execd_image
-        self.service_account = self.app_config.kubernetes.service_account
         
         # Initialize Kubernetes client
         try:
@@ -111,9 +111,6 @@ class KubernetesSandboxService(SandboxService):
             self.workload_provider = create_workload_provider(
                 provider_type=provider_type,
                 k8s_client=self.k8s_client,
-                k8s_config=self.app_config.kubernetes,
-                agent_sandbox_config=self.app_config.agent_sandbox,
-                ingress_config=self.ingress_config,
                 app_config=self.app_config,
             )
             logger.info(
@@ -743,8 +740,6 @@ class KubernetesSandboxService(SandboxService):
                 image_uri = container.image or ""
                 entrypoint = container.command or []
         
-        # Create ImageSpec object
-        from src.api.schema import ImageSpec
         image_spec = ImageSpec(uri=image_uri) if image_uri else ImageSpec(uri="unknown")
         
         return Sandbox(
