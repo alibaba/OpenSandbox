@@ -17,6 +17,7 @@ Examples for common OpenSandbox use cases. Each subdirectory contains runnable c
 - <img src="https://google.github.io/adk-docs/assets/agent-development-kit.png" alt="Google ADK" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**google-adk**](google-adk): Google ADK agent calling OpenSandbox tools
 - 🦞 [**nullclaw**](nullclaw): Launch a Nullclaw Gateway inside a sandbox
 - 🦞 [**openclaw**](openclaw): Run an OpenClaw Gateway inside a sandbox
+- 🦞 [**zeroclaw**](zeroclaw): Run a ZeroClaw Gateway inside a sandbox
 - 🖥️ [**desktop**](desktop): Launch VNC desktop (Xvfb + x11vnc) for VNC client connections
 - <img src="https://playwright.dev/img/playwright-logo.svg" alt="Playwright" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**playwright**](playwright): Launch headless browser (Playwright + Chromium) to scrape web content
 - <img src="https://code.visualstudio.com/assets/favicon.ico" alt="VS Code" width="16" height="16" style="display:inline-block;width:16px;height:16px;vertical-align:middle;margin-right:4px;" /> [**vscode**](vscode): Launch code-server (VS Code Web) to provide browser access
