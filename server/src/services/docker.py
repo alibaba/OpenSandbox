@@ -36,7 +36,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from threading import Lock, Timer
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 from uuid import uuid4
 
 import docker
@@ -1584,6 +1584,49 @@ class DockerSandboxService(SandboxService):
                 },
             )
         return Endpoint(endpoint=f"{public_host}:{execd_host_port}/proxy/{port}")
+
+    def get_logs(
+        self,
+        sandbox_id: str,
+        follow: bool = False,
+        tail: Optional[int] = None,
+        timestamps: bool = False,
+    ) -> Iterator[bytes]:
+        """
+        Stream stdout/stderr logs for a Docker sandbox container.
+
+        Args:
+            sandbox_id: Unique sandbox identifier
+            follow: If True, keep streaming until the container exits.
+            tail: Number of lines from the end to return. None means all lines.
+            timestamps: If True, prepend each log line with an RFC3339 timestamp.
+
+        Yields:
+            bytes: Raw log output chunks (Docker multiplexed-stream format).
+
+        Raises:
+            HTTPException: If the sandbox is not found or logs cannot be retrieved.
+        """
+        container = self._get_container_by_sandbox_id(sandbox_id)
+        tail_arg: int | str = tail if tail is not None else "all"
+        try:
+            log_gen = container.logs(
+                stream=True,
+                follow=follow,
+                stdout=True,
+                stderr=True,
+                timestamps=timestamps,
+                tail=tail_arg,
+            )
+            yield from log_gen
+        except DockerException as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.CONTAINER_QUERY_FAILED,
+                    "message": f"Failed to stream logs for sandbox {sandbox_id}: {str(exc)}",
+                },
+            ) from exc
 
     def _get_docker_host_ip(self) -> Optional[str]:
         """When running inside a container, return [docker].host_ip for endpoint URLs (if set)."""
