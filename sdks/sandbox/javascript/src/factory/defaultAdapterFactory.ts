@@ -19,6 +19,7 @@ import { CommandsAdapter } from "../adapters/commandsAdapter.js";
 import { FilesystemAdapter } from "../adapters/filesystemAdapter.js";
 import { HealthAdapter } from "../adapters/healthAdapter.js";
 import { MetricsAdapter } from "../adapters/metricsAdapter.js";
+import { PoolsAdapter } from "../adapters/poolsAdapter.js";
 import { SandboxesAdapter } from "../adapters/sandboxesAdapter.js";
 
 import type { AdapterFactory, CreateExecdStackOptions, CreateLifecycleStackOptions, ExecdStack, LifecycleStack } from "./adapterFactory.js";
@@ -32,7 +33,13 @@ export class DefaultAdapterFactory implements AdapterFactory {
       fetch: opts.connectionConfig.fetch,
     });
     const sandboxes = new SandboxesAdapter(lifecycleClient);
-    return { sandboxes };
+    const pools = new PoolsAdapter({
+      baseUrl: opts.lifecycleBaseUrl,
+      apiKey: opts.connectionConfig.apiKey,
+      headers: opts.connectionConfig.headers,
+      fetch: opts.connectionConfig.fetch,
+    });
+    return { sandboxes, pools };
   }
 
   createExecdStack(opts: CreateExecdStackOptions): ExecdStack {
