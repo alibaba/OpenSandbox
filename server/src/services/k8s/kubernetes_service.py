@@ -435,8 +435,9 @@ class KubernetesSandboxService(SandboxService):
             ListSandboxesResponse: Paginated list of sandboxes
         """
         try:
-            # Build label selector
-            label_selector = SANDBOX_ID_LABEL
+            # Do not require opensandbox.io/id when listing.
+            # This allows manually created CRs (e.g. BatchSandbox) to appear.
+            label_selector = ""
             
             # List all workloads
             workloads = self.workload_provider.list_workloads(
@@ -703,13 +704,15 @@ class KubernetesSandboxService(SandboxService):
             spec = workload.get("spec", {})
             labels = metadata.get("labels", {})
             creation_timestamp = metadata.get("creationTimestamp")
+            resource_name = metadata.get("name", "")
         else:
             metadata = workload.metadata
             spec = workload.spec
             labels = metadata.labels or {}
             creation_timestamp = metadata.creation_timestamp
+            resource_name = getattr(metadata, "name", "")
         
-        sandbox_id = labels.get(SANDBOX_ID_LABEL, "")
+        sandbox_id = labels.get(SANDBOX_ID_LABEL) or resource_name
         
         # Get expiration from provider
         expires_at = self.workload_provider.get_expiration(workload)
