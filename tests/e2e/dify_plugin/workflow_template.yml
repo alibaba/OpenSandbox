@@ -1,0 +1,213 @@
+app:
+  description: "OpenSandbox plugin e2e workflow"
+  icon: "\U0001F9EA"
+  icon_background: "#E5F2FF"
+  mode: workflow
+  name: OpenSandbox Plugin E2E
+workflow:
+  features:
+    file_upload:
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    opening_statement: ""
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ""
+      voice: ""
+  graph:
+    edges:
+    - data:
+        sourceType: start
+        targetType: tool
+      id: start-create
+      source: "start"
+      sourceHandle: source
+      target: "create"
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: tool
+        targetType: tool
+      id: create-run
+      source: "create"
+      sourceHandle: source
+      target: "run"
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: tool
+        targetType: tool
+      id: run-kill
+      source: "run"
+      sourceHandle: source
+      target: "kill"
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: tool
+        targetType: end
+      id: kill-end
+      source: "kill"
+      sourceHandle: source
+      target: "end"
+      targetHandle: target
+      type: custom
+    nodes:
+    - data:
+        desc: ""
+        selected: false
+        title: Start
+        type: start
+        variables: []
+      height: 52
+      id: "start"
+      position:
+        x: 80
+        y: 282
+      positionAbsolute:
+        x: 80
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 243
+    - data:
+        desc: ""
+        selected: false
+        title: Create Sandbox
+        type: tool
+        provider_id: "__PROVIDER_ID__"
+        provider_type: "builtin"
+        provider_name: "__PROVIDER_NAME__"
+        tool_name: "sandbox_create"
+        tool_label: "__TOOL_CREATE_LABEL__"
+        tool_configurations:
+          opensandbox_base_url: "__OPENSANDBOX_BASE_URL__"
+          opensandbox_api_key: "__OPENSANDBOX_API_KEY__"
+        plugin_unique_identifier: "__PLUGIN_UNIQUE_IDENTIFIER__"
+        tool_node_version: "1"
+        tool_parameters:
+          image:
+            type: constant
+            value: "python:3.11-slim"
+      height: 140
+      id: "create"
+      position:
+        x: 360
+        y: 282
+      positionAbsolute:
+        x: 360
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 280
+    - data:
+        desc: ""
+        selected: false
+        title: Run Command
+        type: tool
+        provider_id: "__PROVIDER_ID__"
+        provider_type: "builtin"
+        provider_name: "__PROVIDER_NAME__"
+        tool_name: "sandbox_run"
+        tool_label: "__TOOL_RUN_LABEL__"
+        tool_configurations:
+          opensandbox_base_url: "__OPENSANDBOX_BASE_URL__"
+          opensandbox_api_key: "__OPENSANDBOX_API_KEY__"
+        plugin_unique_identifier: "__PLUGIN_UNIQUE_IDENTIFIER__"
+        tool_node_version: "1"
+        tool_parameters:
+          sandbox_id:
+            type: mixed
+            value: "{{#create.sandbox_id#}}"
+          command:
+            type: constant
+            value: "echo opensandbox-e2e"
+      height: 140
+      id: "run"
+      position:
+        x: 700
+        y: 282
+      positionAbsolute:
+        x: 700
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 280
+    - data:
+        desc: ""
+        selected: false
+        title: Kill Sandbox
+        type: tool
+        provider_id: "__PROVIDER_ID__"
+        provider_type: "builtin"
+        provider_name: "__PROVIDER_NAME__"
+        tool_name: "sandbox_kill"
+        tool_label: "__TOOL_KILL_LABEL__"
+        tool_configurations:
+          opensandbox_base_url: "__OPENSANDBOX_BASE_URL__"
+          opensandbox_api_key: "__OPENSANDBOX_API_KEY__"
+        plugin_unique_identifier: "__PLUGIN_UNIQUE_IDENTIFIER__"
+        tool_node_version: "1"
+        tool_parameters:
+          sandbox_id:
+            type: mixed
+            value: "{{#create.sandbox_id#}}"
+      height: 140
+      id: "kill"
+      position:
+        x: 1040
+        y: 282
+      positionAbsolute:
+        x: 1040
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 280
+    - data:
+        desc: ""
+        outputs:
+        - value_selector:
+          - "run"
+          - "stdout"
+          variable: stdout
+        selected: false
+        title: End
+        type: end
+      height: 89
+      id: "end"
+      position:
+        x: 1380
+        y: 282
+      positionAbsolute:
+        x: 1380
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 243
+    viewport:
+      x: 0
+      y: 0
+      zoom: 1

@@ -1,0 +1,35 @@
+identity:
+  name: sandbox_kill
+  author: OpenSandbox
+  label:
+    en_US: Kill Sandbox
+    zh_Hans: 终止 Sandbox
+description:
+  human:
+    en_US: Terminate a sandbox by ID.
+    zh_Hans: 通过 ID 终止 sandbox。
+  llm: Terminate a sandbox by ID.
+parameters:
+  - name: sandbox_id
+    type: string
+    required: true
+    label:
+      en_US: Sandbox ID
+      zh_Hans: Sandbox ID
+    human_description:
+      en_US: ID of the sandbox to terminate.
+      zh_Hans: 要终止的 sandbox ID。
+    llm_description: The sandbox id to terminate.
+    form: form
+output_schema:
+  type: object
+  properties:
+    ok:
+      type: boolean
+      description: Whether the sandbox was terminated.
+    sandbox_id:
+      type: string
+      description: The sandbox id.
+extra:
+  python:
+    source: tools/sandbox_kill.py
