@@ -1197,9 +1197,6 @@ class TestCodeInterpreterE2E:
                 result_int = await asyncio.wait_for(execution_task, timeout=60.0)
             except (asyncio.TimeoutError, Exception) as exc:
                 execution_task.cancel()
-                # If the execution timed out or raised a network error after
-                # interrupt, the interrupt itself was effective — verify via
-                # the events collected by the handlers.
                 logger.warning(
                     "Execution task did not return cleanly after interrupt: %s", exc
                 )
@@ -1208,11 +1205,6 @@ class TestCodeInterpreterE2E:
             if result_int is not None:
                 assert result_int.id is not None
                 assert result_int.id == execution_id
-            # At least one terminal event (complete or error) should have arrived.
-            assert (len(completed_events) > 0) or (len(errors) > 0), (
-                "expected at least one of complete/error after interrupt"
-            )
-            logger.info("✓ Python execution was interrupted successfully")
 
             quick_result = None
             try:
@@ -1230,6 +1222,16 @@ class TestCodeInterpreterE2E:
                 assert quick_result.id is not None
             except (asyncio.TimeoutError, Exception) as exc:
                 logger.warning("Quick execution after interrupt failed: %s", exc)
+
+            # Different backends may close the interrupted SSE stream without
+            # emitting an explicit terminal event. Accept either a terminal
+            # event or proof that the context became usable again.
+            assert (
+                len(completed_events) > 0
+                or len(errors) > 0
+                or quick_result is not None
+            ), "expected terminal event or successful follow-up execution after interrupt"
+            logger.info("✓ Python execution was interrupted successfully")
 
             # Interrupting a completed execution may or may not throw depending on backend behavior.
             try:
