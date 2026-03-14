@@ -368,6 +368,7 @@ func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch tasksch
 	var (
 		running, failed, succeed, unknown int32
 		pending                           int32
+		lastErrorMessage                  string
 	)
 	for i := range len(tasks) {
 		task := tasks[i]
@@ -385,6 +386,10 @@ func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch tasksch
 				succeed++
 			case taskscheduler.FailedTaskState:
 				failed++
+				// Capture the most recent error message to surface in status.
+				if msg := task.GetTerminatedMessage(); msg != "" {
+					lastErrorMessage = msg
+				}
 			case taskscheduler.UnknownTaskState:
 				unknown++
 			}
@@ -405,8 +410,14 @@ func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch tasksch
 	newStatus.TaskSucceed = succeed
 	newStatus.TaskUnknown = unknown
 	newStatus.TaskPending = pending
+	// Persist error message from the most recently failed task (e.g. lifecycle hook stderr).
+	// Only update when a new non-empty message is available, to avoid clearing a previously
+	// recorded error on subsequent reconcile cycles where the task may have been released.
+	if lastErrorMessage != "" {
+		newStatus.TaskLastErrorMessage = lastErrorMessage
+	}
 	if !reflect.DeepEqual(newStatus, oldStatus) {
-		log.Info("To update BatchSandbox status", "replicas", newStatus.Replicas, "task_running", newStatus.TaskRunning, "task_succeed", newStatus.TaskSucceed, "task_failed", newStatus.TaskFailed, "task_unknown", newStatus.TaskUnknown, "task_pending", newStatus.TaskPending)
+		log.Info("To update BatchSandbox status", "replicas", newStatus.Replicas, "task_running", newStatus.TaskRunning, "task_succeed", newStatus.TaskSucceed, "task_failed", newStatus.TaskFailed, "task_unknown", newStatus.TaskUnknown, "task_pending", newStatus.TaskPending, "last_error", newStatus.TaskLastErrorMessage)
 		if err := r.updateStatus(batchSbx, newStatus); err != nil {
 			return err
 		}
