@@ -107,6 +107,62 @@ def _assert_terminal_event_contract(
         _assert_recent_timestamp_ms(errors[0].timestamp)
 
 
+def _buffer_attempt_handlers(
+        handlers: ExecutionHandlers,
+) -> tuple[ExecutionHandlers, Callable[[], Awaitable[None]]]:
+    buffered_events: list[tuple[str, object]] = []
+
+    async def on_stdout(msg: OutputMessage) -> None:
+        buffered_events.append(("stdout", msg))
+
+    async def on_stderr(msg: OutputMessage) -> None:
+        buffered_events.append(("stderr", msg))
+
+    async def on_result(result: ExecutionResult) -> None:
+        buffered_events.append(("result", result))
+
+    async def on_complete(complete: ExecutionComplete) -> None:
+        buffered_events.append(("complete", complete))
+
+    async def on_error(error: ExecutionError) -> None:
+        buffered_events.append(("error", error))
+
+    async def on_init(init: ExecutionInit) -> None:
+        buffered_events.append(("init", init))
+
+    async def flush() -> None:
+        for event_type, payload in buffered_events:
+            if event_type == "stdout" and handlers.on_stdout is not None:
+                await handlers.on_stdout(payload)
+            elif event_type == "stderr" and handlers.on_stderr is not None:
+                await handlers.on_stderr(payload)
+            elif event_type == "result" and handlers.on_result is not None:
+                await handlers.on_result(payload)
+            elif (
+                event_type == "complete"
+                and handlers.on_execution_complete is not None
+            ):
+                await handlers.on_execution_complete(payload)
+            elif event_type == "error" and handlers.on_error is not None:
+                await handlers.on_error(payload)
+            elif event_type == "init" and handlers.on_init is not None:
+                await handlers.on_init(payload)
+
+    return (
+        ExecutionHandlers(
+            on_stdout=on_stdout if handlers.on_stdout is not None else None,
+            on_stderr=on_stderr if handlers.on_stderr is not None else None,
+            on_result=on_result if handlers.on_result is not None else None,
+            on_execution_complete=(
+                on_complete if handlers.on_execution_complete is not None else None
+            ),
+            on_error=on_error if handlers.on_error is not None else None,
+            on_init=on_init if handlers.on_init is not None else None,
+        ),
+        flush,
+    )
+
+
 async def run_with_retry(
     code_interpreter: CodeInterpreter,
     code: str,
@@ -131,17 +187,26 @@ async def run_with_retry(
 
     for attempt in range(max_retries):
         try:
+            attempt_handlers = handlers
+            flush_attempt_events: Callable[[], Awaitable[None]] | None = None
+            if handlers is not None:
+                attempt_handlers, flush_attempt_events = _buffer_attempt_handlers(
+                    handlers
+                )
+
             result = await asyncio.wait_for(
                 code_interpreter.codes.run(
                     code,
                     context=context,
                     language=language,
-                    handlers=handlers,
+                    handlers=attempt_handlers,
                 ),
                 timeout=per_call_timeout,
             )
             last_result = result
             if result is not None and result.id is not None:
+                if flush_attempt_events is not None:
+                    await flush_attempt_events()
                 return result
             # Empty result - retry
             if attempt < max_retries - 1:
@@ -1224,4 +1289,3 @@ class TestCodeInterpreterE2E:
         ]
         assert len(final_contexts) == 0
         logger.info("✓ delete_contexts removed all bash contexts")
-
