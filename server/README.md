@@ -158,7 +158,8 @@ Reference runtime compose file:
 **Upgrade order for manual cleanup**
 
 - Existing TTL-only clients can continue to work without changes as long as they do not encounter manual-cleanup sandboxes.
-- Manual cleanup changes the lifecycle response contract: `expiresAt` may be `null`, and nullable lifecycle fields may be serialized explicitly.
+- Manual cleanup changes the lifecycle response contract: `expiresAt` may be `null`, and other nullable lifecycle fields may also be serialized explicitly as `null`.
+- In practice this can include fields such as `metadata`, `status.reason`, `status.message`, and `status.lastTransitionAt`, depending on the sandbox state and the server response model.
 - Before creating any manual-cleanup sandbox, upgrade every SDK/client that may call `create`, `get`, or `list` on the lifecycle API.
 - Recommended rollout order:
   1. Upgrade SDKs/clients

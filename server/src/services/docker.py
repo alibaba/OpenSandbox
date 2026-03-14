@@ -75,6 +75,7 @@ from src.services.helpers import (
 from src.services.sandbox_service import SandboxService
 from src.services.runtime_resolver import SecureRuntimeResolver
 from src.services.validators import (
+    calculate_expiration_or_raise,
     ensure_egress_configured,
     ensure_entrypoint,
     ensure_future_expiration,
@@ -631,7 +632,7 @@ class DockerSandboxService(SandboxService):
         created_at = datetime.now(timezone.utc)
         expires_at = None
         if request.timeout is not None:
-            expires_at = created_at + timedelta(seconds=request.timeout)
+            expires_at = calculate_expiration_or_raise(created_at, request.timeout)
         return sandbox_id, created_at, expires_at
 
     @staticmethod

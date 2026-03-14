@@ -155,6 +155,15 @@ def test_ensure_timeout_within_limit_rejects_timeout_above_limit():
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
 
 
+def test_ensure_timeout_within_limit_rejects_unrepresentable_timeout():
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_timeout_within_limit(10**20, None)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "too large" in exc_info.value.detail["message"]
+
+
 # ============================================================================
 # Volume Name Validation Tests
 # ============================================================================

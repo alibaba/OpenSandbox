@@ -22,7 +22,7 @@ enforce the same preconditions before performing runtime-specific work.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 from fastapi import HTTPException, status
@@ -189,7 +189,12 @@ def ensure_timeout_within_limit(timeout_seconds: Optional[int], max_timeout_seco
     Raises:
         HTTPException: When the timeout exceeds the configured maximum.
     """
-    if timeout_seconds is None or max_timeout_seconds is None:
+    if timeout_seconds is None:
+        return
+
+    calculate_expiration_or_raise(datetime.now(timezone.utc), timeout_seconds)
+
+    if max_timeout_seconds is None:
         return
 
     if timeout_seconds > max_timeout_seconds:
@@ -203,6 +208,27 @@ def ensure_timeout_within_limit(timeout_seconds: Optional[int], max_timeout_seco
                 ),
             },
         )
+
+
+def calculate_expiration_or_raise(created_at: datetime, timeout_seconds: int) -> datetime:
+    """
+    Compute an expiration timestamp and convert datetime overflow into a 400 error.
+
+    Raises:
+        HTTPException: When the timeout value is too large to represent safely.
+    """
+    try:
+        return created_at + timedelta(seconds=timeout_seconds)
+    except (OverflowError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    f"Sandbox timeout {timeout_seconds}s is too large to represent safely."
+                ),
+            },
+        ) from exc
 
 
 # Volume name must be a valid DNS label

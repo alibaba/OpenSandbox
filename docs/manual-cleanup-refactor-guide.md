@@ -41,7 +41,10 @@ This refactor is compatible through a controlled upgrade path, not through stric
 Important compatibility fact:
 
 - Once manual cleanup is enabled in an environment, lifecycle responses may contain `expiresAt=null`
+- Lifecycle responses may also serialize other nullable fields explicitly as `null` instead of omitting them
 - Older SDKs that assume `expiresAt` is always a timestamp may fail when they call `create`, `get`, or `list`
+- Older schema-generated clients may also fail if they assume fields such as `metadata`, `status.reason`,
+  `status.message`, or `status.lastTransitionAt` are always omitted or always non-null
 - Existing TTL-based callers are unaffected as long as they do not encounter manual-cleanup sandboxes
 
 Recommended rollout order:
@@ -434,6 +437,7 @@ Expected compatibility behavior:
 Compatibility caveat:
 
 - Any generated SDKs may need regeneration because `timeout` and `expiresAt` types change from required to optional
+- Generated SDKs should also tolerate explicit `null` values in optional lifecycle fields, not only missing fields
 - Cross-SDK request shapes do not need to be byte-for-byte identical if language constraints differ. In particular, the
   C# SDK may use an explicit `ManualCleanup` flag instead of `timeout=null` so it can keep "unset means use default TTL"
   distinct from "explicitly request manual cleanup".
