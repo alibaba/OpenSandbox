@@ -75,7 +75,7 @@ Manage the sandbox lifecycle, including renewal, pausing, and resuming.
 const info = await sandbox.getInfo();
 console.log("State:", info.status.state);
 console.log("Created:", info.createdAt);
-console.log("Expires:", info.expiresAt);
+console.log("Expires:", info.expiresAt); // null when manual cleanup mode is used
 
 await sandbox.pause();
 
@@ -84,6 +84,16 @@ const resumed = await sandbox.resume();
 
 // Renew: expiresAt = now + timeoutSeconds
 await resumed.renew(30 * 60);
+```
+
+Create a non-expiring sandbox by passing `timeoutSeconds: null`:
+
+```ts
+const manual = await Sandbox.create({
+  connectionConfig: config,
+  image: "ubuntu",
+  timeoutSeconds: null,
+});
 ```
 
 ### 2. Custom Health Check

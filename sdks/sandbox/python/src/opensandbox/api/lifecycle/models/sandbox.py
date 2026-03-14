@@ -47,7 +47,7 @@ class Sandbox:
         status (SandboxStatus): Detailed status information with lifecycle state and transition details
         entrypoint (list[str]): The command to execute as the sandbox's entry process.
             Always present in responses since entrypoint is required in creation requests.
-        expires_at (datetime.datetime): Timestamp when sandbox will auto-terminate
+        expires_at (datetime.datetime | None): Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.
         created_at (datetime.datetime): Sandbox creation timestamp
         metadata (SandboxMetadata | Unset): Custom metadata from creation request
     """
@@ -56,7 +56,7 @@ class Sandbox:
     image: ImageSpec
     status: SandboxStatus
     entrypoint: list[str]
-    expires_at: datetime.datetime
+    expires_at: datetime.datetime | None
     created_at: datetime.datetime
     metadata: SandboxMetadata | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -70,7 +70,7 @@ class Sandbox:
 
         entrypoint = self.entrypoint
 
-        expires_at = self.expires_at.isoformat()
+        expires_at = self.expires_at.isoformat() if self.expires_at is not None else None
 
         created_at = self.created_at.isoformat()
 
@@ -110,7 +110,8 @@ class Sandbox:
 
         entrypoint = cast(list[str], d.pop("entrypoint"))
 
-        expires_at = isoparse(d.pop("expiresAt"))
+        _expires_at = d.pop("expiresAt")
+        expires_at = isoparse(_expires_at) if _expires_at is not None else None
 
         created_at = isoparse(d.pop("createdAt"))
 

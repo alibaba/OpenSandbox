@@ -313,11 +313,14 @@ class CreateSandboxRequest(BaseModel):
     Request to create a new sandbox from a container image.
     """
     image: ImageSpec = Field(..., description="Container image specification for the sandbox")
-    timeout: int = Field(
-        ...,
+    timeout: Optional[int] = Field(
+        None,
         ge=60,
-        le=86400,
-        description="Sandbox timeout in seconds (60-86400). The sandbox will automatically terminate after this duration.",
+        description=(
+            "Sandbox timeout in seconds (minimum 60). "
+            "The maximum is controlled by server.max_sandbox_timeout_seconds. "
+            "When omitted or null, the sandbox will not auto-terminate and must be deleted explicitly."
+        ),
     )
     resource_limits: ResourceLimits = Field(
         ...,
@@ -371,7 +374,11 @@ class CreateSandboxResponse(BaseModel):
     id: str = Field(..., description="Unique sandbox identifier")
     status: SandboxStatus = Field(..., description="Current lifecycle status and detailed state information")
     metadata: Optional[Dict[str, str]] = Field(None, description="Custom metadata from creation request")
-    expires_at: datetime = Field(..., alias="expiresAt", description="Timestamp when sandbox will auto-terminate")
+    expires_at: Optional[datetime] = Field(
+        None,
+        alias="expiresAt",
+        description="Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.",
+    )
     created_at: datetime = Field(..., alias="createdAt", description="Sandbox creation timestamp")
     entrypoint: List[str] = Field(..., description="Entry process specification from creation request")
 
@@ -390,7 +397,11 @@ class Sandbox(BaseModel):
     status: SandboxStatus = Field(..., description="Current lifecycle status and detailed state information")
     metadata: Optional[Dict[str, str]] = Field(None, description="Custom metadata from creation request")
     entrypoint: List[str] = Field(..., description="The command to execute as the sandbox's entry process")
-    expires_at: datetime = Field(..., alias="expiresAt", description="Timestamp when sandbox will auto-terminate")
+    expires_at: Optional[datetime] = Field(
+        None,
+        alias="expiresAt",
+        description="Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.",
+    )
     created_at: datetime = Field(..., alias="createdAt", description="Sandbox creation timestamp")
 
     class Config:

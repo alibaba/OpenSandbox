@@ -63,6 +63,7 @@ from src.services.constants import (
     SANDBOX_EXPIRES_AT_LABEL,
     SANDBOX_HTTP_PORT_LABEL,
     SANDBOX_ID_LABEL,
+    SANDBOX_MANUAL_CLEANUP_LABEL,
     SANDBOX_OSSFS_MOUNTS_LABEL,
     SandboxErrorCodes,
 )
@@ -80,6 +81,7 @@ from src.services.validators import (
     ensure_entrypoint,
     ensure_future_expiration,
     ensure_metadata_labels,
+    ensure_timeout_within_limit,
     ensure_valid_host_path,
     ensure_volumes_valid,
 )
@@ -109,7 +111,7 @@ EGRESS_SIDECAR_LABEL = "opensandbox.io/egress-sidecar-for"
 class PendingSandbox:
     request: CreateSandboxRequest
     created_at: datetime
-    expires_at: datetime
+    expires_at: Optional[datetime]
     status: SandboxStatus
 
 
@@ -291,12 +293,16 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                 timer.cancel()
             self._sandbox_expirations.pop(sandbox_id, None)
 
+    @staticmethod
+    def _has_manual_cleanup(labels: Dict[str, str]) -> bool:
+        """Return True when labels indicate manual cleanup mode."""
+        return labels.get(SANDBOX_MANUAL_CLEANUP_LABEL, "").lower() == "true"
+
     def _get_tracked_expiration(
         self,
         sandbox_id: str,
         labels: Dict[str, str],
-        fallback: datetime,
-    ) -> datetime:
+    ) -> Optional[datetime]:
         """Return the known expiration timestamp for the sandbox."""
         with self._expiration_lock:
             tracked = self._sandbox_expirations.get(sandbox_id)
@@ -305,7 +311,7 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         label_value = labels.get(SANDBOX_EXPIRES_AT_LABEL)
         if label_value:
             return parse_timestamp(label_value)
-        return fallback
+        return None
 
     def _expire_sandbox(
         self,
@@ -426,6 +432,8 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             expires_label = labels.get(SANDBOX_EXPIRES_AT_LABEL)
             if expires_label:
                 expires_at = parse_timestamp(expires_label)
+            elif self._has_manual_cleanup(labels):
+                continue
             else:
                 logger.warning(
                     "Sandbox %s missing expires-at label; skipping expiration scheduling.",
@@ -592,7 +600,7 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         metadata = {
             key: value
             for key, value in labels.items()
-            if key not in {SANDBOX_ID_LABEL, SANDBOX_EXPIRES_AT_LABEL}
+            if key not in {SANDBOX_ID_LABEL, SANDBOX_EXPIRES_AT_LABEL, SANDBOX_MANUAL_CLEANUP_LABEL}
         } or None
         entrypoint = container.attrs.get("Config", {}).get("Cmd") or []
         if isinstance(entrypoint, str):
@@ -607,7 +615,7 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             if finished_at and finished_at != "0001-01-01T00:00:00Z"
             else created_at
         )
-        expires_at = self._get_tracked_expiration(resolved_id, labels, created_at)
+        expires_at = self._get_tracked_expiration(resolved_id, labels)
 
         status_info = SandboxStatus(
             state=state,
@@ -714,10 +722,12 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
     def _prepare_creation_context(
         self,
         request: CreateSandboxRequest,
-    ) -> tuple[str, datetime, datetime]:
+    ) -> tuple[str, datetime, Optional[datetime]]:
         sandbox_id = self.generate_sandbox_id()
         created_at = datetime.now(timezone.utc)
-        expires_at = created_at + timedelta(seconds=request.timeout)
+        expires_at = None
+        if request.timeout is not None:
+            expires_at = created_at + timedelta(seconds=request.timeout)
         return sandbox_id, created_at, expires_at
 
     @staticmethod
@@ -751,6 +761,10 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         """
         ensure_entrypoint(request.entrypoint)
         ensure_metadata_labels(request.metadata)
+        ensure_timeout_within_limit(
+            request.timeout,
+            self.app_config.server.max_sandbox_timeout_seconds,
+        )
         self._ensure_network_policy_support(request)
         self._validate_network_exists()
         pvc_inspect_cache = self._validate_volumes(request)
@@ -762,7 +776,7 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         sandbox_id: str,
         request: CreateSandboxRequest,
         created_at: datetime,
-        expires_at: datetime,
+        expires_at: Optional[datetime],
         pvc_inspect_cache: Optional[dict[str, dict]] = None,
     ) -> None:
         try:
@@ -926,7 +940,7 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         sandbox_id: str,
         request: CreateSandboxRequest,
         created_at: datetime,
-        expires_at: datetime,
+        expires_at: Optional[datetime],
         pvc_inspect_cache: Optional[dict[str, dict]] = None,
     ) -> CreateSandboxResponse:
         labels, environment = self._build_labels_and_env(sandbox_id, request, expires_at)
@@ -1017,7 +1031,8 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             last_transition_at=created_at,
         )
 
-        self._schedule_expiration(sandbox_id, expires_at)
+        if expires_at is not None:
+            self._schedule_expiration(sandbox_id, expires_at)
 
         return CreateSandboxResponse(
             id=sandbox_id,
@@ -1632,6 +1647,24 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         new_expiration = ensure_future_expiration(request.expires_at)
 
         labels = container.attrs.get("Config", {}).get("Labels") or {}
+        if self._has_manual_cleanup(labels):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_EXPIRATION,
+                    "message": f"Sandbox {sandbox_id} does not have automatic expiration enabled.",
+                },
+            )
+        if self._get_tracked_expiration(sandbox_id, labels) is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_EXPIRATION,
+                    "message": (
+                        f"Sandbox {sandbox_id} is missing expiration metadata and cannot be renewed safely."
+                    ),
+                },
+            )
 
         # Persist the new timeout in memory; it will also be respected on restart via _restore_existing_sandboxes
         self._schedule_expiration(sandbox_id, new_expiration)
@@ -1747,12 +1780,15 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         self,
         sandbox_id: str,
         request: CreateSandboxRequest,
-        expires_at: datetime,
+        expires_at: Optional[datetime],
     ) -> tuple[dict[str, str], list[str]]:
         metadata = request.metadata or {}
         labels = {key: str(value) for key, value in metadata.items()}
         labels[SANDBOX_ID_LABEL] = sandbox_id
-        labels[SANDBOX_EXPIRES_AT_LABEL] = expires_at.isoformat()
+        if expires_at is None:
+            labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
+        else:
+            labels[SANDBOX_EXPIRES_AT_LABEL] = expires_at.isoformat()
 
         env_dict = request.env or {}
         environment = []

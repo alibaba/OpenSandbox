@@ -468,11 +468,8 @@ export interface components {
             metadata?: {
                 [key: string]: string;
             };
-            /**
-             * Format: date-time
-             * @description Timestamp when sandbox will auto-terminate
-             */
-            expiresAt: string;
+            /** @description Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled. */
+            expiresAt?: string | null;
             /**
              * Format: date-time
              * @description Sandbox creation timestamp
@@ -501,11 +498,8 @@ export interface components {
              *     Always present in responses since entrypoint is required in creation requests.
              */
             entrypoint: string[];
-            /**
-             * Format: date-time
-             * @description Timestamp when sandbox will auto-terminate
-             */
-            expiresAt: string;
+            /** @description Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled. */
+            expiresAt?: string | null;
             /**
              * Format: date-time
              * @description Sandbox creation timestamp
@@ -588,9 +582,9 @@ export interface components {
             image: components["schemas"]["ImageSpec"];
             /**
              * @description Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
-             *     SDK clients should provide a default value (e.g., 3600 seconds / 1 hour).
+             *     Omit or set null to disable automatic expiration and require explicit cleanup.
              */
-            timeout: number;
+            timeout?: number | null;
             /**
              * @description Runtime resource constraints for the sandbox instance.
              *     SDK clients should provide sensible defaults (e.g., cpu: "500m", memory: "512Mi").

@@ -335,8 +335,10 @@ class SandboxInfo(BaseModel):
     entrypoint: list[str] = Field(
         description="Command line arguments used to start the sandbox"
     )
-    expires_at: datetime = Field(
-        description="Scheduled termination timestamp", alias="expires_at"
+    expires_at: datetime | None = Field(
+        default=None,
+        description="Scheduled termination timestamp. Null means manual cleanup mode.",
+        alias="expires_at",
     )
     created_at: datetime = Field(description="Creation timestamp", alias="created_at")
     image: SandboxImageSpec | None = Field(

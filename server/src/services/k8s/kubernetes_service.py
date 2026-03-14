@@ -51,6 +51,7 @@ from src.services.validators import (
     ensure_egress_configured,
     ensure_future_expiration,
     ensure_metadata_labels,
+    ensure_timeout_within_limit,
     ensure_volumes_valid,
 )
 from src.services.k8s.client import K8sClient
@@ -262,6 +263,10 @@ class KubernetesSandboxService(SandboxService):
         # Validate request
         ensure_entrypoint(request.entrypoint)
         ensure_metadata_labels(request.metadata)
+        ensure_timeout_within_limit(
+            request.timeout,
+            self.app_config.server.max_sandbox_timeout_seconds,
+        )
         self._ensure_network_policy_support(request)
         self._ensure_image_auth_support(request)
         
@@ -270,7 +275,19 @@ class KubernetesSandboxService(SandboxService):
         
         # Calculate expiration time
         created_at = datetime.now(timezone.utc)
-        expires_at = created_at + timedelta(seconds=request.timeout)
+        expires_at = None
+        if request.timeout is not None:
+            expires_at = created_at + timedelta(seconds=request.timeout)
+        elif not self.workload_provider.supports_manual_cleanup():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": (
+                        "Manual cleanup mode is not supported by the current Kubernetes workload provider."
+                    ),
+                },
+            )
         
         # Build labels
         labels = {
@@ -596,7 +613,17 @@ class KubernetesSandboxService(SandboxService):
                         "message": f"Sandbox '{sandbox_id}' not found",
                     },
                 )
-            
+
+            current_expiration = self.workload_provider.get_expiration(workload)
+            if current_expiration is None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_EXPIRATION,
+                        "message": f"Sandbox {sandbox_id} does not have automatic expiration enabled.",
+                    },
+                )
+
             # Update BatchSandbox spec.expireTime field
             self.workload_provider.update_expiration(
                 sandbox_id=sandbox_id,

@@ -93,6 +93,17 @@ sandbox.resume();
 // 获取当前状态
 SandboxInfo info = sandbox.getInfo();
 System.out.println("当前状态: " + info.getStatus().getState());
+System.out.println("过期时间: " + info.getExpiresAt()); // 使用手动清理模式时为 null
+```
+
+通过传入 `timeout(null)` 创建一个不会自动过期的沙箱：
+
+```java
+Sandbox manual = Sandbox.builder()
+    .connectionConfig(config)
+    .image("ubuntu")
+    .timeout(null)
+    .build();
 ```
 
 ### 2. 自定义健康检查

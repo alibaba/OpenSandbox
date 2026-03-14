@@ -318,6 +318,15 @@ class TestVolume:
 class TestCreateSandboxRequestWithVolumes:
     """Tests for CreateSandboxRequest with volumes field."""
 
+    def test_request_without_timeout_uses_manual_cleanup(self):
+        """Request without timeout should be valid and represent manual cleanup mode."""
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            resource_limits=ResourceLimits({"cpu": "500m", "memory": "512Mi"}),
+            entrypoint=["python", "-c", "print('hello')"],
+        )
+        assert request.timeout is None
+
     def test_request_without_volumes(self):
         """Request without volumes should be valid."""
         request = CreateSandboxRequest(
@@ -471,3 +480,24 @@ class TestCreateSandboxRequestWithVolumes:
         assert request.volumes[1].pvc.claim_name == "shared-models-pvc"
         assert request.volumes[1].mount_path == "/mnt/models"
         assert request.volumes[1].read_only is True
+
+    def test_request_rejects_zero_timeout(self):
+        """Zero timeout should still be rejected."""
+        with pytest.raises(ValidationError):
+            CreateSandboxRequest(
+                image=ImageSpec(uri="python:3.11"),
+                timeout=0,
+                resource_limits=ResourceLimits({"cpu": "500m"}),
+                entrypoint=["python", "-c", "print('hello')"],
+            )
+
+    def test_request_allows_timeout_above_previous_hardcoded_limit(self):
+        """Schema should not hardcode the server-side maximum timeout."""
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=172800,
+            resource_limits=ResourceLimits({"cpu": "500m", "memory": "512Mi"}),
+            entrypoint=["python", "-c", "print('hello')"],
+        )
+
+        assert request.timeout == 172800

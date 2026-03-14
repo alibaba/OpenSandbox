@@ -503,7 +503,7 @@ class Volume private constructor(
  * @property id Unique identifier of the sandbox
  * @property status Current status of the sandbox
  * @property entrypoint Command line arguments used to start the sandbox
- * @property expiresAt Timestamp when the sandbox is scheduled for automatic termination
+ * @property expiresAt Timestamp when the sandbox is scheduled for automatic termination. Null means manual cleanup mode.
  * @property createdAt Timestamp when the sandbox was created
  * @property image Image specification used to create this sandbox
  * @property metadata Custom metadata attached to the sandbox
@@ -512,7 +512,7 @@ class SandboxInfo(
     val id: String,
     val status: SandboxStatus,
     val entrypoint: List<String>,
-    val expiresAt: OffsetDateTime,
+    val expiresAt: OffsetDateTime?,
     val createdAt: OffsetDateTime,
     val image: SandboxImageSpec,
     val metadata: Map<String, String>? = null,

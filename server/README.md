@@ -11,7 +11,7 @@ A production-grade, FastAPI-based service for managing the lifecycle of containe
 - **Pluggable runtimes**:
   - **Docker**: Production-ready
   - **Kubernetes**: Production-ready (see `kubernetes/` for deployment)
-- **Automatic expiration**: Configurable TTL with renewal
+- **Lifecycle cleanup modes**: Configurable TTL with renewal, or manual cleanup with explicit delete
 - **Access control**: API Key authentication (`OPEN-SANDBOX-API-KEY`); can be disabled for local/dev
 - **Networking modes**:
   - Host: shared host network, performance first
@@ -88,6 +88,7 @@ Before you start the server, edit the configuration file to suit your environmen
    port = 8080
    log_level = "INFO"
    api_key = "your-secret-api-key-change-this"
+   max_sandbox_timeout_seconds = 86400  # Maximum TTL for requests that specify timeout
 
    [runtime]
    type = "docker"
@@ -104,6 +105,7 @@ Before you start the server, edit the configuration file to suit your environmen
    port = 8080
    log_level = "INFO"
    api_key = "your-secret-api-key-change-this"
+    max_sandbox_timeout_seconds = 86400  # Maximum TTL for requests that specify timeout
 
    [runtime]
    type = "docker"
@@ -143,6 +145,23 @@ The returned endpoint is rewritten to the server proxy route:
 
 Reference runtime compose file:
 - `server/docker-compose.example.yaml`
+
+**Sandbox TTL configuration**
+
+- `timeout` requests must be at least 60 seconds.
+- The maximum allowed TTL is controlled by `server.max_sandbox_timeout_seconds`.
+- Omit `timeout` or set it to `null` in the create request to use manual cleanup mode instead of automatic expiration.
+
+**Upgrade order for manual cleanup**
+
+- Existing TTL-only clients can continue to work without changes as long as they do not encounter manual-cleanup sandboxes.
+- Manual cleanup changes the lifecycle response contract: `expiresAt` may be `null`, and nullable lifecycle fields may be serialized explicitly.
+- Before creating any manual-cleanup sandbox, upgrade every SDK/client that may call `create`, `get`, or `list` on the lifecycle API.
+- Recommended rollout order:
+  1. Upgrade SDKs/clients
+  2. Upgrade the server
+  3. Start creating sandboxes with `timeout` omitted or `null`
+- Do not introduce manual-cleanup sandboxes into a shared environment while old SDKs are still actively reading lifecycle responses.
 
 **Security hardening (applies to all Docker modes)**
    ```toml

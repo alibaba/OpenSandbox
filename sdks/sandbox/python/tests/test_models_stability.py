@@ -76,6 +76,20 @@ def test_sandbox_status_and_info_alias_dump_is_stable() -> None:
     assert dumped["status"]["last_transition_at"].endswith(("Z", "+00:00"))
 
 
+def test_sandbox_info_supports_manual_cleanup_expiration() -> None:
+    info = SandboxInfo(
+        id=str(__import__("uuid").uuid4()),
+        status=SandboxStatus(state="RUNNING"),
+        entrypoint=["/bin/sh"],
+        expires_at=None,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        image=SandboxImageSpec("python:3.11"),
+    )
+
+    dumped = info.model_dump(by_alias=True, mode="json")
+    assert dumped["expires_at"] is None
+
+
 def test_filesystem_models_aliases_and_validation() -> None:
     m = MoveEntry(source="/a", destination="/b")
     assert m.src == "/a"

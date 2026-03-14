@@ -115,6 +115,17 @@ sandbox = await Sandbox.resume(
 # 获取当前状态
 info = await sandbox.get_info()
 print(f"当前状态: {info.status.state}")
+print(f"过期时间: {info.expires_at}")  # 使用手动清理模式时为 None
+```
+
+通过传入 `timeout=None` 创建一个不会自动过期的沙箱：
+
+```python
+manual = await Sandbox.create(
+    "ubuntu",
+    connection_config=config,
+    timeout=None,
+)
 ```
 
 ### 2. 自定义健康检查

@@ -292,6 +292,25 @@ class TestSandboxE2E:
         finally:
             await sandbox2.close()
 
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
+    async def test_01b_manual_cleanup(self):
+        sandbox = await Sandbox.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=TestSandboxE2E.connection_config,
+            timeout=None,
+            ready_timeout=timedelta(seconds=30),
+            metadata={"tag": "manual-e2e-test"},
+        )
+        try:
+            info = await sandbox.get_info()
+            assert info.expires_at is None
+            assert info.metadata is not None
+            assert info.metadata.get("tag") == "manual-e2e-test"
+        finally:
+            await sandbox.kill()
+            await sandbox.close()
+
         logger.info("TEST 1 PASSED: Sandbox lifecycle and health test completed successfully")
 
 

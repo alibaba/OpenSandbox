@@ -120,6 +120,32 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
     }
 
     [Fact(Timeout = 2 * 60 * 1000)]
+    public async Task Sandbox_ManualCleanup_Returns_Null_ExpiresAt()
+    {
+        var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+        {
+            ConnectionConfig = _fixture.ConnectionConfig,
+            Image = _fixture.DefaultImage,
+            ManualCleanup = true,
+            ReadyTimeoutSeconds = _fixture.DefaultReadyTimeoutSeconds,
+            Metadata = new Dictionary<string, string> { ["tag"] = "manual-csharp-e2e-test" }
+        });
+
+        try
+        {
+            var info = await sandbox.GetInfoAsync();
+            Assert.Null(info.ExpiresAt);
+            Assert.NotNull(info.Metadata);
+            Assert.Equal("manual-csharp-e2e-test", info.Metadata!["tag"]);
+        }
+        finally
+        {
+            await sandbox.KillAsync();
+            await sandbox.DisposeAsync();
+        }
+    }
+
+    [Fact(Timeout = 2 * 60 * 1000)]
     public async Task Sandbox_Create_With_NetworkPolicy()
     {
         var policySandbox = await Sandbox.CreateAsync(new SandboxCreateOptions

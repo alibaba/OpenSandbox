@@ -81,6 +81,21 @@ const resumed = await sandbox.resume();
 
 // renew：expiresAt = now + timeoutSeconds
 await resumed.renew(30 * 60);
+
+// 获取当前状态
+const info = await resumed.getInfo();
+console.log("状态:", info.status.state);
+console.log("过期时间:", info.expiresAt); // 使用手动清理模式时为 null
+```
+
+通过传入 `timeoutSeconds: null` 创建一个不会自动过期的沙箱：
+
+```ts
+const manual = await Sandbox.create({
+  connectionConfig: config,
+  image: "ubuntu",
+  timeoutSeconds: null,
+});
 ```
 
 ### 2. 自定义健康检查

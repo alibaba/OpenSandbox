@@ -33,6 +33,7 @@ from src.config import (
 from src.services.constants import (
     SANDBOX_EXPIRES_AT_LABEL,
     SANDBOX_ID_LABEL,
+    SANDBOX_MANUAL_CLEANUP_LABEL,
     SANDBOX_OSSFS_MOUNTS_LABEL,
     SandboxErrorCodes,
 )
@@ -223,6 +224,33 @@ def test_create_sandbox_rejects_invalid_metadata(mock_docker):
     assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
     assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
     mock_client.containers.create.assert_not_called()
+
+
+@patch("src.services.docker.docker")
+def test_create_sandbox_rejects_timeout_above_configured_maximum(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    config = _app_config()
+    config.server.max_sandbox_timeout_seconds = 3600
+    service = DockerSandboxService(config=config)
+
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=7200,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        service.create_sandbox(request)
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "configured maximum of 3600s" in exc.value.detail["message"]
 
 
 @patch("src.services.docker.docker")
@@ -650,6 +678,110 @@ def test_restore_cleans_orphan_sidecar():
         service._restore_existing_sandboxes()
 
     mock_cleanup.assert_called_once_with("orphan-id")
+
+
+def test_prepare_creation_context_allows_manual_cleanup():
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+    )
+
+    _, _, expires_at = service._prepare_creation_context(request)
+
+    assert expires_at is None
+
+
+def test_build_labels_marks_manual_cleanup_without_expiration():
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={"team": "manual"},
+        entrypoint=["python"],
+    )
+
+    labels, _ = service._build_labels_and_env("sandbox-manual", request, None)
+
+    assert labels[SANDBOX_ID_LABEL] == "sandbox-manual"
+    assert labels[SANDBOX_MANUAL_CLEANUP_LABEL] == "true"
+    assert "opensandbox.io/expires-at" not in labels
+
+
+@patch("src.services.docker.docker")
+def test_create_sandbox_with_manual_cleanup_completes_full_create_path(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        resourceLimits=ResourceLimits(root={}),
+        env={"DEBUG": "1"},
+        metadata={"team": "manual"},
+        entrypoint=["python"],
+    )
+
+    with (
+        patch.object(service, "_create_and_start_container") as mock_create,
+        patch.object(service, "_schedule_expiration") as mock_schedule,
+    ):
+        response = service.create_sandbox(request)
+
+    assert response.expires_at is None
+    assert response.metadata == {"team": "manual"}
+    assert response.entrypoint == ["python"]
+    mock_create.assert_called_once()
+    mock_schedule.assert_not_called()
+
+
+def test_restore_existing_sandboxes_ignores_manual_cleanup_without_warning():
+    service = DockerSandboxService(config=_app_config())
+    manual_container = MagicMock()
+    manual_container.attrs = {
+        "Config": {
+            "Labels": {
+                SANDBOX_ID_LABEL: "manual-id",
+                SANDBOX_MANUAL_CLEANUP_LABEL: "true",
+            }
+        }
+    }
+
+    with (
+        patch.object(service.docker_client.containers, "list", return_value=[manual_container]),
+        patch("src.services.docker.logger.warning") as mock_warning,
+        patch.object(service, "_schedule_expiration") as mock_schedule,
+    ):
+        service._restore_existing_sandboxes()
+
+    mock_schedule.assert_not_called()
+    mock_warning.assert_not_called()
+
+
+def test_renew_expiration_rejects_manual_cleanup_sandbox():
+    service = DockerSandboxService(config=_app_config())
+    container = MagicMock()
+    container.attrs = {
+        "Config": {
+            "Labels": {
+                SANDBOX_ID_LABEL: "manual-id",
+                SANDBOX_MANUAL_CLEANUP_LABEL: "true",
+            }
+        }
+    }
+    request = MagicMock(expires_at=datetime.now(timezone.utc) + timedelta(hours=1))
+
+    with patch.object(service, "_get_container_by_sandbox_id", return_value=container):
+        with pytest.raises(HTTPException) as exc_info:
+            service.renew_expiration("manual-id", request)
+
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+    assert exc_info.value.detail["message"] == "Sandbox manual-id does not have automatic expiration enabled."
 
 
 @patch("src.services.docker.docker")

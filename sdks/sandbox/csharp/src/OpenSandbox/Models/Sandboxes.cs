@@ -249,7 +249,7 @@ public class SandboxInfo
     /// Gets or sets the sandbox expiration time.
     /// </summary>
     [JsonPropertyName("expiresAt")]
-    public required DateTime ExpiresAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
 }
 
 /// <summary>
@@ -273,7 +273,7 @@ public class CreateSandboxRequest
     /// Gets or sets the timeout in seconds.
     /// </summary>
     [JsonPropertyName("timeout")]
-    public required int Timeout { get; set; }
+    public int? Timeout { get; set; }
 
     /// <summary>
     /// Gets or sets the resource limits.
@@ -339,7 +339,7 @@ public class CreateSandboxResponse
     /// Gets or sets the sandbox expiration time.
     /// </summary>
     [JsonPropertyName("expiresAt")]
-    public required DateTime ExpiresAt { get; set; }
+    public DateTime? ExpiresAt { get; set; }
 
     /// <summary>
     /// Gets or sets the sandbox creation time.

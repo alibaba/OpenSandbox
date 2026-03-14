@@ -92,6 +92,17 @@ sandbox.resume();
 // Get current status
 SandboxInfo info = sandbox.getInfo();
 System.out.println("State: " + info.getStatus().getState());
+System.out.println("Expires: " + info.getExpiresAt()); // null when manual cleanup mode is used
+```
+
+Create a non-expiring sandbox by passing `timeout(null)`:
+
+```java
+Sandbox manual = Sandbox.builder()
+    .connectionConfig(config)
+    .image("ubuntu")
+    .timeout(null)
+    .build();
 ```
 
 ### 2. Custom Health Check

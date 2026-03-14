@@ -49,7 +49,7 @@ class Sandboxes(Protocol):
         entrypoint: list[str],
         env: dict[str, str],
         metadata: dict[str, str],
-        timeout: timedelta,
+        timeout: timedelta | None,
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
@@ -63,7 +63,7 @@ class Sandboxes(Protocol):
             entrypoint: Command to run as the sandbox's main process.
             env: Environment variables injected into the sandbox runtime.
             metadata: User-defined metadata used for management and filtering.
-            timeout: Sandbox lifetime. The server may terminate the sandbox when it expires.
+            timeout: Sandbox lifetime. Pass None to create a sandbox that requires explicit cleanup.
             resource: Runtime resource limits (e.g. cpu/memory). Exact semantics are server-defined.
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.

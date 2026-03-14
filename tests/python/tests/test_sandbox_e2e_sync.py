@@ -261,6 +261,25 @@ class TestSandboxE2ESync:
 
     @pytest.mark.timeout(120)
     @pytest.mark.order(1)
+    def test_01b_manual_cleanup(self) -> None:
+        sandbox = SandboxSync.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=TestSandboxE2ESync.connection_config,
+            timeout=None,
+            ready_timeout=timedelta(seconds=30),
+            metadata={"tag": "manual-e2e-test"},
+        )
+        try:
+            info = sandbox.get_info()
+            assert info.expires_at is None
+            assert info.metadata is not None
+            assert info.metadata.get("tag") == "manual-e2e-test"
+        finally:
+            sandbox.kill()
+            sandbox.close()
+
+    @pytest.mark.timeout(120)
+    @pytest.mark.order(1)
     def test_01a_network_policy_create(self) -> None:
         logger.info("=" * 80)
         logger.info("TEST 1a: Creating sandbox with networkPolicy (sync)")

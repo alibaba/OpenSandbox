@@ -73,7 +73,6 @@ sandbox_service = create_sandbox_service()
 @router.post(
     "/sandboxes",
     response_model=CreateSandboxResponse,
-    response_model_exclude_none=True,
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         202: {"description": "Sandbox creation accepted for asynchronous provisioning"},
@@ -112,7 +111,6 @@ async def create_sandbox(
 @router.get(
     "/sandboxes",
     response_model=ListSandboxesResponse,
-    response_model_exclude_none=True,
     responses={
         200: {"description": "Paginated collection of sandboxes"},
         400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
@@ -176,7 +174,6 @@ async def list_sandboxes(
 @router.get(
     "/sandboxes/{sandbox_id}",
     response_model=Sandbox,
-    response_model_exclude_none=True,
     responses={
         200: {"description": "Sandbox current state and metadata"},
         401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
