@@ -21,7 +21,7 @@ using Kubernetes resources for sandbox lifecycle management.
 
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from fastapi import HTTPException, status
