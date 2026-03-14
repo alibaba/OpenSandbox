@@ -123,7 +123,7 @@ class SandboxModelConverter:
         entrypoint: list[str],
         env: dict[str, str],
         metadata: dict[str, str],
-        timeout: timedelta,
+        timeout: timedelta | None,
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
@@ -209,17 +209,19 @@ class SandboxModelConverter:
                 SandboxModelConverter.to_api_volume(v) for v in volumes
             ]
 
-        return CreateSandboxRequest(
+        request = CreateSandboxRequest(
             image=SandboxModelConverter.to_api_image_spec(spec),
             entrypoint=entrypoint,
             env=api_env,
             metadata=api_metadata,
-            timeout=int(timeout.total_seconds()),
             resource_limits=api_resource_limits,
             network_policy=api_network_policy,
             extensions=api_extensions,
             volumes=api_volumes,
         )
+        if timeout is not None:
+            request.timeout = int(timeout.total_seconds())
+        return request
 
     @staticmethod
     def to_api_renew_request(
@@ -306,12 +308,16 @@ class SandboxModelConverter:
             elif isinstance(metadata_obj, dict):
                 metadata = metadata_obj
 
+        expires_at = api_sandbox.expires_at
+        if isinstance(expires_at, Unset):
+            expires_at = None
+
         return SandboxInfo(
             id=api_sandbox.id,
             status=SandboxModelConverter._convert_sandbox_status(api_sandbox.status),
             image=domain_image_spec,
             created_at=api_sandbox.created_at,
-            expires_at=api_sandbox.expires_at,
+            expires_at=expires_at,
             entrypoint=api_sandbox.entrypoint,
             metadata=metadata,
         )

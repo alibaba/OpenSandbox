@@ -195,6 +195,54 @@ def add_license_headers(root: Path) -> None:
     )
 
 
+def patch_lifecycle_nullable_nested_models(root: Path) -> None:
+    """Patch generated lifecycle models that openapi-python-client does not null-handle."""
+    replacements = {
+        root / "models" / "image_spec.py": [
+            (
+                "        if isinstance(_auth, Unset):\n            auth = UNSET\n",
+                "        if isinstance(_auth, Unset) or _auth is None:\n            auth = UNSET\n",
+            )
+        ],
+        root / "models" / "create_sandbox_response.py": [
+            (
+                "        if isinstance(_metadata, Unset):\n            metadata = UNSET\n",
+                "        if isinstance(_metadata, Unset) or _metadata is None:\n            metadata = UNSET\n",
+            )
+        ],
+        root / "models" / "sandbox.py": [
+            (
+                "        if isinstance(_metadata, Unset):\n            metadata = UNSET\n",
+                "        if isinstance(_metadata, Unset) or _metadata is None:\n            metadata = UNSET\n",
+            )
+        ],
+        root / "models" / "sandbox_status.py": [
+            (
+                "        if isinstance(_last_transition_at, Unset):\n            last_transition_at = UNSET\n",
+                "        if isinstance(_last_transition_at, Unset) or _last_transition_at is None:\n            last_transition_at = UNSET\n",
+            )
+        ],
+    }
+
+    patched_files = 0
+    for file_path, file_replacements in replacements.items():
+        if not file_path.exists():
+            continue
+
+        content = file_path.read_text(encoding="utf-8")
+        updated = content
+        for old, new in file_replacements:
+            if old in updated:
+                updated = updated.replace(old, new, 1)
+
+        if updated != content:
+            file_path.write_text(updated, encoding="utf-8")
+            patched_files += 1
+
+    if patched_files:
+        print(f"✅ Patched nullable lifecycle model handling in {patched_files} files")
+
+
 def post_process_generated_code() -> None:
     """Post-process the generated code to ensure proper package structure."""
     print("\n🔧 Post-processing generated code...")
@@ -213,6 +261,7 @@ def post_process_generated_code() -> None:
     add_license_headers(Path("src/opensandbox/api/execd"))
     add_license_headers(Path("src/opensandbox/api/lifecycle"))
     add_license_headers(Path("src/opensandbox/api"))
+    patch_lifecycle_nullable_nested_models(Path("src/opensandbox/api/lifecycle"))
 
 
 def main() -> None:

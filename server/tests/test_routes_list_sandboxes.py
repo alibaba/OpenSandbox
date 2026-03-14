@@ -132,6 +132,50 @@ def test_list_sandboxes_keeps_blank_metadata_values(
     assert captured_requests[0].filter.metadata == {"team": "infra", "note": ""}
 
 
+def test_list_sandboxes_preserves_only_nullable_expires_at(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    now = datetime.now(timezone.utc)
+
+    class StubService:
+        @staticmethod
+        def list_sandboxes(request) -> ListSandboxesResponse:
+            return ListSandboxesResponse(
+                items=[
+                    Sandbox(
+                        id="sbx-manual",
+                        image=ImageSpec(uri="python:3.11"),
+                        status=SandboxStatus(state="Running"),
+                        metadata=None,
+                        entrypoint=["python"],
+                        expiresAt=None,
+                        createdAt=now,
+                    )
+                ],
+                pagination=PaginationInfo(
+                    page=1,
+                    pageSize=20,
+                    totalItems=1,
+                    totalPages=1,
+                    hasNextPage=False,
+                ),
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.get("/v1/sandboxes", headers=auth_headers)
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["expiresAt"] is None
+    assert item["metadata"] is None
+    assert item["status"]["reason"] is None
+    assert item["status"]["message"] is None
+    assert item["status"]["lastTransitionAt"] is None
+
+
 def test_list_sandboxes_validates_page_bounds(
     client: TestClient,
     auth_headers: dict,

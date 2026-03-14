@@ -19,6 +19,12 @@ from datetime import datetime, timezone
 
 import pytest
 
+from opensandbox.api.lifecycle.models.create_sandbox_response import (
+    CreateSandboxResponse as ApiCreateSandboxResponse,
+)
+from opensandbox.api.lifecycle.models.image_spec import ImageSpec as ApiImageSpec
+from opensandbox.api.lifecycle.models.sandbox import Sandbox as ApiSandbox
+from opensandbox.api.lifecycle.types import UNSET
 from opensandbox.models.filesystem import MoveEntry, WriteEntry
 from opensandbox.models.sandboxes import (
     PVC,
@@ -40,6 +46,45 @@ def test_sandbox_image_spec_supports_positional_image() -> None:
 def test_sandbox_image_spec_rejects_blank_image() -> None:
     with pytest.raises(ValueError):
         SandboxImageSpec("   ")
+
+
+def test_api_image_spec_tolerates_null_auth() -> None:
+    spec = ApiImageSpec.from_dict({"uri": "python:3.11", "auth": None})
+    assert spec.uri == "python:3.11"
+    assert spec.auth is UNSET
+
+
+def test_api_create_sandbox_response_tolerates_null_metadata() -> None:
+    response = ApiCreateSandboxResponse.from_dict(
+        {
+            "id": "sandbox-1",
+            "status": {"state": "Running", "lastTransitionAt": None},
+            "createdAt": "2025-01-01T00:00:00Z",
+            "entrypoint": ["/bin/sh"],
+            "metadata": None,
+            "expiresAt": None,
+        }
+    )
+    assert response.metadata is UNSET
+    assert response.expires_at is None
+    assert response.status.last_transition_at is UNSET
+
+
+def test_api_sandbox_tolerates_null_metadata() -> None:
+    sandbox = ApiSandbox.from_dict(
+        {
+            "id": "sandbox-1",
+            "image": {"uri": "python:3.11", "auth": None},
+            "status": {"state": "Running", "lastTransitionAt": None},
+            "entrypoint": ["/bin/sh"],
+            "createdAt": "2025-01-01T00:00:00Z",
+            "metadata": None,
+            "expiresAt": None,
+        }
+    )
+    assert sandbox.metadata is UNSET
+    assert sandbox.expires_at is None
+    assert sandbox.status.last_transition_at is UNSET
 
 
 def test_sandbox_image_auth_rejects_blank_username_and_password() -> None:
@@ -73,6 +118,20 @@ def test_sandbox_status_and_info_alias_dump_is_stable() -> None:
     assert "expires_at" in dumped
     assert "created_at" in dumped
     assert dumped["status"]["last_transition_at"].endswith(("Z", "+00:00"))
+
+
+def test_sandbox_info_supports_manual_cleanup_expiration() -> None:
+    info = SandboxInfo(
+        id=str(__import__("uuid").uuid4()),
+        status=SandboxStatus(state="RUNNING"),
+        entrypoint=["/bin/sh"],
+        expires_at=None,
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        image=SandboxImageSpec("python:3.11"),
+    )
+
+    dumped = info.model_dump(by_alias=True, mode="json")
+    assert dumped["expires_at"] is None
 
 
 def test_filesystem_models_aliases_and_validation() -> None:

@@ -22,13 +22,13 @@ enforce the same preconditions before performing runtime-specific work.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 from fastapi import HTTPException, status
 import re
 
-from src.services.constants import SandboxErrorCodes
+from src.services.constants import RESERVED_LABEL_PREFIX, SandboxErrorCodes
 
 if TYPE_CHECKING:
     from src.api.schema import NetworkPolicy, Volume
@@ -102,6 +102,17 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
                     "message": "Metadata keys and values must be strings.",
                 },
             )
+        if key.startswith(RESERVED_LABEL_PREFIX):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
+                    "message": (
+                        f"Metadata key '{key}' uses the reserved prefix '{RESERVED_LABEL_PREFIX}'. "
+                        "Keys under this prefix are managed by the system and cannot be set via metadata."
+                    ),
+                },
+            )
         if not _is_valid_label_key(key):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -165,6 +176,59 @@ def ensure_valid_port(port: int) -> None:
                 "message": "Port must be between 1 and 65535.",
             },
         )
+
+
+def ensure_timeout_within_limit(timeout_seconds: Optional[int], max_timeout_seconds: Optional[int]) -> None:
+    """
+    Validate that a requested sandbox TTL does not exceed the configured limit.
+
+    Args:
+        timeout_seconds: Requested sandbox TTL in seconds, or None for manual cleanup.
+        max_timeout_seconds: Configured maximum TTL in seconds, or None to disable the limit.
+
+    Raises:
+        HTTPException: When the timeout exceeds the configured maximum.
+    """
+    if timeout_seconds is None:
+        return
+
+    calculate_expiration_or_raise(datetime.now(timezone.utc), timeout_seconds)
+
+    if max_timeout_seconds is None:
+        return
+
+    if timeout_seconds > max_timeout_seconds:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    f"Sandbox timeout {timeout_seconds}s exceeds configured maximum "
+                    f"of {max_timeout_seconds}s."
+                ),
+            },
+        )
+
+
+def calculate_expiration_or_raise(created_at: datetime, timeout_seconds: int) -> datetime:
+    """
+    Compute an expiration timestamp and convert datetime overflow into a 400 error.
+
+    Raises:
+        HTTPException: When the timeout value is too large to represent safely.
+    """
+    try:
+        return created_at + timedelta(seconds=timeout_seconds)
+    except (OverflowError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    f"Sandbox timeout {timeout_seconds}s is too large to represent safely."
+                ),
+            },
+        ) from exc
 
 
 # Volume name must be a valid DNS label

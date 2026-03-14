@@ -183,6 +183,15 @@ class WorkloadProvider(ABC):
         """
         return False
 
+    def supports_manual_cleanup(self) -> bool:
+        """
+        Whether this provider can represent a non-expiring sandbox.
+
+        Providers should override this only after their backing CRD semantics
+        are verified to support omitting expiration fields safely.
+        """
+        return False
+
     def legacy_resource_name(self, sandbox_id: str) -> str:
         """
         Convert a sandbox_id to the legacy resource name with prefix.

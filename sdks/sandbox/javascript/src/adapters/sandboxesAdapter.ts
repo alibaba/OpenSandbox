@@ -69,11 +69,16 @@ export class SandboxesAdapter implements Sandboxes {
     return d;
   }
 
+  private parseOptionalIsoDate(field: string, v: unknown): Date | null {
+    if (v == null) return null;
+    return this.parseIsoDate(field, v);
+  }
+
   private mapSandboxInfo(raw: ApiGetSandboxOk): SandboxInfo {
     return {
       ...(raw ?? {}),
       createdAt: this.parseIsoDate("createdAt", raw?.createdAt),
-      expiresAt: this.parseIsoDate("expiresAt", raw?.expiresAt),
+      expiresAt: this.parseOptionalIsoDate("expiresAt", raw?.expiresAt),
     } as SandboxInfo;
   }
 
@@ -91,7 +96,7 @@ export class SandboxesAdapter implements Sandboxes {
     return {
       ...(raw ?? {}),
       createdAt: this.parseIsoDate("createdAt", raw?.createdAt),
-      expiresAt: this.parseIsoDate("expiresAt", raw?.expiresAt),
+      expiresAt: this.parseOptionalIsoDate("expiresAt", raw?.expiresAt),
     } as CreateSandboxResponse;
   }
 

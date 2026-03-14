@@ -14,8 +14,11 @@
 
 """Shared constants for sandbox services."""
 
+RESERVED_LABEL_PREFIX = "opensandbox.io/"
+
 SANDBOX_ID_LABEL = "opensandbox.io/id"
 SANDBOX_EXPIRES_AT_LABEL = "opensandbox.io/expires-at"
+SANDBOX_MANUAL_CLEANUP_LABEL = "opensandbox.io/manual-cleanup"
 # Host-mapped ports recorded on containers (bridge mode).
 SANDBOX_EMBEDDING_PROXY_PORT_LABEL = "opensandbox.io/embedding-proxy-port"  # maps container 44772 -> host port
 SANDBOX_HTTP_PORT_LABEL = "opensandbox.io/http-port"  # maps container 8080 -> host port
@@ -76,8 +79,10 @@ class SandboxErrorCodes:
 
 
 __all__ = [
+    "RESERVED_LABEL_PREFIX",
     "SANDBOX_ID_LABEL",
     "SANDBOX_EXPIRES_AT_LABEL",
+    "SANDBOX_MANUAL_CLEANUP_LABEL",
     "SANDBOX_EMBEDDING_PROXY_PORT_LABEL",
     "SANDBOX_HTTP_PORT_LABEL",
     "OPEN_SANDBOX_INGRESS_HEADER",

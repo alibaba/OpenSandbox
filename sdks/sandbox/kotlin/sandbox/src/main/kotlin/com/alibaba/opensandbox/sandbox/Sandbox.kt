@@ -276,7 +276,7 @@ class Sandbox internal constructor(
             entrypoint: List<String>,
             env: Map<String, String>,
             metadata: Map<String, String>,
-            timeout: Duration,
+            timeout: Duration?,
             readyTimeout: Duration,
             resource: Map<String, String>,
             networkPolicy: NetworkPolicy?,
@@ -287,8 +287,9 @@ class Sandbox internal constructor(
             skipHealthCheck: Boolean,
             volumes: List<Volume>?,
         ): Sandbox {
+            val timeoutLabel = if (timeout != null) "${timeout.seconds}s" else "manual-cleanup"
             return initializeSandbox(
-                operationName = "create sandbox with image ${imageSpec.image} (timeout: ${timeout.seconds}s)",
+                operationName = "create sandbox with image ${imageSpec.image} (timeout: $timeoutLabel)",
                 connectionConfig = connectionConfig,
                 healthCheck = healthCheck,
                 timeout = readyTimeout,
@@ -771,7 +772,7 @@ class Sandbox internal constructor(
         /**
          * Lifecycle config
          */
-        private var timeout: Duration = Duration.ofSeconds(600)
+        private var timeout: Duration? = Duration.ofSeconds(600)
         private var readyTimeout: Duration = Duration.ofSeconds(30)
         private var healthCheckPollingInterval: Duration = Duration.ofMillis(200)
         private var healthCheck: ((Sandbox) -> Boolean)? = null
@@ -1045,12 +1046,12 @@ class Sandbox internal constructor(
         /**
          * Sets the sandbox timeout (automatic termination time).
          *
-         * @param timeout Maximum sandbox lifetime
+         * @param timeout Maximum sandbox lifetime. Pass null to require explicit cleanup.
          * @return This builder for method chaining
          * @throws InvalidArgumentException if timeout is negative or zero
          */
-        fun timeout(timeout: Duration): Builder {
-            if (timeout.isNegative || timeout.isZero) {
+        fun timeout(timeout: Duration?): Builder {
+            if (timeout != null && (timeout.isNegative || timeout.isZero)) {
                 throw InvalidArgumentException(
                     message = "Timeout must be positive, got: $timeout",
                 )

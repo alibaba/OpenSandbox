@@ -120,6 +120,35 @@ async def test_create_sandbox_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_sandbox_manual_cleanup_omits_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {}
+
+    async def _fake_asyncio_detailed(*, client, body):
+        called["body"] = body
+        return _Resp(status_code=200, parsed=_api_create_sandbox_response(str(uuid4())))
+
+    monkeypatch.setattr(
+        "opensandbox.api.lifecycle.api.sandboxes.post_sandboxes.asyncio_detailed",
+        _fake_asyncio_detailed,
+    )
+
+    adapter = SandboxesAdapter(ConnectionConfig(domain="example.com:8080", api_key="k"))
+    await adapter.create_sandbox(
+        spec=SandboxImageSpec("python:3.11"),
+        entrypoint=["/bin/sh"],
+        env={},
+        metadata={},
+        timeout=None,
+        resource={"cpu": "100m"},
+        network_policy=None,
+        extensions={},
+        volumes=None,
+    )
+
+    assert "timeout" not in called["body"].to_dict()
+
+
+@pytest.mark.asyncio
 async def test_create_sandbox_empty_response_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fake_asyncio_detailed(*, client, body):
         return _Resp(status_code=200, parsed=None)

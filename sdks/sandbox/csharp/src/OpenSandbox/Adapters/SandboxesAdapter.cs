@@ -167,6 +167,11 @@ internal sealed class SandboxesAdapter : ISandboxes
         return date.ToUniversalTime();
     }
 
+    private static DateTime? ParseOptionalIsoDate(string fieldName, JsonElement element)
+    {
+        return element.ValueKind == JsonValueKind.Null ? null : ParseIsoDate(fieldName, element);
+    }
+
     private static SandboxInfo ParseSandboxInfo(JsonElement element)
     {
         var status = element.GetProperty("status");
@@ -193,7 +198,9 @@ internal sealed class SandboxesAdapter : ISandboxes
                 Message = status.TryGetProperty("message", out var message) ? message.GetString() : null
             },
             CreatedAt = ParseIsoDate("createdAt", element.GetProperty("createdAt")),
-            ExpiresAt = ParseIsoDate("expiresAt", element.GetProperty("expiresAt"))
+            ExpiresAt = element.TryGetProperty("expiresAt", out var expiresAtElement)
+                ? ParseOptionalIsoDate("expiresAt", expiresAtElement)
+                : null
         };
     }
 
@@ -214,7 +221,9 @@ internal sealed class SandboxesAdapter : ISandboxes
                 ? metadata.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString() ?? string.Empty)
                 : null,
             CreatedAt = ParseIsoDate("createdAt", element.GetProperty("createdAt")),
-            ExpiresAt = ParseIsoDate("expiresAt", element.GetProperty("expiresAt")),
+            ExpiresAt = element.TryGetProperty("expiresAt", out var expiresAtElement)
+                ? ParseOptionalIsoDate("expiresAt", expiresAtElement)
+                : null,
             Entrypoint = element.GetProperty("entrypoint").EnumerateArray().Select(e => e.GetString() ?? string.Empty).ToList()
         };
     }

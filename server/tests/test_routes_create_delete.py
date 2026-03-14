@@ -60,6 +60,44 @@ def test_create_sandbox_returns_202_and_service_payload(
     assert calls[0].image.uri == "python:3.11"
 
 
+def test_create_sandbox_manual_cleanup_returns_null_expiration(
+    client: TestClient,
+    auth_headers: dict,
+    sample_sandbox_request: dict,
+    monkeypatch,
+) -> None:
+    now = datetime.now(timezone.utc)
+
+    class StubService:
+        @staticmethod
+        def create_sandbox(request) -> CreateSandboxResponse:
+            return CreateSandboxResponse(
+                id="sbx-manual",
+                status=SandboxStatus(state="Pending"),
+                metadata=None,
+                expiresAt=None,
+                createdAt=now,
+                entrypoint=["python", "-c", "print('Hello from sandbox')"],
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    sample_sandbox_request.pop("timeout", None)
+
+    response = client.post(
+        "/v1/sandboxes",
+        headers=auth_headers,
+        json=sample_sandbox_request,
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["expiresAt"] is None
+    assert payload["metadata"] is None
+    assert payload["status"]["reason"] is None
+    assert payload["status"]["message"] is None
+    assert payload["status"]["lastTransitionAt"] is None
+
+
 def test_create_sandbox_rejects_invalid_request(
     client: TestClient,
     auth_headers: dict,

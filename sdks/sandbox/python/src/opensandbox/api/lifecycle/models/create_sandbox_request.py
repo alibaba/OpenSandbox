@@ -47,8 +47,6 @@ class CreateSandboxRequest:
             image (ImageSpec): Container image specification for sandbox provisioning.
 
                 Supports public registry images and private registry images with authentication.
-            timeout (int): Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
-                SDK clients should provide a default value (e.g., 3600 seconds / 1 hour).
             resource_limits (ResourceLimits): Runtime resource constraints as key-value pairs. Similar to Kubernetes
                 resource specifications,
                 allows flexible definition of resource limits. Common resource types include:
@@ -71,6 +69,10 @@ class CreateSandboxRequest:
                 - ["java", "-jar", "/app/app.jar"]
                 - ["node", "server.js"]
                  Example: ['python', '/app/main.py'].
+            timeout (int | None | Unset): Sandbox timeout in seconds. The sandbox will automatically terminate after this
+                duration.
+                The maximum is controlled by the server configuration (`server.max_sandbox_timeout_seconds`).
+                Omit or set null to disable automatic expiration and require explicit cleanup.
             env (CreateSandboxRequestEnv | Unset): Environment variables to inject into the sandbox runtime. Example:
                 {'API_KEY': 'secret-key', 'DEBUG': 'true', 'LOG_LEVEL': 'info'}.
             metadata (CreateSandboxRequestMetadata | Unset): Custom key-value metadata for management, filtering, and
@@ -97,9 +99,9 @@ class CreateSandboxRequest:
     """
 
     image: ImageSpec
-    timeout: int
     resource_limits: ResourceLimits
     entrypoint: list[str]
+    timeout: int | None | Unset = UNSET
     env: CreateSandboxRequestEnv | Unset = UNSET
     metadata: CreateSandboxRequestMetadata | Unset = UNSET
     network_policy: NetworkPolicy | Unset = UNSET
@@ -110,11 +112,15 @@ class CreateSandboxRequest:
     def to_dict(self) -> dict[str, Any]:
         image = self.image.to_dict()
 
-        timeout = self.timeout
-
         resource_limits = self.resource_limits.to_dict()
 
         entrypoint = self.entrypoint
+
+        timeout: int | None | Unset
+        if isinstance(self.timeout, Unset):
+            timeout = UNSET
+        else:
+            timeout = self.timeout
 
         env: dict[str, Any] | Unset = UNSET
         if not isinstance(self.env, Unset):
@@ -144,11 +150,12 @@ class CreateSandboxRequest:
         field_dict.update(
             {
                 "image": image,
-                "timeout": timeout,
                 "resourceLimits": resource_limits,
                 "entrypoint": entrypoint,
             }
         )
+        if timeout is not UNSET:
+            field_dict["timeout"] = timeout
         if env is not UNSET:
             field_dict["env"] = env
         if metadata is not UNSET:
@@ -175,11 +182,18 @@ class CreateSandboxRequest:
         d = dict(src_dict)
         image = ImageSpec.from_dict(d.pop("image"))
 
-        timeout = d.pop("timeout")
-
         resource_limits = ResourceLimits.from_dict(d.pop("resourceLimits"))
 
         entrypoint = cast(list[str], d.pop("entrypoint"))
+
+        def _parse_timeout(data: object) -> int | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            return cast(int | None | Unset, data)
+
+        timeout = _parse_timeout(d.pop("timeout", UNSET))
 
         _env = d.pop("env", UNSET)
         env: CreateSandboxRequestEnv | Unset
@@ -220,9 +234,9 @@ class CreateSandboxRequest:
 
         create_sandbox_request = cls(
             image=image,
-            timeout=timeout,
             resource_limits=resource_limits,
             entrypoint=entrypoint,
+            timeout=timeout,
             env=env,
             metadata=metadata,
             network_policy=network_policy,

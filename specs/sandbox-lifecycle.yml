@@ -151,6 +151,15 @@ paths:
                     egress:
                       - action: deny
                         target: "bad.example.com"
+              manual-cleanup:
+                summary: Manual cleanup without automatic expiration
+                value:
+                  image:
+                    uri: python:3.11
+                  resourceLimits:
+                    cpu: "500m"
+                    memory: "512Mi"
+                  entrypoint: ["python", "/app/main.py"]
       responses:
         '202':
           description: |
@@ -524,9 +533,11 @@ components:
           description: Custom metadata from creation request
 
         expiresAt:
-          type: string
-          format: date-time
-          description: Timestamp when sandbox will auto-terminate
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.
 
         createdAt:
           type: string
@@ -543,7 +554,6 @@ components:
         - id
         - status
         - createdAt
-        - expiresAt
         - entrypoint
 
     Sandbox:
@@ -579,9 +589,11 @@ components:
             Always present in responses since entrypoint is required in creation requests.
 
         expiresAt:
-          type: string
-          format: date-time
-          description: Timestamp when sandbox will auto-terminate
+          oneOf:
+            - type: string
+              format: date-time
+            - type: 'null'
+          description: Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.
 
         createdAt:
           type: string
@@ -593,7 +605,6 @@ components:
         - status
         - createdAt
         - entrypoint
-        - expiresAt
         - image
     SandboxState:
       type: string
@@ -678,7 +689,7 @@ components:
       additionalProperties: false
     CreateSandboxRequest:
       type: object
-      required: [image, timeout, resourceLimits, entrypoint]
+      required: [image, resourceLimits, entrypoint]
       description: |
         Request to create a new sandbox from a container image.
 
@@ -689,12 +700,14 @@ components:
           description: Container image specification for the sandbox
 
         timeout:
-          type: integer
-          minimum: 60
-          maximum: 86400
+          oneOf:
+            - type: integer
+              minimum: 60
+            - type: 'null'
           description: |
             Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
-            SDK clients should provide a default value (e.g., 3600 seconds / 1 hour).
+            The maximum is controlled by the server configuration (`server.max_sandbox_timeout_seconds`).
+            Omit or set null to disable automatic expiration and require explicit cleanup.
 
         resourceLimits:
           $ref: '#/components/schemas/ResourceLimits'
@@ -965,4 +978,3 @@ components:
           pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
           maxLength: 253
       additionalProperties: false
-

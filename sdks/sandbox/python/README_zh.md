@@ -115,6 +115,17 @@ sandbox = await Sandbox.resume(
 # 获取当前状态
 info = await sandbox.get_info()
 print(f"当前状态: {info.status.state}")
+print(f"过期时间: {info.expires_at}")  # 使用手动清理模式时为 None
+```
+
+通过传入 `timeout=None` 创建一个不会自动过期的沙箱：
+
+```python
+manual = await Sandbox.create(
+    "ubuntu",
+    connection_config=config,
+    timeout=None,
+)
 ```
 
 ### 2. 自定义健康检查
@@ -293,6 +304,8 @@ config = ConnectionConfig(
 | `metadata`      | 自定义元数据标签       | 空                              |
 | `network_policy` | 可选的出站网络策略（egress） | -                         |
 | `ready_timeout` | 等待沙箱就绪的最大时间 | 30 秒                           |
+
+注意：`opensandbox.io/` 前缀下的 metadata key 属于系统保留标签，服务端会拒绝用户传入。
 
 ```python
 from datetime import timedelta

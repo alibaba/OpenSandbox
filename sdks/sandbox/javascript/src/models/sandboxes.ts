@@ -157,7 +157,7 @@ export interface SandboxInfo extends Record<string, unknown> {
   /**
    * Sandbox expiration time (server-side TTL).
    */
-  expiresAt: Date;
+  expiresAt: Date | null;
 }
 
 export interface CreateSandboxRequest extends Record<string, unknown> {
@@ -166,7 +166,7 @@ export interface CreateSandboxRequest extends Record<string, unknown> {
   /**
    * Timeout in seconds (server semantics).
    */
-  timeout: number;
+  timeout?: number | null;
   resourceLimits: ResourceLimits;
   env?: Record<string, string>;
   metadata?: Record<string, string>;
@@ -188,7 +188,7 @@ export interface CreateSandboxResponse extends Record<string, unknown> {
   /**
    * Sandbox expiration time after creation.
    */
-  expiresAt: Date;
+  expiresAt: Date | null;
   /**
    * Sandbox creation time.
    */

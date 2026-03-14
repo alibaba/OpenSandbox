@@ -219,6 +219,31 @@ public class SandboxE2ETest extends BaseE2ETest {
     }
 
     @Test
+    @Order(1)
+    @DisplayName("Sandbox manual cleanup returns null expiresAt")
+    @Timeout(value = 2, unit = TimeUnit.MINUTES)
+    void testSandboxManualCleanup() {
+        Sandbox manualSandbox =
+                Sandbox.builder()
+                        .connectionConfig(sharedConnectionConfig)
+                        .image(getSandboxImage())
+                        .timeout(null)
+                        .readyTimeout(Duration.ofSeconds(60))
+                        .metadata(Map.of("tag", "manual-java-e2e-test"))
+                        .build();
+
+        try {
+            SandboxInfo info = manualSandbox.getInfo();
+            assertNull(info.getExpiresAt());
+            assertNotNull(info.getMetadata());
+            assertEquals("manual-java-e2e-test", info.getMetadata().get("tag"));
+        } finally {
+            manualSandbox.kill();
+            manualSandbox.close();
+        }
+    }
+
+    @Test
     @Order(2)
     @DisplayName("Sandbox create with networkPolicy")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)

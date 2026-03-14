@@ -80,6 +80,21 @@ const resumed = await sandbox.resume();
 
 // renew：expiresAt = now + timeoutSeconds
 await resumed.renew(30 * 60);
+
+// 获取当前状态
+const info = await resumed.getInfo();
+console.log("状态:", info.status.state);
+console.log("过期时间:", info.expiresAt); // 使用手动清理模式时为 null
+```
+
+通过传入 `timeoutSeconds: null` 创建一个不会自动过期的沙箱：
+
+```ts
+const manual = await Sandbox.create({
+  connectionConfig: config,
+  image: "ubuntu",
+  timeoutSeconds: null,
+});
 ```
 
 ### 2. 自定义健康检查
@@ -222,6 +237,8 @@ const config2 = new ConnectionConfig({
 | `healthCheck`                | 自定义就绪检查                       | -                            |
 | `readyTimeoutSeconds`        | 等待就绪最大时间                     | 30 秒                        |
 | `healthCheckPollingInterval` | 就绪轮询间隔（毫秒）                 | 200 ms                       |
+
+注意：`opensandbox.io/` 前缀下的 metadata key 属于系统保留标签，服务端会拒绝用户传入。
 
 ```ts
 const sandbox = await Sandbox.create({

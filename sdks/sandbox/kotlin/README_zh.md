@@ -92,6 +92,17 @@ sandbox.resume();
 // 获取当前状态
 SandboxInfo info = sandbox.getInfo();
 System.out.println("当前状态: " + info.getStatus().getState());
+System.out.println("过期时间: " + info.getExpiresAt()); // 使用手动清理模式时为 null
+```
+
+通过传入 `timeout(null)` 创建一个不会自动过期的沙箱：
+
+```java
+Sandbox manual = Sandbox.builder()
+    .connectionConfig(config)
+    .image("ubuntu")
+    .timeout(null)
+    .build();
 ```
 
 ### 2. 自定义健康检查
@@ -255,6 +266,8 @@ ConnectionConfig sharedConfig = ConnectionConfig.builder()
 | `metadata`     | 自定义元数据标签       | 空                              |
 | `networkPolicy` | 可选的出站网络策略（egress） | -                         |
 | `readyTimeout` | 等待沙箱就绪的最大时间 | 30 秒                           |
+
+注意：`opensandbox.io/` 前缀下的 metadata key 属于系统保留标签，服务端会拒绝用户传入。
 
 ```java
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy;

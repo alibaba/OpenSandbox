@@ -91,6 +91,11 @@ public class SandboxCreateOptions
     public int? TimeoutSeconds { get; set; }
 
     /// <summary>
+    /// Gets or sets whether the sandbox should disable automatic expiration and require explicit cleanup.
+    /// </summary>
+    public bool ManualCleanup { get; set; }
+
+    /// <summary>
     /// Gets or sets whether to skip health checks during creation.
     /// </summary>
     public bool SkipHealthCheck { get; set; }

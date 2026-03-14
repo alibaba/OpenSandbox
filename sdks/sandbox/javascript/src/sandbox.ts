@@ -91,9 +91,9 @@ export interface SandboxCreateOptions {
    */
   resource?: Record<string, string>;
   /**
-   * Sandbox timeout in seconds.
+   * Sandbox timeout in seconds. Set to `null` to require explicit cleanup.
    */
-  timeoutSeconds?: number;
+  timeoutSeconds?: number | null;
 
   /**
    * Skip readiness checks during create/connect.
@@ -254,10 +254,14 @@ export class Sandbox {
       }
     }
 
+    const timeoutSeconds =
+      opts.timeoutSeconds === null
+        ? null
+        : Math.floor(opts.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS);
+
     const req: CreateSandboxRequest = {
       image: toImageSpec(opts.image),
       entrypoint: opts.entrypoint ?? DEFAULT_ENTRYPOINT,
-      timeout: Math.floor(opts.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS),
       resourceLimits: opts.resource ?? DEFAULT_RESOURCE_LIMITS,
       env: opts.env ?? {},
       metadata: opts.metadata ?? {},
@@ -270,6 +274,9 @@ export class Sandbox {
       volumes: opts.volumes,
       extensions: opts.extensions ?? {},
     };
+    if (timeoutSeconds !== null) {
+      req.timeout = timeoutSeconds;
+    }
 
     let sandboxId: SandboxId | undefined;
     try {

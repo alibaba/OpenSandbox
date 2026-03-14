@@ -361,7 +361,7 @@ class SandboxSync:
         cls,
         image: SandboxImageSpec | str,
         *,
-        timeout: timedelta = timedelta(minutes=10),
+        timeout: timedelta | None = timedelta(minutes=10),
         ready_timeout: timedelta = timedelta(seconds=30),
         env: dict[str, str] | None = None,
         metadata: dict[str, str] | None = None,
@@ -380,7 +380,7 @@ class SandboxSync:
 
         Args:
             image: Container image specification including image reference and optional auth
-            timeout: Maximum sandbox lifetime
+            timeout: Maximum sandbox lifetime. Pass None to require explicit cleanup.
             ready_timeout: Maximum time to wait for sandbox to become ready
             env: Environment variables for the sandbox
             metadata: Custom metadata for the sandbox
@@ -411,10 +411,11 @@ class SandboxSync:
         if isinstance(image, str):
             image = SandboxImageSpec(image=image)
 
+        timeout_log = "manual-cleanup" if timeout is None else f"{timeout.total_seconds()}s"
         logger.info(
-            "Creating sandbox with image: %s (timeout: %ss)",
+            "Creating sandbox with image: %s (timeout: %s)",
             image.image,
-            timeout.total_seconds(),
+            timeout_log,
         )
         factory = AdapterFactorySync(config)
         sandbox_id: str | None = None

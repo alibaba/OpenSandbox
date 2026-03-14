@@ -91,6 +91,17 @@ sandbox.resume();
 // Get current status
 SandboxInfo info = sandbox.getInfo();
 System.out.println("State: " + info.getStatus().getState());
+System.out.println("Expires: " + info.getExpiresAt()); // null when manual cleanup mode is used
+```
+
+Create a non-expiring sandbox by passing `timeout(null)`:
+
+```java
+Sandbox manual = Sandbox.builder()
+    .connectionConfig(config)
+    .image("ubuntu")
+    .timeout(null)
+    .build();
 ```
 
 ### 2. Custom Health Check
@@ -254,6 +265,9 @@ The `Sandbox.builder()` allows configuring the sandbox environment.
 | `metadata`     | Custom metadata tags                     | Empty                           |
 | `networkPolicy` | Optional outbound network policy (egress) | -                             |
 | `readyTimeout` | Max time to wait for sandbox to be ready | 30 seconds                      |
+
+Note: metadata keys under `opensandbox.io/` are reserved for system-managed
+labels and will be rejected by the server.
 
 ```java
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy;
