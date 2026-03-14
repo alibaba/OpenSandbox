@@ -41,7 +41,7 @@ class CreateSandboxResponse:
     Attributes:
         id (str): Unique sandbox identifier
         status (SandboxStatus): Detailed status information with lifecycle state and transition details
-        expires_at (datetime.datetime): Timestamp when sandbox will auto-terminate
+        expires_at (datetime.datetime | None): Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.
         created_at (datetime.datetime): Sandbox creation timestamp
         entrypoint (list[str]): Entry process specification from creation request
         metadata (CreateSandboxResponseMetadata | Unset): Custom metadata from creation request
@@ -49,7 +49,7 @@ class CreateSandboxResponse:
 
     id: str
     status: SandboxStatus
-    expires_at: datetime.datetime
+    expires_at: datetime.datetime | None
     created_at: datetime.datetime
     entrypoint: list[str]
     metadata: CreateSandboxResponseMetadata | Unset = UNSET
@@ -60,7 +60,7 @@ class CreateSandboxResponse:
 
         status = self.status.to_dict()
 
-        expires_at = self.expires_at.isoformat()
+        expires_at = self.expires_at.isoformat() if self.expires_at is not None else None
 
         created_at = self.created_at.isoformat()
 
@@ -96,7 +96,8 @@ class CreateSandboxResponse:
 
         status = SandboxStatus.from_dict(d.pop("status"))
 
-        expires_at = isoparse(d.pop("expiresAt"))
+        _expires_at = d.pop("expiresAt")
+        expires_at = isoparse(_expires_at) if _expires_at is not None else None
 
         created_at = isoparse(d.pop("createdAt"))
 

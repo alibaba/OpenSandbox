@@ -50,7 +50,7 @@ class SandboxesSync(Protocol):
         entrypoint: list[str],
         env: dict[str, str],
         metadata: dict[str, str],
-        timeout: timedelta,
+        timeout: timedelta | None,
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
@@ -64,7 +64,7 @@ class SandboxesSync(Protocol):
             entrypoint: Command to run as entrypoint.
             env: Environment variables.
             metadata: Custom metadata.
-            timeout: Sandbox lifetime / expiration duration.
+            timeout: Sandbox lifetime / expiration duration. Pass None to require explicit cleanup.
             resource: Resource limits.
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.

@@ -113,6 +113,28 @@ test("01 sandbox lifecycle, health, endpoint, metrics, renew, connect", async ()
   }
 });
 
+test("01b manual cleanup sandbox returns null expiresAt", async () => {
+  const connectionConfig = createConnectionConfig();
+  const manualSandbox = await Sandbox.create({
+    connectionConfig,
+    image: getSandboxImage(),
+    timeoutSeconds: null,
+    readyTimeoutSeconds: 60,
+    metadata: { tag: "manual-e2e-test" },
+    entrypoint: ["tail", "-f", "/dev/null"],
+    healthCheckPollingInterval: 200,
+  });
+
+  try {
+    const info = await manualSandbox.getInfo();
+    expect(info.expiresAt).toBeNull();
+    expect(info.metadata?.tag).toBe("manual-e2e-test");
+  } finally {
+    await manualSandbox.kill();
+    await manualSandbox.close();
+  }
+});
+
 test.skip("01a sandbox create with networkPolicy", async () => {
   const connectionConfig = createConnectionConfig();
   const networkPolicySandbox = await Sandbox.create({

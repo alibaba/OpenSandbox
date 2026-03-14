@@ -47,8 +47,7 @@ class CreateSandboxRequest:
             image (ImageSpec): Container image specification for sandbox provisioning.
 
                 Supports public registry images and private registry images with authentication.
-            timeout (int): Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
-                SDK clients should provide a default value (e.g., 3600 seconds / 1 hour).
+            timeout (int | None | Unset): Sandbox timeout in seconds. Omit or set null to require explicit cleanup.
             resource_limits (ResourceLimits): Runtime resource constraints as key-value pairs. Similar to Kubernetes
                 resource specifications,
                 allows flexible definition of resource limits. Common resource types include:
@@ -97,9 +96,9 @@ class CreateSandboxRequest:
     """
 
     image: ImageSpec
-    timeout: int
     resource_limits: ResourceLimits
     entrypoint: list[str]
+    timeout: int | None | Unset = UNSET
     env: CreateSandboxRequestEnv | Unset = UNSET
     metadata: CreateSandboxRequestMetadata | Unset = UNSET
     network_policy: NetworkPolicy | Unset = UNSET
@@ -144,11 +143,12 @@ class CreateSandboxRequest:
         field_dict.update(
             {
                 "image": image,
-                "timeout": timeout,
                 "resourceLimits": resource_limits,
                 "entrypoint": entrypoint,
             }
         )
+        if timeout is not UNSET:
+            field_dict["timeout"] = timeout
         if env is not UNSET:
             field_dict["env"] = env
         if metadata is not UNSET:
@@ -175,7 +175,7 @@ class CreateSandboxRequest:
         d = dict(src_dict)
         image = ImageSpec.from_dict(d.pop("image"))
 
-        timeout = d.pop("timeout")
+        timeout = d.pop("timeout", UNSET)
 
         resource_limits = ResourceLimits.from_dict(d.pop("resourceLimits"))
 

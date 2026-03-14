@@ -468,11 +468,8 @@ export interface components {
             metadata?: {
                 [key: string]: string;
             };
-            /**
-             * Format: date-time
-             * @description Timestamp when sandbox will auto-terminate
-             */
-            expiresAt: string;
+            /** @description Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled. */
+            expiresAt?: string | null;
             /**
              * Format: date-time
              * @description Sandbox creation timestamp
@@ -501,11 +498,8 @@ export interface components {
              *     Always present in responses since entrypoint is required in creation requests.
              */
             entrypoint: string[];
-            /**
-             * Format: date-time
-             * @description Timestamp when sandbox will auto-terminate
-             */
-            expiresAt: string;
+            /** @description Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled. */
+            expiresAt?: string | null;
             /**
              * Format: date-time
              * @description Sandbox creation timestamp
@@ -588,9 +582,9 @@ export interface components {
             image: components["schemas"]["ImageSpec"];
             /**
              * @description Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
-             *     SDK clients should provide a default value (e.g., 3600 seconds / 1 hour).
+             *     Omit or set null to disable automatic expiration and require explicit cleanup.
              */
-            timeout: number;
+            timeout?: number | null;
             /**
              * @description Runtime resource constraints for the sandbox instance.
              *     SDK clients should provide sensible defaults (e.g., cpu: "500m", memory: "512Mi").
@@ -800,15 +794,20 @@ export interface components {
             path: string;
         };
         /**
-         * @description Kubernetes PersistentVolumeClaim mount backend. References an existing
-         *     PVC in the same namespace as the sandbox pod.
+         * @description Platform-managed named volume backend. A runtime-neutral abstraction
+         *     for referencing a pre-existing, platform-managed named volume.
          *
-         *     Only available in Kubernetes runtime.
+         *     - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+         *     - Docker: maps to a Docker named volume (created via `docker volume create`).
+         *
+         *     The volume must already exist on the target platform before sandbox
+         *     creation.
          */
         PVC: {
             /**
-             * @description Name of the PersistentVolumeClaim in the same namespace.
-             *     Must be a valid Kubernetes resource name.
+             * @description Name of the volume on the target platform.
+             *     In Kubernetes this is the PVC name; in Docker this is the named
+             *     volume name. Must be a valid DNS label.
              */
             claimName: string;
         };

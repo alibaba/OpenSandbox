@@ -167,6 +167,33 @@ def ensure_valid_port(port: int) -> None:
         )
 
 
+def ensure_timeout_within_limit(timeout_seconds: Optional[int], max_timeout_seconds: Optional[int]) -> None:
+    """
+    Validate that a requested sandbox TTL does not exceed the configured limit.
+
+    Args:
+        timeout_seconds: Requested sandbox TTL in seconds, or None for manual cleanup.
+        max_timeout_seconds: Configured maximum TTL in seconds, or None to disable the limit.
+
+    Raises:
+        HTTPException: When the timeout exceeds the configured maximum.
+    """
+    if timeout_seconds is None or max_timeout_seconds is None:
+        return
+
+    if timeout_seconds > max_timeout_seconds:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    f"Sandbox timeout {timeout_seconds}s exceeds configured maximum "
+                    f"of {max_timeout_seconds}s."
+                ),
+            },
+        )
+
+
 # Volume name must be a valid DNS label
 VOLUME_NAME_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 # Kubernetes resource name pattern

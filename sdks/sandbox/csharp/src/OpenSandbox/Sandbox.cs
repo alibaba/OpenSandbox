@@ -151,7 +151,7 @@ public sealed class Sandbox : IAsyncDisposable
                 Auth = options.ImageAuth
             },
             Entrypoint = options.Entrypoint ?? Constants.DefaultEntrypoint,
-            Timeout = options.TimeoutSeconds ?? Constants.DefaultTimeoutSeconds,
+            Timeout = options.ManualCleanup ? null : options.TimeoutSeconds ?? Constants.DefaultTimeoutSeconds,
             ResourceLimits = options.Resource ?? Constants.DefaultResourceLimits,
             Env = options.Env,
             Metadata = options.Metadata,

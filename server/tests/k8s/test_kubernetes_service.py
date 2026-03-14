@@ -194,6 +194,34 @@ class TestKubernetesSandboxServiceCreate:
         k8s_service.create_sandbox(create_sandbox_request)
         k8s_service.workload_provider.create_workload.assert_called_once()
 
+    def test_create_sandbox_rejects_manual_cleanup_when_provider_not_supported(
+        self, k8s_service, create_sandbox_request
+    ):
+        create_sandbox_request.timeout = None
+        k8s_service.workload_provider.supports_manual_cleanup.return_value = False
+
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service.create_sandbox(create_sandbox_request)
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+        assert "Manual cleanup mode is not supported" in exc_info.value.detail["message"]
+        k8s_service.workload_provider.create_workload.assert_not_called()
+
+    def test_create_sandbox_rejects_timeout_above_configured_maximum(
+        self, k8s_service, create_sandbox_request
+    ):
+        k8s_service.app_config.server.max_sandbox_timeout_seconds = 3600
+        create_sandbox_request.timeout = 7200
+
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service.create_sandbox(create_sandbox_request)
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+        assert "configured maximum of 3600s" in exc_info.value.detail["message"]
+        k8s_service.workload_provider.create_workload.assert_not_called()
+
 
 class TestWaitForSandboxReady:
     """_wait_for_sandbox_ready method tests"""
@@ -274,6 +302,23 @@ class TestWaitForSandboxReady:
         
         assert exc_info.value.status_code == 504  # Gateway Timeout
         assert "timeout" in exc_info.value.detail["message"].lower()
+
+
+class TestKubernetesSandboxServiceRenew:
+    def test_renew_expiration_rejects_manual_cleanup_sandbox(self, k8s_service):
+        k8s_service.workload_provider.get_workload.return_value = MagicMock()
+        k8s_service.workload_provider.get_expiration.return_value = None
+        request = MagicMock(expires_at=datetime.now(timezone.utc) + timedelta(hours=1))
+
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service.renew_expiration("test-sandbox-id", request)
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_EXPIRATION
+        assert (
+            exc_info.value.detail["message"]
+            == "Sandbox test-sandbox-id does not have automatic expiration enabled."
+        )
 
 
 class TestGetSandbox:

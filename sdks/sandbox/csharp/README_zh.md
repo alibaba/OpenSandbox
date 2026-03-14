@@ -68,7 +68,7 @@ catch (SandboxException ex)
 var info = await sandbox.GetInfoAsync();
 Console.WriteLine($"状态: {info.Status.State}");
 Console.WriteLine($"创建时间: {info.CreatedAt}");
-Console.WriteLine($"过期时间: {info.ExpiresAt}");
+Console.WriteLine($"过期时间: {info.ExpiresAt}"); // 使用手动清理模式时为 null
 
 await sandbox.PauseAsync();
 
@@ -78,6 +78,22 @@ var resumed = await sandbox.ResumeAsync();
 // 续期: expiresAt = now + timeoutSeconds
 await resumed.RenewAsync(30 * 60);
 ```
+
+通过设置 `ManualCleanup = true` 创建一个不会自动过期的沙箱：
+
+```csharp
+var manual = await Sandbox.CreateAsync(new SandboxCreateOptions
+{
+    ConnectionConfig = config,
+    Image = "ubuntu",
+    ManualCleanup = true,
+});
+```
+
+注意：与 Python、JavaScript、Kotlin SDK 不同，C# SDK 使用显式的
+`ManualCleanup` 开关，而不是 `TimeoutSeconds = null`。这是有意的设计，
+因为在当前的 options 模型里，`int?` 不能稳定地区分“未设置，沿用默认 TTL”
+和“显式请求手动清理”。
 
 ### 2. 自定义健康检查
 

@@ -17,6 +17,7 @@ using System.Text;
 using FluentAssertions;
 using OpenSandbox.Adapters;
 using OpenSandbox.Internal;
+using OpenSandbox.Models;
 using Xunit;
 
 namespace OpenSandbox.Tests;
@@ -58,6 +59,56 @@ public class SandboxesAdapterTests
         handler.LastRequestUri!.Query.Should().Contain("use_server_proxy=false");
     }
 
+    [Fact]
+    public async Task GetSandboxAsync_ShouldTreatMissingExpiresAtAsNull()
+    {
+        var payload = """
+        {
+          "id": "sbx-1",
+          "image": { "uri": "python:3.11" },
+          "entrypoint": ["python"],
+          "status": { "state": "Running" },
+          "createdAt": "2026-03-14T12:00:00Z"
+        }
+        """;
+        var adapter = CreateAdapterWithJsonResponse(payload);
+
+        SandboxInfo sandbox = await adapter.GetSandboxAsync("sbx-1");
+
+        sandbox.ExpiresAt.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateSandboxAsync_ShouldTreatMissingExpiresAtAsNull()
+    {
+        var payload = """
+        {
+          "id": "sbx-2",
+          "status": { "state": "Pending" },
+          "createdAt": "2026-03-14T12:00:00Z",
+          "entrypoint": ["python"]
+        }
+        """;
+        var adapter = CreateAdapterWithJsonResponse(payload);
+
+        CreateSandboxResponse response = await adapter.CreateSandboxAsync(new CreateSandboxRequest
+        {
+            Image = new ImageSpec { Uri = "python:3.11" },
+            ResourceLimits = new Dictionary<string, string>(),
+            Entrypoint = new List<string> { "python" }
+        });
+
+        response.ExpiresAt.Should().BeNull();
+    }
+
+    private static SandboxesAdapter CreateAdapterWithJsonResponse(string payload)
+    {
+        var handler = new StaticJsonHandler(payload);
+        var client = new HttpClient(handler);
+        var wrapper = new HttpClientWrapper(client, "http://localhost:8080/v1");
+        return new SandboxesAdapter(wrapper);
+    }
+
     private sealed class CaptureHandler : HttpMessageHandler
     {
         public Uri? LastRequestUri { get; private set; }
@@ -66,6 +117,18 @@ public class SandboxesAdapterTests
         {
             LastRequestUri = request.RequestUri;
             var payload = "{\"endpoint\":\"example.internal:44772\",\"headers\":{}}";
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class StaticJsonHandler(string payload) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
             var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(payload, Encoding.UTF8, "application/json")

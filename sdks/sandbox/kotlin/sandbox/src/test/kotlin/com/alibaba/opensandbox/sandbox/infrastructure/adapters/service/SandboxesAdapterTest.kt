@@ -134,6 +134,37 @@ class SandboxesAdapterTest {
     }
 
     @Test
+    fun `createSandbox should accept null expiresAt for manual cleanup response`() {
+        val responseBody =
+            """
+            {
+                "id": "manual-sbx",
+                "status": { "state": "Running" },
+                "expiresAt": null,
+                "createdAt": "2023-01-01T10:00:00Z",
+                "entrypoint": ["bash"]
+            }
+            """.trimIndent()
+        mockWebServer.enqueue(MockResponse().setBody(responseBody).setResponseCode(201))
+
+        val spec = SandboxImageSpec.builder().image("ubuntu:latest").build()
+        val result =
+            sandboxesAdapter.createSandbox(
+                spec = spec,
+                entrypoint = listOf("bash"),
+                env = emptyMap(),
+                metadata = emptyMap(),
+                timeout = null,
+                resource = mapOf("cpu" to "1"),
+                networkPolicy = null,
+                extensions = emptyMap(),
+                volumes = null,
+            )
+
+        assertEquals("manual-sbx", result.id)
+    }
+
+    @Test
     fun `getSandboxInfo should parse response correctly`() {
         val sandboxId = "sandbox-id"
         val responseBody =
@@ -166,6 +197,37 @@ class SandboxesAdapterTest {
 
         val request = mockWebServer.takeRequest()
         assertEquals("/v1/sandboxes/$sandboxId", request.path)
+    }
+
+    @Test
+    fun `getSandboxInfo should parse null expiresAt for manual cleanup`() {
+        val sandboxId = "manual-sandbox"
+        val responseBody =
+            """
+            {
+                "id": "$sandboxId",
+                "status": {
+                    "state": "Running",
+                    "reason": null,
+                    "message": null,
+                    "lastTransitionAt": "2023-01-01T10:00:00Z"
+                },
+                "entrypoint": ["/bin/bash"],
+                "expiresAt": null,
+                "createdAt": "2023-01-01T10:00:00Z",
+                "image": {
+                    "uri": "ubuntu:latest"
+                },
+                "metadata": {}
+            }
+            """.trimIndent()
+
+        mockWebServer.enqueue(MockResponse().setBody(responseBody))
+
+        val result = sandboxesAdapter.getSandboxInfo(sandboxId)
+
+        assertEquals(sandboxId, result.id)
+        assertEquals(null, result.expiresAt)
     }
 
     @Test

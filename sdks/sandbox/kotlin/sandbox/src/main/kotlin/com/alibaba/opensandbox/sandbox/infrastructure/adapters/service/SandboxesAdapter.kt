@@ -58,7 +58,7 @@ internal class SandboxesAdapter(
         entrypoint: List<String>,
         env: Map<String, String>,
         metadata: Map<String, String>,
-        timeout: Duration,
+        timeout: Duration?,
         resource: Map<String, String>,
         networkPolicy: NetworkPolicy?,
         extensions: Map<String, String>,

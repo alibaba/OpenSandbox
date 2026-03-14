@@ -42,7 +42,7 @@ interface Sandboxes {
      * @param entrypoint The command to run as the sandbox's main process (e.g. `["python", "/app/main.py"]`)
      * @param env Environment variables injected into the sandbox runtime
      * @param metadata User-defined metadata used for management and filtering
-     * @param timeout Sandbox lifetime. The server may terminate the sandbox when it expires
+     * @param timeout Sandbox lifetime. Pass null to require explicit cleanup.
      * @param resource Runtime resource limits (e.g. cpu/memory). Exact semantics are server-defined
      * @param networkPolicy Optional outbound network policy (egress)
      * @param extensions Opaque extension parameters passed through to the server as-is. Prefer namespaced keys
@@ -54,7 +54,7 @@ interface Sandboxes {
         entrypoint: List<String>,
         env: Map<String, String>,
         metadata: Map<String, String>,
-        timeout: Duration,
+        timeout: Duration?,
         resource: Map<String, String>,
         networkPolicy: NetworkPolicy?,
         extensions: Map<String, String>,

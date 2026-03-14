@@ -68,7 +68,7 @@ Manage the sandbox lifecycle, including renewal, pausing, and resuming.
 var info = await sandbox.GetInfoAsync();
 Console.WriteLine($"State: {info.Status.State}");
 Console.WriteLine($"Created: {info.CreatedAt}");
-Console.WriteLine($"Expires: {info.ExpiresAt}");
+Console.WriteLine($"Expires: {info.ExpiresAt}"); // null when manual cleanup mode is used
 
 await sandbox.PauseAsync();
 
@@ -78,6 +78,23 @@ var resumed = await sandbox.ResumeAsync();
 // Renew: expiresAt = now + timeoutSeconds
 await resumed.RenewAsync(30 * 60);
 ```
+
+Create a non-expiring sandbox by setting `ManualCleanup = true`:
+
+```csharp
+var manual = await Sandbox.CreateAsync(new SandboxCreateOptions
+{
+    ConnectionConfig = config,
+    Image = "ubuntu",
+    ManualCleanup = true,
+});
+```
+
+Note: unlike the Python, JavaScript, and Kotlin SDKs, the C# SDK uses an explicit
+`ManualCleanup` flag instead of `TimeoutSeconds = null`. This is intentional:
+`int?` in the current options model cannot reliably distinguish "unset, use the
+default TTL" from "explicitly request manual cleanup" without making the default
+creation path ambiguous.
 
 ### Connect to an Existing Sandbox
 

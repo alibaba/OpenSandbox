@@ -114,7 +114,7 @@ class SandboxesAdapter(Sandboxes):
         entrypoint: list[str],
         env: dict[str, str],
         metadata: dict[str, str],
-        timeout: timedelta,
+        timeout: timedelta | None,
         resource: dict[str, str],
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],

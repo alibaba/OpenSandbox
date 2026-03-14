@@ -93,6 +93,37 @@ def test_renew_expiration_propagates_service_http_error(
     }
 
 
+def test_renew_expiration_returns_409_for_manual_cleanup_sandbox(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def renew_expiration(sandbox_id: str, request) -> RenewSandboxExpirationResponse:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "DOCKER::INVALID_EXPIRATION",
+                    "message": f"Sandbox {sandbox_id} does not have automatic expiration enabled.",
+                },
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.post(
+        "/v1/sandboxes/sbx-manual/renew-expiration",
+        headers=auth_headers,
+        json={"expiresAt": "2030-01-01T00:00:00Z"},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "DOCKER::INVALID_EXPIRATION",
+        "message": "Sandbox sbx-manual does not have automatic expiration enabled.",
+    }
+
+
 def test_renew_expiration_requires_api_key(client: TestClient) -> None:
     response = client.post(
         "/v1/sandboxes/sbx-001/renew-expiration",

@@ -19,6 +19,7 @@ from src.api.schema import Host, PVC, Volume
 from src.services.constants import SandboxErrorCodes
 from src.services.validators import (
     ensure_metadata_labels,
+    ensure_timeout_within_limit,
     ensure_valid_host_path,
     ensure_valid_mount_path,
     ensure_valid_pvc_name,
@@ -111,6 +112,22 @@ def test_ensure_metadata_labels_rejects_key_with_empty_prefix():
         ensure_metadata_labels({"/name": "value"})
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
+
+def test_ensure_timeout_within_limit_allows_equal_boundary():
+    ensure_timeout_within_limit(3600, 3600)
+
+
+def test_ensure_timeout_within_limit_allows_disabled_upper_bound():
+    ensure_timeout_within_limit(7200, None)
+
+
+def test_ensure_timeout_within_limit_rejects_timeout_above_limit():
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_timeout_within_limit(3601, 3600)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
 
 
 # ============================================================================
