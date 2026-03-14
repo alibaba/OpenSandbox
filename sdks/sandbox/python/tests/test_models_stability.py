@@ -19,10 +19,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from opensandbox.api.lifecycle.models.image_spec import ImageSpec as ApiImageSpec
 from opensandbox.api.lifecycle.models.create_sandbox_response import (
     CreateSandboxResponse as ApiCreateSandboxResponse,
 )
+from opensandbox.api.lifecycle.models.image_spec import ImageSpec as ApiImageSpec
 from opensandbox.api.lifecycle.models.sandbox import Sandbox as ApiSandbox
 from opensandbox.api.lifecycle.types import UNSET
 from opensandbox.models.filesystem import MoveEntry, WriteEntry
