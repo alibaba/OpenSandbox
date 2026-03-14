@@ -204,6 +204,50 @@ sandboxes.getSandboxInfos().forEach(info -> {
 // manager.close();
 ```
 
+### 6. Sandbox Pool（客户端池化）
+
+你可以使用 `SandboxPool` 维护就绪沙箱的空闲缓冲区，以降低 `acquire` 延迟。
+
+> ⚠ 实验性能力：`SandboxPool` 仍在根据真实生产场景持续演进，后续版本可能存在 breaking changes。
+
+```java
+import com.alibaba.opensandbox.sandbox.pool.SandboxPool;
+import com.alibaba.opensandbox.sandbox.domain.pool.PoolCreationSpec;
+import com.alibaba.opensandbox.sandbox.domain.pool.AcquirePolicy;
+import com.alibaba.opensandbox.sandbox.infrastructure.pool.InMemoryPoolStateStore;
+
+SandboxPool pool = SandboxPool.builder()
+    .poolName("demo-pool")
+    .ownerId("worker-1")
+    .maxIdle(3)
+    .stateStore(new InMemoryPoolStateStore()) // 单机实现
+    .connectionConfig(config)
+    .creationSpec(
+        PoolCreationSpec.builder()
+            .image("ubuntu:22.04")
+            .entrypoint(java.util.List.of("tail", "-f", "/dev/null"))
+            .build()
+    )
+    .build();
+
+pool.start();
+Sandbox sb = pool.acquire(Duration.ofMinutes(10), AcquirePolicy.FAIL_FAST);
+try {
+    sb.commands().run("echo pool-ok");
+} finally {
+    sb.kill();
+    sb.close();
+}
+pool.shutdown(true);
+```
+
+池状态语义：
+- `acquire()` 仅允许在 `RUNNING` 状态调用。
+- 在 `DRAINING` / `STOPPED` 状态，`acquire()` 会抛出 `PoolNotRunningException`。
+
+
+> 在分布式部署场景下，需要由业务方自行提供 `PoolStateStore` 实现，并保证其满足分布式语义：原子 `tryTakeIdle`、`put/remove` 幂等、主锁所有权与续约、不同 `poolName` 隔离、以及计数一致性。
+
 ## 配置说明
 
 ### 1. 连接配置 (Connection Configuration)

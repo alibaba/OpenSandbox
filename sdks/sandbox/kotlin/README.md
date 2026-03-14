@@ -203,6 +203,50 @@ sandboxes.getSandboxInfos().forEach(info -> {
 // manager.close();
 ```
 
+### 6. Sandbox Pool (Client-Side)
+
+Use `SandboxPool` to keep an idle buffer of ready sandboxes and reduce acquire latency.
+
+> ⚠ Experimental: `SandboxPool` is still evolving based on production feedback and may introduce breaking changes in future releases.
+
+```java
+import com.alibaba.opensandbox.sandbox.pool.SandboxPool;
+import com.alibaba.opensandbox.sandbox.domain.pool.PoolCreationSpec;
+import com.alibaba.opensandbox.sandbox.domain.pool.AcquirePolicy;
+import com.alibaba.opensandbox.sandbox.infrastructure.pool.InMemoryPoolStateStore;
+
+SandboxPool pool = SandboxPool.builder()
+    .poolName("demo-pool")
+    .ownerId("worker-1")
+    .maxIdle(3)
+    .stateStore(new InMemoryPoolStateStore()) // single-node store
+    .connectionConfig(config)
+    .creationSpec(
+        PoolCreationSpec.builder()
+            .image("ubuntu:22.04")
+            .entrypoint(java.util.List.of("tail", "-f", "/dev/null"))
+            .build()
+    )
+    .build();
+
+pool.start();
+Sandbox sb = pool.acquire(Duration.ofMinutes(10), AcquirePolicy.FAIL_FAST);
+try {
+    sb.commands().run("echo pool-ok");
+} finally {
+    sb.kill();
+    sb.close();
+}
+pool.shutdown(true);
+```
+
+Pool lifecycle semantics:
+- `acquire()` is only allowed when pool state is `RUNNING`.
+- In `DRAINING` / `STOPPED`, `acquire()` throws `PoolNotRunningException`.
+
+
+> For distributed deployment, your application must provide a `PoolStateStore` implementation and ensure it satisfies distributed semantics (atomic idle take, idempotent put/remove, lock ownership/renewal, pool isolation, and consistent counters).
+
 ## Configuration
 
 ### 1. Connection Configuration
