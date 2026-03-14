@@ -122,7 +122,7 @@ class Sandbox:
 
         _metadata = d.pop("metadata", UNSET)
         metadata: SandboxMetadata | Unset
-        if isinstance(_metadata, Unset):
+        if isinstance(_metadata, Unset) or _metadata is None:
             metadata = UNSET
         else:
             metadata = SandboxMetadata.from_dict(_metadata)

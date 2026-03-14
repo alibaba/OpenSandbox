@@ -197,18 +197,50 @@ def add_license_headers(root: Path) -> None:
 
 def patch_lifecycle_nullable_nested_models(root: Path) -> None:
     """Patch generated lifecycle models that openapi-python-client does not null-handle."""
-    image_spec_file = root / "models" / "image_spec.py"
-    if not image_spec_file.exists():
-        return
+    replacements = {
+        root / "models" / "image_spec.py": [
+            (
+                "        if isinstance(_auth, Unset):\n            auth = UNSET\n",
+                "        if isinstance(_auth, Unset) or _auth is None:\n            auth = UNSET\n",
+            )
+        ],
+        root / "models" / "create_sandbox_response.py": [
+            (
+                "        if isinstance(_metadata, Unset):\n            metadata = UNSET\n",
+                "        if isinstance(_metadata, Unset) or _metadata is None:\n            metadata = UNSET\n",
+            )
+        ],
+        root / "models" / "sandbox.py": [
+            (
+                "        if isinstance(_metadata, Unset):\n            metadata = UNSET\n",
+                "        if isinstance(_metadata, Unset) or _metadata is None:\n            metadata = UNSET\n",
+            )
+        ],
+        root / "models" / "sandbox_status.py": [
+            (
+                "        if isinstance(_last_transition_at, Unset):\n            last_transition_at = UNSET\n",
+                "        if isinstance(_last_transition_at, Unset) or _last_transition_at is None:\n            last_transition_at = UNSET\n",
+            )
+        ],
+    }
 
-    content = image_spec_file.read_text(encoding="utf-8")
-    old = "        if isinstance(_auth, Unset):\n            auth = UNSET\n"
-    new = "        if isinstance(_auth, Unset) or _auth is None:\n            auth = UNSET\n"
-    if old not in content:
-        return
+    patched_files = 0
+    for file_path, file_replacements in replacements.items():
+        if not file_path.exists():
+            continue
 
-    image_spec_file.write_text(content.replace(old, new, 1), encoding="utf-8")
-    print(f"✅ Patched nullable nested auth handling in {image_spec_file}")
+        content = file_path.read_text(encoding="utf-8")
+        updated = content
+        for old, new in file_replacements:
+            if old in updated:
+                updated = updated.replace(old, new, 1)
+
+        if updated != content:
+            file_path.write_text(updated, encoding="utf-8")
+            patched_files += 1
+
+    if patched_files:
+        print(f"✅ Patched nullable lifecycle model handling in {patched_files} files")
 
 
 def post_process_generated_code() -> None:
