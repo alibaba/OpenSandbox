@@ -310,6 +310,9 @@ var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
 | `ReadyTimeoutSeconds` | Max time to wait for readiness | 30 seconds |
 | `HealthCheckPollingInterval` | Poll interval while waiting (milliseconds) | 200 ms |
 
+Note: metadata keys under `opensandbox.io/` are reserved for system-managed
+labels and will be rejected by the server.
+
 ```csharp
 var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
 {

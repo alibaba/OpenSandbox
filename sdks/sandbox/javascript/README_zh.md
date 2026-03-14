@@ -238,6 +238,8 @@ const config2 = new ConnectionConfig({
 | `readyTimeoutSeconds`        | 等待就绪最大时间                     | 30 秒                        |
 | `healthCheckPollingInterval` | 就绪轮询间隔（毫秒）                 | 200 ms                       |
 
+注意：`opensandbox.io/` 前缀下的 metadata key 属于系统保留标签，服务端会拒绝用户传入。
+
 ```ts
 const sandbox = await Sandbox.create({
   connectionConfig: config,

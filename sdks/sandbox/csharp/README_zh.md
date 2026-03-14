@@ -294,6 +294,8 @@ var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
 | `ReadyTimeoutSeconds` | 等待就绪的最大时间 | 30 秒 |
 | `HealthCheckPollingInterval` | 等待时的轮询间隔（毫秒） | 200 ms |
 
+注意：`opensandbox.io/` 前缀下的 metadata key 属于系统保留标签，服务端会拒绝用户传入。
+
 ```csharp
 var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
 {

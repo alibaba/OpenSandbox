@@ -33,7 +33,6 @@ def test_ensure_metadata_labels_accepts_common_k8s_forms():
     # Various valid label shapes: with/without prefix, mixed chars, empty value allowed.
     valid_metadata = {
         "app": "web",
-        "opensandbox.io/hello": "world",
         "k8s.io/name": "app-1",
         "example.com/label": "a.b_c-1",
         "team": "A1_b-2.c",
@@ -110,6 +109,32 @@ def test_ensure_metadata_labels_rejects_key_with_empty_prefix():
     """Key with an empty prefix (starts with '/') should be rejected."""
     with pytest.raises(HTTPException) as exc_info:
         ensure_metadata_labels({"/name": "value"})
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
+
+def test_ensure_metadata_labels_rejects_reserved_prefix():
+    """User metadata must not use the opensandbox.io/ reserved prefix."""
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({"opensandbox.io/expires-at": "2030-01-01T00:00:00Z"})
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+    assert "reserved prefix" in exc_info.value.detail["message"]
+
+
+def test_ensure_metadata_labels_rejects_manual_cleanup_key():
+    """User must not inject the manual-cleanup lifecycle label."""
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({"opensandbox.io/manual-cleanup": "true"})
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+    assert "reserved prefix" in exc_info.value.detail["message"]
+
+
+def test_ensure_metadata_labels_rejects_arbitrary_reserved_key():
+    """Any key under opensandbox.io/ should be rejected, not just known labels."""
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_metadata_labels({"opensandbox.io/custom": "value"})
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
 

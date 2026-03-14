@@ -27,6 +27,9 @@ A production-grade, FastAPI-based service for managing the lifecycle of containe
 - **Port resolution**: Dynamic endpoint generation
 - **Structured errors**: Standard error codes and messages
 
+Metadata keys under the reserved prefix `opensandbox.io/` are system-managed
+and cannot be supplied by users.
+
 ## Requirements
 
 - **Python**: 3.10 or higher

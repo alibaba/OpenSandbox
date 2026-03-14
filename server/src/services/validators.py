@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 from fastapi import HTTPException, status
 import re
 
-from src.services.constants import SandboxErrorCodes
+from src.services.constants import RESERVED_LABEL_PREFIX, SandboxErrorCodes
 
 if TYPE_CHECKING:
     from src.api.schema import NetworkPolicy, Volume
@@ -100,6 +100,17 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
                 detail={
                     "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
                     "message": "Metadata keys and values must be strings.",
+                },
+            )
+        if key.startswith(RESERVED_LABEL_PREFIX):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
+                    "message": (
+                        f"Metadata key '{key}' uses the reserved prefix '{RESERVED_LABEL_PREFIX}'. "
+                        "Keys under this prefix are managed by the system and cannot be set via metadata."
+                    ),
                 },
             )
         if not _is_valid_label_key(key):
