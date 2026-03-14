@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from opensandbox.api.lifecycle.models.image_spec import ImageSpec as ApiImageSpec
+from opensandbox.api.lifecycle.types import UNSET
 from opensandbox.models.filesystem import MoveEntry, WriteEntry
 from opensandbox.models.sandboxes import (
     PVC,
@@ -40,6 +42,12 @@ def test_sandbox_image_spec_supports_positional_image() -> None:
 def test_sandbox_image_spec_rejects_blank_image() -> None:
     with pytest.raises(ValueError):
         SandboxImageSpec("   ")
+
+
+def test_api_image_spec_tolerates_null_auth() -> None:
+    spec = ApiImageSpec.from_dict({"uri": "python:3.11", "auth": None})
+    assert spec.uri == "python:3.11"
+    assert spec.auth is UNSET
 
 
 def test_sandbox_image_auth_rejects_blank_username_and_password() -> None:
