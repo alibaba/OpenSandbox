@@ -41,26 +41,25 @@ class CreateSandboxResponse:
     Attributes:
         id (str): Unique sandbox identifier
         status (SandboxStatus): Detailed status information with lifecycle state and transition details
-        expires_at (datetime.datetime | None): Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.
         created_at (datetime.datetime): Sandbox creation timestamp
         entrypoint (list[str]): Entry process specification from creation request
         metadata (CreateSandboxResponseMetadata | Unset): Custom metadata from creation request
+        expires_at (datetime.datetime | None | Unset): Timestamp when sandbox will auto-terminate. Null when manual
+            cleanup is enabled.
     """
 
     id: str
     status: SandboxStatus
-    expires_at: datetime.datetime | None
     created_at: datetime.datetime
     entrypoint: list[str]
     metadata: CreateSandboxResponseMetadata | Unset = UNSET
+    expires_at: datetime.datetime | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         id = self.id
 
         status = self.status.to_dict()
-
-        expires_at = self.expires_at.isoformat() if self.expires_at is not None else None
 
         created_at = self.created_at.isoformat()
 
@@ -70,19 +69,28 @@ class CreateSandboxResponse:
         if not isinstance(self.metadata, Unset):
             metadata = self.metadata.to_dict()
 
+        expires_at: None | str | Unset
+        if isinstance(self.expires_at, Unset):
+            expires_at = UNSET
+        elif isinstance(self.expires_at, datetime.datetime):
+            expires_at = self.expires_at.isoformat()
+        else:
+            expires_at = self.expires_at
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
             {
                 "id": id,
                 "status": status,
-                "expiresAt": expires_at,
                 "createdAt": created_at,
                 "entrypoint": entrypoint,
             }
         )
         if metadata is not UNSET:
             field_dict["metadata"] = metadata
+        if expires_at is not UNSET:
+            field_dict["expiresAt"] = expires_at
 
         return field_dict
 
@@ -96,9 +104,6 @@ class CreateSandboxResponse:
 
         status = SandboxStatus.from_dict(d.pop("status"))
 
-        _expires_at = d.pop("expiresAt")
-        expires_at = isoparse(_expires_at) if _expires_at is not None else None
-
         created_at = isoparse(d.pop("createdAt"))
 
         entrypoint = cast(list[str], d.pop("entrypoint"))
@@ -110,13 +115,30 @@ class CreateSandboxResponse:
         else:
             metadata = CreateSandboxResponseMetadata.from_dict(_metadata)
 
+        def _parse_expires_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                expires_at_type_0 = isoparse(data)
+
+                return expires_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        expires_at = _parse_expires_at(d.pop("expiresAt", UNSET))
+
         create_sandbox_response = cls(
             id=id,
             status=status,
-            expires_at=expires_at,
             created_at=created_at,
             entrypoint=entrypoint,
             metadata=metadata,
+            expires_at=expires_at,
         )
 
         create_sandbox_response.additional_properties = d

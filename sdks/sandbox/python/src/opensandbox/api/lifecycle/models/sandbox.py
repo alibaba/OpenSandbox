@@ -47,18 +47,19 @@ class Sandbox:
         status (SandboxStatus): Detailed status information with lifecycle state and transition details
         entrypoint (list[str]): The command to execute as the sandbox's entry process.
             Always present in responses since entrypoint is required in creation requests.
-        expires_at (datetime.datetime | None): Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.
         created_at (datetime.datetime): Sandbox creation timestamp
         metadata (SandboxMetadata | Unset): Custom metadata from creation request
+        expires_at (datetime.datetime | None | Unset): Timestamp when sandbox will auto-terminate. Null when manual
+            cleanup is enabled.
     """
 
     id: str
     image: ImageSpec
     status: SandboxStatus
     entrypoint: list[str]
-    expires_at: datetime.datetime | None
     created_at: datetime.datetime
     metadata: SandboxMetadata | Unset = UNSET
+    expires_at: datetime.datetime | None | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,13 +71,19 @@ class Sandbox:
 
         entrypoint = self.entrypoint
 
-        expires_at = self.expires_at.isoformat() if self.expires_at is not None else None
-
         created_at = self.created_at.isoformat()
 
         metadata: dict[str, Any] | Unset = UNSET
         if not isinstance(self.metadata, Unset):
             metadata = self.metadata.to_dict()
+
+        expires_at: None | str | Unset
+        if isinstance(self.expires_at, Unset):
+            expires_at = UNSET
+        elif isinstance(self.expires_at, datetime.datetime):
+            expires_at = self.expires_at.isoformat()
+        else:
+            expires_at = self.expires_at
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -86,12 +93,13 @@ class Sandbox:
                 "image": image,
                 "status": status,
                 "entrypoint": entrypoint,
-                "expiresAt": expires_at,
                 "createdAt": created_at,
             }
         )
         if metadata is not UNSET:
             field_dict["metadata"] = metadata
+        if expires_at is not UNSET:
+            field_dict["expiresAt"] = expires_at
 
         return field_dict
 
@@ -110,9 +118,6 @@ class Sandbox:
 
         entrypoint = cast(list[str], d.pop("entrypoint"))
 
-        _expires_at = d.pop("expiresAt")
-        expires_at = isoparse(_expires_at) if _expires_at is not None else None
-
         created_at = isoparse(d.pop("createdAt"))
 
         _metadata = d.pop("metadata", UNSET)
@@ -122,14 +127,31 @@ class Sandbox:
         else:
             metadata = SandboxMetadata.from_dict(_metadata)
 
+        def _parse_expires_at(data: object) -> datetime.datetime | None | Unset:
+            if data is None:
+                return data
+            if isinstance(data, Unset):
+                return data
+            try:
+                if not isinstance(data, str):
+                    raise TypeError()
+                expires_at_type_0 = isoparse(data)
+
+                return expires_at_type_0
+            except (TypeError, ValueError, AttributeError, KeyError):
+                pass
+            return cast(datetime.datetime | None | Unset, data)
+
+        expires_at = _parse_expires_at(d.pop("expiresAt", UNSET))
+
         sandbox = cls(
             id=id,
             image=image,
             status=status,
             entrypoint=entrypoint,
-            expires_at=expires_at,
             created_at=created_at,
             metadata=metadata,
+            expires_at=expires_at,
         )
 
         sandbox.additional_properties = d

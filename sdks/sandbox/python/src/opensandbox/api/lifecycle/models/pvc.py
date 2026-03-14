@@ -26,14 +26,19 @@ T = TypeVar("T", bound="PVC")
 
 @_attrs_define
 class PVC:
-    """Kubernetes PersistentVolumeClaim mount backend. References an existing
-    PVC in the same namespace as the sandbox pod.
+    """Platform-managed named volume backend. A runtime-neutral abstraction
+    for referencing a pre-existing, platform-managed named volume.
 
-    Only available in Kubernetes runtime.
+    - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+    - Docker: maps to a Docker named volume (created via `docker volume create`).
+
+    The volume must already exist on the target platform before sandbox
+    creation.
 
         Attributes:
-            claim_name (str): Name of the PersistentVolumeClaim in the same namespace.
-                Must be a valid Kubernetes resource name.
+            claim_name (str): Name of the volume on the target platform.
+                In Kubernetes this is the PVC name; in Docker this is the named
+                volume name. Must be a valid DNS label.
     """
 
     claim_name: str

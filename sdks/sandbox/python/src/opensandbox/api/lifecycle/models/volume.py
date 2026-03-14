@@ -48,10 +48,14 @@ class Volume:
 
                 Security note: Host paths are restricted by server-side allowlist.
                 Users must specify paths under permitted prefixes.
-            pvc (PVC | Unset): Kubernetes PersistentVolumeClaim mount backend. References an existing
-                PVC in the same namespace as the sandbox pod.
+            pvc (PVC | Unset): Platform-managed named volume backend. A runtime-neutral abstraction
+                for referencing a pre-existing, platform-managed named volume.
 
-                Only available in Kubernetes runtime.
+                - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+                - Docker: maps to a Docker named volume (created via `docker volume create`).
+
+                The volume must already exist on the target platform before sandbox
+                creation.
             read_only (bool | Unset): If true, the volume is mounted as read-only. Defaults to false (read-write).
                  Default: False.
             sub_path (str | Unset): Optional subdirectory under the backend path to mount.
