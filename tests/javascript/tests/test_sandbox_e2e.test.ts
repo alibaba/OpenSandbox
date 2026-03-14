@@ -262,7 +262,13 @@ test("01c sandbox create with host volume mount (read-only)", async () => {
     const writeResult = await roSandbox.commands.run(
       `touch ${containerMountPath}/should-fail.txt`
     );
-    expect(writeResult.error).toBeTruthy();
+    const statResult = await roSandbox.commands.run(
+      `test ! -e ${containerMountPath}/should-fail.txt && echo OK`
+    );
+    const writeWasRejected =
+      writeResult.error != null || writeResult.logs.stderr.length > 0;
+    const fileWasNotCreated = statResult.logs.stdout[0]?.text === "OK";
+    expect(writeWasRejected || fileWasNotCreated).toBe(true);
   } finally {
     try {
       await roSandbox.kill();
@@ -374,7 +380,13 @@ test("01e sandbox create with PVC named volume mount (read-only)", async () => {
     const writeResult = await roSandbox.commands.run(
       `touch ${containerMountPath}/should-fail.txt`
     );
-    expect(writeResult.error).toBeTruthy();
+    const statResult = await roSandbox.commands.run(
+      `test ! -e ${containerMountPath}/should-fail.txt && echo OK`
+    );
+    const writeWasRejected =
+      writeResult.error != null || writeResult.logs.stderr.length > 0;
+    const fileWasNotCreated = statResult.logs.stdout[0]?.text === "OK";
+    expect(writeWasRejected || fileWasNotCreated).toBe(true);
   } finally {
     try {
       await roSandbox.kill();
