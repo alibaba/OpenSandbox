@@ -32,6 +32,7 @@ import logging
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import timedelta
+from typing import Callable
 
 import pytest
 from code_interpreter import CodeInterpreter
