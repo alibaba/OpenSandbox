@@ -305,6 +305,8 @@ config = ConnectionConfig(
 | `network_policy` | 可选的出站网络策略（egress） | -                         |
 | `ready_timeout` | 等待沙箱就绪的最大时间 | 30 秒                           |
 
+注意：`opensandbox.io/` 前缀下的 metadata key 属于系统保留标签，服务端会拒绝用户传入。
+
 ```python
 from datetime import timedelta
 

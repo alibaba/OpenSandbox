@@ -34,7 +34,7 @@ import tarfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from threading import Lock, Timer
 from typing import Any, Dict, Optional
 from uuid import uuid4
@@ -77,6 +77,7 @@ from src.services.ossfs_mixin import OSSFSMixin
 from src.services.sandbox_service import SandboxService
 from src.services.runtime_resolver import SecureRuntimeResolver
 from src.services.validators import (
+    calculate_expiration_or_raise,
     ensure_egress_configured,
     ensure_entrypoint,
     ensure_future_expiration,
@@ -727,7 +728,7 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         created_at = datetime.now(timezone.utc)
         expires_at = None
         if request.timeout is not None:
-            expires_at = created_at + timedelta(seconds=request.timeout)
+            expires_at = calculate_expiration_or_raise(created_at, request.timeout)
         return sandbox_id, created_at, expires_at
 
     @staticmethod

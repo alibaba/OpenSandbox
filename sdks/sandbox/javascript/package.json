@@ -41,6 +41,7 @@
   "scripts": {
     "gen:api": "node ./scripts/generate-api.mjs",
     "build": "pnpm run gen:api && tsup",
+    "test": "pnpm run build && node --test tests/*.test.mjs",
     "lint": "eslint src scripts --max-warnings 0",
     "clean": "rm -rf dist"
   },

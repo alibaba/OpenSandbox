@@ -582,6 +582,7 @@ export interface components {
             image: components["schemas"]["ImageSpec"];
             /**
              * @description Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
+             *     The maximum is controlled by the server configuration (`server.max_sandbox_timeout_seconds`).
              *     Omit or set null to disable automatic expiration and require explicit cleanup.
              */
             timeout?: number | null;

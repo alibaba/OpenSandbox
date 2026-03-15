@@ -272,6 +272,8 @@ ConnectionConfig sharedConfig = ConnectionConfig.builder()
 | `networkPolicy` | 可选的出站网络策略（egress） | -                         |
 | `readyTimeout` | 等待沙箱就绪的最大时间 | 30 秒                           |
 
+注意：`opensandbox.io/` 前缀下的 metadata key 属于系统保留标签，服务端会拒绝用户传入。
+
 ```java
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule;

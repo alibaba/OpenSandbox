@@ -254,10 +254,16 @@ export class Sandbox {
       }
     }
 
+    const rawTimeout = opts.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
     const timeoutSeconds =
       opts.timeoutSeconds === null
         ? null
-        : Math.floor(opts.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS);
+        : Math.floor(rawTimeout);
+    if (timeoutSeconds !== null && !Number.isFinite(timeoutSeconds)) {
+      throw new Error(
+        `timeoutSeconds must be a finite number, got ${opts.timeoutSeconds}`
+      );
+    }
 
     const req: CreateSandboxRequest = {
       image: toImageSpec(opts.image),

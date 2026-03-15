@@ -308,12 +308,16 @@ class SandboxModelConverter:
             elif isinstance(metadata_obj, dict):
                 metadata = metadata_obj
 
+        expires_at = api_sandbox.expires_at
+        if isinstance(expires_at, Unset):
+            expires_at = None
+
         return SandboxInfo(
             id=api_sandbox.id,
             status=SandboxModelConverter._convert_sandbox_status(api_sandbox.status),
             image=domain_image_spec,
             created_at=api_sandbox.created_at,
-            expires_at=api_sandbox.expires_at,
+            expires_at=expires_at,
             entrypoint=api_sandbox.entrypoint,
             metadata=metadata,
         )

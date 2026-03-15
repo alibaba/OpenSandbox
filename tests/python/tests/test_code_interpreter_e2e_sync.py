@@ -24,6 +24,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from datetime import timedelta
+from typing import Callable
 
 import pytest
 from code_interpreter import CodeInterpreterSync
@@ -99,6 +100,62 @@ def _assert_terminal_event_contract(
         _assert_recent_timestamp_ms(errors[0].timestamp)
 
 
+def _buffer_attempt_handlers_sync(
+    handlers: ExecutionHandlersSync,
+) -> tuple[ExecutionHandlersSync, Callable[[], None]]:
+    buffered_events: list[tuple[str, object]] = []
+
+    def on_stdout(msg) -> None:
+        buffered_events.append(("stdout", msg))
+
+    def on_stderr(msg) -> None:
+        buffered_events.append(("stderr", msg))
+
+    def on_result(result) -> None:
+        buffered_events.append(("result", result))
+
+    def on_complete(complete) -> None:
+        buffered_events.append(("complete", complete))
+
+    def on_error(error) -> None:
+        buffered_events.append(("error", error))
+
+    def on_init(init) -> None:
+        buffered_events.append(("init", init))
+
+    def flush() -> None:
+        for event_type, payload in buffered_events:
+            if event_type == "stdout" and handlers.on_stdout is not None:
+                handlers.on_stdout(payload)
+            elif event_type == "stderr" and handlers.on_stderr is not None:
+                handlers.on_stderr(payload)
+            elif event_type == "result" and handlers.on_result is not None:
+                handlers.on_result(payload)
+            elif (
+                event_type == "complete"
+                and handlers.on_execution_complete is not None
+            ):
+                handlers.on_execution_complete(payload)
+            elif event_type == "error" and handlers.on_error is not None:
+                handlers.on_error(payload)
+            elif event_type == "init" and handlers.on_init is not None:
+                handlers.on_init(payload)
+
+    return (
+        ExecutionHandlersSync(
+            on_stdout=on_stdout if handlers.on_stdout is not None else None,
+            on_stderr=on_stderr if handlers.on_stderr is not None else None,
+            on_result=on_result if handlers.on_result is not None else None,
+            on_execution_complete=(
+                on_complete if handlers.on_execution_complete is not None else None
+            ),
+            on_error=on_error if handlers.on_error is not None else None,
+            on_init=on_init if handlers.on_init is not None else None,
+        ),
+        flush,
+    )
+
+
 def run_with_retry_sync(
     code_interpreter: CodeInterpreterSync,
     code: str,
@@ -121,14 +178,22 @@ def run_with_retry_sync(
 
     for attempt in range(max_retries):
         try:
+            attempt_handlers = handlers
+            flush_attempt_events: Callable[[], None] | None = None
+            if handlers is not None:
+                attempt_handlers, flush_attempt_events = _buffer_attempt_handlers_sync(
+                    handlers
+                )
             result = code_interpreter.codes.run(
                 code,
                 context=context,
                 language=language,
-                handlers=handlers,
+                handlers=attempt_handlers,
             )
             last_result = result
             if result is not None and result.id is not None:
+                if flush_attempt_events is not None:
+                    flush_attempt_events()
                 return result
             # Empty result — retry
             if attempt < max_retries - 1:
@@ -416,7 +481,8 @@ class TestCodeInterpreterE2ESync:
 
         # New usage: directly pass a language string (ephemeral context).
         # This validates the `codes.run(..., language=...)` convenience interface.
-        direct_lang_result = code_interpreter.codes.run(
+        direct_lang_result = run_with_retry_sync(
+            code_interpreter,
             "result = 2 + 2\nresult",
             language=SupportedLanguage.PYTHON,
         )
@@ -458,13 +524,14 @@ class TestCodeInterpreterE2ESync:
         with managed_ctx_sync(code_interpreter, SupportedLanguage.PYTHON) as python_context:
             assert python_context.id is not None and str(python_context.id).strip()
 
-            simple_result_py = code_interpreter.codes.run(
+            simple_result_py = run_with_retry_sync(
+                code_interpreter,
                 "print('Hello from Python!')\n"
                 + "result = 2 + 2\n"
                 + "print(f'2 + 2 = {result}')",
                 context=python_context,
                 handlers=handlers_py,
-                )
+            )
             assert simple_result_py is not None
             assert simple_result_py.id is not None and simple_result_py.id.strip()
             _assert_terminal_event_contract(
@@ -1016,4 +1083,3 @@ class TestCodeInterpreterE2ESync:
         ]
         assert len(final_contexts) == 0
         logger.info("✓ delete_contexts removed all bash contexts")
-

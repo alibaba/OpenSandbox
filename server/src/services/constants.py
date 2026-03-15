@@ -14,6 +14,8 @@
 
 """Shared constants for sandbox services."""
 
+RESERVED_LABEL_PREFIX = "opensandbox.io/"
+
 SANDBOX_ID_LABEL = "opensandbox.io/id"
 SANDBOX_EXPIRES_AT_LABEL = "opensandbox.io/expires-at"
 SANDBOX_MANUAL_CLEANUP_LABEL = "opensandbox.io/manual-cleanup"
@@ -87,6 +89,7 @@ class SandboxErrorCodes:
 
 
 __all__ = [
+    "RESERVED_LABEL_PREFIX",
     "SANDBOX_ID_LABEL",
     "SANDBOX_EXPIRES_AT_LABEL",
     "SANDBOX_MANUAL_CLEANUP_LABEL",

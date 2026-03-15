@@ -21,7 +21,7 @@ using Kubernetes resources for sandbox lifecycle management.
 
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from fastapi import HTTPException, status
@@ -47,6 +47,7 @@ from src.services.constants import (
 from src.services.helpers import matches_filter
 from src.services.sandbox_service import SandboxService
 from src.services.validators import (
+    calculate_expiration_or_raise,
     ensure_entrypoint,
     ensure_egress_configured,
     ensure_future_expiration,
@@ -277,7 +278,7 @@ class KubernetesSandboxService(SandboxService):
         created_at = datetime.now(timezone.utc)
         expires_at = None
         if request.timeout is not None:
-            expires_at = created_at + timedelta(seconds=request.timeout)
+            expires_at = calculate_expiration_or_raise(created_at, request.timeout)
         elif not self.workload_provider.supports_manual_cleanup():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

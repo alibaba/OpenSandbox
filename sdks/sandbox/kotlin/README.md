@@ -271,6 +271,9 @@ The `Sandbox.builder()` allows configuring the sandbox environment.
 | `networkPolicy` | Optional outbound network policy (egress) | -                             |
 | `readyTimeout` | Max time to wait for sandbox to be ready | 30 seconds                      |
 
+Note: metadata keys under `opensandbox.io/` are reserved for system-managed
+labels and will be rejected by the server.
+
 ```java
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule;
