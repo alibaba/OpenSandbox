@@ -35,19 +35,37 @@ function joinUrl(baseUrl: string, pathname: string): string {
 
 type ApiRunCommandRequest =
   ExecdPaths["/command"]["post"]["requestBody"]["content"]["application/json"];
+type ApiRunCommandRequestWithExtensions = ApiRunCommandRequest & {
+  uid?: number;
+  gid?: number;
+  envs?: Record<string, string>;
+};
 type ApiCommandStatusOk =
   ExecdPaths["/command/status/{id}"]["get"]["responses"][200]["content"]["application/json"];
 type ApiCommandLogsOk =
   ExecdPaths["/command/{id}/logs"]["get"]["responses"][200]["content"]["text/plain"];
 
 function toRunCommandRequest(command: string, opts?: RunCommandOpts): ApiRunCommandRequest {
-  const body: ApiRunCommandRequest = {
+  if (opts?.gid != null && opts.uid == null) {
+    throw new Error("uid is required when gid is provided");
+  }
+
+  const body: ApiRunCommandRequestWithExtensions = {
     command,
     cwd: opts?.workingDirectory,
     background: !!opts?.background,
   };
   if (opts?.timeoutSeconds != null) {
     body.timeout = Math.round(opts.timeoutSeconds * 1000);
+  }
+  if (opts?.uid != null) {
+    body.uid = opts.uid;
+  }
+  if (opts?.gid != null) {
+    body.gid = opts.gid;
+  }
+  if (opts?.envs != null) {
+    body.envs = opts.envs;
   }
   return body;
 }

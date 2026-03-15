@@ -557,6 +557,29 @@ test("02a command status + background logs", async () => {
   expect(logsText.includes("log-line-2")).toBe(true);
 });
 
+test("02b command env injection", async () => {
+  if (!sandbox) throw new Error("sandbox not created");
+
+  const envKey = "OPEN_SANDBOX_E2E_CMD_ENV";
+  const envValue = `env-ok-${Date.now()}`;
+  const probeCommand = `sh -c 'if [ -z "\${${envKey}:-}" ]; then echo "__EMPTY__"; else echo "\${${envKey}}"; fi'`;
+
+  const baseline = await sandbox.commands.run(probeCommand);
+  expect(baseline.error).toBeUndefined();
+  const baselineOutput = baseline.logs.stdout.map((m) => m.text).join("\n").trim();
+  expect(baselineOutput).toBe("__EMPTY__");
+
+  const injected = await sandbox.commands.run(probeCommand, {
+    envs: {
+      [envKey]: envValue,
+      OPEN_SANDBOX_E2E_SECOND_ENV: "second-ok",
+    },
+  });
+  expect(injected.error).toBeUndefined();
+  const injectedOutput = injected.logs.stdout.map((m) => m.text).join("\n").trim();
+  expect(injectedOutput).toBe(envValue);
+});
+
 test("03 filesystem operations: CRUD + replace/move/delete + range + stream", async () => {
   if (!sandbox) throw new Error("sandbox not created");
 
