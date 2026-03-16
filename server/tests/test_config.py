@@ -83,7 +83,7 @@ def test_docker_runtime_disallows_kubernetes_block():
 
 def test_server_config_defaults_include_max_sandbox_timeout():
     server_cfg = ServerConfig()
-    assert server_cfg.max_sandbox_timeout_seconds == 86400
+    assert server_cfg.max_sandbox_timeout_seconds is None
 
 
 def test_kubernetes_runtime_fills_missing_block():

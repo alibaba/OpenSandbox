@@ -186,7 +186,7 @@ class ServerConfig(BaseModel):
         description="Bound public IP. When set, used as the host part when returning sandbox endpoints.",
     )
     max_sandbox_timeout_seconds: Optional[int] = Field(
-        default=86400,
+        default=None,
         ge=60,
         description=(
             "Maximum allowed sandbox TTL in seconds for requests that specify timeout. "
