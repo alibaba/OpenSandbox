@@ -430,10 +430,14 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             sandbox_id = labels.get(SANDBOX_ID_LABEL)
             if not sandbox_id:
                 continue
+
+            mount_keys = _parse_and_accumulate_mount_refs(labels)
+
             expires_label = labels.get(SANDBOX_EXPIRES_AT_LABEL)
             if expires_label:
                 expires_at = parse_timestamp(expires_label)
             elif self._has_manual_cleanup(labels):
+                restored += 1
                 continue
             else:
                 logger.warning(
@@ -441,8 +445,6 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                     sandbox_id,
                 )
                 continue
-
-            mount_keys = _parse_and_accumulate_mount_refs(labels)
 
             if expires_at <= now:
                 logger.info("Sandbox %s already expired; terminating now.", sandbox_id)

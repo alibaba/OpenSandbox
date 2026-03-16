@@ -1644,6 +1644,28 @@ class TestDockerVolumeValidation:
         assert service._ossfs_mount_ref_counts[mount_key] == 1
         mock_run.assert_not_called()
 
+    def test_restore_manual_cleanup_sandbox_rebuilds_ossfs_refs(self, mock_docker):
+        """Manual cleanup sandbox OSSFS refs should be restored on startup."""
+        mount_key = "/mnt/ossfs/bucket-manual/data"
+        container = MagicMock()
+        container.attrs = {
+            "Config": {
+                "Labels": {
+                    SANDBOX_ID_LABEL: "sandbox-manual",
+                    SANDBOX_MANUAL_CLEANUP_LABEL: "true",
+                    SANDBOX_OSSFS_MOUNTS_LABEL: f'["{mount_key}"]',
+                }
+            },
+            "State": {"Running": True},
+        }
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = [container]
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        assert service._ossfs_mount_ref_counts.get(mount_key) == 1
+
     def test_pvc_volume_inspect_failure_returns_500(self, mock_docker):
         """Docker API failure during volume inspection should return 500."""
         mock_client = MagicMock()
