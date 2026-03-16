@@ -42,8 +42,8 @@ const (
 	pwdMarkerPrefix    = "__PWD__:"
 )
 
-func (c *Controller) createBashSession(_ *CreateContextRequest) (string, error) {
-	session := newBashSession(nil)
+func (c *Controller) createBashSession(req *CreateContextRequest) (string, error) {
+	session := newBashSession(req.Cwd)
 	if err := session.start(); err != nil {
 		return "", fmt.Errorf("failed to start bash session: %w", err)
 	}
@@ -98,25 +98,11 @@ func (c *Controller) DeleteBashSession(sessionID string) error {
 	return c.closeBashSession(sessionID)
 }
 
-// nolint:unused
-func (c *Controller) listBashSessions() []string {
-	sessions := make([]string, 0)
-	c.bashSessionClientMap.Range(func(key, _ any) bool {
-		sessionID, _ := key.(string)
-		sessions = append(sessions, sessionID)
-		return true
-	})
-
-	return sessions
-}
-
 // Session implementation (pipe-based, no PTY)
-func newBashSession(config *bashSessionConfig) *bashSession {
-	if config == nil {
-		config = &bashSessionConfig{
-			Session:        uuidString(),
-			StartupTimeout: 5 * time.Second,
-		}
+func newBashSession(cwd string) *bashSession {
+	config := &bashSessionConfig{
+		Session:        uuidString(),
+		StartupTimeout: 5 * time.Second,
 	}
 
 	env := make(map[string]string)
@@ -129,6 +115,7 @@ func newBashSession(config *bashSessionConfig) *bashSession {
 	return &bashSession{
 		config: config,
 		env:    env,
+		cwd:    cwd,
 	}
 }
 

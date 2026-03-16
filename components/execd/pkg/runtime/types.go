@@ -92,6 +92,8 @@ type bashSessionConfig struct {
 	Session string
 	// StartupTimeout is the startup timeout.
 	StartupTimeout time.Duration
+	// Cwd is the working directory.
+	Cwd string
 }
 
 // bashSession represents a bash session.

@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
@@ -62,6 +63,9 @@ func TestBashSession_NonZeroExitEmitsError(t *testing.T) {
 		},
 	}
 
+	session, err := c.createBashSession(&CreateContextRequest{})
+	assert.NoError(t, err)
+	req.Context = session
 	require.NoError(t, c.runBashSession(ctx, req))
 
 	var gotErr *execute.ErrorOutput
@@ -84,7 +88,7 @@ func TestBashSession_NonZeroExitEmitsError(t *testing.T) {
 }
 
 func TestBashSession_envAndExitCode(t *testing.T) {
-	session := newBashSession(nil)
+	session := newBashSession("")
 	t.Cleanup(func() { _ = session.close() })
 
 	require.NoError(t, session.start())
@@ -157,7 +161,7 @@ func TestBashSession_envAndExitCode(t *testing.T) {
 }
 
 func TestBashSession_envLargeOutputChained(t *testing.T) {
-	session := newBashSession(nil)
+	session := newBashSession("")
 	t.Cleanup(func() { _ = session.close() })
 
 	require.NoError(t, session.start())
@@ -210,7 +214,7 @@ func TestBashSession_envLargeOutputChained(t *testing.T) {
 }
 
 func TestBashSession_cwdPersistsWithoutOverride(t *testing.T) {
-	session := newBashSession(nil)
+	session := newBashSession("")
 	t.Cleanup(func() { _ = session.close() })
 
 	require.NoError(t, session.start())
@@ -250,7 +254,7 @@ func TestBashSession_cwdPersistsWithoutOverride(t *testing.T) {
 }
 
 func TestBashSession_requestCwdOverridesAfterCd(t *testing.T) {
-	session := newBashSession(nil)
+	session := newBashSession("")
 	t.Cleanup(func() { _ = session.close() })
 
 	require.NoError(t, session.start())
@@ -295,7 +299,7 @@ func TestBashSession_requestCwdOverridesAfterCd(t *testing.T) {
 }
 
 func TestBashSession_envDumpNotLeakedWhenNoTrailingNewline(t *testing.T) {
-	session := newBashSession(nil)
+	session := newBashSession("")
 	t.Cleanup(func() { _ = session.close() })
 
 	require.NoError(t, session.start())
@@ -323,7 +327,7 @@ func TestBashSession_envDumpNotLeakedWhenNoTrailingNewline(t *testing.T) {
 }
 
 func TestBashSession_envDumpNotLeakedWhenNoOutput(t *testing.T) {
-	session := newBashSession(nil)
+	session := newBashSession("")
 	t.Cleanup(func() { _ = session.close() })
 
 	require.NoError(t, session.start())
@@ -407,7 +411,7 @@ cat "$reward_dir/reward.txt"
 }
 
 func TestBashSession_execReplacesShell(t *testing.T) {
-	session := newBashSession(nil)
+	session := newBashSession("")
 	t.Cleanup(func() { _ = session.close() })
 
 	require.NoError(t, session.start())
@@ -447,7 +451,7 @@ exec /tmp/exec_child.sh
 }
 
 func TestBashSession_complexExec(t *testing.T) {
-	session := newBashSession(nil)
+	session := newBashSession("")
 	t.Cleanup(func() { _ = session.close() })
 
 	require.NoError(t, session.start())
