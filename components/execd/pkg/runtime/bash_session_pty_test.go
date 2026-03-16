@@ -146,13 +146,27 @@ func TestPTY_PipeModeUnchanged(t *testing.T) {
 	// ResizePTY must be a no-op (no error) when not in PTY mode.
 	require.NoError(t, s.ResizePTY(100, 30))
 
+	// Attach output first so the broadcast goroutine has a PipeWriter in place,
+	// then write stdin to avoid a race where output lands only in the replay buffer.
+	outR, _, detach := s.AttachOutput()
+	defer detach()
+
 	// Stdin must still work via pipe.
 	_, err := s.WriteStdin([]byte("echo pipe-ok\n"))
 	require.NoError(t, err)
 
-	// Read from stdout via AttachOutput.
-	outR, _, detach := s.AttachOutput()
-	defer detach()
-	out := readOutputTimeout(outR, 3*time.Second)
-	assert.Contains(t, out, "pipe-ok", "expected pipe-mode echo output, got: %q", out)
+	// Poll the replay buffer until output appears — this is reliable regardless of
+	// whether the output arrived before or after AttachOutput installed the PipeWriter.
+	deadline := time.Now().Add(5 * time.Second)
+	var got string
+	for time.Now().Before(deadline) {
+		data, _ := s.replay.readFrom(0)
+		got = string(data)
+		if strings.Contains(got, "pipe-ok") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = outR // attached above; detach() will clean up
+	assert.Contains(t, got, "pipe-ok", "expected pipe-mode echo output in replay buffer, got: %q", got)
 }

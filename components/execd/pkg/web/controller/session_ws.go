@@ -15,8 +15,8 @@
 package controller
 
 import (
-	"bufio"
 	"context"
+	"io"
 	"net/http"
 	"strconv"
 	"sync"
@@ -160,66 +160,49 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		}
 	}()
 
-	// 8. Write pump — stdout scanner.
-	// Buffer sized to 16 MiB to handle large JSON/base64 lines from agent tools.
-	pumpWg.Add(1)
-	go func() {
+	// streamPump reads raw byte chunks from r and forwards them as WS frames of the given type.
+	// Raw reads (rather than line scanning) are required so that PTY prompts, progress spinners,
+	// and cursor-control sequences — which are often written without a trailing newline — are
+	// delivered immediately without buffering.
+	streamPump := func(r io.Reader, frameType string) {
 		defer pumpWg.Done()
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-		for scanner.Scan() {
-			if ctx.Err() != nil {
-				return
-			}
-			// Replay buffer is written by the broadcast goroutine; just forward to client.
-			if writeErr := writeJSON(model.ServerFrame{
-				Type:      "stdout",
-				Data:      scanner.Text() + "\n",
-				Timestamp: time.Now().UnixMilli(),
-			}); writeErr != nil {
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil && ctx.Err() == nil {
-			_ = writeJSON(model.ServerFrame{
-				Type:  "error",
-				Error: "stdout read error: " + err.Error(),
-				Code:  model.WSErrCodeRuntimeError,
-			})
-			cancel()
-		}
-	}()
-
-	// 9. Write pump — stderr scanner (pipe mode only; PTY merges stderr into ptmx).
-	// Buffer sized to 16 MiB to match stdout pump. stderr is nil in PTY mode.
-	if stderr != nil {
-		pumpWg.Add(1)
-		go func() {
-			defer pumpWg.Done()
-			scanner := bufio.NewScanner(stderr)
-			scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-			for scanner.Scan() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := r.Read(buf)
+			if n > 0 {
 				if ctx.Err() != nil {
 					return
 				}
-				// Replay buffer is written by the broadcast goroutine; just forward to client.
 				if writeErr := writeJSON(model.ServerFrame{
-					Type:      "stderr",
-					Data:      scanner.Text() + "\n",
+					Type:      frameType,
+					Data:      string(buf[:n]),
 					Timestamp: time.Now().UnixMilli(),
 				}); writeErr != nil {
 					return
 				}
 			}
-			if err := scanner.Err(); err != nil && ctx.Err() == nil {
-				_ = writeJSON(model.ServerFrame{
-					Type:  "error",
-					Error: "stderr read error: " + err.Error(),
-					Code:  model.WSErrCodeRuntimeError,
-				})
-				cancel()
+			if readErr != nil {
+				if readErr != io.EOF && ctx.Err() == nil {
+					_ = writeJSON(model.ServerFrame{
+						Type:  "error",
+						Error: frameType + " read error: " + readErr.Error(),
+						Code:  model.WSErrCodeRuntimeError,
+					})
+					cancel()
+				}
+				return
 			}
-		}()
+		}
+	}
+
+	// 8. Write pump — stdout (raw byte chunks).
+	pumpWg.Add(1)
+	go streamPump(stdout, "stdout")
+
+	// 9. Write pump — stderr (pipe mode only; PTY merges stderr into ptmx; nil in PTY mode).
+	if stderr != nil {
+		pumpWg.Add(1)
+		go streamPump(stderr, "stderr")
 	}
 
 	// 10. Exit watcher — sends exit frame when bash process ends.
