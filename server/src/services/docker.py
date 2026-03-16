@@ -255,18 +255,31 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
 
         return containers[0]
 
-    def _schedule_expiration(self, sandbox_id: str, expires_at: datetime) -> None:
+    def _schedule_expiration(
+        self,
+        sandbox_id: str,
+        expires_at: datetime,
+        *,
+        update_expiration: bool = True,
+        **expire_kwargs,
+    ) -> None:
         """Schedule automatic sandbox termination at expiration time."""
         # Delay might already be negative if the timer should fire immediately
         delay = max(0.0, (expires_at - datetime.now(timezone.utc)).total_seconds())
-        timer = Timer(delay, self._expire_sandbox, args=(sandbox_id,))
+        timer = Timer(
+            delay,
+            self._expire_sandbox,
+            args=(sandbox_id,),
+            kwargs=expire_kwargs or None,
+        )
         timer.daemon = True
         with self._expiration_lock:
             # Replace existing timer (if any) so renew operations take effect immediately
             existing = self._expiration_timers.pop(sandbox_id, None)
             if existing:
                 existing.cancel()
-            self._sandbox_expirations[sandbox_id] = expires_at
+            if update_expiration:
+                self._sandbox_expirations[sandbox_id] = expires_at
             self._expiration_timers[sandbox_id] = timer
         timer.start()
 
@@ -294,17 +307,53 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             return parse_timestamp(label_value)
         return fallback
 
-    def _expire_sandbox(self, sandbox_id: str) -> None:
+    def _expire_sandbox(
+        self,
+        sandbox_id: str,
+        fallback_mount_keys: Optional[list[str]] = None,
+    ) -> None:
         """Timer callback to terminate expired sandboxes."""
         mount_keys: list[str] = []
         try:
             container = self._get_container_by_sandbox_id(sandbox_id)
         except HTTPException as exc:
-            if exc.status_code != status.HTTP_404_NOT_FOUND:
-                logger.warning(
-                    "Failed to fetch sandbox %s for expiration: %s", sandbox_id, exc.detail
-                )
-            self._remove_expiration_tracking(sandbox_id)
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                self._remove_expiration_tracking(sandbox_id)
+                if fallback_mount_keys:
+                    self._release_ossfs_mounts(fallback_mount_keys)
+            else:
+                with self._expiration_lock:
+                    current_expires = self._sandbox_expirations.get(sandbox_id)
+                now = datetime.now(timezone.utc)
+                if current_expires and current_expires > now:
+                    logger.info(
+                        "Sandbox %s expiration was renewed; skipping retry.",
+                        sandbox_id,
+                    )
+                else:
+                    logger.warning(
+                        "Failed to fetch sandbox %s for expiration: %s — "
+                        "scheduling retry in 30s",
+                        sandbox_id,
+                        exc.detail,
+                    )
+                    retry_at = now + timedelta(seconds=30)
+                    self._schedule_expiration(
+                        sandbox_id,
+                        retry_at,
+                        update_expiration=False,
+                        fallback_mount_keys=fallback_mount_keys,
+                    )
+            return
+
+        with self._expiration_lock:
+            current_expires = self._sandbox_expirations.get(sandbox_id)
+        if current_expires and current_expires > datetime.now(timezone.utc):
+            logger.info(
+                "Sandbox %s was renewed (expires %s); aborting expiration.",
+                sandbox_id,
+                current_expires,
+            )
             return
 
         labels = container.attrs.get("Config", {}).get("Labels") or {}
@@ -344,10 +393,28 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         restored = 0
         seen_sidecars: set[str] = set()
         restored_mount_refs: dict[str, int] = {}
+        expired_entries: list[tuple[str, list[str]]] = []
         now = datetime.now(timezone.utc)
+
+        def _parse_and_accumulate_mount_refs(labels: dict) -> list[str]:
+            mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
+            try:
+                parsed = json.loads(mount_keys_raw)
+            except (TypeError, json.JSONDecodeError):
+                parsed = []
+            keys: list[str] = []
+            if isinstance(parsed, list):
+                for key in parsed:
+                    if isinstance(key, str) and key:
+                        keys.append(key)
+                        restored_mount_refs[key] = restored_mount_refs.get(key, 0) + 1
+            return keys
+
+        # Pass 1: collect ref counts for ALL sandbox containers (alive + expired)
+        # and schedule timers for alive ones.  Expired sandboxes are deferred to
+        # pass 2 so that ref counts are fully populated before any release.
         for container in containers:
             labels = container.attrs.get("Config", {}).get("Labels") or {}
-            # Sidecar only
             sidecar_for = labels.get(EGRESS_SIDECAR_LABEL)
             if sidecar_for:
                 seen_sidecars.add(sidecar_for)
@@ -366,22 +433,26 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                 )
                 continue
 
+            mount_keys = _parse_and_accumulate_mount_refs(labels)
+
             if expires_at <= now:
                 logger.info("Sandbox %s already expired; terminating now.", sandbox_id)
-                self._expire_sandbox(sandbox_id)
+                expired_entries.append((sandbox_id, mount_keys))
                 continue
 
             self._schedule_expiration(sandbox_id, expires_at)
-            mount_keys_raw = labels.get(SANDBOX_OSSFS_MOUNTS_LABEL, "[]")
-            try:
-                mount_keys = json.loads(mount_keys_raw)
-            except (TypeError, json.JSONDecodeError):
-                mount_keys = []
-            if isinstance(mount_keys, list):
-                for key in mount_keys:
-                    if isinstance(key, str) and key:
-                        restored_mount_refs[key] = restored_mount_refs.get(key, 0) + 1
             restored += 1
+
+        # Populate ref counts before expiring anything so _release_ossfs_mount
+        # can properly decrement and unmount.
+        with self._ossfs_mount_lock:
+            self._ossfs_mount_ref_counts = restored_mount_refs
+
+        # Pass 2: expire deferred sandboxes (ref counts are now available).
+        # Cached mount keys are passed as fallback so that mounts are still
+        # released even if the container vanishes between pass 1 and pass 2.
+        for sandbox_id, cached_mount_keys in expired_entries:
+            self._expire_sandbox(sandbox_id, fallback_mount_keys=cached_mount_keys)
 
         # Cleanup orphan sidecars (no matching sandbox container)
         for orphan_id in seen_sidecars:
@@ -397,8 +468,6 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
 
         if restored:
             logger.info("Restored expiration timers for %d sandbox(es).", restored)
-        with self._ossfs_mount_lock:
-            self._ossfs_mount_ref_counts = restored_mount_refs
 
     def _fetch_execd_archive(self) -> bytes:
         """Fetch (and memoize) the execd archive from the platform container."""
@@ -872,53 +941,53 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                 separators=(",", ":"),
             )
 
-        # Build volume bind mounts from request volumes.
-        # pvc_inspect_cache carries Docker volume inspect data from the
-        # validation phase, avoiding a redundant API call.
-        volume_binds = self._build_volume_binds(request.volumes, pvc_inspect_cache)
-
         sidecar_container = None
-        host_config_kwargs: Dict[str, Any]
-        exposed_ports: Optional[list[str]] = None
+        try:
+            # Build volume bind mounts from request volumes.
+            # pvc_inspect_cache carries Docker volume inspect data from the
+            # validation phase, avoiding a redundant API call.
+            volume_binds = self._build_volume_binds(request.volumes, pvc_inspect_cache)
 
-        if request.network_policy:
-            host_execd_port, host_http_port = self._allocate_distinct_host_ports()
-            sidecar_container = self._start_egress_sidecar(
-                sandbox_id=sandbox_id,
-                network_policy=request.network_policy,
-                host_execd_port=host_execd_port,
-                host_http_port=host_http_port,
-            )
-            labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
-            labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
-            host_config_kwargs = self._base_host_config_kwargs(
-                mem_limit, nano_cpus, f"container:{sidecar_container.id}"
-            )
-            # Drop NET_ADMIN for the main container; only the sidecar should keep it
-            cap_drop = set(host_config_kwargs.get("cap_drop") or [])
-            cap_drop.add("NET_ADMIN")
-            if cap_drop:
-                host_config_kwargs["cap_drop"] = list(cap_drop)
-        else:
-            host_config_kwargs = self._base_host_config_kwargs(
-                mem_limit, nano_cpus, self.network_mode
-            )
-            if self.network_mode != HOST_NETWORK_MODE:
+            host_config_kwargs: Dict[str, Any]
+            exposed_ports: Optional[list[str]] = None
+
+            if request.network_policy:
                 host_execd_port, host_http_port = self._allocate_distinct_host_ports()
-                port_bindings = {
-                    "44772": ("0.0.0.0", host_execd_port),
-                    "8080": ("0.0.0.0", host_http_port),
-                }
-                host_config_kwargs["port_bindings"] = port_bindings
-                exposed_ports = list(port_bindings.keys())
+                sidecar_container = self._start_egress_sidecar(
+                    sandbox_id=sandbox_id,
+                    network_policy=request.network_policy,
+                    host_execd_port=host_execd_port,
+                    host_http_port=host_http_port,
+                )
                 labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                 labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
+                host_config_kwargs = self._base_host_config_kwargs(
+                    mem_limit, nano_cpus, f"container:{sidecar_container.id}"
+                )
+                # Drop NET_ADMIN for the main container; only the sidecar should keep it
+                cap_drop = set(host_config_kwargs.get("cap_drop") or [])
+                cap_drop.add("NET_ADMIN")
+                if cap_drop:
+                    host_config_kwargs["cap_drop"] = list(cap_drop)
+            else:
+                host_config_kwargs = self._base_host_config_kwargs(
+                    mem_limit, nano_cpus, self.network_mode
+                )
+                if self.network_mode == BRIDGE_NETWORK_MODE:
+                    host_execd_port, host_http_port = self._allocate_distinct_host_ports()
+                    port_bindings = {
+                        "44772": ("0.0.0.0", host_execd_port),
+                        "8080": ("0.0.0.0", host_http_port),
+                    }
+                    host_config_kwargs["port_bindings"] = port_bindings
+                    exposed_ports = list(port_bindings.keys())
+                    labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
+                    labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
 
-        # Inject volume bind mounts into Docker host config
-        if volume_binds:
-            host_config_kwargs["binds"] = volume_binds
+            # Inject volume bind mounts into Docker host config
+            if volume_binds:
+                host_config_kwargs["binds"] = volume_binds
 
-        try:
             self._create_and_start_container(
                 sandbox_id,
                 image_uri,
