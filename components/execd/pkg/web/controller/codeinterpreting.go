@@ -278,7 +278,7 @@ func (c *CodeInterpretingController) RunInSession() {
 	}
 
 	var request model.RunInSessionRequest
-	if err := c.bindJSON(&request); err != nil {
+	if err := c.bindJSON(&request); err != nil && !errors.Is(err, io.EOF) {
 		c.RespondError(
 			http.StatusBadRequest,
 			model.ErrorCodeInvalidRequest,

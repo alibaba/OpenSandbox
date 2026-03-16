@@ -37,10 +37,10 @@ import (
 )
 
 const (
-	envDumpStartMarker = "__ENV_DUMP_START__"
-	envDumpEndMarker   = "__ENV_DUMP_END__"
-	exitMarkerPrefix   = "__EXIT_CODE__:"
-	pwdMarkerPrefix    = "__PWD__:"
+	envDumpStartMarker = "__EXECD_ENV_DUMP_START_8a3f__"
+	envDumpEndMarker   = "__EXECD_ENV_DUMP_END_8a3f__"
+	exitMarkerPrefix   = "__EXECD_EXIT_v1__:"
+	pwdMarkerPrefix    = "__EXECD_PWD_v1__:"
 )
 
 func (c *Controller) createBashSession(req *CreateContextRequest) (string, error) {
@@ -135,6 +135,11 @@ func (s *bashSession) start() error {
 func (s *bashSession) trackCurrentProcess(pid int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.closing {
+		// close() already ran while we were in cmd.Start(); kill immediately
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		return
+	}
 	s.currentProcessPid = pid
 }
 
@@ -190,24 +195,39 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	}
 
 	cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", scriptPath)
+	cmd.Dir = cwd // set OS-level CWD; harmless if cwd == "" (inherits daemon CWD)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// Do not pass envSnapshot via cmd.Env to avoid "argument list too long" when session env is large.
 	// Child inherits parent env (nil => default in Go). The script file already has "export K=V" for
 	// all session vars at the top, so the session environment is applied when the script runs.
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("stdout pipe: %w", err)
-	}
-	cmd.Stderr = cmd.Stdout
+	stdoutR, stdoutW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 
 	if err := cmd.Start(); err != nil {
+		_ = stdoutW.Close()
+		_ = stderrW.Close()
 		log.Error("start bash session failed: %v (command: %q)", err, request.Code)
 		return fmt.Errorf("start bash: %w", err)
 	}
 	defer s.untrackCurrentProcess()
 	s.trackCurrentProcess(cmd.Process.Pid)
 
-	scanner := bufio.NewScanner(stdout)
+	// Drain stderr in a separate goroutine; fire OnExecuteStderr for each line.
+	stderrDone := make(chan struct{})
+	go func() {
+		defer close(stderrDone)
+		stderrScanner := bufio.NewScanner(stderrR)
+		stderrScanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		for stderrScanner.Scan() {
+			if request.Hooks.OnExecuteStderr != nil {
+				request.Hooks.OnExecuteStderr(stderrScanner.Text())
+			}
+		}
+	}()
+
+	scanner := bufio.NewScanner(stdoutR)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
 	var (
@@ -243,6 +263,10 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 
 	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
+	// Close write ends to unblock the stderr goroutine, then wait for it to drain.
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+	<-stderrDone
 
 	if scanErr != nil {
 		log.Error("read stdout failed: %v (command: %q)", scanErr, request.Code)
@@ -444,6 +468,7 @@ func (s *bashSession) close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.closing = true
 	pid := s.currentProcessPid
 	s.currentProcessPid = 0
 	s.started = false
