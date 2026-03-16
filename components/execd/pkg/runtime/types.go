@@ -108,4 +108,7 @@ type bashSession struct {
 	// currentProcessPid is the pid of the active run's process group leader (bash).
 	// Set after cmd.Start(), cleared when run() returns. Used by close() to kill the process group.
 	currentProcessPid int
+
+	// replay buffers all output so reconnecting clients can catch up on missed bytes.
+	replay *replayBuffer
 }

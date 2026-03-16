@@ -83,6 +83,7 @@ const (
 	StreamEventTypeComplete ServerStreamEventType = "execution_complete"
 	StreamEventTypeCount    ServerStreamEventType = "execution_count"
 	StreamEventTypePing     ServerStreamEventType = "ping"
+	StreamEventTypeReplay   ServerStreamEventType = "replay"
 )
 
 // ServerStreamEvent is emitted to clients over SSE.

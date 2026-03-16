@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -308,6 +309,21 @@ func (c *CodeInterpretingController) RunInSession() {
 	runReq.Hooks = c.setServerEventsHandler(ctx)
 
 	c.setupSSEResponse()
+
+	// If ?since=<offset> is provided, replay buffered output before live stream.
+	if sinceStr := c.ctx.Query("since"); sinceStr != "" {
+		if since, err := strconv.ParseInt(sinceStr, 10, 64); err == nil {
+			if replayData, _, replayErr := codeRunner.ReplaySessionOutput(sessionID, since); replayErr == nil && len(replayData) > 0 {
+				event := model.ServerStreamEvent{
+					Type:      model.StreamEventTypeReplay,
+					Text:      string(replayData),
+					Timestamp: time.Now().UnixMilli(),
+				}
+				c.writeSingleEvent("Replay", event.ToJSON(), true, event.Summary())
+			}
+		}
+	}
+
 	err := codeRunner.RunInBashSession(ctx, runReq)
 	if err != nil {
 		c.RespondError(
@@ -319,6 +335,43 @@ func (c *CodeInterpretingController) RunInSession() {
 	}
 
 	time.Sleep(flag.ApiGracefulShutdownTimeout)
+}
+
+// GetSessionStatus returns status and replay buffer offset for a bash session.
+func (c *CodeInterpretingController) GetSessionStatus() {
+	sessionID := c.ctx.Param("sessionId")
+	if sessionID == "" {
+		c.RespondError(
+			http.StatusBadRequest,
+			model.ErrorCodeMissingQuery,
+			"missing path parameter 'sessionId'",
+		)
+		return
+	}
+
+	status, err := codeRunner.GetBashSessionStatus(sessionID)
+	if err != nil {
+		if errors.Is(err, runtime.ErrContextNotFound) {
+			c.RespondError(
+				http.StatusNotFound,
+				model.ErrorCodeContextNotFound,
+				fmt.Sprintf("session %s not found", sessionID),
+			)
+			return
+		}
+		c.RespondError(
+			http.StatusInternalServerError,
+			model.ErrorCodeRuntimeError,
+			fmt.Sprintf("error getting session status. %v", err),
+		)
+		return
+	}
+
+	c.RespondSuccess(model.SessionStatusResponse{
+		SessionID:    status.SessionID,
+		Running:      status.Running,
+		OutputOffset: status.OutputOffset,
+	})
 }
 
 // DeleteSession deletes a bash session (delete_session API).

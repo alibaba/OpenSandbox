@@ -40,3 +40,10 @@ func (r *RunInSessionRequest) Validate() error {
 	validate := validator.New()
 	return validate.Struct(r)
 }
+
+// SessionStatusResponse is the response for GET /session/:id.
+type SessionStatusResponse struct {
+	SessionID    string `json:"session_id"`
+	Running      bool   `json:"running"`
+	OutputOffset int64  `json:"output_offset"`
+}

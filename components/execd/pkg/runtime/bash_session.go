@@ -100,6 +100,40 @@ func (c *Controller) DeleteBashSession(sessionID string) error {
 	return c.closeBashSession(sessionID)
 }
 
+// BashSessionStatus holds observable state for a bash session.
+type BashSessionStatus struct {
+	SessionID    string
+	Running      bool
+	OutputOffset int64
+}
+
+// ReplaySessionOutput returns buffered output bytes starting from offset.
+// Returns (data, nextOffset). See replayBuffer.readFrom for semantics.
+func (c *Controller) ReplaySessionOutput(sessionID string, offset int64) ([]byte, int64, error) {
+	session := c.getBashSession(sessionID)
+	if session == nil {
+		return nil, 0, ErrContextNotFound
+	}
+	data, next := session.replay.readFrom(offset)
+	return data, next, nil
+}
+
+// GetBashSessionStatus returns status info for a bash session, including replay buffer offset.
+func (c *Controller) GetBashSessionStatus(sessionID string) (*BashSessionStatus, error) {
+	session := c.getBashSession(sessionID)
+	if session == nil {
+		return nil, ErrContextNotFound
+	}
+	session.mu.Lock()
+	running := session.started && !session.closing
+	session.mu.Unlock()
+	return &BashSessionStatus{
+		SessionID:    sessionID,
+		Running:      running,
+		OutputOffset: session.replay.total,
+	}, nil
+}
+
 // Session implementation (pipe-based, no PTY)
 func newBashSession(cwd string) *bashSession {
 	config := &bashSessionConfig{
@@ -118,6 +152,7 @@ func newBashSession(cwd string) *bashSession {
 		config: config,
 		env:    env,
 		cwd:    cwd,
+		replay: newReplayBuffer(defaultReplayBufSize),
 	}
 }
 
@@ -222,6 +257,8 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 		stderrScanner := bufio.NewScanner(stderrR)
 		stderrScanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 		for stderrScanner.Scan() {
+			line := stderrScanner.Text() + "\n"
+			s.replay.write([]byte(line))
 			if request.Hooks.OnExecuteStderr != nil {
 				request.Hooks.OnExecuteStderr(stderrScanner.Text())
 			}
@@ -256,6 +293,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 				envLines = append(envLines, line)
 				continue
 			}
+			s.replay.write([]byte(line + "\n"))
 			if request.Hooks.OnExecuteStdout != nil {
 				request.Hooks.OnExecuteStdout(line)
 			}
