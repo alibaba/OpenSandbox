@@ -52,11 +52,11 @@ cd ..
 sleep 10
 
 cd sdks/sandbox/kotlin
-./gradlew publishToMavenLocal
+./gradlew clean publishToMavenLocal --no-build-cache
 cd ../../../
 
 cd sdks/code-interpreter/kotlin
-./gradlew publishToMavenLocal -PuseMavenLocal
+./gradlew clean publishToMavenLocal --no-build-cache -PuseMavenLocal
 cd ../../../
 
 # run Java e2e
