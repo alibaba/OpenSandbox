@@ -319,7 +319,9 @@ class CreateSandboxRequest(BaseModel):
         description=(
             "Sandbox timeout in seconds (minimum 60). "
             "The maximum is controlled by server.max_sandbox_timeout_seconds. "
-            "When omitted or null, the sandbox will not auto-terminate and must be deleted explicitly."
+            "When omitted or null, the sandbox will not auto-terminate and must be deleted explicitly. "
+            "Note: manual cleanup support is runtime-dependent; Kubernetes providers may reject "
+            "null timeout when the workload provider does not support non-expiring sandboxes."
         ),
     )
     resource_limits: ResourceLimits = Field(
