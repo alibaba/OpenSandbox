@@ -66,6 +66,15 @@ type commandKernel struct {
 	content      string
 }
 
+// GetBashSession retrieves a bash session by ID. Returns nil if not found.
+func (c *Controller) GetBashSession(sessionID string) BashSession {
+	s := c.getBashSession(sessionID)
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
 // NewController creates a runtime controller.
 func NewController(baseURL, token string) *Controller {
 	return &Controller{

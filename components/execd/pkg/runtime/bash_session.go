@@ -107,6 +107,16 @@ type BashSessionStatus struct {
 	OutputOffset int64
 }
 
+// WriteSessionOutput appends data to the replay buffer for the named session.
+// Used by the WebSocket handler to persist live output for reconnect replay.
+func (c *Controller) WriteSessionOutput(sessionID string, data []byte) {
+	s := c.getBashSession(sessionID)
+	if s == nil {
+		return
+	}
+	s.replay.write(data)
+}
+
 // ReplaySessionOutput returns buffered output bytes starting from offset.
 // Returns (data, nextOffset). See replayBuffer.readFrom for semantics.
 func (c *Controller) ReplaySessionOutput(sessionID string, offset int64) ([]byte, int64, error) {
@@ -149,10 +159,11 @@ func newBashSession(cwd string) *bashSession {
 	}
 
 	return &bashSession{
-		config: config,
-		env:    env,
-		cwd:    cwd,
-		replay: newReplayBuffer(defaultReplayBufSize),
+		config:       config,
+		env:          env,
+		cwd:          cwd,
+		replay:       newReplayBuffer(defaultReplayBufSize),
+		lastExitCode: -1,
 	}
 }
 
@@ -167,6 +178,175 @@ func (s *bashSession) start() error {
 	s.started = true
 	return nil
 }
+
+// Start launches an interactive bash process for WebSocket stdin/stdout mode.
+// It is idempotent: if the process is already running, it returns nil.
+// Unlike run(), this bash process stays alive reading from stdin until closed.
+func (s *bashSession) Start() error {
+	s.mu.Lock()
+	if s.currentProcessPid != 0 {
+		s.mu.Unlock()
+		return nil // already running
+	}
+	if s.closing {
+		s.mu.Unlock()
+		return errors.New("session is closing")
+	}
+	s.mu.Unlock()
+
+	cmd := exec.Command("bash", "--noprofile", "--norc")
+	if s.cwd != "" {
+		cmd.Dir = s.cwd
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	stdinR, stdinW, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create stdin pipe: %w", err)
+	}
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		_ = stdinR.Close()
+		_ = stdinW.Close()
+		return fmt.Errorf("create stdout pipe: %w", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		_ = stdinR.Close()
+		_ = stdinW.Close()
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		return fmt.Errorf("create stderr pipe: %w", err)
+	}
+
+	cmd.Stdin = stdinR
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+
+	if err := cmd.Start(); err != nil {
+		_ = stdinR.Close()
+		_ = stdinW.Close()
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		_ = stderrR.Close()
+		_ = stderrW.Close()
+		return fmt.Errorf("start bash: %w", err)
+	}
+
+	// Close child-side ends in the parent process.
+	_ = stdinR.Close()
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+
+	doneCh := make(chan struct{})
+
+	s.mu.Lock()
+	s.stdin = stdinW
+	s.stdoutPipe = stdoutR
+	s.stderrPipe = stderrR
+	s.doneCh = doneCh
+	s.currentProcessPid = cmd.Process.Pid
+	s.started = true
+	s.mu.Unlock()
+
+	go func() {
+		_ = cmd.Wait()
+		code := -1
+		if cmd.ProcessState != nil {
+			code = cmd.ProcessState.ExitCode()
+		}
+		_ = stdinW.Close()
+		s.mu.Lock()
+		s.lastExitCode = code
+		s.currentProcessPid = 0
+		s.mu.Unlock()
+		close(doneCh)
+	}()
+
+	return nil
+}
+
+// SendSignal sends a named OS signal (e.g. "SIGINT") to the session's process group.
+// No-op if the session is not running or the signal name is unknown.
+func (s *bashSession) SendSignal(name string) {
+	s.mu.Lock()
+	pid := s.currentProcessPid
+	s.mu.Unlock()
+	if pid == 0 {
+		return
+	}
+	sig := signalByName(name)
+	if sig == 0 {
+		return
+	}
+	_ = syscall.Kill(-pid, sig)
+}
+
+// signalByName maps a POSIX signal name to its syscall.Signal number.
+// Returns 0 for unknown names.
+func signalByName(name string) syscall.Signal {
+	switch name {
+	case "SIGINT":
+		return syscall.SIGINT
+	case "SIGTERM":
+		return syscall.SIGTERM
+	case "SIGKILL":
+		return syscall.SIGKILL
+	case "SIGQUIT":
+		return syscall.SIGQUIT
+	case "SIGHUP":
+		return syscall.SIGHUP
+	default:
+		return 0
+	}
+}
+
+// WriteStdin writes p to the session's stdin pipe.
+// Returns error if the session has not started or the pipe is closed.
+func (s *bashSession) WriteStdin(p []byte) (int, error) {
+	s.mu.Lock()
+	w := s.stdin
+	s.mu.Unlock()
+	if w == nil {
+		return 0, errors.New("session not started")
+	}
+	return w.Write(p)
+}
+
+// LockWS atomically acquires exclusive WebSocket access.
+// Returns false if already locked.
+func (s *bashSession) LockWS() bool {
+	return s.wsConnected.CompareAndSwap(false, true)
+}
+
+// UnlockWS releases the WebSocket connection lock.
+func (s *bashSession) UnlockWS() {
+	s.wsConnected.Store(false)
+}
+
+// IsRunning reports whether the bash process is currently alive.
+func (s *bashSession) IsRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.currentProcessPid != 0
+}
+
+// ExitCode returns the exit code of the most recently completed process.
+// Returns -1 if the process has not yet exited.
+func (s *bashSession) ExitCode() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastExitCode
+}
+
+// StdoutPipe returns the reader for the process's stdout.
+func (s *bashSession) StdoutPipe() io.Reader { return s.stdoutPipe }
+
+// StderrPipe returns the reader for the process's stderr.
+func (s *bashSession) StderrPipe() io.Reader { return s.stderrPipe }
+
+// Done returns a channel that is closed when the WS-mode bash process exits.
+func (s *bashSession) Done() <-chan struct{} { return s.doneCh }
 
 func (s *bashSession) trackCurrentProcess(pid int) {
 	s.mu.Lock()

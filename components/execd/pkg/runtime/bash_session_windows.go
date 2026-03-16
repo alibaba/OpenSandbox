@@ -24,6 +24,13 @@ import (
 
 var errBashSessionNotSupported = errors.New("bash session is not supported on windows")
 
+// BashSessionStatus holds observable state for a bash session.
+type BashSessionStatus struct {
+	SessionID    string
+	Running      bool
+	OutputOffset int64
+}
+
 // CreateBashSession is not supported on Windows.
 func (c *Controller) CreateBashSession(_ *CreateContextRequest) (string, error) { //nolint:revive
 	return "", errBashSessionNotSupported
@@ -38,3 +45,21 @@ func (c *Controller) RunInBashSession(_ context.Context, _ *ExecuteCodeRequest) 
 func (c *Controller) DeleteBashSession(_ string) error { //nolint:revive
 	return errBashSessionNotSupported
 }
+
+// GetBashSession is not supported on Windows.
+func (c *Controller) GetBashSession(_ string) BashSession { //nolint:revive
+	return nil
+}
+
+// GetBashSessionStatus is not supported on Windows.
+func (c *Controller) GetBashSessionStatus(_ string) (*BashSessionStatus, error) { //nolint:revive
+	return nil, errBashSessionNotSupported
+}
+
+// ReplaySessionOutput is not supported on Windows.
+func (c *Controller) ReplaySessionOutput(_ string, _ int64) ([]byte, int64, error) { //nolint:revive
+	return nil, 0, errBashSessionNotSupported
+}
+
+// WriteSessionOutput is not supported on Windows.
+func (c *Controller) WriteSessionOutput(_ string, _ []byte) {} //nolint:revive

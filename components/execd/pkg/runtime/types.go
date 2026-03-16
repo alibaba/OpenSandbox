@@ -16,7 +16,9 @@ package runtime
 
 import (
 	"fmt"
+	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
@@ -84,6 +86,30 @@ type CodeContext struct {
 	Language Language `json:"language"`
 }
 
+// BashSession is the interface exposed to callers outside the runtime package.
+type BashSession interface {
+	// LockWS atomically acquires exclusive WebSocket access. Returns false if already locked.
+	LockWS() bool
+	// UnlockWS releases the WebSocket connection lock.
+	UnlockWS()
+	// Start launches the underlying bash process (idempotent: no-op if already running).
+	Start() error
+	// IsRunning reports whether the bash process is currently alive.
+	IsRunning() bool
+	// ExitCode returns the exit code of the most recently completed process (-1 if not exited).
+	ExitCode() int
+	// WriteStdin writes p to the session's stdin pipe.
+	WriteStdin(p []byte) (int, error)
+	// StdoutPipe returns the stdout reader.
+	StdoutPipe() io.Reader
+	// StderrPipe returns the stderr reader.
+	StderrPipe() io.Reader
+	// Done returns a channel closed when the bash process exits.
+	Done() <-chan struct{}
+	// SendSignal sends a named signal (e.g. "SIGINT") to the process group.
+	SendSignal(name string)
+}
+
 // bashSessionConfig holds bash session configuration.
 type bashSessionConfig struct {
 	// StartupSource is a list of scripts sourced on startup.
@@ -111,4 +137,12 @@ type bashSession struct {
 
 	// replay buffers all output so reconnecting clients can catch up on missed bytes.
 	replay *replayBuffer
+
+	// WS mode fields — set by start() when a WebSocket client connects.
+	wsConnected  atomic.Bool  // true while a WS connection holds the session
+	lastExitCode int          // stored on process exit; -1 if not yet exited
+	stdin        io.WriteCloser // write end of bash's stdin pipe (WS mode)
+	stdoutPipe   io.Reader    // stdout reader (WS mode)
+	stderrPipe   io.Reader    // stderr reader (WS mode)
+	doneCh       chan struct{} // closed when WS-mode bash process exits
 }

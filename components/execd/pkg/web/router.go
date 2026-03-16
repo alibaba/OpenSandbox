@@ -70,6 +70,11 @@ func NewRouter(accessToken string) *gin.Engine {
 		session.DELETE("/:sessionId", withCode(func(c *controller.CodeInterpretingController) { c.DeleteSession() }))
 	}
 
+	ws := r.Group("/ws")
+	{
+		ws.GET("/session/:sessionId", withCode(func(c *controller.CodeInterpretingController) { c.SessionWebSocket() }))
+	}
+
 	command := r.Group("/command")
 	{
 		command.POST("", withCode(func(c *controller.CodeInterpretingController) { c.RunCommand() }))
