@@ -185,7 +185,7 @@ func (s *bashSession) start() error {
 // Unlike run(), this bash process stays alive reading from stdin until closed.
 func (s *bashSession) Start() error {
 	s.mu.Lock()
-	if s.currentProcessPid != 0 {
+	if s.wsPid != 0 {
 		s.mu.Unlock()
 		return nil // already running
 	}
@@ -249,7 +249,7 @@ func (s *bashSession) Start() error {
 	s.stdoutPipe = stdoutR
 	s.stderrPipe = stderrR
 	s.doneCh = doneCh
-	s.currentProcessPid = cmd.Process.Pid
+	s.wsPid = cmd.Process.Pid
 	s.started = true
 	s.mu.Unlock()
 
@@ -262,7 +262,7 @@ func (s *bashSession) Start() error {
 		_ = stdinW.Close()
 		s.mu.Lock()
 		s.lastExitCode = code
-		s.currentProcessPid = 0
+		s.wsPid = 0
 		s.mu.Unlock()
 		close(doneCh)
 	}()
@@ -275,7 +275,7 @@ func (s *bashSession) Start() error {
 // It is idempotent: if the process is already running, it returns nil.
 func (s *bashSession) StartPTY() error {
 	s.mu.Lock()
-	if s.currentProcessPid != 0 {
+	if s.wsPid != 0 {
 		s.mu.Unlock()
 		return nil // already running
 	}
@@ -305,7 +305,7 @@ func (s *bashSession) StartPTY() error {
 	s.stdoutPipe = ptmx // PTY merges stdout+stderr
 	s.stderrPipe = nil  // not used in PTY mode
 	s.doneCh = doneCh
-	s.currentProcessPid = cmd.Process.Pid
+	s.wsPid = cmd.Process.Pid
 	s.started = true
 	s.mu.Unlock()
 
@@ -318,7 +318,10 @@ func (s *bashSession) StartPTY() error {
 		_ = ptmx.Close()
 		s.mu.Lock()
 		s.lastExitCode = code
-		s.currentProcessPid = 0
+		s.wsPid = 0
+		// Clear PTY descriptors so a subsequent Start() in pipe mode is clean.
+		s.isPTY = false
+		s.ptmx = nil
 		s.mu.Unlock()
 		close(doneCh)
 	}()
@@ -342,7 +345,7 @@ func (s *bashSession) ResizePTY(cols, rows uint16) error {
 // No-op if the session is not running or the signal name is unknown.
 func (s *bashSession) SendSignal(name string) {
 	s.mu.Lock()
-	pid := s.currentProcessPid
+	pid := s.wsPid
 	s.mu.Unlock()
 	if pid == 0 {
 		return
@@ -406,11 +409,11 @@ func (s *bashSession) UnlockWS() {
 	s.wsConnected.Store(false)
 }
 
-// IsRunning reports whether the bash process is currently alive.
+// IsRunning reports whether the long-lived WS bash process is currently alive.
 func (s *bashSession) IsRunning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.currentProcessPid != 0
+	return s.wsPid != 0
 }
 
 // ExitCode returns the exit code of the most recently completed process.
@@ -426,6 +429,22 @@ func (s *bashSession) StdoutPipe() io.Reader { return s.stdoutPipe }
 
 // StderrPipe returns the reader for the process's stderr.
 func (s *bashSession) StderrPipe() io.Reader { return s.stderrPipe }
+
+// CloseOutputPipes closes the stdout and stderr pipe readers, unblocking any
+// goroutine currently blocked in scanner.Scan(). Called by the WebSocket handler
+// on disconnect so stale pump goroutines exit promptly rather than leaking.
+func (s *bashSession) CloseOutputPipes() {
+	s.mu.Lock()
+	stdout := s.stdoutPipe
+	stderr := s.stderrPipe
+	s.mu.Unlock()
+	if stdout != nil {
+		_ = stdout.Close()
+	}
+	if stderr != nil {
+		_ = stderr.Close()
+	}
+}
 
 // Done returns a channel that is closed when the WS-mode bash process exits.
 func (s *bashSession) Done() <-chan struct{} { return s.doneCh }
@@ -491,6 +510,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 		return fmt.Errorf("create script file: %w", err)
 	}
 	scriptPath := scriptFile.Name()
+	defer os.Remove(scriptPath) // clean up temp script regardless of outcome
 	if _, err := scriptFile.WriteString(script); err != nil {
 		_ = scriptFile.Close()
 		return fmt.Errorf("write script file: %w", err)
@@ -777,16 +797,20 @@ func (s *bashSession) close() error {
 	defer s.mu.Unlock()
 
 	s.closing = true
-	pid := s.currentProcessPid
+	wsPid := s.wsPid
+	runPid := s.currentProcessPid
 	ptmx := s.ptmx
+	s.wsPid = 0
 	s.currentProcessPid = 0
 	s.started = false
 	s.env = nil
 	s.cwd = ""
 
-	if pid != 0 {
-		if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
-			log.Warning("kill session process group %d: %v (process may have already exited)", pid, err)
+	for _, pid := range []int{wsPid, runPid} {
+		if pid != 0 {
+			if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+				log.Warning("kill session process group %d: %v (process may have already exited)", pid, err)
+			}
 		}
 	}
 	if ptmx != nil {

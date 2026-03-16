@@ -118,6 +118,10 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Close output pipes when the handler exits so scanner goroutines unblock immediately
+	// instead of leaking until the next line of output arrives from a future reconnect.
+	defer session.CloseOutputPipes()
+
 	// 7. Ping/pong keepalive — RFC 6455 control-level pings every 30s.
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck
@@ -259,7 +263,7 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		case "signal":
 			session.SendSignal(frame.Signal)
 		case "resize":
-			if usePTY {
+			if session.IsPTY() {
 				_ = session.ResizePTY(uint16(frame.Cols), uint16(frame.Rows))
 			}
 			// Silently ignored in pipe mode; accepted to avoid client errors.
