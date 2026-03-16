@@ -35,6 +35,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -154,6 +155,20 @@ class SandboxTest {
         val actualRenew = sandbox.renew(timeout)
 
         assertSame(expectedRenew, actualRenew)
+    }
+
+    @Test
+    fun `builder manualCleanup should clear timeout`() {
+        val builder =
+            Sandbox.builder()
+                .image("python:3.12")
+                .timeout(Duration.ofMinutes(5))
+                .manualCleanup()
+
+        val timeoutField = builder.javaClass.getDeclaredField("timeout")
+        timeoutField.isAccessible = true
+
+        assertNull(timeoutField.get(builder))
     }
 
     @Test

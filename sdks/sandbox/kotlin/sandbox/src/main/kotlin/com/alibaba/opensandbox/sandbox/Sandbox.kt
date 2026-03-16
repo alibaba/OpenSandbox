@@ -1061,6 +1061,16 @@ class Sandbox internal constructor(
         }
 
         /**
+         * Disables automatic expiration and requires explicit cleanup.
+         *
+         * This provides a stable Java interop entrypoint for non-expiring sandboxes.
+         */
+        fun manualCleanup(): Builder {
+            this.timeout = null
+            return this
+        }
+
+        /**
          * Sets the timeout for waiting for sandbox readiness.
          *
          * @param readyTimeout Maximum time to wait for sandbox to become ready

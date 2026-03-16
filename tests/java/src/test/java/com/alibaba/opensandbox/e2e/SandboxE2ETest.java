@@ -229,7 +229,7 @@ public class SandboxE2ETest extends BaseE2ETest {
                 Sandbox.builder()
                         .connectionConfig(sharedConnectionConfig)
                         .image(getSandboxImage())
-                        .timeout(null)
+                        .manualCleanup()
                         .readyTimeout(Duration.ofSeconds(60))
                         .metadata(Map.of("tag", "manual-java-e2e-test"))
                         .build();
