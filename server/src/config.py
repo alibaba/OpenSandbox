@@ -190,7 +190,7 @@ class ServerConfig(BaseModel):
         ge=60,
         description=(
             "Maximum allowed sandbox TTL in seconds for requests that specify timeout. "
-            "Set to null to disable the server-side upper bound."
+            "Omit from config to disable the server-side upper bound."
         ),
     )
 
