@@ -1,0 +1,337 @@
+# Copyright 2026 Alibaba Group Holding Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""File operation commands: cat, write, upload, download, rm, mv, mkdir, rmdir, search, info, chmod, replace."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import click
+
+from opensandbox_cli.client import ClientContext
+from opensandbox_cli.utils import handle_errors
+
+
+@click.group("file", invoke_without_command=True)
+@click.pass_context
+def file_group(ctx: click.Context) -> None:
+    """File operations on a sandbox."""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+# ---- cat (read) -----------------------------------------------------------
+
+@file_group.command("cat")
+@click.argument("sandbox_id")
+@click.argument("path")
+@click.option("--encoding", default="utf-8", help="File encoding.")
+@click.pass_obj
+@handle_errors
+def file_cat(obj: ClientContext, sandbox_id: str, path: str, encoding: str) -> None:
+    """Read a file from the sandbox."""
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        content = sandbox.files.read_file(path, encoding=encoding)
+        click.echo(content, nl=False)
+    finally:
+        sandbox.close()
+
+
+# ---- write ----------------------------------------------------------------
+
+@file_group.command("write")
+@click.argument("sandbox_id")
+@click.argument("path")
+@click.option("--content", "-c", default=None, help="Content to write. Reads from stdin if not provided.")
+@click.option("--encoding", default="utf-8", help="File encoding.")
+@click.option("--mode", default=None, help="File permission mode (e.g. 0644).")
+@click.option("--owner", default=None, help="File owner.")
+@click.option("--group", default=None, help="File group.")
+@click.pass_obj
+@handle_errors
+def file_write(
+    obj: ClientContext,
+    sandbox_id: str,
+    path: str,
+    content: str | None,
+    encoding: str,
+    mode: str | None,
+    owner: str | None,
+    group: str | None,
+) -> None:
+    """Write content to a file in the sandbox."""
+    if content is None:
+        if sys.stdin.isatty():
+            click.echo("Reading from stdin (Ctrl+D to finish):", err=True)
+        content = sys.stdin.read()
+
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        kwargs: dict = {"encoding": encoding}
+        if mode is not None:
+            kwargs["mode"] = mode
+        if owner is not None:
+            kwargs["owner"] = owner
+        if group is not None:
+            kwargs["group"] = group
+        sandbox.files.write_file(path, content, **kwargs)
+        click.echo(f"Written: {path}")
+    finally:
+        sandbox.close()
+
+
+# ---- upload ---------------------------------------------------------------
+
+@file_group.command("upload")
+@click.argument("sandbox_id")
+@click.argument("local_path", type=click.Path(exists=True))
+@click.argument("remote_path")
+@click.pass_obj
+@handle_errors
+def file_upload(
+    obj: ClientContext, sandbox_id: str, local_path: str, remote_path: str
+) -> None:
+    """Upload a local file to the sandbox."""
+    data = Path(local_path).read_bytes()
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        sandbox.files.write_file(remote_path, data)
+        click.echo(f"Uploaded: {local_path} -> {remote_path}")
+    finally:
+        sandbox.close()
+
+
+# ---- download -------------------------------------------------------------
+
+@file_group.command("download")
+@click.argument("sandbox_id")
+@click.argument("remote_path")
+@click.argument("local_path", type=click.Path())
+@click.pass_obj
+@handle_errors
+def file_download(
+    obj: ClientContext, sandbox_id: str, remote_path: str, local_path: str
+) -> None:
+    """Download a file from the sandbox to local disk."""
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        content = sandbox.files.read_bytes(remote_path)
+        Path(local_path).write_bytes(content)
+        click.echo(f"Downloaded: {remote_path} -> {local_path}")
+    finally:
+        sandbox.close()
+
+
+# ---- rm (delete) ----------------------------------------------------------
+
+@file_group.command("rm")
+@click.argument("sandbox_id")
+@click.argument("paths", nargs=-1, required=True)
+@click.pass_obj
+@handle_errors
+def file_rm(obj: ClientContext, sandbox_id: str, paths: tuple[str, ...]) -> None:
+    """Delete files from the sandbox."""
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        sandbox.files.delete_files(list(paths))
+        for p in paths:
+            click.echo(f"Deleted: {p}")
+    finally:
+        sandbox.close()
+
+
+# ---- mv (move) ------------------------------------------------------------
+
+@file_group.command("mv")
+@click.argument("sandbox_id")
+@click.argument("source")
+@click.argument("destination")
+@click.pass_obj
+@handle_errors
+def file_mv(
+    obj: ClientContext, sandbox_id: str, source: str, destination: str
+) -> None:
+    """Move/rename a file in the sandbox."""
+    from opensandbox.models.filesystem import MoveEntry
+
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        sandbox.files.move_files([MoveEntry(source=source, destination=destination)])
+        click.echo(f"Moved: {source} -> {destination}")
+    finally:
+        sandbox.close()
+
+
+# ---- mkdir ----------------------------------------------------------------
+
+@file_group.command("mkdir")
+@click.argument("sandbox_id")
+@click.argument("paths", nargs=-1, required=True)
+@click.option("--mode", default=None, help="Directory permission mode.")
+@click.option("--owner", default=None, help="Directory owner.")
+@click.option("--group", default=None, help="Directory group.")
+@click.pass_obj
+@handle_errors
+def file_mkdir(
+    obj: ClientContext,
+    sandbox_id: str,
+    paths: tuple[str, ...],
+    mode: str | None,
+    owner: str | None,
+    group: str | None,
+) -> None:
+    """Create directories in the sandbox."""
+    from opensandbox.models.filesystem import WriteEntry
+
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        entries = []
+        for p in paths:
+            kwargs: dict = {"path": p}
+            if mode is not None:
+                kwargs["mode"] = mode
+            if owner is not None:
+                kwargs["owner"] = owner
+            if group is not None:
+                kwargs["group"] = group
+            entries.append(WriteEntry(**kwargs))
+        sandbox.files.create_directories(entries)
+        for p in paths:
+            click.echo(f"Created: {p}")
+    finally:
+        sandbox.close()
+
+
+# ---- rmdir ----------------------------------------------------------------
+
+@file_group.command("rmdir")
+@click.argument("sandbox_id")
+@click.argument("paths", nargs=-1, required=True)
+@click.pass_obj
+@handle_errors
+def file_rmdir(obj: ClientContext, sandbox_id: str, paths: tuple[str, ...]) -> None:
+    """Delete directories from the sandbox."""
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        sandbox.files.delete_directories(list(paths))
+        for p in paths:
+            click.echo(f"Removed: {p}")
+    finally:
+        sandbox.close()
+
+
+# ---- search ---------------------------------------------------------------
+
+@file_group.command("search")
+@click.argument("sandbox_id")
+@click.argument("path")
+@click.option("--pattern", "-p", required=True, help="Glob pattern to search for.")
+@click.pass_obj
+@handle_errors
+def file_search(
+    obj: ClientContext, sandbox_id: str, path: str, pattern: str
+) -> None:
+    """Search for files in the sandbox."""
+    from opensandbox.models.filesystem import SearchEntry
+
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        results = sandbox.files.search(SearchEntry(path=path, pattern=pattern))
+        if obj.output.fmt in ("json", "yaml"):
+            obj.output.print_models(results, columns=["path", "size", "mode", "owner", "modified_at"])
+        else:
+            for entry in results:
+                click.echo(f"{entry.size:>10}  {entry.owner:<8}  {entry.path}")
+    finally:
+        sandbox.close()
+
+
+# ---- info (stat) ----------------------------------------------------------
+
+@file_group.command("info")
+@click.argument("sandbox_id")
+@click.argument("paths", nargs=-1, required=True)
+@click.pass_obj
+@handle_errors
+def file_info(obj: ClientContext, sandbox_id: str, paths: tuple[str, ...]) -> None:
+    """Get file/directory info."""
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        info_map = sandbox.files.get_file_info(list(paths))
+        for path, entry in info_map.items():
+            obj.output.print_dict(
+                {"path": path, **entry.model_dump(mode="json")},
+                title=path,
+            )
+    finally:
+        sandbox.close()
+
+
+# ---- chmod ----------------------------------------------------------------
+
+@file_group.command("chmod")
+@click.argument("sandbox_id")
+@click.argument("path")
+@click.option("--mode", required=True, help="Permission mode (e.g. 0755).")
+@click.option("--owner", default=None, help="File owner.")
+@click.option("--group", default=None, help="File group.")
+@click.pass_obj
+@handle_errors
+def file_chmod(
+    obj: ClientContext,
+    sandbox_id: str,
+    path: str,
+    mode: str,
+    owner: str | None,
+    group: str | None,
+) -> None:
+    """Set file permissions."""
+    from opensandbox.models.filesystem import SetPermissionEntry
+
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        sandbox.files.set_permissions(
+            [SetPermissionEntry(path=path, mode=mode, owner=owner, group=group)]
+        )
+        click.echo(f"Permissions set: {path}")
+    finally:
+        sandbox.close()
+
+
+# ---- replace --------------------------------------------------------------
+
+@file_group.command("replace")
+@click.argument("sandbox_id")
+@click.argument("path")
+@click.option("--old", required=True, help="Text to search for.")
+@click.option("--new", required=True, help="Replacement text.")
+@click.pass_obj
+@handle_errors
+def file_replace(
+    obj: ClientContext, sandbox_id: str, path: str, old: str, new: str
+) -> None:
+    """Replace content in a file."""
+    from opensandbox.models.filesystem import ContentReplaceEntry
+
+    sandbox = obj.connect_sandbox(sandbox_id)
+    try:
+        sandbox.files.replace_contents(
+            [ContentReplaceEntry(path=path, old_content=old, new_content=new)]
+        )
+        click.echo(f"Replaced in: {path}")
+    finally:
+        sandbox.close()

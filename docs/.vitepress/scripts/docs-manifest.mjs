@@ -139,6 +139,7 @@ const shortTitleByPath = {
   "sdks/sandbox/python/README.md": "Sandbox Python SDK",
   "sdks/sandbox/csharp/README.md": "Sandbox C# SDK",
   "sdks/mcp/sandbox/python/README.md": "MCP Sandbox Python SDK",
+  "cli/README.md": "CLI (Python)",
   "sdks/sandbox/kotlin/sandbox-api/build/generated/api/execd/README.md": "Sandbox Execd API (Kotlin)",
   "sdks/sandbox/kotlin/sandbox-api/build/generated/api/lifecycle/README.md": "Sandbox Lifecycle API (Kotlin)",
 
@@ -183,6 +184,7 @@ const shortTitleByPathZh = {
   "sdks/sandbox/python/README.md": "沙箱 Python SDK",
   "sdks/sandbox/csharp/README.md": "沙箱 C# SDK",
   "sdks/mcp/sandbox/python/README.md": "MCP 沙箱 Python SDK",
+  "cli/README.md": "CLI（Python）",
   "sdks/sandbox/kotlin/sandbox-api/build/generated/api/execd/README.md": "沙箱 Execd API（Kotlin）",
   "sdks/sandbox/kotlin/sandbox-api/build/generated/api/lifecycle/README.md": "沙箱生命周期 API（Kotlin）",
 

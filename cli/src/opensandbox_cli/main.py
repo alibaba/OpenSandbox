@@ -1,0 +1,86 @@
+# Copyright 2026 Alibaba Group Holding Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Root Click group with global options."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import click
+
+from opensandbox_cli import __version__
+from opensandbox_cli.client import ClientContext
+from opensandbox_cli.commands.code import code_group
+from opensandbox_cli.commands.command import command_group, exec_cmd
+from opensandbox_cli.commands.config_cmd import config_group
+from opensandbox_cli.commands.file import file_group
+from opensandbox_cli.commands.sandbox import sandbox_group
+from opensandbox_cli.config import resolve_config
+from opensandbox_cli.output import OutputFormatter
+
+
+@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option("--api-key", envvar="OPEN_SANDBOX_API_KEY", default=None, help="API key for authentication.")
+@click.option("--domain", envvar="OPEN_SANDBOX_DOMAIN", default=None, help="API server domain (e.g. localhost:8080).")
+@click.option("--protocol", type=click.Choice(["http", "https"]), default=None, help="Protocol (http/https).")
+@click.option("--timeout", "request_timeout", type=int, default=None, help="Request timeout in seconds.")
+@click.option("-o", "--output", "output_format", type=click.Choice(["table", "json", "yaml"]), default=None, help="Output format.")
+@click.option("--config", "config_path", type=click.Path(exists=False, path_type=Path), default=None, help="Config file path.")
+@click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose/debug output.")
+@click.option("--no-color", is_flag=True, default=False, help="Disable colored output.")
+@click.version_option(version=__version__, prog_name="opensandbox")
+@click.pass_context
+def cli(
+    ctx: click.Context,
+    api_key: str | None,
+    domain: str | None,
+    protocol: str | None,
+    request_timeout: int | None,
+    output_format: str | None,
+    config_path: Path | None,
+    verbose: bool,
+    no_color: bool,
+) -> None:
+    """OpenSandbox CLI — manage sandboxes from your terminal."""
+    if verbose:
+        import logging
+
+        logging.basicConfig(level=logging.DEBUG)
+
+    resolved = resolve_config(
+        cli_api_key=api_key,
+        cli_domain=domain,
+        cli_protocol=protocol,
+        cli_timeout=request_timeout,
+        cli_output=output_format,
+        config_path=config_path,
+    )
+
+    formatter = OutputFormatter(
+        resolved["output_format"],
+        color=not no_color and resolved.get("color", True),
+    )
+
+    ctx.obj = ClientContext(resolved_config=resolved, output=formatter)
+    ctx.call_on_close(lambda: ctx.obj.close())
+
+
+# Register sub-command groups
+cli.add_command(sandbox_group)
+cli.add_command(command_group)
+cli.add_command(exec_cmd)
+cli.add_command(file_group)
+cli.add_command(code_group)
+cli.add_command(config_group)
