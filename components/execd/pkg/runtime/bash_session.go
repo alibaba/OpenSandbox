@@ -251,17 +251,22 @@ func (s *bashSession) Start() error {
 	s.started = true
 	s.mu.Unlock()
 
-	// Broadcast goroutine: reads real stdout and fans out to the current per-connection sink.
+	// Broadcast goroutine: reads real stdout, always writes to replay buffer, and
+	// fans out to the current per-connection sink when one is attached.
+	// Output produced during client downtime is preserved in the replay buffer so
+	// reconnecting clients can catch up via ?since=.
 	go func() {
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := stdoutR.Read(buf)
 			if n > 0 {
+				chunk := buf[:n]
+				s.replay.write(chunk)
 				s.outMu.Lock()
 				w := s.stdoutW
 				s.outMu.Unlock()
 				if w != nil {
-					_, _ = w.Write(buf[:n])
+					_, _ = w.Write(chunk)
 				}
 			}
 			if err != nil {
@@ -276,17 +281,20 @@ func (s *bashSession) Start() error {
 		}
 	}()
 
-	// Broadcast goroutine: reads real stderr and fans out to the current per-connection sink.
+	// Broadcast goroutine: reads real stderr, always writes to replay buffer, and
+	// fans out to the current per-connection sink when one is attached.
 	go func() {
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := stderrR.Read(buf)
 			if n > 0 {
+				chunk := buf[:n]
+				s.replay.write(chunk)
 				s.outMu.Lock()
 				w := s.stderrW
 				s.outMu.Unlock()
 				if w != nil {
-					_, _ = w.Write(buf[:n])
+					_, _ = w.Write(chunk)
 				}
 			}
 			if err != nil {
@@ -355,17 +363,20 @@ func (s *bashSession) StartPTY() error {
 	s.started = true
 	s.mu.Unlock()
 
-	// Broadcast goroutine: reads PTY master (stdout+stderr merged) and fans out.
+	// Broadcast goroutine: reads PTY master (stdout+stderr merged), always writes to
+	// replay buffer, and fans out to the current per-connection sink when one is attached.
 	go func() {
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := ptmx.Read(buf)
 			if n > 0 {
+				chunk := buf[:n]
+				s.replay.write(chunk)
 				s.outMu.Lock()
 				w := s.stdoutW
 				s.outMu.Unlock()
 				if w != nil {
-					_, _ = w.Write(buf[:n])
+					_, _ = w.Write(chunk)
 				}
 			}
 			if err != nil {
@@ -637,6 +648,13 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	defer s.untrackCurrentProcess()
 	s.trackCurrentProcess(cmd.Process.Pid)
 
+	// Close write ends immediately so scanners receive EOF when the process exits,
+	// not after cmd.Wait() returns. Without this, stdout scanning and cmd.Wait()
+	// deadlock: scan waits for EOF (needs stdoutW closed), Wait needs the process
+	// to exit (which it has, but pipe buffers keep stdoutW open in the parent).
+	_ = stdoutW.Close()
+	_ = stderrW.Close()
+
 	// Drain stderr in a separate goroutine; fire OnExecuteStderr for each line.
 	stderrDone := make(chan struct{})
 	go func() {
@@ -689,9 +707,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 
 	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
-	// Close write ends to unblock the stderr goroutine, then wait for it to drain.
-	_ = stdoutW.Close()
-	_ = stderrW.Close()
+	// Wait for stderr goroutine to drain.
 	<-stderrDone
 
 	if scanErr != nil {

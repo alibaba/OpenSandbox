@@ -63,8 +63,10 @@ func TestPTY_BasicExecution(t *testing.T) {
 	_, err := s.WriteStdin([]byte("echo hi\n"))
 	require.NoError(t, err)
 
-	// Read from ptmx (via StdoutPipe, which equals ptmx in PTY mode).
-	out := readOutputTimeout(s.StdoutPipe(), 3*time.Second)
+	// Read output via AttachOutput.
+	outR, _, detach := s.AttachOutput()
+	defer detach()
+	out := readOutputTimeout(outR, 3*time.Second)
 	assert.Contains(t, out, "hi", "expected 'hi' in PTY output, got: %q", out)
 }
 
@@ -111,7 +113,9 @@ func TestPTY_AnsiSequencesPresent(t *testing.T) {
 	_, err := s.WriteStdin([]byte("PS1='\\e[1;32m>>\\e[0m '; echo marker\n"))
 	require.NoError(t, err)
 
-	out := readOutputTimeout(s.StdoutPipe(), 3*time.Second)
+	outR, _, detach := s.AttachOutput()
+	defer detach()
+	out := readOutputTimeout(outR, 3*time.Second)
 	// ANSI escape sequences start with ESC (\x1b) followed by [
 	assert.Contains(t, out, "\x1b[", "expected ANSI escape sequence in PTY output, got: %q", out)
 	assert.Contains(t, out, "marker", "expected 'marker' in PTY output, got: %q", out)
@@ -146,7 +150,9 @@ func TestPTY_PipeModeUnchanged(t *testing.T) {
 	_, err := s.WriteStdin([]byte("echo pipe-ok\n"))
 	require.NoError(t, err)
 
-	// Read from stdout pipe.
-	out := readOutputTimeout(s.StdoutPipe(), 3*time.Second)
+	// Read from stdout via AttachOutput.
+	outR, _, detach := s.AttachOutput()
+	defer detach()
+	out := readOutputTimeout(outR, 3*time.Second)
 	assert.Contains(t, out, "pipe-ok", "expected pipe-mode echo output, got: %q", out)
 }

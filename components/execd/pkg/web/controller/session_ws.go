@@ -58,6 +58,7 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 	conn, err := wsUpgrader.Upgrade(c.ctx.Writer, c.ctx.Request, nil)
 	if err != nil {
 		// gorilla writes the HTTP error response automatically.
+		session.UnlockWS()
 		return
 	}
 	defer conn.Close()
@@ -169,12 +170,10 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 			if ctx.Err() != nil {
 				return
 			}
-			line := scanner.Text() + "\n"
-			// Write to replay buffer so reconnecting clients can catch up.
-			codeRunner.WriteSessionOutput(sessionID, []byte(line))
+			// Replay buffer is written by the broadcast goroutine; just forward to client.
 			if writeErr := writeJSON(model.ServerFrame{
 				Type:      "stdout",
-				Data:      line,
+				Data:      scanner.Text() + "\n",
 				Timestamp: time.Now().UnixMilli(),
 			}); writeErr != nil {
 				return
@@ -202,12 +201,10 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 				if ctx.Err() != nil {
 					return
 				}
-				line := scanner.Text() + "\n"
-				// Write to replay buffer so reconnecting clients can catch up.
-				codeRunner.WriteSessionOutput(sessionID, []byte(line))
+				// Replay buffer is written by the broadcast goroutine; just forward to client.
 				if writeErr := writeJSON(model.ServerFrame{
 					Type:      "stderr",
-					Data:      line,
+					Data:      scanner.Text() + "\n",
 					Timestamp: time.Now().UnixMilli(),
 				}); writeErr != nil {
 					return
