@@ -88,6 +88,7 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 				Error: "failed to start bash",
 				Code:  model.WSErrCodeStartFailed,
 			})
+			session.UnlockWS()
 			return
 		}
 	}

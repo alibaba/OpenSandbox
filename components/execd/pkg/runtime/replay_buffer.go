@@ -43,6 +43,14 @@ func (r *replayBuffer) write(p []byte) {
 	}
 }
 
+// Total returns the total number of bytes ever written to the buffer.
+// Safe to call concurrently.
+func (r *replayBuffer) Total() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.total
+}
+
 // readFrom returns all bytes from offset onward (up to buffer capacity).
 // Returns (data, nextOffset).
 //   - If offset >= total, returns (nil, total) — client is caught up.

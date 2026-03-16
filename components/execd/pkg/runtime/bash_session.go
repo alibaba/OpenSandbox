@@ -141,7 +141,7 @@ func (c *Controller) GetBashSessionStatus(sessionID string) (*BashSessionStatus,
 	return &BashSessionStatus{
 		SessionID:    sessionID,
 		Running:      running,
-		OutputOffset: session.replay.total,
+		OutputOffset: session.replay.Total(),
 	}, nil
 }
 
@@ -634,13 +634,27 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	// Do not pass envSnapshot via cmd.Env to avoid "argument list too long" when session env is large.
 	// Child inherits parent env (nil => default in Go). The script file already has "export K=V" for
 	// all session vars at the top, so the session environment is applied when the script runs.
-	stdoutR, stdoutW := io.Pipe()
-	stderrR, stderrW := io.Pipe()
+	// Use OS pipes (not io.Pipe) so we can close the parent-side write ends immediately
+	// after cmd.Start() without breaking in-flight writes. The kernel buffers data
+	// independently; closing the write end in the parent just signals EOF to the reader
+	// once the child has exited and flushed, without any "write on closed pipe" errors.
+	stdoutR, stdoutW, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create stdout pipe: %w", err)
+	}
+	stderrR, stderrW, err := os.Pipe()
+	if err != nil {
+		_ = stdoutR.Close()
+		_ = stdoutW.Close()
+		return fmt.Errorf("create stderr pipe: %w", err)
+	}
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 
 	if err := cmd.Start(); err != nil {
+		_ = stdoutR.Close()
 		_ = stdoutW.Close()
+		_ = stderrR.Close()
 		_ = stderrW.Close()
 		log.Error("start bash session failed: %v (command: %q)", err, request.Code)
 		return fmt.Errorf("start bash: %w", err)
@@ -648,10 +662,9 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	defer s.untrackCurrentProcess()
 	s.trackCurrentProcess(cmd.Process.Pid)
 
-	// Close write ends immediately so scanners receive EOF when the process exits,
-	// not after cmd.Wait() returns. Without this, stdout scanning and cmd.Wait()
-	// deadlock: scan waits for EOF (needs stdoutW closed), Wait needs the process
-	// to exit (which it has, but pipe buffers keep stdoutW open in the parent).
+	// Close parent-side write ends now. The child has inherited its own copies;
+	// closing ours here means the reader gets EOF as soon as the child exits,
+	// without waiting for cmd.Wait() — eliminating the scan↔Wait deadlock.
 	_ = stdoutW.Close()
 	_ = stderrW.Close()
 
