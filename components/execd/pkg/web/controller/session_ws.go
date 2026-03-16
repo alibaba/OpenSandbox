@@ -103,9 +103,10 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		}
 	}
 
-	// 6. Send connected frame — mode reflects actual session type.
+	// 6. Send connected frame — mode derived from actual session state, not the request parameter,
+	// so reconnecting clients always receive the correct terminal assumptions.
 	mode := "pipe"
-	if usePTY {
+	if session.IsPTY() {
 		mode = "pty"
 	}
 	_ = writeJSON(model.ServerFrame{
@@ -143,12 +144,14 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 	}()
 
 	// 8. Write pump — stdout scanner.
+	// Buffer sized to 16 MiB to handle large JSON/base64 lines from agent tools.
 	go func() {
 		stdout := session.StdoutPipe()
 		if stdout == nil {
 			return
 		}
 		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -166,16 +169,26 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 				return
 			}
 		}
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			_ = writeJSON(model.ServerFrame{
+				Type:  "error",
+				Error: "stdout read error: " + err.Error(),
+				Code:  model.WSErrCodeRuntimeError,
+			})
+			cancel()
+		}
 	}()
 
 	// 9. Write pump — stderr scanner (pipe mode only; PTY merges stderr into ptmx).
-	if !usePTY {
+	// Buffer sized to 16 MiB to match stdout pump.
+	if !session.IsPTY() {
 		go func() {
 			stderr := session.StderrPipe()
 			if stderr == nil {
 				return
 			}
 			scanner := bufio.NewScanner(stderr)
+			scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 			for scanner.Scan() {
 				select {
 				case <-ctx.Done():
@@ -192,6 +205,14 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 				}); writeErr != nil {
 					return
 				}
+			}
+			if err := scanner.Err(); err != nil && ctx.Err() == nil {
+				_ = writeJSON(model.ServerFrame{
+					Type:  "error",
+					Error: "stderr read error: " + err.Error(),
+					Code:  model.WSErrCodeRuntimeError,
+				})
+				cancel()
 			}
 		}()
 	}

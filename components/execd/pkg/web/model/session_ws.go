@@ -43,4 +43,5 @@ const (
 	WSErrCodeStdinWriteFailed = "STDIN_WRITE_FAILED"
 	WSErrCodeInvalidFrame     = "INVALID_FRAME"
 	WSErrCodeAlreadyConnected = "ALREADY_CONNECTED"
+	WSErrCodeRuntimeError     = "RUNTIME_ERROR"
 )

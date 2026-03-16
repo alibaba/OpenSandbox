@@ -242,6 +242,9 @@ func (s *bashSession) Start() error {
 	doneCh := make(chan struct{})
 
 	s.mu.Lock()
+	// Reset stale PTY state so WriteStdin targets the correct pipe on mode switch.
+	s.isPTY = false
+	s.ptmx = nil
 	s.stdin = stdinW
 	s.stdoutPipe = stdoutR
 	s.stderrPipe = stderrR
@@ -426,6 +429,13 @@ func (s *bashSession) StderrPipe() io.Reader { return s.stderrPipe }
 
 // Done returns a channel that is closed when the WS-mode bash process exits.
 func (s *bashSession) Done() <-chan struct{} { return s.doneCh }
+
+// IsPTY reports whether the session is running in PTY mode.
+func (s *bashSession) IsPTY() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isPTY
+}
 
 func (s *bashSession) trackCurrentProcess(pid int) {
 	s.mu.Lock()

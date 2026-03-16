@@ -113,6 +113,8 @@ type BashSession interface {
 	SendSignal(name string)
 	// ResizePTY sends a TIOCSWINSZ ioctl to the PTY master. No-op if not in PTY mode.
 	ResizePTY(cols, rows uint16) error
+	// IsPTY reports whether the session is currently running in PTY mode.
+	IsPTY() bool
 }
 
 // bashSessionConfig holds bash session configuration.
