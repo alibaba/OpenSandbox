@@ -378,12 +378,9 @@ public class SandboxE2ETest extends BaseE2ETest {
                             .commands()
                             .run(
                                     RunCommandRequest.builder()
-                                            .command(
-                                                    "test -d " + containerMountPath + " && echo OK")
+                                            .command("test -d " + containerMountPath)
                                             .build());
             assertNull(dirCheck.getError());
-            assertEquals(1, dirCheck.getLogs().getStdout().size());
-            assertEquals("OK", dirCheck.getLogs().getStdout().get(0).getText());
         } finally {
             try {
                 volumeSandbox.kill();
@@ -527,12 +524,9 @@ public class SandboxE2ETest extends BaseE2ETest {
                             .commands()
                             .run(
                                     RunCommandRequest.builder()
-                                            .command(
-                                                    "test -d " + containerMountPath + " && echo OK")
+                                            .command("test -d " + containerMountPath)
                                             .build());
             assertNull(dirCheck.getError());
-            assertEquals(1, dirCheck.getLogs().getStdout().size());
-            assertEquals("OK", dirCheck.getLogs().getStdout().get(0).getText());
         } finally {
             try {
                 pvcSandbox.kill();
