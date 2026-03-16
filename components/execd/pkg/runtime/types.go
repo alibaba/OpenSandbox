@@ -103,10 +103,11 @@ type BashSession interface {
 	ExitCode() int
 	// WriteStdin writes p to the session's stdin pipe.
 	WriteStdin(p []byte) (int, error)
-	// StdoutPipe returns the stdout reader.
-	StdoutPipe() io.Reader
-	// StderrPipe returns the stderr reader.
-	StderrPipe() io.Reader
+	// AttachOutput returns per-connection pipe readers for stdout (and stderr in pipe mode)
+	// plus a detach func. The broadcast goroutine copies from the real OS pipe into these
+	// readers. Calling detach closes the write ends, causing the readers to return EOF and
+	// unblocking any scanner goroutines without touching the underlying OS pipe.
+	AttachOutput() (stdout io.Reader, stderr io.Reader, detach func())
 	// Done returns a channel closed when the bash process exits.
 	Done() <-chan struct{}
 	// SendSignal sends a named signal (e.g. "SIGINT") to the process group.
@@ -149,13 +150,18 @@ type bashSession struct {
 	// replay buffers all output so reconnecting clients can catch up on missed bytes.
 	replay *replayBuffer
 
-	// WS mode fields — set by start() when a WebSocket client connects.
+	// WS mode fields — set by Start/StartPTY when the interactive shell is launched.
 	wsConnected  atomic.Bool    // true while a WS connection holds the session
 	lastExitCode int            // stored on process exit; -1 if not yet exited
 	stdin        io.WriteCloser // write end of bash's stdin pipe (WS mode)
-	stdoutPipe   io.Reader      // stdout reader (WS mode)
-	stderrPipe   io.Reader      // stderr reader (WS mode); nil in PTY mode
 	doneCh       chan struct{}   // closed when WS-mode bash process exits
+
+	// Output broadcast: a goroutine reads the real OS pipe and writes to the current
+	// per-connection PipeWriter. On WS disconnect, detach() closes the PipeWriter so
+	// the handler's scanner gets EOF. On reconnect a new PipeWriter is swapped in.
+	outMu     sync.Mutex    // guards stdoutW / stderrW
+	stdoutW   *io.PipeWriter // current broadcast sink for stdout; nil before first attach
+	stderrW   *io.PipeWriter // current broadcast sink for stderr; nil in PTY mode or before attach
 
 	// PTY mode fields — non-nil only when started via StartPTY().
 	isPTY bool     // true when session uses a PTY instead of pipes

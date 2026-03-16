@@ -136,7 +136,7 @@ func (c *Controller) GetBashSessionStatus(sessionID string) (*BashSessionStatus,
 		return nil, ErrContextNotFound
 	}
 	session.mu.Lock()
-	running := session.started && !session.closing
+	running := session.wsPid != 0
 	session.mu.Unlock()
 	return &BashSessionStatus{
 		SessionID:    sessionID,
@@ -246,12 +246,60 @@ func (s *bashSession) Start() error {
 	s.isPTY = false
 	s.ptmx = nil
 	s.stdin = stdinW
-	s.stdoutPipe = stdoutR
-	s.stderrPipe = stderrR
 	s.doneCh = doneCh
 	s.wsPid = cmd.Process.Pid
 	s.started = true
 	s.mu.Unlock()
+
+	// Broadcast goroutine: reads real stdout and fans out to the current per-connection sink.
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := stdoutR.Read(buf)
+			if n > 0 {
+				s.outMu.Lock()
+				w := s.stdoutW
+				s.outMu.Unlock()
+				if w != nil {
+					_, _ = w.Write(buf[:n])
+				}
+			}
+			if err != nil {
+				s.outMu.Lock()
+				if s.stdoutW != nil {
+					_ = s.stdoutW.Close()
+					s.stdoutW = nil
+				}
+				s.outMu.Unlock()
+				return
+			}
+		}
+	}()
+
+	// Broadcast goroutine: reads real stderr and fans out to the current per-connection sink.
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := stderrR.Read(buf)
+			if n > 0 {
+				s.outMu.Lock()
+				w := s.stderrW
+				s.outMu.Unlock()
+				if w != nil {
+					_, _ = w.Write(buf[:n])
+				}
+			}
+			if err != nil {
+				s.outMu.Lock()
+				if s.stderrW != nil {
+					_ = s.stderrW.Close()
+					s.stderrW = nil
+				}
+				s.outMu.Unlock()
+				return
+			}
+		}
+	}()
 
 	go func() {
 		_ = cmd.Wait()
@@ -302,12 +350,35 @@ func (s *bashSession) StartPTY() error {
 	s.mu.Lock()
 	s.ptmx = ptmx
 	s.isPTY = true
-	s.stdoutPipe = ptmx // PTY merges stdout+stderr
-	s.stderrPipe = nil  // not used in PTY mode
 	s.doneCh = doneCh
 	s.wsPid = cmd.Process.Pid
 	s.started = true
 	s.mu.Unlock()
+
+	// Broadcast goroutine: reads PTY master (stdout+stderr merged) and fans out.
+	go func() {
+		buf := make([]byte, 32*1024)
+		for {
+			n, err := ptmx.Read(buf)
+			if n > 0 {
+				s.outMu.Lock()
+				w := s.stdoutW
+				s.outMu.Unlock()
+				if w != nil {
+					_, _ = w.Write(buf[:n])
+				}
+			}
+			if err != nil {
+				s.outMu.Lock()
+				if s.stdoutW != nil {
+					_ = s.stdoutW.Close()
+					s.stdoutW = nil
+				}
+				s.outMu.Unlock()
+				return
+			}
+		}
+	}()
 
 	go func() {
 		_ = cmd.Wait()
@@ -424,11 +495,54 @@ func (s *bashSession) ExitCode() int {
 	return s.lastExitCode
 }
 
-// StdoutPipe returns the reader for the process's stdout.
-func (s *bashSession) StdoutPipe() io.Reader { return s.stdoutPipe }
+// AttachOutput installs a fresh per-connection pipe pair and returns readers plus a detach func.
+// The broadcast goroutine (started by Start/StartPTY) copies from the real OS pipe into the
+// current PipeWriter. Calling detach() closes the PipeWriters so the returned readers return
+// EOF, unblocking any scanner goroutines on this connection without affecting the underlying pipe.
+func (s *bashSession) AttachOutput() (stdout io.Reader, stderr io.Reader, detach func()) {
+	stdoutR, stdoutW := io.Pipe()
 
-// StderrPipe returns the reader for the process's stderr.
-func (s *bashSession) StderrPipe() io.Reader { return s.stderrPipe }
+	s.outMu.Lock()
+	// Close any previous writer (e.g. from a stale prior connection) before swapping.
+	if s.stdoutW != nil {
+		_ = s.stdoutW.Close()
+	}
+	s.stdoutW = stdoutW
+	s.outMu.Unlock()
+
+	var stderrR *io.PipeReader
+	var stderrPW *io.PipeWriter
+
+	s.mu.Lock()
+	isPTY := s.isPTY
+	s.mu.Unlock()
+
+	if !isPTY {
+		stderrR, stderrPW = io.Pipe()
+		s.outMu.Lock()
+		if s.stderrW != nil {
+			_ = s.stderrW.Close()
+		}
+		s.stderrW = stderrPW
+		s.outMu.Unlock()
+	}
+
+	detach = func() {
+		s.outMu.Lock()
+		// Only close if we're still the active writer (guards against double-detach).
+		if s.stdoutW == stdoutW {
+			_ = stdoutW.Close()
+			s.stdoutW = nil
+		}
+		if stderrPW != nil && s.stderrW == stderrPW {
+			_ = stderrPW.Close()
+			s.stderrW = nil
+		}
+		s.outMu.Unlock()
+	}
+
+	return stdoutR, stderrR, detach
+}
 
 // Done returns a channel that is closed when the WS-mode bash process exits.
 func (s *bashSession) Done() <-chan struct{} { return s.doneCh }

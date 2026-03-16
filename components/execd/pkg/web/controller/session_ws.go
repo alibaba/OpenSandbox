@@ -50,7 +50,9 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		c.RespondError(http.StatusConflict, model.ErrorCodeRuntimeError, "session already connected")
 		return
 	}
-	defer session.UnlockWS()
+	// Do NOT defer UnlockWS here — we release it manually after pump goroutines
+	// finish, so a reconnecting client cannot start new scanners on the shared pipe
+	// while stale scanners from the previous connection are still blocked in Scan().
 
 	// 3. Upgrade HTTP → WebSocket.
 	conn, err := wsUpgrader.Upgrade(c.ctx.Writer, c.ctx.Request, nil)
@@ -118,6 +120,19 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Attach per-connection pipe readers. detach() closes the write ends on handler exit,
+	// causing scanner goroutines to receive EOF and exit promptly. UnlockWS is called only
+	// after pumps finish, preventing a reconnecting client from starting new scanners while
+	// stale ones are still reading from the shared pipe.
+	stdout, stderr, detach := session.AttachOutput()
+	var pumpWg sync.WaitGroup
+	defer func() {
+		cancel()
+		detach()
+		pumpWg.Wait()
+		session.UnlockWS()
+	}()
+
 	// 7. Ping/pong keepalive — RFC 6455 control-level pings every 30s.
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck
@@ -145,18 +160,14 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 
 	// 8. Write pump — stdout scanner.
 	// Buffer sized to 16 MiB to handle large JSON/base64 lines from agent tools.
+	pumpWg.Add(1)
 	go func() {
-		stdout := session.StdoutPipe()
-		if stdout == nil {
-			return
-		}
+		defer pumpWg.Done()
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 		for scanner.Scan() {
-			select {
-			case <-ctx.Done():
+			if ctx.Err() != nil {
 				return
-			default:
 			}
 			line := scanner.Text() + "\n"
 			// Write to replay buffer so reconnecting clients can catch up.
@@ -180,20 +191,16 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 	}()
 
 	// 9. Write pump — stderr scanner (pipe mode only; PTY merges stderr into ptmx).
-	// Buffer sized to 16 MiB to match stdout pump.
-	if !session.IsPTY() {
+	// Buffer sized to 16 MiB to match stdout pump. stderr is nil in PTY mode.
+	if stderr != nil {
+		pumpWg.Add(1)
 		go func() {
-			stderr := session.StderrPipe()
-			if stderr == nil {
-				return
-			}
+			defer pumpWg.Done()
 			scanner := bufio.NewScanner(stderr)
 			scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 			for scanner.Scan() {
-				select {
-				case <-ctx.Done():
+				if ctx.Err() != nil {
 					return
-				default:
 				}
 				line := scanner.Text() + "\n"
 				// Write to replay buffer so reconnecting clients can catch up.
