@@ -115,10 +115,6 @@ type BashSession interface {
 	ResizePTY(cols, rows uint16) error
 	// IsPTY reports whether the session is currently running in PTY mode.
 	IsPTY() bool
-	// CloseOutputPipes closes the stdout and stderr pipe readers.
-	// Called by the WebSocket handler on disconnect to unblock any goroutines
-	// blocked in scanner.Scan(), preventing goroutine leaks across reconnects.
-	CloseOutputPipes()
 }
 
 // bashSessionConfig holds bash session configuration.
@@ -154,12 +150,12 @@ type bashSession struct {
 	replay *replayBuffer
 
 	// WS mode fields — set by start() when a WebSocket client connects.
-	wsConnected  atomic.Bool     // true while a WS connection holds the session
-	lastExitCode int             // stored on process exit; -1 if not yet exited
-	stdin        io.WriteCloser  // write end of bash's stdin pipe (WS mode)
-	stdoutPipe   io.ReadCloser   // stdout reader (WS mode); closed on handler disconnect to unblock scanners
-	stderrPipe   io.ReadCloser   // stderr reader (WS mode); nil in PTY mode
-	doneCh       chan struct{}    // closed when WS-mode bash process exits
+	wsConnected  atomic.Bool    // true while a WS connection holds the session
+	lastExitCode int            // stored on process exit; -1 if not yet exited
+	stdin        io.WriteCloser // write end of bash's stdin pipe (WS mode)
+	stdoutPipe   io.Reader      // stdout reader (WS mode)
+	stderrPipe   io.Reader      // stderr reader (WS mode); nil in PTY mode
+	doneCh       chan struct{}   // closed when WS-mode bash process exits
 
 	// PTY mode fields — non-nil only when started via StartPTY().
 	isPTY bool     // true when session uses a PTY instead of pipes

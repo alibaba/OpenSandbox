@@ -430,22 +430,6 @@ func (s *bashSession) StdoutPipe() io.Reader { return s.stdoutPipe }
 // StderrPipe returns the reader for the process's stderr.
 func (s *bashSession) StderrPipe() io.Reader { return s.stderrPipe }
 
-// CloseOutputPipes closes the stdout and stderr pipe readers, unblocking any
-// goroutine currently blocked in scanner.Scan(). Called by the WebSocket handler
-// on disconnect so stale pump goroutines exit promptly rather than leaking.
-func (s *bashSession) CloseOutputPipes() {
-	s.mu.Lock()
-	stdout := s.stdoutPipe
-	stderr := s.stderrPipe
-	s.mu.Unlock()
-	if stdout != nil {
-		_ = stdout.Close()
-	}
-	if stderr != nil {
-		_ = stderr.Close()
-	}
-}
-
 // Done returns a channel that is closed when the WS-mode bash process exits.
 func (s *bashSession) Done() <-chan struct{} { return s.doneCh }
 

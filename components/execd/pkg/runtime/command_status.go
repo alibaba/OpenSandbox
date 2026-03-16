@@ -48,7 +48,11 @@ func (c *Controller) commandSnapshot(session string) *commandKernel {
 		return nil
 	}
 
+	// Hold the read lock while copying so the snapshot is consistent with
+	// concurrent markCommandFinished writes (which take the write lock).
+	c.mu.RLock()
 	cp := *kernel
+	c.mu.RUnlock()
 	return &cp
 }
 
