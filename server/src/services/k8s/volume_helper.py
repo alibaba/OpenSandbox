@@ -56,6 +56,8 @@ def apply_volumes_to_pod_spec(
 
     # Collect existing volume names to prevent collisions with internal volumes
     existing_volume_names = {v.get("name") for v in pod_volumes if isinstance(v, dict)}
+    # One Kubernetes volume per unique PVC; multiple volumeMounts can reference it
+    pvc_to_volume_name: Dict[str, str] = {}
 
     for vol in volumes:
         vol_name = vol.name
@@ -68,18 +70,25 @@ def apply_volumes_to_pod_spec(
             )
 
         if vol.pvc is not None:
-            # PVC backend: maps to PersistentVolumeClaim
+            # PVC backend: maps to Kubernetes PersistentVolumeClaim.
+            # Multiple Volume API objects sharing the same claim_name must produce
+            # a single Kubernetes volume and multiple volumeMounts (CSI drivers
+            # can fail when the same PVC is defined in multiple volume entries).
             pvc_claim_name = vol.pvc.claim_name
 
-            pod_volumes.append({
-                "name": vol_name,
-                "persistentVolumeClaim": {
-                    "claimName": pvc_claim_name,
-                },
-            })
+            if pvc_claim_name not in pvc_to_volume_name:
+                # First use of this PVC: create one volume, use current vol.name as volume name
+                pod_volumes.append({
+                    "name": vol_name,
+                    "persistentVolumeClaim": {
+                        "claimName": pvc_claim_name,
+                    },
+                })
+                pvc_to_volume_name[pvc_claim_name] = vol_name
+                existing_volume_names.add(vol_name)
 
             mount = {
-                "name": vol_name,
+                "name": pvc_to_volume_name[pvc_claim_name],
                 "mountPath": vol.mount_path,
                 "readOnly": vol.read_only,
             }
@@ -88,10 +97,7 @@ def apply_volumes_to_pod_spec(
             mounts.append(mount)
 
             logger.info(
-                "Added PVC volume '%s' (claim: %s) mounted at '%s' for sandbox",
-                vol_name,
-                pvc_claim_name,
-                vol.mount_path,
+                f"Added PVC volume '{vol_name}' (claim: {pvc_claim_name}) mounted at '{vol.mount_path}' for sandbox"
             )
         elif vol.host is not None:
             # Host backend: maps to hostPath volume
@@ -116,10 +122,7 @@ def apply_volumes_to_pod_spec(
             mounts.append(mount)
 
             logger.info(
-                "Added hostPath volume '%s' (path: %s) mounted at '%s' for sandbox",
-                vol_name,
-                host_path,
-                vol.mount_path,
+                f"Added hostPath volume '{vol_name}' (path: {host_path}) mounted at '{vol.mount_path}' for sandbox"
             )
         else:
             raise ValueError(

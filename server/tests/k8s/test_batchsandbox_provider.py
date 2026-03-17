@@ -1972,3 +1972,48 @@ spec:
             apply_volumes_to_pod_spec(pod_spec, volumes)
 
         assert "conflicts with an internal volume" in str(exc_info.value)
+
+    def test_apply_volumes_to_pod_spec_same_pvc_multiple_mounts(self, mock_k8s_client):
+        """
+        When multiple Volume API objects share the same claim_name, only one
+        Kubernetes volume is created; multiple volumeMounts reference it (avoids
+        CSI driver issues from duplicate PVC volume definitions).
+        """
+        from src.api.schema import Volume, PVC
+
+        pod_spec = {
+            "containers": [{"name": "main", "volumeMounts": []}],
+            "volumes": [],
+        }
+        volumes = [
+            Volume(
+                name="skills",
+                pvc=PVC(claim_name="oss-pvc-r"),
+                mount_path="/path/to/skills",
+                sub_path="skill-hub/publish",
+                read_only=True,
+            ),
+            Volume(
+                name="draft",
+                pvc=PVC(claim_name="oss-pvc-r"),
+                mount_path="/path/to/draft",
+                sub_path="skill-hub/draft",
+                read_only=True,
+            ),
+        ]
+
+        apply_volumes_to_pod_spec(pod_spec, volumes)
+
+        # One volume definition for the shared PVC (first Volume name used)
+        assert len(pod_spec["volumes"]) == 1
+        assert pod_spec["volumes"][0]["name"] == "skills"
+        assert pod_spec["volumes"][0]["persistentVolumeClaim"]["claimName"] == "oss-pvc-r"
+
+        # Two volumeMounts, both referencing the same volume name
+        mounts = pod_spec["containers"][0]["volumeMounts"]
+        assert len(mounts) == 2
+        by_path = {m["mountPath"]: m for m in mounts}
+        assert by_path["/path/to/skills"]["name"] == "skills"
+        assert by_path["/path/to/skills"].get("subPath") == "skill-hub/publish"
+        assert by_path["/path/to/draft"]["name"] == "skills"
+        assert by_path["/path/to/draft"].get("subPath") == "skill-hub/draft"
