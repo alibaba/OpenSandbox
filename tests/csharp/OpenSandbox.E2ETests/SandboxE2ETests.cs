@@ -146,7 +146,7 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
     }
 
     [Fact(Timeout = 2 * 60 * 1000)]
-    public async Task Sandbox_Create_With_NetworkPolicy()
+    public async Task Sandbox_Create_With_NetworkPolicy_Get_And_Patch_Egress()
     {
         var policySandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
         {
@@ -163,11 +163,43 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
 
         try
         {
+            await Task.Delay(5000);
+
+            var initialPolicy = await policySandbox.GetEgressPolicyAsync();
+            Assert.NotNull(initialPolicy);
+            Assert.Equal(NetworkRuleAction.Deny, initialPolicy.DefaultAction);
+            Assert.NotNull(initialPolicy.Egress);
+            Assert.Contains(
+                initialPolicy.Egress!,
+                rule => rule.Target == "pypi.org" && rule.Action == NetworkRuleAction.Allow);
+
             var blocked = await policySandbox.Commands.RunAsync("curl -I https://www.github.com");
             Assert.NotNull(blocked.Error);
 
             var allowed = await policySandbox.Commands.RunAsync("curl -I https://pypi.org");
             Assert.Null(allowed.Error);
+
+            await policySandbox.PatchEgressRulesAsync(new List<NetworkRule>
+            {
+                new() { Action = NetworkRuleAction.Allow, Target = "www.github.com" },
+                new() { Action = NetworkRuleAction.Deny, Target = "pypi.org" }
+            });
+            await Task.Delay(2000);
+
+            var patchedPolicy = await policySandbox.GetEgressPolicyAsync();
+            Assert.NotNull(patchedPolicy.Egress);
+            Assert.Contains(
+                patchedPolicy.Egress!,
+                rule => rule.Target == "www.github.com" && rule.Action == NetworkRuleAction.Allow);
+            Assert.Contains(
+                patchedPolicy.Egress!,
+                rule => rule.Target == "pypi.org" && rule.Action == NetworkRuleAction.Deny);
+
+            var githubAllowed = await policySandbox.Commands.RunAsync("curl -I https://www.github.com");
+            Assert.Null(githubAllowed.Error);
+
+            var pypiDenied = await policySandbox.Commands.RunAsync("curl -I https://pypi.org");
+            Assert.NotNull(pypiDenied.Error);
         }
         finally
         {

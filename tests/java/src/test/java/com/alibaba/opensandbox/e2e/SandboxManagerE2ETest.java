@@ -21,6 +21,8 @@ import static org.junit.jupiter.api.Assertions.*;
 import com.alibaba.opensandbox.sandbox.Sandbox;
 import com.alibaba.opensandbox.sandbox.SandboxManager;
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxException;
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.Execution;
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommandRequest;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.*;
 import java.time.Duration;
 import java.util.*;
@@ -251,5 +253,104 @@ public class SandboxManagerE2ETest extends BaseE2ETest {
         assertThrows(
                 SandboxException.class,
                 () -> sandboxManager.renewSandbox(nonExistentId, Duration.ofMinutes(5)));
+    }
+
+    @Test
+    @Order(4)
+    @DisplayName("manager get/patch egress policy")
+    @Timeout(value = 3, unit = TimeUnit.MINUTES)
+    void testManagerGetAndPatchEgressPolicy() {
+        NetworkPolicy initialPolicy =
+                NetworkPolicy.builder()
+                        .defaultAction(NetworkPolicy.DefaultAction.DENY)
+                        .addEgress(
+                                NetworkRule.builder()
+                                        .action(NetworkRule.Action.ALLOW)
+                                        .target("pypi.org")
+                                        .build())
+                        .build();
+
+        Sandbox policySandbox =
+                Sandbox.builder()
+                        .connectionConfig(sharedConnectionConfig)
+                        .image(getSandboxImage())
+                        .timeout(Duration.ofMinutes(2))
+                        .readyTimeout(Duration.ofSeconds(60))
+                        .networkPolicy(initialPolicy)
+                        .build();
+        try {
+            try {
+                Thread.sleep(5000);
+            } catch (InterruptedException ignored) {
+            }
+
+            NetworkPolicy fetched = sandboxManager.getEgressPolicy(policySandbox.getId());
+            assertNotNull(fetched);
+            assertEquals(NetworkPolicy.DefaultAction.DENY, fetched.getDefaultAction());
+            assertNotNull(fetched.getEgress());
+            assertTrue(
+                    fetched.getEgress().stream()
+                            .anyMatch(
+                                    r ->
+                                            "pypi.org".equals(r.getTarget())
+                                                    && r.getAction() == NetworkRule.Action.ALLOW));
+
+            sandboxManager.patchEgressRules(
+                    policySandbox.getId(),
+                    List.of(
+                            NetworkRule.builder()
+                                    .action(NetworkRule.Action.ALLOW)
+                                    .target("www.github.com")
+                                    .build(),
+                            NetworkRule.builder()
+                                    .action(NetworkRule.Action.DENY)
+                                    .target("pypi.org")
+                                    .build()));
+
+            try {
+                Thread.sleep(2000);
+            } catch (InterruptedException ignored) {
+            }
+
+            NetworkPolicy patched = sandboxManager.getEgressPolicy(policySandbox.getId());
+            assertNotNull(patched);
+            assertNotNull(patched.getEgress());
+            assertTrue(
+                    patched.getEgress().stream()
+                            .anyMatch(
+                                    r ->
+                                            "www.github.com".equals(r.getTarget())
+                                                    && r.getAction() == NetworkRule.Action.ALLOW));
+            assertTrue(
+                    patched.getEgress().stream()
+                            .anyMatch(
+                                    r ->
+                                            "pypi.org".equals(r.getTarget())
+                                                    && r.getAction() == NetworkRule.Action.DENY));
+
+            Execution githubAllowed =
+                    policySandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("curl -I https://www.github.com")
+                                            .build());
+            assertNull(githubAllowed.getError());
+
+            Execution pypiDenied =
+                    policySandbox
+                            .commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("curl -I https://pypi.org")
+                                            .build());
+            assertNotNull(pypiDenied.getError());
+        } finally {
+            try {
+                policySandbox.kill();
+            } catch (Exception ignored) {
+            }
+            policySandbox.close();
+        }
     }
 }

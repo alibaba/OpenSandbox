@@ -29,7 +29,12 @@ from uuid import uuid4
 
 import pytest
 from opensandbox import SandboxManagerSync, SandboxSync
-from opensandbox.models.sandboxes import SandboxFilter, SandboxImageSpec
+from opensandbox.models.sandboxes import (
+    NetworkPolicy,
+    NetworkRule,
+    SandboxFilter,
+    SandboxImageSpec,
+)
 
 from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
 
@@ -208,6 +213,59 @@ class TestSandboxManagerE2ESync:
                     pass
                 try:
                     s.close()
+                except Exception:
+                    pass
+            manager.close()
+
+    @pytest.mark.timeout(600)
+    def test_03_egress_get_and_patch(self):
+        cfg = create_connection_config_sync()
+        manager = SandboxManagerSync.create(connection_config=cfg)
+        policy_sandbox = None
+        try:
+            policy_sandbox = SandboxSync.create(
+                image=SandboxImageSpec(get_sandbox_image()),
+                connection_config=cfg,
+                timeout=timedelta(minutes=2),
+                ready_timeout=timedelta(seconds=60),
+                network_policy=NetworkPolicy(
+                    defaultAction="deny",
+                    egress=[NetworkRule(action="allow", target="pypi.org")],
+                ),
+            )
+            time.sleep(5)
+
+            policy = manager.get_egress_policy(policy_sandbox.id)
+            assert policy.default_action == "deny"
+            assert policy.egress is not None
+            assert any(rule.target == "pypi.org" and rule.action == "allow" for rule in policy.egress)
+
+            manager.patch_egress_rules(
+                policy_sandbox.id,
+                [
+                    NetworkRule(action="allow", target="www.github.com"),
+                    NetworkRule(action="deny", target="pypi.org"),
+                ],
+            )
+            time.sleep(2)
+
+            patched = manager.get_egress_policy(policy_sandbox.id)
+            assert patched.egress is not None
+            assert any(rule.target == "www.github.com" and rule.action == "allow" for rule in patched.egress)
+            assert any(rule.target == "pypi.org" and rule.action == "deny" for rule in patched.egress)
+
+            allowed = policy_sandbox.commands.run("curl -I https://www.github.com")
+            assert allowed.error is None
+            denied = policy_sandbox.commands.run("curl -I https://pypi.org")
+            assert denied.error is not None
+        finally:
+            if policy_sandbox is not None:
+                try:
+                    policy_sandbox.kill()
+                except Exception:
+                    pass
+                try:
+                    policy_sandbox.close()
                 except Exception:
                     pass
             manager.close()

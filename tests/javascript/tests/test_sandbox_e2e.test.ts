@@ -152,10 +152,31 @@ test.skip("01a sandbox create with networkPolicy", async () => {
       egress: [{ action: "allow", target: "pypi.org" }],
     },
   });
+  await new Promise((r) => setTimeout(r, 5000));
   try {
-    const r = await networkPolicySandbox.commands.run("echo policy-ok");
-    expect(r.error).toBeUndefined();
-    expect(r.logs.stdout[0]?.text).toBe("policy-ok");
+    const initialPolicy = await networkPolicySandbox.getEgressPolicy();
+    expect(initialPolicy.defaultAction).toBe("deny");
+    expect(initialPolicy.egress?.some((r) => r.target === "pypi.org" && r.action === "allow")).toBe(true);
+
+    const blocked = await networkPolicySandbox.commands.run("curl -I https://www.github.com");
+    expect(blocked.error).toBeTruthy();
+    const allowed = await networkPolicySandbox.commands.run("curl -I https://pypi.org");
+    expect(allowed.error).toBeUndefined();
+
+    await networkPolicySandbox.patchEgressRules([
+      { action: "allow", target: "www.github.com" },
+      { action: "deny", target: "pypi.org" },
+    ]);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const patchedPolicy = await networkPolicySandbox.getEgressPolicy();
+    expect(patchedPolicy.egress?.some((r) => r.target === "www.github.com" && r.action === "allow")).toBe(true);
+    expect(patchedPolicy.egress?.some((r) => r.target === "pypi.org" && r.action === "deny")).toBe(true);
+
+    const githubAllowed = await networkPolicySandbox.commands.run("curl -I https://www.github.com");
+    expect(githubAllowed.error).toBeUndefined();
+    const pypiDenied = await networkPolicySandbox.commands.run("curl -I https://pypi.org");
+    expect(pypiDenied.error).toBeTruthy();
   } finally {
     try {
       await networkPolicySandbox.kill();

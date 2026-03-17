@@ -149,6 +149,71 @@ public class SandboxManagerE2ETests : IClassFixture<SandboxManagerE2ETestFixture
         await Assert.ThrowsAnyAsync<Exception>(() => manager.KillSandboxAsync(fakeId));
         await Assert.ThrowsAnyAsync<Exception>(() => manager.RenewSandboxAsync(fakeId, 300));
     }
+
+    [Fact(Timeout = 3 * 60 * 1000)]
+    public async Task Manager_Get_And_Patch_EgressPolicy()
+    {
+        var manager = _fixture.Manager;
+        var baseFixture = new E2ETestFixture();
+        var policySandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+        {
+            ConnectionConfig = baseFixture.ConnectionConfig,
+            Image = baseFixture.DefaultImage,
+            TimeoutSeconds = baseFixture.DefaultTimeoutSeconds,
+            ReadyTimeoutSeconds = baseFixture.DefaultReadyTimeoutSeconds,
+            NetworkPolicy = new NetworkPolicy
+            {
+                DefaultAction = NetworkRuleAction.Deny,
+                Egress = new List<NetworkRule> { new() { Action = NetworkRuleAction.Allow, Target = "pypi.org" } }
+            }
+        });
+
+        try
+        {
+            await Task.Delay(5000);
+
+            var initial = await manager.GetEgressPolicyAsync(policySandbox.Id);
+            Assert.NotNull(initial);
+            Assert.Equal(NetworkRuleAction.Deny, initial.DefaultAction);
+            Assert.NotNull(initial.Egress);
+            Assert.Contains(
+                initial.Egress!,
+                rule => rule.Target == "pypi.org" && rule.Action == NetworkRuleAction.Allow);
+
+            await manager.PatchEgressRulesAsync(policySandbox.Id, new List<NetworkRule>
+            {
+                new() { Action = NetworkRuleAction.Allow, Target = "www.github.com" },
+                new() { Action = NetworkRuleAction.Deny, Target = "pypi.org" }
+            });
+            await Task.Delay(2000);
+
+            var patched = await manager.GetEgressPolicyAsync(policySandbox.Id);
+            Assert.NotNull(patched.Egress);
+            Assert.Contains(
+                patched.Egress!,
+                rule => rule.Target == "www.github.com" && rule.Action == NetworkRuleAction.Allow);
+            Assert.Contains(
+                patched.Egress!,
+                rule => rule.Target == "pypi.org" && rule.Action == NetworkRuleAction.Deny);
+
+            var githubAllowed = await policySandbox.Commands.RunAsync("curl -I https://www.github.com");
+            Assert.Null(githubAllowed.Error);
+            var pypiDenied = await policySandbox.Commands.RunAsync("curl -I https://pypi.org");
+            Assert.NotNull(pypiDenied.Error);
+        }
+        finally
+        {
+            try
+            {
+                await policySandbox.KillAsync();
+            }
+            catch
+            {
+            }
+
+            await policySandbox.DisposeAsync();
+        }
+    }
 }
 
 public sealed class SandboxManagerE2ETestFixture : IAsyncLifetime

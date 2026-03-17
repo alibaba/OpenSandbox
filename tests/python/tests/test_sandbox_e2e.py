@@ -345,6 +345,71 @@ class TestSandboxE2E:
                 pass
             await sandbox.close()
 
+    @pytest.mark.timeout(180)
+    @pytest.mark.order(1)
+    async def test_01aa_network_policy_get_and_patch(self):
+        logger.info("=" * 80)
+        logger.info("TEST 1aa: networkPolicy get/patch (async)")
+        logger.info("=" * 80)
+
+        cfg = create_connection_config()
+        sandbox = await Sandbox.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            network_policy=NetworkPolicy(
+                defaultAction="deny",
+                egress=[NetworkRule(action="allow", target="pypi.org")],
+            ),
+        )
+        try:
+            await asyncio.sleep(5)
+
+            # Verify get egress policy right after create.
+            policy = await sandbox.get_egress_policy()
+            assert policy.default_action == "deny"
+            assert policy.egress is not None
+            assert any(rule.target == "pypi.org" and rule.action == "allow" for rule in policy.egress)
+
+            # Baseline behavior: github blocked, pypi allowed.
+            blocked = await sandbox.commands.run("curl -I https://www.github.com")
+            assert blocked.error is not None
+            allowed = await sandbox.commands.run("curl -I https://pypi.org")
+            assert allowed.error is None
+
+            # Patch policy: allow github, deny pypi.
+            await sandbox.patch_egress_rules(
+                [
+                    NetworkRule(action="allow", target="www.github.com"),
+                    NetworkRule(action="deny", target="pypi.org"),
+                ],
+            )
+            await asyncio.sleep(2)
+
+            patched_policy = await sandbox.get_egress_policy()
+            assert patched_policy.egress is not None
+            assert any(
+                rule.target == "www.github.com" and rule.action == "allow"
+                for rule in patched_policy.egress
+            )
+            assert any(
+                rule.target == "pypi.org" and rule.action == "deny"
+                for rule in patched_policy.egress
+            )
+
+            # Behavior after patch should be flipped.
+            github_allowed = await sandbox.commands.run("curl -I https://www.github.com")
+            assert github_allowed.error is None
+            pypi_denied = await sandbox.commands.run("curl -I https://pypi.org")
+            assert pypi_denied.error is not None
+        finally:
+            try:
+                await sandbox.kill()
+            except Exception:
+                pass
+            await sandbox.close()
+
     @pytest.mark.timeout(120)
     @pytest.mark.order(1)
     async def test_01b_host_volume_mount(self):

@@ -313,6 +313,71 @@ class TestSandboxE2ESync:
             except Exception:
                 pass
 
+    @pytest.mark.timeout(180)
+    @pytest.mark.order(1)
+    def test_01aa_network_policy_get_and_patch(self) -> None:
+        logger.info("=" * 80)
+        logger.info("TEST 1aa: networkPolicy get/patch (sync)")
+        logger.info("=" * 80)
+
+        cfg = create_connection_config_sync()
+        sandbox = SandboxSync.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            connection_config=cfg,
+            timeout=timedelta(minutes=2),
+            ready_timeout=timedelta(seconds=30),
+            network_policy=NetworkPolicy(
+                defaultAction="deny",
+                egress=[NetworkRule(action="allow", target="pypi.org")],
+            ),
+        )
+        try:
+            time.sleep(5)
+
+            policy = sandbox.get_egress_policy()
+            assert policy.default_action == "deny"
+            assert policy.egress is not None
+            assert any(rule.target == "pypi.org" and rule.action == "allow" for rule in policy.egress)
+
+            blocked = sandbox.commands.run("curl -I https://www.github.com")
+            assert blocked.error is not None
+            allowed = sandbox.commands.run("curl -I https://pypi.org")
+            assert allowed.error is None
+
+            sandbox.patch_egress_rules(
+                [
+                    NetworkRule(action="allow", target="www.github.com"),
+                    NetworkRule(action="deny", target="pypi.org"),
+                ],
+            )
+            time.sleep(2)
+
+            patched_policy = sandbox.get_egress_policy()
+            assert patched_policy.egress is not None
+            assert any(
+                rule.target == "www.github.com" and rule.action == "allow"
+                for rule in patched_policy.egress
+            )
+            assert any(
+                rule.target == "pypi.org" and rule.action == "deny"
+                for rule in patched_policy.egress
+            )
+
+            github_allowed = sandbox.commands.run("curl -I https://www.github.com")
+            assert github_allowed.error is None
+            pypi_denied = sandbox.commands.run("curl -I https://pypi.org")
+            assert pypi_denied.error is not None
+        finally:
+            try:
+                sandbox.kill()
+            except Exception:
+                pass
+            sandbox.close()
+            try:
+                cfg.transport.close()
+            except Exception:
+                pass
+
     @pytest.mark.timeout(120)
     @pytest.mark.order(1)
     def test_01b_host_volume_mount(self) -> None:

@@ -192,3 +192,47 @@ test("03 invalid operations reject", async () => {
   await expect(manager.killSandbox(nonExistentId)).rejects.toBeTruthy();
   await expect(manager.renewSandbox(nonExistentId, 5 * 60)).rejects.toBeTruthy();
 }, 60_000);
+
+test("04 manager get/patch egress policy", async () => {
+  if (!manager) throw new Error("sandbox manager not initialized");
+  const connectionConfig = createConnectionConfig();
+  const policySandbox = await Sandbox.create({
+    connectionConfig,
+    image: getSandboxImage(),
+    timeoutSeconds: 2 * 60,
+    readyTimeoutSeconds: 60,
+    networkPolicy: {
+      defaultAction: "deny",
+      egress: [{ action: "allow", target: "pypi.org" }],
+    },
+  });
+
+  try {
+    await sleep(5000);
+
+    const initial = await manager.getEgressPolicy(policySandbox.id);
+    expect(initial.defaultAction).toBe("deny");
+    expect(initial.egress?.some((r) => r.target === "pypi.org" && r.action === "allow")).toBe(true);
+
+    await manager.patchEgressRules(policySandbox.id, [
+      { action: "allow", target: "www.github.com" },
+      { action: "deny", target: "pypi.org" },
+    ]);
+    await sleep(2000);
+
+    const patched = await manager.getEgressPolicy(policySandbox.id);
+    expect(patched.egress?.some((r) => r.target === "www.github.com" && r.action === "allow")).toBe(true);
+    expect(patched.egress?.some((r) => r.target === "pypi.org" && r.action === "deny")).toBe(true);
+
+    const githubAllowed = await policySandbox.commands.run("curl -I https://www.github.com");
+    expect(githubAllowed.error).toBeUndefined();
+    const pypiDenied = await policySandbox.commands.run("curl -I https://pypi.org");
+    expect(pypiDenied.error).toBeTruthy();
+  } finally {
+    try {
+      await policySandbox.kill();
+    } catch {
+      // ignore
+    }
+  }
+}, 3 * 60_000);
