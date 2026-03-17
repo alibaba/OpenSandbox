@@ -205,7 +205,10 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		go streamPump(stderr, "stderr")
 	}
 
-	// 10. Exit watcher — sends exit frame when bash process ends.
+	// 10. Exit watcher — sends exit frame when bash process ends, then closes the
+	// connection so the read loop's ReadJSON unblocks immediately rather than waiting
+	// up to 60s for the deadline. Without this, reconnect attempts during that window
+	// hit "session already connected" even though the process is already gone.
 	go func() {
 		defer cancel()
 		doneCh := session.Done()
@@ -219,6 +222,11 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		}
 		exitCode := session.ExitCode()
 		_ = writeJSON(model.ServerFrame{Type: "exit", ExitCode: &exitCode})
+		// Close with a normal closure code so the read loop gets an error immediately.
+		writeMu.Lock()
+		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "process exited"))
+		writeMu.Unlock()
+		conn.Close()
 	}()
 
 	// 11. Read pump — client → bash stdin.

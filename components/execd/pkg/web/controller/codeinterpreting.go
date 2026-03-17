@@ -326,6 +326,14 @@ func (c *CodeInterpretingController) RunInSession() {
 
 	err := codeRunner.RunInBashSession(ctx, runReq)
 	if err != nil {
+		if errors.Is(err, runtime.ErrContextNotFound) {
+			c.RespondError(
+				http.StatusNotFound,
+				model.ErrorCodeContextNotFound,
+				fmt.Sprintf("session not found. %v", err),
+			)
+			return
+		}
 		c.RespondError(
 			http.StatusInternalServerError,
 			model.ErrorCodeRuntimeError,
