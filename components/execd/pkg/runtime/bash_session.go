@@ -256,6 +256,7 @@ func (s *bashSession) Start() error {
 	// Output produced during client downtime is preserved in the replay buffer so
 	// reconnecting clients can catch up via ?since=.
 	go func() {
+		defer stdoutR.Close() // release the OS fd when the shell's stdout closes
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := stdoutR.Read(buf)
@@ -284,6 +285,7 @@ func (s *bashSession) Start() error {
 	// Broadcast goroutine: reads real stderr, always writes to replay buffer, and
 	// fans out to the current per-connection sink when one is attached.
 	go func() {
+		defer stderrR.Close() // release the OS fd when the shell's stderr closes
 		buf := make([]byte, 32*1024)
 		for {
 			n, err := stderrR.Read(buf)
@@ -672,6 +674,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
+		defer stderrR.Close() // release OS fd once stderr is fully drained
 		stderrScanner := bufio.NewScanner(stderrR)
 		stderrScanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 		for stderrScanner.Scan() {
@@ -683,6 +686,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 		}
 	}()
 
+	defer stdoutR.Close() // release OS fd once stdout is fully drained
 	scanner := bufio.NewScanner(stdoutR)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 

@@ -93,7 +93,24 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		}
 	}
 
-	// 5. Replay buffered output if ?since= is provided.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 5. Attach per-connection pipe readers BEFORE replaying buffered output.
+	// This ensures the live sink is in place before we snapshot the replay buffer,
+	// so any bytes the broadcast goroutine emits after the snapshot are delivered
+	// via the live pipe rather than falling into the gap between replay and attach.
+	stdout, stderr, detach := session.AttachOutput()
+	var pumpWg sync.WaitGroup
+	defer func() {
+		cancel()
+		detach()
+		pumpWg.Wait()
+		session.UnlockWS()
+	}()
+
+	// 6. Replay buffered output if ?since= is provided — done AFTER AttachOutput so
+	// the live sink is already in place and no bytes can fall into the gap.
 	if sinceStr := c.ctx.Query("since"); sinceStr != "" {
 		if since, parseErr := strconv.ParseInt(sinceStr, 10, 64); parseErr == nil {
 			replayData, nextOffset, _ := codeRunner.ReplaySessionOutput(sessionID, since)
@@ -107,7 +124,7 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		}
 	}
 
-	// 6. Send connected frame — mode derived from actual session state, not the request parameter,
+	// 7. Send connected frame — mode derived from actual session state, not the request parameter,
 	// so reconnecting clients always receive the correct terminal assumptions.
 	mode := "pipe"
 	if session.IsPTY() {
@@ -119,23 +136,7 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		Mode:      mode,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Attach per-connection pipe readers. detach() closes the write ends on handler exit,
-	// causing scanner goroutines to receive EOF and exit promptly. UnlockWS is called only
-	// after pumps finish, preventing a reconnecting client from starting new scanners while
-	// stale ones are still reading from the shared pipe.
-	stdout, stderr, detach := session.AttachOutput()
-	var pumpWg sync.WaitGroup
-	defer func() {
-		cancel()
-		detach()
-		pumpWg.Wait()
-		session.UnlockWS()
-	}()
-
-	// 7. Ping/pong keepalive — RFC 6455 control-level pings every 30s.
+	// 8. Ping/pong keepalive — RFC 6455 control-level pings every 30s.
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(60 * time.Second)) //nolint:errcheck
 		return nil
@@ -256,7 +257,13 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 			session.SendSignal(frame.Signal)
 		case "resize":
 			if session.IsPTY() {
-				_ = session.ResizePTY(uint16(frame.Cols), uint16(frame.Rows))
+				if resizeErr := session.ResizePTY(uint16(frame.Cols), uint16(frame.Rows)); resizeErr != nil {
+					_ = writeJSON(model.ServerFrame{
+						Type:  "error",
+						Error: "resize failed: " + resizeErr.Error(),
+						Code:  model.WSErrCodeRuntimeError,
+					})
+				}
 			}
 			// Silently ignored in pipe mode; accepted to avoid client errors.
 		case "ping":

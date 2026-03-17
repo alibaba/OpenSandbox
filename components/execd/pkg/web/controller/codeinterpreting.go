@@ -304,6 +304,15 @@ func (c *CodeInterpretingController) RunInSession() {
 		Cwd:      request.Cwd,
 		Timeout:  timeout,
 	}
+	// Verify the session exists BEFORE committing the SSE response (200 + headers).
+	// Once setupSSEResponse() flushes, we can no longer send HTTP error codes.
+	if _, _, err := codeRunner.ReplaySessionOutput(sessionID, 0); err != nil {
+		if errors.Is(err, runtime.ErrContextNotFound) {
+			c.RespondError(http.StatusNotFound, model.ErrorCodeContextNotFound, "session not found")
+			return
+		}
+	}
+
 	ctx, cancel := context.WithCancel(c.ctx.Request.Context())
 	defer cancel()
 	runReq.Hooks = c.setServerEventsHandler(ctx)
