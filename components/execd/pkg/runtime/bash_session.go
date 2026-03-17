@@ -120,6 +120,15 @@ func (c *Controller) WriteSessionOutput(sessionID string, data []byte) {
 
 // ReplaySessionOutput returns buffered output bytes starting from offset.
 // Returns (data, nextOffset). See replayBuffer.readFrom for semantics.
+// GetBashSession retrieves a bash session by ID. Returns nil if not found.
+func (c *Controller) GetBashSession(sessionID string) BashSession {
+	s := c.getBashSession(sessionID)
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
 func (c *Controller) ReplaySessionOutput(sessionID string, offset int64) ([]byte, int64, error) {
 	session := c.getBashSession(sessionID)
 	if session == nil {

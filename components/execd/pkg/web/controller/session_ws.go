@@ -96,10 +96,24 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 5. Attach per-connection pipe readers BEFORE replaying buffered output.
-	// This ensures the live sink is in place before we snapshot the replay buffer,
-	// so any bytes the broadcast goroutine emits after the snapshot are delivered
-	// via the live pipe rather than falling into the gap between replay and attach.
+	// 5. Snapshot the replay buffer offset THEN attach the live pipe — in that order.
+	//
+	// Why this order matters:
+	//   - Snapshotting first captures a definite "replay up to here" watermark.
+	//   - AttachOutput installs the PipeWriter so the broadcast goroutine begins
+	//     queuing bytes into the pipe immediately.
+	//   - Any byte produced between snapshot and attach lands in the pipe only
+	//     (not in the replay frame), so each byte is delivered exactly once.
+	//   - If we attached first and snapshotted second, bytes produced in that
+	//     window would appear in both the replay frame and the live pipe (duplicate).
+	var replayData []byte
+	var replayNextOffset int64
+	if sinceStr := c.ctx.Query("since"); sinceStr != "" {
+		if since, parseErr := strconv.ParseInt(sinceStr, 10, 64); parseErr == nil {
+			replayData, replayNextOffset, _ = codeRunner.ReplaySessionOutput(sessionID, since)
+		}
+	}
+
 	stdout, stderr, detach := session.AttachOutput()
 	var pumpWg sync.WaitGroup
 	defer func() {
@@ -109,19 +123,13 @@ func (c *CodeInterpretingController) SessionWebSocket() {
 		session.UnlockWS()
 	}()
 
-	// 6. Replay buffered output if ?since= is provided — done AFTER AttachOutput so
-	// the live sink is already in place and no bytes can fall into the gap.
-	if sinceStr := c.ctx.Query("since"); sinceStr != "" {
-		if since, parseErr := strconv.ParseInt(sinceStr, 10, 64); parseErr == nil {
-			replayData, nextOffset, _ := codeRunner.ReplaySessionOutput(sessionID, since)
-			if len(replayData) > 0 {
-				_ = writeJSON(model.ServerFrame{
-					Type:   "replay",
-					Data:   string(replayData),
-					Offset: nextOffset,
-				})
-			}
-		}
+	// 6. Send replay frame now that the live sink is attached — no gap, no duplicates.
+	if len(replayData) > 0 {
+		_ = writeJSON(model.ServerFrame{
+			Type:   "replay",
+			Data:   string(replayData),
+			Offset: replayNextOffset,
+		})
 	}
 
 	// 7. Send connected frame — mode derived from actual session state, not the request parameter,
