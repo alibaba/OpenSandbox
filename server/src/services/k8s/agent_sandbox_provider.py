@@ -128,7 +128,7 @@ class AgentSandboxProvider(WorkloadProvider):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         labels: Dict[str, str],
-        expires_at: datetime,
+        expires_at: Optional[datetime],
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
@@ -162,6 +162,19 @@ class AgentSandboxProvider(WorkloadProvider):
 
         resource_name = self._resource_name(sandbox_id)
 
+        # When expires_at is None (manual cleanup), omit shutdownTime so controller does not auto-expire
+        spec = {
+            "replicas": 1,
+            "shutdownPolicy": self.shutdown_policy,
+            "podTemplate": {
+                "metadata": {
+                    "labels": labels,
+                },
+                "spec": pod_spec,
+            },
+        }
+        if expires_at is not None:
+            spec["shutdownTime"] = expires_at.isoformat()
         runtime_manifest = {
             "apiVersion": f"{self.group}/{self.version}",
             "kind": "Sandbox",
@@ -170,17 +183,7 @@ class AgentSandboxProvider(WorkloadProvider):
                 "namespace": namespace,
                 "labels": labels,
             },
-            "spec": {
-                "replicas": 1,
-                "shutdownTime": expires_at.isoformat(),
-                "shutdownPolicy": self.shutdown_policy,
-                "podTemplate": {
-                    "metadata": {
-                        "labels": labels,
-                    },
-                    "spec": pod_spec,
-                },
-            },
+            "spec": spec,
         }
 
         sandbox = self.template_manager.merge_with_runtime_values(runtime_manifest)

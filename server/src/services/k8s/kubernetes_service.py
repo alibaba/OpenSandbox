@@ -42,6 +42,7 @@ from src.api.schema import (
 from src.config import AppConfig, get_config
 from src.services.constants import (
     SANDBOX_ID_LABEL,
+    SANDBOX_MANUAL_CLEANUP_LABEL,
     SandboxErrorCodes,
 )
 from src.services.helpers import matches_filter
@@ -274,26 +275,18 @@ class KubernetesSandboxService(SandboxService):
         # Generate sandbox ID
         sandbox_id = self.generate_sandbox_id()
         
-        # Calculate expiration time
+        # Calculate expiration time (None = no TTL, manual cleanup only; same as Docker)
         created_at = datetime.now(timezone.utc)
         expires_at = None
         if request.timeout is not None:
             expires_at = calculate_expiration_or_raise(created_at, request.timeout)
-        elif not self.workload_provider.supports_manual_cleanup():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": SandboxErrorCodes.INVALID_PARAMETER,
-                    "message": (
-                        "Manual cleanup mode is not supported by the current Kubernetes workload provider."
-                    ),
-                },
-            )
-        
+
         # Build labels
         labels = {
             SANDBOX_ID_LABEL: sandbox_id,
         }
+        if expires_at is None:
+            labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
         
         # Add user metadata as labels
         if request.metadata:

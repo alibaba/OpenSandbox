@@ -41,7 +41,7 @@ class WorkloadProvider(ABC):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         labels: Dict[str, str],
-        expires_at: datetime,
+        expires_at: Optional[datetime],
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
@@ -59,7 +59,7 @@ class WorkloadProvider(ABC):
             env: Environment variables
             resource_limits: Resource limits (cpu, memory)
             labels: Labels to apply to the workload
-            expires_at: Expiration time
+            expires_at: Expiration time, or None for manual cleanup (no TTL)
             execd_image: execd daemon image
             extensions: General extension field for passing additional configuration.
                 This is a flexible field for various use cases (e.g., ``poolRef`` for pool-based creation).
@@ -180,15 +180,6 @@ class WorkloadProvider(ABC):
 
         Providers that implement imagePullSecrets injection should override
         this method to return True.
-        """
-        return False
-
-    def supports_manual_cleanup(self) -> bool:
-        """
-        Whether this provider can represent a non-expiring sandbox.
-
-        Providers should override this only after their backing CRD semantics
-        are verified to support omitting expiration fields safely.
         """
         return False
 

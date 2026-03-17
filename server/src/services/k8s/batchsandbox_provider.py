@@ -107,7 +107,7 @@ class BatchSandboxProvider(WorkloadProvider):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         labels: Dict[str, str],
-        expires_at: datetime,
+        expires_at: Optional[datetime],
         execd_image: str,
         extensions: Optional[Dict[str, str]] = None,
         network_policy: Optional[NetworkPolicy] = None,
@@ -227,7 +227,15 @@ class BatchSandboxProvider(WorkloadProvider):
             apply_volumes_to_pod_spec(pod_spec, volumes)
 
         # Build runtime-generated BatchSandbox manifest
-        # This contains only the essential runtime fields
+        # When expires_at is None (manual cleanup), omit expireTime so controller does not auto-expire
+        spec: Dict[str, Any] = {
+            "replicas": 1,
+            "template": {
+                "spec": pod_spec,
+            },
+        }
+        if expires_at is not None:
+            spec["expireTime"] = expires_at.isoformat()
         runtime_manifest = {
             "apiVersion": f"{self.group}/{self.version}",
             "kind": "BatchSandbox",
@@ -236,13 +244,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 "namespace": namespace,
                 "labels": labels,
             },
-            "spec": {
-                "replicas": 1,
-                "expireTime": expires_at.isoformat(),
-                "template": {
-                    "spec": pod_spec,
-                },
-            },
+            "spec": spec,
         }
         
         # Merge with template to get final manifest
@@ -297,7 +299,7 @@ class BatchSandboxProvider(WorkloadProvider):
         namespace: str,
         labels: Dict[str, str],
         pool_ref: str,
-        expires_at: datetime,
+        expires_at: Optional[datetime],
         entrypoint: List[str],
         env: Dict[str, str],
     ) -> Dict[str, Any]:
@@ -323,6 +325,13 @@ class BatchSandboxProvider(WorkloadProvider):
         Raises:
             SandboxError: If required parameters are invalid
         """
+        spec: Dict[str, Any] = {
+            "replicas": 1,
+            "poolRef": pool_ref,
+            "taskTemplate": self._build_task_template(entrypoint, env),
+        }
+        if expires_at is not None:
+            spec["expireTime"] = expires_at.isoformat()
         runtime_manifest = {
             "apiVersion": f"{self.group}/{self.version}",
             "kind": "BatchSandbox",
@@ -331,12 +340,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 "namespace": namespace,
                 "labels": labels,
             },
-            "spec": {
-                "replicas": 1,
-                "poolRef": pool_ref,
-                "expireTime": expires_at.isoformat(),
-                "taskTemplate": self._build_task_template(entrypoint, env),
-            },
+            "spec": spec,
         }
         
         # Pool-based creation does not need template merging
@@ -734,7 +738,7 @@ class BatchSandboxProvider(WorkloadProvider):
         except (ValueError, TypeError) as e:
             logger.warning("Invalid expireTime format: %s, error: %s", expire_time_str, e)
             return None
-    
+
     def _parse_pod_ip(self, workload: Dict[str, Any]) -> Optional[str]:
         """Parse the first Pod IP from the endpoints annotation.
 
