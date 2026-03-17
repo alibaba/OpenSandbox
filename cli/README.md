@@ -24,63 +24,86 @@ pipx install opensandbox-cli
 
 ## Quick Start
 
-> **Note**: Before running these commands, ensure the OpenSandbox service is running. See the root [README.md](../README.md) for startup instructions.
+### Step 0: Start the OpenSandbox Server
 
-### 1. Initialize Configuration
+Before using the CLI, make sure the OpenSandbox server is running. See the root [README.md](../README.md) for startup instructions.
+
+```bash
+opensandbox-server
+```
+
+![Start OpenSandbox Server](assets/start_opensandbox_server.png)
+
+### Step 1: Install the CLI
+
+```bash
+cd cli
+uv pip install -e .
+```
+
+![Install CLI](assets/install_cli.png)
+
+### Step 2: Initialize Configuration
 
 ```bash
 osb config init
+osb config set connection.domain localhost:8080
+osb config set connection.protocol http
 ```
 
-This creates `~/.opensandbox/config.toml` with default settings. Edit it to set your API key and server domain:
+![Init CLI](assets/init_cli.png)
 
-```toml
-[connection]
-api_key = "your-api-key"
-domain = "localhost:8080"
-protocol = "http"
-```
-
-### 2. Create a Sandbox
+### Step 3: Create a Sandbox
 
 ```bash
-osb sandbox create --image python:3.11
+osb sandbox create --image python:3.12
 ```
 
-### 3. Run Commands
+![Create Sandbox](assets/cli_create_sandbox.png)
+
+### Step 4: List Sandboxes
 
 ```bash
-# Quick shortcut
-osb exec <sandbox-id> -- echo "Hello Sandbox!"
+# Table output (default)
+osb sandbox list
 
-# Or use the full command group
-osb command run <sandbox-id> -- ls -la /workspace
+# JSON output for scripting
+osb -o json sandbox list
 ```
 
-### 4. Manage Files
+![List Sandboxes](assets/cli_list_sandbox.png)
+
+![List Sandboxes JSON](assets/cli_list_sandbox_json.png)
+
+### Step 5: Execute Commands
 
 ```bash
-# Read a file
-osb file cat <sandbox-id> /etc/hostname
-
-# Upload a local file
-osb file upload <sandbox-id> ./script.py /workspace/script.py
-
-# Download a file
-osb file download <sandbox-id> /workspace/output.txt ./output.txt
+osb exec <sandbox-id> -- echo "hello world"
+osb exec <sandbox-id> -- python -c "print(1+1)"
 ```
 
-### 5. Execute Code (Code Interpreter)
+![Execute Commands](assets/cli_sandbox_exec.png)
+
+### Step 6: File Operations
 
 ```bash
-osb code run <sandbox-id> --language python -c "print('Hello from sandbox!')"
+# Write a file
+osb file write <sandbox-id> /tmp/test.txt -c "hello"
+
+# Read it back
+osb file cat <sandbox-id> /tmp/test.txt
 ```
 
-### 6. Cleanup
+![File Operations](assets/cli_sandbox_file.png)
+
+### Step 7: Cleanup
 
 ```bash
 osb sandbox kill <sandbox-id>
+osb sandbox list
 ```
+
+![Kill Sandbox](assets/cli_kill_sandbox.png)
 
 ## Command Reference
 
