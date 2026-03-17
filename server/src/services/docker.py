@@ -990,7 +990,7 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                 host_config_kwargs = self._base_host_config_kwargs(
                     mem_limit, nano_cpus, self.network_mode
                 )
-                if self.network_mode == BRIDGE_NETWORK_MODE:
+                if self.network_mode != HOST_NETWORK_MODE:
                     host_execd_port, host_http_port = self._allocate_distinct_host_ports()
                     port_bindings = {
                         "44772": ("0.0.0.0", host_execd_port),
