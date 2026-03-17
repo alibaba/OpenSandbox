@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import os
 import posixpath
+import re
 import subprocess
 import tempfile
 from typing import Any, Optional
@@ -33,6 +34,132 @@ logger = logging.getLogger(__name__)
 
 
 class OSSFSMixin:
+    @staticmethod
+    def _validate_bucket_name(bucket: str) -> None:
+        """
+        Validate OSS bucket name to prevent command injection.
+        
+        Bucket names must follow OSS naming rules: lowercase letters, numbers, hyphens.
+        Length: 3-63 characters. Cannot start/end with hyphen.
+        """
+        if not bucket or not isinstance(bucket, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": "OSSFS bucket name cannot be empty.",
+                },
+            )
+        
+        # OSS bucket naming: 3-63 chars, lowercase alphanumeric and hyphens only
+        # Must start and end with lowercase letter or digit
+        if not re.match(r'^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$', bucket):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": (
+                        f"Invalid bucket name '{bucket}'. Bucket names must be 3-63 characters, "
+                        "contain only lowercase letters, numbers, and hyphens, "
+                        "and start/end with a letter or number."
+                    ),
+                },
+            )
+
+    @staticmethod
+    def _validate_ossfs_option(option: str) -> None:
+        """
+        Validate OSSFS option to prevent command injection.
+        
+        Options should not contain shell metacharacters or command separators.
+        """
+        # Check for dangerous characters that could be used for command injection
+        dangerous_chars = [';', '&', '|', '`', '$', '(', ')', '<', '>', '\n', '\r']
+        for char in dangerous_chars:
+            if char in option:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": (
+                            f"Invalid OSSFS option: contains forbidden character '{char}'. "
+                            "Options must not contain shell metacharacters."
+                        ),
+                    },
+                )
+
+    @staticmethod
+    def _validate_mount_path(path: str) -> None:
+        """
+        Validate mount path to prevent command injection in unmount operations.
+        
+        Path must be absolute and not contain dangerous characters.
+        """
+        if not path or not isinstance(path, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": "Mount path cannot be empty.",
+                },
+            )
+        
+        # Path must be absolute
+        if not path.startswith('/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": f"Mount path must be absolute: '{path}'",
+                },
+            )
+        
+        # Check for dangerous characters that could be used for command injection
+        dangerous_chars = [';', '&', '|', '`', '$', '(', ')', '<', '>', '\n', '\r']
+        for char in dangerous_chars:
+            if char in path:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": (
+                            f"Invalid mount path: contains forbidden character '{char}'. "
+                            "Paths must not contain shell metacharacters."
+                        ),
+                    },
+                )
+
+    @staticmethod
+    def _validate_endpoint_url(endpoint_url: str) -> None:
+        """
+        Validate endpoint URL to prevent command injection.
+        
+        URL should not contain dangerous shell metacharacters.
+        """
+        if not endpoint_url or not isinstance(endpoint_url, str):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": "Endpoint URL cannot be empty.",
+                },
+            )
+        
+        # Check for dangerous characters
+        dangerous_chars = [';', '&', '|', '`', '$', '(', ')', '<', '>', '\n', '\r', ' ']
+        for char in dangerous_chars:
+            if char in endpoint_url:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": (
+                            f"Invalid endpoint URL: contains forbidden character '{char}'. "
+                            "URLs must not contain shell metacharacters or spaces."
+                        ),
+                    },
+                )
+
     @staticmethod
     def _normalize_ossfs_option(raw_option: str) -> str:
         option = str(raw_option).strip()
@@ -87,6 +214,11 @@ class OSSFSMixin:
         endpoint_url: str,
         passwd_file: str,
     ) -> list[str]:
+        # Validate inputs for security
+        self._validate_bucket_name(volume.ossfs.bucket)
+        self._validate_endpoint_url(endpoint_url)
+        self._validate_mount_path(backend_path)
+        
         cmd: list[str] = [
             "ossfs",
             source,
@@ -100,6 +232,8 @@ class OSSFSMixin:
             for raw_opt in volume.ossfs.options:
                 opt = self._normalize_ossfs_option(raw_opt)
                 if opt:
+                    # Validate each option for dangerous characters
+                    self._validate_ossfs_option(opt)
                     cmd.extend(["-o", opt])
         return cmd
 
@@ -109,6 +243,10 @@ class OSSFSMixin:
         endpoint_url: str,
         prefix: str,
     ) -> list[str]:
+        # Validate inputs for security
+        self._validate_bucket_name(volume.ossfs.bucket)
+        self._validate_endpoint_url(endpoint_url)
+        
         conf_lines: list[str] = [
             f"--oss_endpoint={endpoint_url}",
             f"--oss_bucket={volume.ossfs.bucket}",
@@ -122,11 +260,14 @@ class OSSFSMixin:
             for raw_opt in volume.ossfs.options:
                 opt = self._normalize_ossfs_option(raw_opt)
                 if opt:
+                    # Validate each option for dangerous characters
+                    self._validate_ossfs_option(opt)
                     conf_lines.append(f"--{opt}")
         return conf_lines
 
-    @staticmethod
-    def _build_ossfs_v2_mount_command(backend_path: str, conf_file: str) -> list[str]:
+    def _build_ossfs_v2_mount_command(self, backend_path: str, conf_file: str) -> list[str]:
+        # Validate backend path for security
+        self._validate_mount_path(backend_path)
         return ["ossfs2", "mount", backend_path, "-c", conf_file]
 
     @staticmethod
@@ -276,6 +417,9 @@ class OSSFSMixin:
 
     def _release_ossfs_mount(self, mount_key: str) -> None:
         """Release one reference and unmount when ref count reaches zero."""
+        # Validate mount path before using in unmount commands
+        self._validate_mount_path(mount_key)
+        
         with self._ossfs_mount_lock:
             current = self._ossfs_mount_ref_counts.get(mount_key, 0)
             if current <= 0:
