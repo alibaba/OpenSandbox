@@ -66,7 +66,7 @@ opensandbox-server init-config ~/.sandbox.toml --example docker
 ```
 
 > If you prefer working from source, you can still clone the repo for development, but you no longer need to clone this repository just to start the server.
->
+> You'll also require an instance of docker running.
 > ```bash
 > git clone https://github.com/alibaba/OpenSandbox.git
 > cd OpenSandbox/server
