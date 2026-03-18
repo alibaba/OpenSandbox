@@ -429,11 +429,6 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
 
     target_host = endpoint.endpoint
     query_string = request.url.query
-    target_url = (
-        f"http://{target_host}/{full_path}?{query_string}"
-        if query_string
-        else f"http://{target_host}/{full_path}"
-    )
 
     client: httpx.AsyncClient = request.app.state.http_client
 
@@ -463,9 +458,10 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
 
         req = client.build_request(
             method=request.method,
-            url=target_url,
+            url=f"http://{target_host}/{full_path}",
+            params=query_string if query_string else None,
             headers=headers,
-            content=request.stream(),
+            content=request.stream() if request.method in ("POST", "PUT", "PATCH") else None,
         )
 
         resp = await client.send(req, stream=True)
