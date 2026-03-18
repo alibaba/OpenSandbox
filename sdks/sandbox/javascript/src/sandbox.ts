@@ -14,6 +14,7 @@
 
 import {
   DEFAULT_ENTRYPOINT,
+  DEFAULT_EGRESS_PORT,
   DEFAULT_EXECD_PORT,
   DEFAULT_HEALTH_CHECK_POLLING_INTERVAL_MILLIS,
   DEFAULT_READY_TIMEOUT_SECONDS,
@@ -501,11 +502,21 @@ export class Sandbox {
   }
 
   async getEgressPolicy(): Promise<NetworkPolicy> {
-    return await this.sandboxes.getEgressPolicy(this.id);
+    const endpoint = await this.getEndpoint(DEFAULT_EGRESS_PORT);
+    return await Sandbox._priv.get(this)!.adapterFactory.createEgressStack({
+      connectionConfig: this.connectionConfig,
+      egressBaseUrl: `${this.connectionConfig.protocol}://${endpoint.endpoint}`,
+      endpointHeaders: endpoint.headers,
+    }).egress.getPolicy();
   }
 
   async patchEgressRules(rules: NetworkRule[]): Promise<void> {
-    await this.sandboxes.patchEgressRules(this.id, rules);
+    const endpoint = await this.getEndpoint(DEFAULT_EGRESS_PORT);
+    await Sandbox._priv.get(this)!.adapterFactory.createEgressStack({
+      connectionConfig: this.connectionConfig,
+      egressBaseUrl: `${this.connectionConfig.protocol}://${endpoint.endpoint}`,
+      endpointHeaders: endpoint.headers,
+    }).egress.patchRules(rules);
   }
 
   /**

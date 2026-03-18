@@ -26,7 +26,7 @@ from typing import Any
 
 from opensandbox.adapters.factory import AdapterFactory
 from opensandbox.config import ConnectionConfig
-from opensandbox.constants import DEFAULT_EXECD_PORT
+from opensandbox.constants import DEFAULT_EGRESS_PORT, DEFAULT_EXECD_PORT
 from opensandbox.exceptions import (
     InvalidArgumentException,
     SandboxException,
@@ -226,13 +226,21 @@ class Sandbox:
         """
         Get current egress policy for this sandbox.
         """
-        return await self._sandbox_service.get_egress_policy(self.id)
+        factory = AdapterFactory(self.connection_config)
+        endpoint = await self._sandbox_service.get_sandbox_endpoint(
+            self.id, DEFAULT_EGRESS_PORT, self.connection_config.use_server_proxy
+        )
+        return await factory.create_egress_service(endpoint).get_policy()
 
     async def patch_egress_rules(self, rules: list[NetworkRule]) -> None:
         """
         Overwrite egress rules for this sandbox.
         """
-        await self._sandbox_service.patch_egress_rules(self.id, rules)
+        factory = AdapterFactory(self.connection_config)
+        endpoint = await self._sandbox_service.get_sandbox_endpoint(
+            self.id, DEFAULT_EGRESS_PORT, self.connection_config.use_server_proxy
+        )
+        await factory.create_egress_service(endpoint).patch_rules(rules)
 
     async def pause(self) -> None:
         """

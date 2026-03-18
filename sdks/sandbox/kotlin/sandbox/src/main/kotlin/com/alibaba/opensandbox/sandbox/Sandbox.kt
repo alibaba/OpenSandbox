@@ -21,6 +21,7 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.InvalidArgumentExceptio
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxInternalException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxReadyTimeoutException
+import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EGRESS_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EXECD_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
@@ -430,7 +431,8 @@ class Sandbox internal constructor(
      * @throws SandboxException if operation fails
      */
     fun getEgressPolicy(): NetworkPolicy {
-        return sandboxService.getEgressPolicy(id)
+        val endpoint = getEndpoint(DEFAULT_EGRESS_PORT)
+        return AdapterFactory(httpClientProvider).createEgress(endpoint).getPolicy()
     }
 
     /**
@@ -439,7 +441,8 @@ class Sandbox internal constructor(
      * @throws SandboxException if operation fails
      */
     fun patchEgressRules(rules: List<NetworkRule>) {
-        sandboxService.patchEgressRules(id, rules)
+        val endpoint = getEndpoint(DEFAULT_EGRESS_PORT)
+        AdapterFactory(httpClientProvider).createEgress(endpoint).patchRules(rules)
     }
 
     /**

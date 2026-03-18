@@ -111,6 +111,60 @@ def generate_execd_api_client() -> None:
                 break
 
 
+def generate_egress_api_client() -> None:
+    """Generate the egress API client from OpenAPI spec."""
+    print("\n🔧 Generating egress API client...")
+
+    spec_path = Path("../../../specs/egress-api.yaml").resolve()
+    output_path = Path("src/opensandbox/api/egress")
+    config_path = Path("scripts/openapi_egress_config.yaml")
+    temp_output = Path("temp_egress_client")
+
+    if not spec_path.exists():
+        print(f"❌ OpenAPI spec not found at {spec_path}")
+        print("Please ensure the specs directory is available")
+        return
+
+    if output_path.exists():
+        shutil.rmtree(output_path)
+
+    if temp_output.exists():
+        shutil.rmtree(temp_output)
+
+    cmd = [
+        "openapi-python-client",
+        "generate",
+        "--path",
+        str(spec_path),
+        "--output-path",
+        str(temp_output),
+        "--config",
+        str(config_path),
+        "--overwrite",
+    ]
+
+    try:
+        run_command(cmd, "Generating egress API client")
+    except subprocess.CalledProcessError:
+        print("❌ Failed to generate egress API client")
+        return
+
+    generated_package = temp_output / "opensandbox_api_egress"
+    if generated_package.exists():
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(generated_package), str(output_path))
+        shutil.rmtree(temp_output)
+        print(f"✅ Moved generated code to {output_path}")
+    else:
+        for item in temp_output.iterdir():
+            if item.is_dir() and not item.name.startswith("."):
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(item), str(output_path))
+                shutil.rmtree(temp_output)
+                print(f"✅ Moved generated code from {item} to {output_path}")
+                break
+
+
 def generate_sandbox_lifecycle_api() -> None:
     """Generate the sandbox lifecycle API client."""
     print("\n🔧 Generating sandbox lifecycle API client...")
@@ -259,6 +313,7 @@ def post_process_generated_code() -> None:
 
     # Ensure all generated python files have a license header.
     add_license_headers(Path("src/opensandbox/api/execd"))
+    add_license_headers(Path("src/opensandbox/api/egress"))
     add_license_headers(Path("src/opensandbox/api/lifecycle"))
     add_license_headers(Path("src/opensandbox/api"))
     patch_lifecycle_nullable_nested_models(Path("src/opensandbox/api/lifecycle"))
@@ -289,6 +344,7 @@ def main() -> None:
 
     # Generate API clients
     generate_execd_api_client()
+    generate_egress_api_client()
     generate_sandbox_lifecycle_api()
 
     # Post-process
@@ -297,6 +353,7 @@ def main() -> None:
     print("\n✅ API client generation completed!")
     print("Generated clients:")
     print("  - src/opensandbox/api/execd/")
+    print("  - src/opensandbox/api/egress/")
     print("  - src/opensandbox/api/lifecycle/")
     print("\nThe generated clients support custom httpx.AsyncClient injection:")
     print("  from opensandbox.api.execd import Client, AuthenticatedClient")

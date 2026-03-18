@@ -23,6 +23,7 @@ This converter is designed to work with openapi-python-client generated models,
 which use attrs for model definitions.
 """
 from datetime import datetime, timedelta, timezone
+from typing import Literal, cast
 
 from opensandbox.api.lifecycle.models import (
     CreateSandboxResponse,
@@ -295,13 +296,18 @@ class SandboxModelConverter:
         if not isinstance(api_policy.egress, Unset):
             egress = [
                 NetworkRule(
-                    action=str(rule.action.value),
+                    action=cast(Literal["allow", "deny"], rule.action.value),
                     target=rule.target,
                 )
                 for rule in api_policy.egress
             ]
 
-        return NetworkPolicy(default_action=default_action, egress=egress)
+        return NetworkPolicy.model_validate(
+            {
+                "defaultAction": default_action,
+                "egress": egress,
+            }
+        )
 
     @staticmethod
     def to_sandbox_renew_response(

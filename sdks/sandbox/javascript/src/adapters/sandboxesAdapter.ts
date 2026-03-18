@@ -24,8 +24,6 @@ import type {
   Endpoint,
   ListSandboxesParams,
   ListSandboxesResponse,
-  NetworkPolicy,
-  NetworkRule,
   RenewSandboxExpirationRequest,
   RenewSandboxExpirationResponse,
   SandboxId,
@@ -46,10 +44,6 @@ type ApiRenewSandboxExpirationOk =
   LifecyclePaths["/sandboxes/{sandboxId}/renew-expiration"]["post"]["responses"][200]["content"]["application/json"];
 type ApiEndpointOk =
   LifecyclePaths["/sandboxes/{sandboxId}/endpoints/{port}"]["get"]["responses"][200]["content"]["application/json"];
-type ApiGetEgressPolicyOk =
-  LifecyclePaths["/sandboxes/{sandboxId}/egress"]["get"]["responses"][200]["content"]["application/json"];
-type ApiPatchEgressRulesRequest =
-  LifecyclePaths["/sandboxes/{sandboxId}/egress"]["patch"]["requestBody"]["content"]["application/json"];
 
 function encodeMetadataFilter(metadata: Record<string, string>): string {
   // The Lifecycle API expects a single `metadata` query parameter whose value is `k=v&k2=v2`.
@@ -198,26 +192,5 @@ export class SandboxesAdapter implements Sandboxes {
       throw new Error("Get sandbox endpoint failed: unexpected response shape");
     }
     return ok as unknown as Endpoint;
-  }
-
-  async getEgressPolicy(sandboxId: SandboxId): Promise<NetworkPolicy> {
-    const { data, error, response } = await this.client.GET("/sandboxes/{sandboxId}/egress", {
-      params: { path: { sandboxId } },
-    });
-    throwOnOpenApiFetchError({ error, response }, "Get sandbox egress policy failed");
-    const raw = data as ApiGetEgressPolicyOk | undefined;
-    if (!raw || typeof raw !== "object") {
-      throw new Error("Get sandbox egress policy failed: unexpected response shape");
-    }
-    return raw as NetworkPolicy;
-  }
-
-  async patchEgressRules(sandboxId: SandboxId, rules: NetworkRule[]): Promise<void> {
-    const body: ApiPatchEgressRulesRequest = rules as unknown as ApiPatchEgressRulesRequest;
-    const { error, response } = await this.client.PATCH("/sandboxes/{sandboxId}/egress", {
-      params: { path: { sandboxId } },
-      body,
-    });
-    throwOnOpenApiFetchError({ error, response }, "Patch sandbox egress rules failed");
   }
 }

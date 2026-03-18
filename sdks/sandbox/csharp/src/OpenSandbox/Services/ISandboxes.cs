@@ -91,31 +91,6 @@ public interface ISandboxes
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets current egress policy for a sandbox.
-    /// </summary>
-    /// <param name="sandboxId">The sandbox ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The current egress policy.</returns>
-    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
-    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
-    Task<NetworkPolicy> GetEgressPolicyAsync(
-        string sandboxId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Overwrites egress rules for a sandbox.
-    /// </summary>
-    /// <param name="sandboxId">The sandbox ID.</param>
-    /// <param name="rules">Patch egress rules payload.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <exception cref="InvalidArgumentException">Thrown when arguments are invalid.</exception>
-    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
-    Task PatchEgressRulesAsync(
-        string sandboxId,
-        IReadOnlyList<NetworkRule> rules,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Renews the expiration time of a sandbox.
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>

@@ -24,7 +24,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from opensandbox.config.connection_sync import ConnectionConfigSync
-from opensandbox.constants import DEFAULT_EXECD_PORT
+from opensandbox.constants import DEFAULT_EGRESS_PORT, DEFAULT_EXECD_PORT
 from opensandbox.exceptions import (
     InvalidArgumentException,
     SandboxException,
@@ -234,13 +234,21 @@ class SandboxSync:
         """
         Get current egress policy for this sandbox.
         """
-        return self._sandbox_service.get_egress_policy(self.id)
+        factory = AdapterFactorySync(self.connection_config)
+        endpoint = self._sandbox_service.get_sandbox_endpoint(
+            self.id, DEFAULT_EGRESS_PORT, self.connection_config.use_server_proxy
+        )
+        return factory.create_egress_service(endpoint).get_policy()
 
     def patch_egress_rules(self, rules: list[NetworkRule]) -> None:
         """
         Overwrite egress rules for this sandbox.
         """
-        self._sandbox_service.patch_egress_rules(self.id, rules)
+        factory = AdapterFactorySync(self.connection_config)
+        endpoint = self._sandbox_service.get_sandbox_endpoint(
+            self.id, DEFAULT_EGRESS_PORT, self.connection_config.use_server_proxy
+        )
+        factory.create_egress_service(endpoint).patch_rules(rules)
 
     def pause(self) -> None:
         """

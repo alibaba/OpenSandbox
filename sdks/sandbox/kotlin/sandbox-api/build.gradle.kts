@@ -96,10 +96,22 @@ val generateExecdApi =
         modelPackage.set("com.alibaba.opensandbox.sandbox.api.models.execd")
     }
 
+val generateEgressApi =
+    tasks.register<GenerateTask>("generateEgressApi") {
+        configureCommonOptions()
+
+        inputSpec.set(rootProject.projectDir.parentFile.parentFile.parentFile.resolve("specs/egress-api.yaml").absolutePath)
+        outputDir.set(layout.buildDirectory.dir("generated/api/egress").get().asFile.absolutePath)
+        packageName.set("com.alibaba.opensandbox.sandbox.api.egress")
+        apiPackage.set("com.alibaba.opensandbox.sandbox.api.egress")
+        modelPackage.set("com.alibaba.opensandbox.sandbox.api.models.egress")
+    }
+
 val lifecycleSrc = generateSandboxLifecycleApi.map { file(it.outputDir).resolve("src/main/kotlin") }
 val execdSrc = generateExecdApi.map { file(it.outputDir).resolve("src/main/kotlin") }
+val egressSrc = generateEgressApi.map { file(it.outputDir).resolve("src/main/kotlin") }
 sourceSets {
     main {
-        java.srcDirs(lifecycleSrc, execdSrc)
+        java.srcDirs(lifecycleSrc, execdSrc, egressSrc)
     }
 }

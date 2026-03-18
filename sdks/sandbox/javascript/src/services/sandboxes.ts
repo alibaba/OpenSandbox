@@ -18,8 +18,6 @@ import type {
   Endpoint,
   ListSandboxesParams,
   ListSandboxesResponse,
-  NetworkPolicy,
-  NetworkRule,
   RenewSandboxExpirationRequest,
   RenewSandboxExpirationResponse,
   SandboxId,
@@ -45,7 +43,4 @@ export interface Sandboxes {
     port: number,
     useServerProxy?: boolean
   ): Promise<Endpoint>;
-
-  getEgressPolicy(sandboxId: SandboxId): Promise<NetworkPolicy>;
-  patchEgressRules(sandboxId: SandboxId, rules: NetworkRule[]): Promise<void>;
 }

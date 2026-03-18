@@ -81,6 +81,7 @@ const repoRoot = path.resolve(__dirname, "../../../../");
 
 const specs = {
   execd: path.join(repoRoot, "specs", "execd-api.yaml"),
+  egress: path.join(repoRoot, "specs", "egress-api.yaml"),
   lifecycle: path.join(repoRoot, "specs", "sandbox-lifecycle.yml"),
 };
 
@@ -95,6 +96,7 @@ mkdirSync(outDir, { recursive: true });
 
 const outFiles = {
   execd: path.join(outDir, "execd.ts"),
+  egress: path.join(outDir, "egress.ts"),
   lifecycle: path.join(outDir, "lifecycle.ts"),
 };
 
@@ -104,6 +106,7 @@ console.log(`- outDir:   ${outDir}`);
 
 // Use pnpm as requested by the project rules.
 run("pnpm", ["exec", "openapi-typescript", specs.execd, "-o", outFiles.execd], packageRoot);
+run("pnpm", ["exec", "openapi-typescript", specs.egress, "-o", outFiles.egress], packageRoot);
 run(
   "pnpm",
   ["exec", "openapi-typescript", specs.lifecycle, "-o", outFiles.lifecycle],
@@ -112,10 +115,11 @@ run(
 
 // The generator may overwrite outputs; re-apply unified license headers after generation.
 ensureLicenseHeader(outFiles.execd);
+ensureLicenseHeader(outFiles.egress);
 ensureLicenseHeader(outFiles.lifecycle);
 
 console.log("\n✅ API type generation completed:");
 console.log(`- ${path.relative(packageRoot, outFiles.execd)}`);
+console.log(`- ${path.relative(packageRoot, outFiles.egress)}`);
 console.log(`- ${path.relative(packageRoot, outFiles.lifecycle)}`);
-
 

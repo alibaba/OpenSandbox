@@ -17,7 +17,6 @@
 package com.alibaba.opensandbox.sandbox.domain.services
 
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxCreateResponse
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
@@ -117,25 +116,6 @@ interface Sandboxes {
      * @param sandboxId Unique identifier of the sandbox
      */
     fun resumeSandbox(sandboxId: String)
-
-    /**
-     * Gets current egress policy for a sandbox.
-     *
-     * @param sandboxId Unique identifier of the sandbox
-     * @return Current egress policy
-     */
-    fun getEgressPolicy(sandboxId: String): NetworkPolicy
-
-    /**
-     * Overwrites egress rules for a sandbox.
-     *
-     * @param sandboxId Unique identifier of the sandbox
-     * @param rules Egress rules patch payload
-     */
-    fun patchEgressRules(
-        sandboxId: String,
-        rules: List<NetworkRule>,
-    )
 
     /**
      * Renew the expiration time of a sandbox.

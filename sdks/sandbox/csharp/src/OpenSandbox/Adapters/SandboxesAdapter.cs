@@ -114,34 +114,6 @@ internal sealed class SandboxesAdapter : ISandboxes
         await _client.PostAsync($"/sandboxes/{Uri.EscapeDataString(sandboxId)}/resume", cancellationToken: cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task<NetworkPolicy> GetEgressPolicyAsync(
-        string sandboxId,
-        CancellationToken cancellationToken = default)
-    {
-        var response = await _client.GetAsync<JsonElement>(
-            $"/sandboxes/{Uri.EscapeDataString(sandboxId)}/egress",
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        return ParseNetworkPolicy(response);
-    }
-
-    public async Task PatchEgressRulesAsync(
-        string sandboxId,
-        IReadOnlyList<NetworkRule> rules,
-        CancellationToken cancellationToken = default)
-    {
-        var normalizedRules = rules.Select(r => new Dictionary<string, object?>
-        {
-            ["action"] = r.Action == NetworkRuleAction.Allow ? "allow" : "deny",
-            ["target"] = r.Target
-        }).ToList();
-
-        await _client.PatchAsync(
-            $"/sandboxes/{Uri.EscapeDataString(sandboxId)}/egress",
-            normalizedRules,
-            cancellationToken).ConfigureAwait(false);
-    }
-
     public async Task<RenewSandboxExpirationResponse> RenewSandboxExpirationAsync(
         string sandboxId,
         RenewSandboxExpirationRequest request,
@@ -292,46 +264,6 @@ internal sealed class SandboxesAdapter : ISandboxes
         return new RenewSandboxExpirationResponse
         {
             ExpiresAt = expiresAt
-        };
-    }
-
-    private static NetworkPolicy ParseNetworkPolicy(JsonElement element)
-    {
-        var policy = new NetworkPolicy();
-
-        if (element.TryGetProperty("defaultAction", out var defaultAction) &&
-            defaultAction.ValueKind == JsonValueKind.String)
-        {
-            policy.DefaultAction = ParseNetworkRuleAction(defaultAction.GetString());
-        }
-
-        if (element.TryGetProperty("egress", out var egress) &&
-            egress.ValueKind == JsonValueKind.Array)
-        {
-            policy.Egress = egress.EnumerateArray().Select(ParseNetworkRule).ToList();
-        }
-
-        return policy;
-    }
-
-    private static NetworkRule ParseNetworkRule(JsonElement element)
-    {
-        var actionText = element.GetProperty("action").GetString();
-        var target = element.GetProperty("target").GetString();
-        return new NetworkRule
-        {
-            Action = ParseNetworkRuleAction(actionText),
-            Target = target ?? throw new SandboxApiException("Missing target in network rule")
-        };
-    }
-
-    private static NetworkRuleAction ParseNetworkRuleAction(string? action)
-    {
-        return action?.ToLowerInvariant() switch
-        {
-            "allow" => NetworkRuleAction.Allow,
-            "deny" => NetworkRuleAction.Deny,
-            _ => throw new SandboxApiException($"Invalid network rule action: {action ?? "<null>"}")
         };
     }
 }

@@ -91,6 +91,7 @@ export { ExecutionEventDispatcher } from "./models/executionEventDispatcher.js";
 
 export {
   DEFAULT_ENTRYPOINT,
+  DEFAULT_EGRESS_PORT,
   DEFAULT_EXECD_PORT,
   DEFAULT_RESOURCE_LIMITS,
   DEFAULT_TIMEOUT_SECONDS,

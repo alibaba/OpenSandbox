@@ -16,25 +16,19 @@
 
 from http import HTTPStatus
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.error_response import ErrorResponse
-from ...models.network_policy import NetworkPolicy
+from ...models.policy_status_response import PolicyStatusResponse
 from ...types import Response
 
 
-def _get_kwargs(
-    sandbox_id: str,
-) -> dict[str, Any]:
+def _get_kwargs() -> dict[str, Any]:
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/sandboxes/{sandbox_id}/egress".format(
-            sandbox_id=quote(str(sandbox_id), safe=""),
-        ),
+        "url": "/policy",
     }
 
     return _kwargs
@@ -42,30 +36,18 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> ErrorResponse | NetworkPolicy | None:
+) -> PolicyStatusResponse | str | None:
     if response.status_code == 200:
-        response_200 = NetworkPolicy.from_dict(response.json())
+        response_200 = PolicyStatusResponse.from_dict(response.json())
 
         return response_200
 
     if response.status_code == 401:
-        response_401 = ErrorResponse.from_dict(response.json())
-
+        response_401 = response.text
         return response_401
 
-    if response.status_code == 403:
-        response_403 = ErrorResponse.from_dict(response.json())
-
-        return response_403
-
-    if response.status_code == 404:
-        response_404 = ErrorResponse.from_dict(response.json())
-
-        return response_404
-
     if response.status_code == 500:
-        response_500 = ErrorResponse.from_dict(response.json())
-
+        response_500 = response.text
         return response_500
 
     if client.raise_on_unexpected_status:
@@ -76,7 +58,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[ErrorResponse | NetworkPolicy]:
+) -> Response[PolicyStatusResponse | str]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -86,28 +68,23 @@ def _build_response(
 
 
 def sync_detailed(
-    sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Response[ErrorResponse | NetworkPolicy]:
-    """Get existed egress rules for a sandbox
+) -> Response[PolicyStatusResponse | str]:
+    """Get current egress policy
 
-     Retrieve current egress policy for the sandbox.
-
-    Args:
-        sandbox_id (str):
+     Returns the currently enforced egress policy and the sidecar's derived
+    runtime mode metadata.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ErrorResponse | NetworkPolicy]
+        Response[PolicyStatusResponse | str]
     """
 
-    kwargs = _get_kwargs(
-        sandbox_id=sandbox_id,
-    )
+    kwargs = _get_kwargs()
 
     response = client.get_httpx_client().request(
         **kwargs,
@@ -117,54 +94,45 @@ def sync_detailed(
 
 
 def sync(
-    sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> ErrorResponse | NetworkPolicy | None:
-    """Get existed egress rules for a sandbox
+) -> PolicyStatusResponse | str | None:
+    """Get current egress policy
 
-     Retrieve current egress policy for the sandbox.
-
-    Args:
-        sandbox_id (str):
+     Returns the currently enforced egress policy and the sidecar's derived
+    runtime mode metadata.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ErrorResponse | NetworkPolicy
+        PolicyStatusResponse | str
     """
 
     return sync_detailed(
-        sandbox_id=sandbox_id,
         client=client,
     ).parsed
 
 
 async def asyncio_detailed(
-    sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Response[ErrorResponse | NetworkPolicy]:
-    """Get existed egress rules for a sandbox
+) -> Response[PolicyStatusResponse | str]:
+    """Get current egress policy
 
-     Retrieve current egress policy for the sandbox.
-
-    Args:
-        sandbox_id (str):
+     Returns the currently enforced egress policy and the sidecar's derived
+    runtime mode metadata.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ErrorResponse | NetworkPolicy]
+        Response[PolicyStatusResponse | str]
     """
 
-    kwargs = _get_kwargs(
-        sandbox_id=sandbox_id,
-    )
+    kwargs = _get_kwargs()
 
     response = await client.get_async_httpx_client().request(**kwargs)
 
@@ -172,28 +140,24 @@ async def asyncio_detailed(
 
 
 async def asyncio(
-    sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> ErrorResponse | NetworkPolicy | None:
-    """Get existed egress rules for a sandbox
+) -> PolicyStatusResponse | str | None:
+    """Get current egress policy
 
-     Retrieve current egress policy for the sandbox.
-
-    Args:
-        sandbox_id (str):
+     Returns the currently enforced egress policy and the sidecar's derived
+    runtime mode metadata.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ErrorResponse | NetworkPolicy
+        PolicyStatusResponse | str
     """
 
     return (
         await asyncio_detailed(
-            sandbox_id=sandbox_id,
             client=client,
         )
     ).parsed

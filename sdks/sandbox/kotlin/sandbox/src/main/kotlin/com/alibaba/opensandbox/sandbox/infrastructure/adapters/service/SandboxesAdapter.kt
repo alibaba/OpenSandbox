@@ -19,7 +19,6 @@ package com.alibaba.opensandbox.sandbox.infrastructure.adapters.service
 import com.alibaba.opensandbox.sandbox.HttpClientProvider
 import com.alibaba.opensandbox.sandbox.api.SandboxesApi
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
-import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxCreateResponse
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
@@ -30,9 +29,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewRespo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
 import com.alibaba.opensandbox.sandbox.domain.services.Sandboxes
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter
-import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toApiNetworkRule
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toApiRenewRequest
-import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toDomainNetworkPolicy
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toPagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSandboxCreateResponse
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSandboxEndpoint
@@ -177,28 +174,6 @@ internal class SandboxesAdapter(
             response
         } catch (e: Exception) {
             logger.error("Failed to renew sandbox {} expiration", sandboxId, e)
-            throw e.toSandboxException()
-        }
-    }
-
-    override fun getEgressPolicy(sandboxId: String): NetworkPolicy {
-        logger.debug("Retrieving egress policy for sandbox {}", sandboxId)
-        return try {
-            api.sandboxesSandboxIdEgressGet(sandboxId).toDomainNetworkPolicy()
-        } catch (e: Exception) {
-            throw e.toSandboxException()
-        }
-    }
-
-    override fun patchEgressRules(
-        sandboxId: String,
-        rules: List<NetworkRule>,
-    ) {
-        logger.info("Patching egress rules for sandbox {} with {} rule(s)", sandboxId, rules.size)
-        try {
-            api.sandboxesSandboxIdEgressPatch(sandboxId, rules.map { it.toApiNetworkRule() })
-        } catch (e: Exception) {
-            logger.error("Failed to patch egress rules for sandbox {}", sandboxId, e)
             throw e.toSandboxException()
         }
     }

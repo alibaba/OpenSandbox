@@ -19,11 +19,13 @@ package com.alibaba.opensandbox.sandbox.infrastructure.factory
 import com.alibaba.opensandbox.sandbox.HttpClientProvider
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.services.Commands
+import com.alibaba.opensandbox.sandbox.domain.services.Egress
 import com.alibaba.opensandbox.sandbox.domain.services.Filesystem
 import com.alibaba.opensandbox.sandbox.domain.services.Health
 import com.alibaba.opensandbox.sandbox.domain.services.Metrics
 import com.alibaba.opensandbox.sandbox.domain.services.Sandboxes
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.CommandsAdapter
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.EgressAdapter
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.FilesystemAdapter
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.HealthAdapter
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.MetricsAdapter
@@ -48,6 +50,10 @@ internal class AdapterFactory(
 
     fun createCommands(endpoint: SandboxEndpoint): Commands {
         return CommandsAdapter(httpClientProvider, endpoint)
+    }
+
+    fun createEgress(endpoint: SandboxEndpoint): Egress {
+        return EgressAdapter(httpClientProvider, endpoint)
     }
 
     fun createMetrics(endpoint: SandboxEndpoint): Metrics {

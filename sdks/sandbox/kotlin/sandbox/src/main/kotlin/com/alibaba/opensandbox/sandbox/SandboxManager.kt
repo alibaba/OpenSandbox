@@ -19,6 +19,7 @@ package com.alibaba.opensandbox.sandbox
 import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
 import com.alibaba.opensandbox.sandbox.domain.exceptions.InvalidArgumentException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxException
+import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EGRESS_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
@@ -169,7 +170,13 @@ class SandboxManager internal constructor(
      * @return Current egress policy
      */
     fun getEgressPolicy(sandboxId: String): NetworkPolicy {
-        return sandboxService.getEgressPolicy(sandboxId)
+        val endpoint =
+            sandboxService.getSandboxEndpoint(
+                sandboxId,
+                DEFAULT_EGRESS_PORT,
+                httpClientProvider.config.useServerProxy,
+            )
+        return AdapterFactory(httpClientProvider).createEgress(endpoint).getPolicy()
     }
 
     /**
@@ -182,7 +189,13 @@ class SandboxManager internal constructor(
         sandboxId: String,
         rules: List<NetworkRule>,
     ) {
-        sandboxService.patchEgressRules(sandboxId, rules)
+        val endpoint =
+            sandboxService.getSandboxEndpoint(
+                sandboxId,
+                DEFAULT_EGRESS_PORT,
+                httpClientProvider.config.useServerProxy,
+            )
+        AdapterFactory(httpClientProvider).createEgress(endpoint).patchRules(rules)
     }
 
     /**

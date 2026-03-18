@@ -25,6 +25,11 @@ public static class Constants
     public const int DefaultExecdPort = 44772;
 
     /// <summary>
+    /// Default port for the egress sidecar service.
+    /// </summary>
+    public const int DefaultEgressPort = 18080;
+
+    /// <summary>
     /// Default entrypoint command for sandbox containers.
     /// </summary>
     public static readonly string[] DefaultEntrypoint = new[] { "tail", "-f", "/dev/null" };

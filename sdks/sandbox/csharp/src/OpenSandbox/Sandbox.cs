@@ -487,9 +487,21 @@ public sealed class Sandbox : IAsyncDisposable
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The current egress policy.</returns>
-    public Task<NetworkPolicy> GetEgressPolicyAsync(CancellationToken cancellationToken = default)
+    public async Task<NetworkPolicy> GetEgressPolicyAsync(CancellationToken cancellationToken = default)
     {
-        return _sandboxes.GetEgressPolicyAsync(Id, cancellationToken);
+        var endpoint = await GetEndpointAsync(Constants.DefaultEgressPort, cancellationToken).ConfigureAwait(false);
+        var protocol = ConnectionConfig.Protocol == ConnectionProtocol.Https ? "https" : "http";
+        var egressBaseUrl = $"{protocol}://{endpoint.EndpointAddress}";
+        var egressHeaders = MergeHeaders(ConnectionConfig.Headers, endpoint.Headers);
+
+        return await _adapterFactory.CreateEgressStack(new CreateEgressStackOptions
+        {
+            ConnectionConfig = ConnectionConfig,
+            EgressBaseUrl = egressBaseUrl,
+            EgressHeaders = egressHeaders,
+            HttpClientProvider = _httpClientProvider,
+            LoggerFactory = _loggerFactory
+        }).Egress.GetPolicyAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -497,11 +509,23 @@ public sealed class Sandbox : IAsyncDisposable
     /// </summary>
     /// <param name="rules">Patch egress rules payload.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public Task PatchEgressRulesAsync(
+    public async Task PatchEgressRulesAsync(
         IReadOnlyList<NetworkRule> rules,
         CancellationToken cancellationToken = default)
     {
-        return _sandboxes.PatchEgressRulesAsync(Id, rules, cancellationToken);
+        var endpoint = await GetEndpointAsync(Constants.DefaultEgressPort, cancellationToken).ConfigureAwait(false);
+        var protocol = ConnectionConfig.Protocol == ConnectionProtocol.Https ? "https" : "http";
+        var egressBaseUrl = $"{protocol}://{endpoint.EndpointAddress}";
+        var egressHeaders = MergeHeaders(ConnectionConfig.Headers, endpoint.Headers);
+
+        await _adapterFactory.CreateEgressStack(new CreateEgressStackOptions
+        {
+            ConnectionConfig = ConnectionConfig,
+            EgressBaseUrl = egressBaseUrl,
+            EgressHeaders = egressHeaders,
+            HttpClientProvider = _httpClientProvider,
+            LoggerFactory = _loggerFactory
+        }).Egress.PatchRulesAsync(rules, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -609,7 +633,7 @@ public sealed class Sandbox : IAsyncDisposable
         return default;
     }
 
-    private static IReadOnlyDictionary<string, string> MergeHeaders(
+    internal static IReadOnlyDictionary<string, string> MergeHeaders(
         IReadOnlyDictionary<string, string> baseHeaders,
         IReadOnlyDictionary<string, string>? overrideHeaders)
     {

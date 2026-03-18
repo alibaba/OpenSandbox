@@ -15,20 +15,18 @@
 #
 
 from http import HTTPStatus
-from typing import Any, cast
-from urllib.parse import quote
+from typing import Any
 
 import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.error_response import ErrorResponse
 from ...models.network_rule import NetworkRule
+from ...models.policy_status_response import PolicyStatusResponse
 from ...types import Response
 
 
 def _get_kwargs(
-    sandbox_id: str,
     *,
     body: list[NetworkRule],
 ) -> dict[str, Any]:
@@ -36,9 +34,7 @@ def _get_kwargs(
 
     _kwargs: dict[str, Any] = {
         "method": "patch",
-        "url": "/sandboxes/{sandbox_id}/egress".format(
-            sandbox_id=quote(str(sandbox_id), safe=""),
-        ),
+        "url": "/policy",
     }
 
     _kwargs["json"] = []
@@ -52,34 +48,24 @@ def _get_kwargs(
     return _kwargs
 
 
-def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ErrorResponse | None:
+def _parse_response(
+    *, client: AuthenticatedClient | Client, response: httpx.Response
+) -> PolicyStatusResponse | str | None:
     if response.status_code == 200:
-        response_200 = cast(Any, None)
+        response_200 = PolicyStatusResponse.from_dict(response.json())
+
         return response_200
 
     if response.status_code == 400:
-        response_400 = ErrorResponse.from_dict(response.json())
-
+        response_400 = response.text
         return response_400
 
     if response.status_code == 401:
-        response_401 = ErrorResponse.from_dict(response.json())
-
+        response_401 = response.text
         return response_401
 
-    if response.status_code == 403:
-        response_403 = ErrorResponse.from_dict(response.json())
-
-        return response_403
-
-    if response.status_code == 404:
-        response_404 = ErrorResponse.from_dict(response.json())
-
-        return response_404
-
     if response.status_code == 500:
-        response_500 = ErrorResponse.from_dict(response.json())
-
+        response_500 = response.text
         return response_500
 
     if client.raise_on_unexpected_status:
@@ -88,7 +74,9 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
         return None
 
 
-def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ErrorResponse]:
+def _build_response(
+    *, client: AuthenticatedClient | Client, response: httpx.Response
+) -> Response[PolicyStatusResponse | str]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -98,22 +86,20 @@ def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
 
 def sync_detailed(
-    sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: list[NetworkRule],
-) -> Response[Any | ErrorResponse]:
-    """Patch new egress rules for a sandbox
+) -> Response[PolicyStatusResponse | str]:
+    """Patch egress rules
 
-     Update egress rules for the sandbox synchronously.
+     Merge incoming egress rules with the currently enforced policy.
 
-    This endpoint uses merge semantics aligned with the egress sidecar `/policy` PATCH behavior:
+    This endpoint uses merge semantics:
     - Existing rules remain unless overridden by incoming rules.
     - Incoming rules are applied with higher priority than existing rules.
     - If multiple incoming rules refer to the same `target`, the first one wins.
 
     Args:
-        sandbox_id (str):
         body (list[NetworkRule]):
 
     Raises:
@@ -121,11 +107,10 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | ErrorResponse]
+        Response[PolicyStatusResponse | str]
     """
 
     kwargs = _get_kwargs(
-        sandbox_id=sandbox_id,
         body=body,
     )
 
@@ -137,22 +122,20 @@ def sync_detailed(
 
 
 def sync(
-    sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: list[NetworkRule],
-) -> Any | ErrorResponse | None:
-    """Patch new egress rules for a sandbox
+) -> PolicyStatusResponse | str | None:
+    """Patch egress rules
 
-     Update egress rules for the sandbox synchronously.
+     Merge incoming egress rules with the currently enforced policy.
 
-    This endpoint uses merge semantics aligned with the egress sidecar `/policy` PATCH behavior:
+    This endpoint uses merge semantics:
     - Existing rules remain unless overridden by incoming rules.
     - Incoming rules are applied with higher priority than existing rules.
     - If multiple incoming rules refer to the same `target`, the first one wins.
 
     Args:
-        sandbox_id (str):
         body (list[NetworkRule]):
 
     Raises:
@@ -160,33 +143,30 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | ErrorResponse
+        PolicyStatusResponse | str
     """
 
     return sync_detailed(
-        sandbox_id=sandbox_id,
         client=client,
         body=body,
     ).parsed
 
 
 async def asyncio_detailed(
-    sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: list[NetworkRule],
-) -> Response[Any | ErrorResponse]:
-    """Patch new egress rules for a sandbox
+) -> Response[PolicyStatusResponse | str]:
+    """Patch egress rules
 
-     Update egress rules for the sandbox synchronously.
+     Merge incoming egress rules with the currently enforced policy.
 
-    This endpoint uses merge semantics aligned with the egress sidecar `/policy` PATCH behavior:
+    This endpoint uses merge semantics:
     - Existing rules remain unless overridden by incoming rules.
     - Incoming rules are applied with higher priority than existing rules.
     - If multiple incoming rules refer to the same `target`, the first one wins.
 
     Args:
-        sandbox_id (str):
         body (list[NetworkRule]):
 
     Raises:
@@ -194,11 +174,10 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Any | ErrorResponse]
+        Response[PolicyStatusResponse | str]
     """
 
     kwargs = _get_kwargs(
-        sandbox_id=sandbox_id,
         body=body,
     )
 
@@ -208,22 +187,20 @@ async def asyncio_detailed(
 
 
 async def asyncio(
-    sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
     body: list[NetworkRule],
-) -> Any | ErrorResponse | None:
-    """Patch new egress rules for a sandbox
+) -> PolicyStatusResponse | str | None:
+    """Patch egress rules
 
-     Update egress rules for the sandbox synchronously.
+     Merge incoming egress rules with the currently enforced policy.
 
-    This endpoint uses merge semantics aligned with the egress sidecar `/policy` PATCH behavior:
+    This endpoint uses merge semantics:
     - Existing rules remain unless overridden by incoming rules.
     - Incoming rules are applied with higher priority than existing rules.
     - If multiple incoming rules refer to the same `target`, the first one wins.
 
     Args:
-        sandbox_id (str):
         body (list[NetworkRule]):
 
     Raises:
@@ -231,12 +208,11 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Any | ErrorResponse
+        PolicyStatusResponse | str
     """
 
     return (
         await asyncio_detailed(
-            sandbox_id=sandbox_id,
             client=client,
             body=body,
         )

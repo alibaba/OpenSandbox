@@ -36,7 +36,6 @@ from opensandbox.api.lifecycle.types import UNSET
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.models.sandboxes import (
     NetworkPolicy,
-    NetworkRule,
     PagedSandboxInfos,
     SandboxCreateResponse,
     SandboxEndpoint,
@@ -211,45 +210,6 @@ class SandboxesAdapterSync(SandboxesSync):
             handle_api_error(response_obj, f"Pause sandbox {sandbox_id}")
         except Exception as e:
             logger.error("Failed to pause sandbox: %s", sandbox_id, exc_info=e)
-            raise ExceptionConverter.to_sandbox_exception(e) from e
-
-    def get_egress_policy(self, sandbox_id: str) -> NetworkPolicy:
-        try:
-            from opensandbox.api.lifecycle.api.sandboxes import (
-                get_sandboxes_sandbox_id_egress,
-            )
-            from opensandbox.api.lifecycle.models.network_policy import (
-                NetworkPolicy as ApiNetworkPolicy,
-            )
-
-            response_obj = get_sandboxes_sandbox_id_egress.sync_detailed(
-                client=self._get_client(),
-                sandbox_id=sandbox_id,
-            )
-            handle_api_error(response_obj, f"Get egress policy for sandbox {sandbox_id}")
-            parsed = require_parsed(
-                response_obj,
-                ApiNetworkPolicy,
-                f"Get egress policy for sandbox {sandbox_id}",
-            )
-            return SandboxModelConverter.to_sandbox_network_policy(parsed)
-        except Exception as e:
-            logger.error("Failed to get egress policy for sandbox: %s", sandbox_id, exc_info=e)
-            raise ExceptionConverter.to_sandbox_exception(e) from e
-
-    def patch_egress_rules(self, sandbox_id: str, rules: list[NetworkRule]) -> None:
-        try:
-            from opensandbox.api.lifecycle.api.sandboxes import (
-                patch_sandboxes_sandbox_id_egress,
-            )
-            response_obj = patch_sandboxes_sandbox_id_egress.sync_detailed(
-                client=self._get_client(),
-                sandbox_id=sandbox_id,
-                body=SandboxModelConverter.to_api_network_rules(rules),
-            )
-            handle_api_error(response_obj, f"Patch egress rules for sandbox {sandbox_id}")
-        except Exception as e:
-            logger.error("Failed to patch egress policy for sandbox: %s", sandbox_id, exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
     def resume_sandbox(self, sandbox_id: str) -> None:

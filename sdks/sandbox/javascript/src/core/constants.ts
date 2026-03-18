@@ -13,6 +13,7 @@
 // limitations under the License.
 
 export const DEFAULT_EXECD_PORT = 44772;
+export const DEFAULT_EGRESS_PORT = 18080;
 
 export const DEFAULT_ENTRYPOINT: string[] = ["tail", "-f", "/dev/null"];
 

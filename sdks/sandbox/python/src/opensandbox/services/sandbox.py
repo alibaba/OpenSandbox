@@ -24,7 +24,6 @@ from typing import Protocol
 
 from opensandbox.models.sandboxes import (
     NetworkPolicy,
-    NetworkRule,
     PagedSandboxInfos,
     SandboxCreateResponse,
     SandboxEndpoint,
@@ -134,34 +133,6 @@ class Sandboxes(Protocol):
 
         Args:
             sandbox_id: Unique identifier of the sandbox
-
-        Raises:
-            SandboxException: if the operation fails
-        """
-        ...
-
-    async def get_egress_policy(self, sandbox_id: str) -> NetworkPolicy:
-        """
-        Get current sandbox egress policy.
-
-        Args:
-            sandbox_id: Unique identifier of the sandbox
-
-        Returns:
-            Current egress policy
-
-        Raises:
-            SandboxException: if the operation fails
-        """
-        ...
-
-    async def patch_egress_rules(self, sandbox_id: str, rules: list[NetworkRule]) -> None:
-        """
-        Overwrite sandbox egress rules.
-
-        Args:
-            sandbox_id: Unique identifier of the sandbox
-            rules: Egress patch rules payload
 
         Raises:
             SandboxException: if the operation fails

@@ -20,6 +20,7 @@ Protocol definitions for sandbox services.
 """
 
 from opensandbox.services.command import Commands
+from opensandbox.services.egress import Egress
 from opensandbox.services.filesystem import Filesystem
 from opensandbox.services.health import Health
 from opensandbox.services.metrics import Metrics
@@ -27,6 +28,7 @@ from opensandbox.services.sandbox import Sandboxes
 
 __all__ = [
     "Commands",
+    "Egress",
     "Filesystem",
     "Health",
     "Metrics",
