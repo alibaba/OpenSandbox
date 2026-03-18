@@ -4,10 +4,10 @@ authors:
   - "@pjp"
 creation-date: 2026-03-15
 last-updated: 2026-03-15
-status: draft
+status: implementing
 ---
 
-# OSEP-0008: Auto-Renew Sandbox on Ingress Access
+# OSEP-0009: Auto-Renew Sandbox on Ingress Access
 
 <!-- toc -->
 - [Summary](#summary)

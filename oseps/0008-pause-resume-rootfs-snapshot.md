@@ -4,7 +4,7 @@ authors:
   - "@fengcone"
 creation-date: 2026-03-11
 last-updated: 2026-03-13
-status: draft
+status: implementing
 ---
 
 # OSEP-0008: Pause and Resume via Rootfs Snapshot

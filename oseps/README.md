@@ -13,3 +13,5 @@ This is the complete list of OpenSandbox Enhancement Proposals:
 |       [OSEP-0005](0005-client-side-sandbox-pool.md)        |          Client-Side Sandbox Pool          | implementing  |  2026-03-09  |
 |           [OSEP-0006](0006-developer-console.md)           |  Developer Console for Sandbox Operations  | implementable |  2026-03-06  |
 |     [OSEP-0007](0007-fast-sandbox-runtime-support.md)      |        Fast Sandbox Runtime Support        |  provisional  |  2026-02-08  |
+|    [OSEP-0008](0008-pause-resume-rootfs-snapshot.md)       |      Pause and Resume via Rootfs Snapshot  | implementing  |  2026-03-13  |
+| [OSEP-0009](0009-auto-renew-sandbox-on-ingress-access.md)  |    Auto-Renew Sandbox on Ingress Access    | implementing  |  2026-03-15  |
