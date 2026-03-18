@@ -20,9 +20,11 @@ from src.api.schema import Endpoint
 
 
 class _FakeStreamingResponse:
-    def __init__(self, status_code: int = 200, headers: dict | None = None, chunks: list[bytes] | None = None):
+    def __init__(
+        self, status_code: int = 200, headers: dict | None = None, chunks: list[bytes] | None = None
+    ):
         self.status_code = status_code
-        self.headers = headers or {}
+        self.headers = httpx.Headers(headers or {})
         self._chunks = chunks or []
 
     async def aiter_bytes(self):
@@ -81,8 +83,10 @@ def test_proxy_forwards_filtered_headers_and_query(
         **auth_headers,
         "Authorization": "Bearer top-secret",
         "Cookie": "sid=secret",
-        "Connection": "keep-alive",
+        "Connection": "keep-alive, X-Hop-Temp",
         "Upgrade": "h2c",
+        "Trailer": "X-Checksum",
+        "X-Hop-Temp": "drop-me",
         "X-Trace": "trace-1",
     }
 
@@ -105,9 +109,52 @@ def test_proxy_forwards_filtered_headers_and_query(
     assert "host" not in lowered_headers
     assert "connection" not in lowered_headers
     assert "upgrade" not in lowered_headers
+    assert "trailer" not in lowered_headers
     assert "authorization" not in lowered_headers
     assert "cookie" not in lowered_headers
+    assert "x-hop-temp" not in lowered_headers
     assert lowered_headers.get("x-trace") == "trace-1"
+
+
+def test_proxy_filters_response_hop_by_hop_headers(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert resolve_internal is True
+            return Endpoint(endpoint="10.57.1.91:40109")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(
+        status_code=200,
+        headers={
+            "x-backend": "yes",
+            "Connection": "keep-alive, X-Hop-Temp",
+            "Keep-Alive": "timeout=5",
+            "Trailer": "X-Checksum",
+            "X-Hop-Temp": "drop-me",
+        },
+        chunks=[b"proxy-ok"],
+    )
+    client.app.state.http_client = fake_client
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/44772/healthz",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"proxy-ok"
+    assert response.headers.get("x-backend") == "yes"
+    assert response.headers.get("connection") is None
+    assert response.headers.get("keep-alive") is None
+    assert response.headers.get("trailer") is None
+    assert response.headers.get("x-hop-temp") is None
 
 
 def test_proxy_rejects_websocket_upgrade(
