@@ -118,3 +118,44 @@ func TestReplaceContentFailsUnknownFile(t *testing.T) {
 
 	require.Contains(t, []int{http.StatusNotFound, http.StatusInternalServerError}, rec.Code, "expected failure status")
 }
+
+func TestFormatContentDisposition(t *testing.T) {
+	tests := []struct {
+		name     string
+		filename string
+		want     string
+	}{
+		{
+			name:     "ASCII filename",
+			filename: "test.txt",
+			want:     "attachment; filename=\"test.txt\"",
+		},
+		{
+			name:     "Chinese filename",
+			filename: "测试文件.txt",
+			want:     "attachment; filename=\"%E6%B5%8B%E8%AF%95%E6%96%87%E4%BB%B6.txt\"; filename*=UTF-8''%E6%B5%8B%E8%AF%95%E6%96%87%E4%BB%B6.txt",
+		},
+		{
+			name:     "Japanese filename",
+			filename: "テスト.txt",
+			want:     "attachment; filename=\"%E3%83%86%E3%82%B9%E3%83%88.txt\"; filename*=UTF-8''%E3%83%86%E3%82%B9%E3%83%88.txt",
+		},
+		{
+			name:     "Special characters in filename",
+			filename: "file with spaces.txt",
+			want:     "attachment; filename=\"file with spaces.txt\"",
+		},
+		{
+			name:     "Mixed ASCII and non-ASCII",
+			filename: "report-报告.pdf",
+			want:     "attachment; filename=\"report-%E6%8A%A5%E5%91%8A.pdf\"; filename*=UTF-8''report-%E6%8A%A5%E5%91%8A.pdf",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatContentDisposition(tt.filename)
+			require.Equal(t, tt.want, got)
+		})
+	}
+}

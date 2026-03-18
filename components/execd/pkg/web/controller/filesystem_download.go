@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -55,7 +56,7 @@ func (c *FilesystemController) DownloadFile() {
 	}
 
 	c.ctx.Header("Content-Type", "application/octet-stream")
-	c.ctx.Header("Content-Disposition", "attachment; filename="+filepath.Base(filePath))
+	c.ctx.Header("Content-Disposition", formatContentDisposition(filepath.Base(filePath)))
 	c.ctx.Header("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
 
 	if rangeHeader := c.ctx.GetHeader("Range"); rangeHeader != "" {
@@ -80,4 +81,26 @@ func (c *FilesystemController) DownloadFile() {
 	}
 
 	http.ServeContent(c.ctx.Writer, c.ctx.Request, filepath.Base(filePath), fileInfo.ModTime(), file)
+}
+
+// formatContentDisposition formats the Content-Disposition header value with proper
+// encoding for non-ASCII filenames according to RFC 6266 and RFC 5987.
+func formatContentDisposition(filename string) string {
+	// Check if filename contains non-ASCII characters
+	needsEncoding := false
+	for _, r := range filename {
+		if r > 127 {
+			needsEncoding = true
+			break
+		}
+	}
+
+	if !needsEncoding {
+		return "attachment; filename=\"" + filename + "\""
+	}
+
+	// Use RFC 5987 encoding for non-ASCII filenames
+	// Format: attachment; filename="fallback"; filename*=UTF-8''encoded_name
+	encodedFilename := url.PathEscape(filename)
+	return "attachment; filename=\"" + encodedFilename + "\"; filename*=UTF-8''" + encodedFilename
 }
