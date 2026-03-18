@@ -164,7 +164,7 @@ def test_proxy_forwards_get_request_with_query_params(
     assert fake_client.built is not None
     assert fake_client.built["method"] == "GET"
     assert fake_client.built["url"] == "http://10.57.1.91:40109/files/search"
-    assert fake_client.built["params"] == "path=/workspace"
+    assert fake_client.built["params"] == "path=%2Fworkspace"
     assert fake_client.built["content"] is None
 
 
@@ -193,7 +193,8 @@ def test_proxy_forwards_delete_request_with_body(
     )
     client.app.state.http_client = fake_client
 
-    response = client.delete(
+    response = client.request(
+        "DELETE",
         "/v1/sandboxes/sbx-123/proxy/44772/resources",
         headers=auth_headers,
         content=b'{"id": "resource-123"}',
