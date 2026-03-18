@@ -39,10 +39,18 @@ class _FakeAsyncClient:
         self.raise_connect_error = False
         self.raise_generic_error = False
 
-    def build_request(self, method: str, url: str, headers: dict, content):
+    def build_request(
+        self,
+        method: str,
+        url: str,
+        headers: dict,
+        content,
+        params: str | None = None,
+    ):
         self.built = {
             "method": method,
             "url": url,
+            "params": params,
             "headers": headers,
             "content": content,
         }
@@ -103,7 +111,8 @@ def test_proxy_forwards_filtered_headers_and_query(
 
     assert fake_client.built is not None
     assert fake_client.built["method"] == "POST"
-    assert fake_client.built["url"] == "http://10.57.1.91:40109/api/run?q=search"
+    assert fake_client.built["url"] == "http://10.57.1.91:40109/api/run"
+    assert fake_client.built["params"] == "q=search"
     forwarded_headers = fake_client.built["headers"]
     lowered_headers = {k.lower(): v for k, v in forwarded_headers.items()}
     assert "host" not in lowered_headers
@@ -114,6 +123,49 @@ def test_proxy_forwards_filtered_headers_and_query(
     assert "cookie" not in lowered_headers
     assert "x-hop-temp" not in lowered_headers
     assert lowered_headers.get("x-trace") == "trace-1"
+
+
+def test_proxy_forwards_get_request_with_query_params(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    """Test that GET requests with query parameters are forwarded correctly.
+
+    This test verifies the fix for issue #484 where GET requests with query
+    parameters were failing with 400 MISSING_QUERY when using use_server_proxy.
+    The query string should be passed via httpx params, not embedded in URL.
+    """
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert sandbox_id == "sbx-123"
+            assert port == 44772
+            assert resolve_internal is True
+            return Endpoint(endpoint="10.57.1.91:40109")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(
+        status_code=200,
+        headers={"content-type": "application/json"},
+        chunks=[b'[{"name":"file.txt","size":100}]'],
+    )
+    client.app.state.http_client = fake_client
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/44772/files/search",
+        params={"path": "/workspace"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert fake_client.built is not None
+    assert fake_client.built["method"] == "GET"
+    assert fake_client.built["url"] == "http://10.57.1.91:40109/files/search"
+    assert fake_client.built["params"] == "path=/workspace"
+    assert fake_client.built["content"] is None
 
 
 def test_proxy_filters_response_hop_by_hop_headers(
