@@ -168,6 +168,43 @@ def test_proxy_forwards_get_request_with_query_params(
     assert fake_client.built["content"] is None
 
 
+def test_proxy_forwards_delete_request_with_body(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    """Test that DELETE requests with body payload are forwarded correctly.
+
+    This verifies that DELETE requests with JSON/body payload are not
+    incorrectly stripped when proxying.
+    """
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            return Endpoint(endpoint="10.57.1.91:40109")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(
+        status_code=200,
+        headers={"content-type": "application/json"},
+        chunks=[b'{"deleted":true}'],
+    )
+    client.app.state.http_client = fake_client
+
+    response = client.delete(
+        "/v1/sandboxes/sbx-123/proxy/44772/resources",
+        headers=auth_headers,
+        content=b'{"id": "resource-123"}',
+    )
+
+    assert response.status_code == 200
+    assert fake_client.built is not None
+    assert fake_client.built["method"] == "DELETE"
+    assert fake_client.built["content"] is not None
+
+
 def test_proxy_filters_response_hop_by_hop_headers(
     client: TestClient,
     auth_headers: dict,

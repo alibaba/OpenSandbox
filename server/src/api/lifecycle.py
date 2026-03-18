@@ -461,7 +461,7 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
             url=f"http://{target_host}/{full_path}",
             params=query_string if query_string else None,
             headers=headers,
-            content=request.stream() if request.method in ("POST", "PUT", "PATCH") else None,
+            content=request.stream() if request.method in ("POST", "PUT", "PATCH", "DELETE") else None,
         )
 
         resp = await client.send(req, stream=True)
