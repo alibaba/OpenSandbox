@@ -9,6 +9,7 @@ on:
     paths:
       - 'server/src/**'
       - 'components/execd/**'
+      - 'components/egress/**'
       - 'sdks/code-interpreter/**'
       - 'sdks/sandbox/**'
       - 'tests/**'
@@ -42,6 +43,9 @@ jobs:
           # Remove root-owned files from previous sandbox runs by mounting parent dir
           docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
 
+      - name: Build local egress image
+        run: docker build -t opensandbox/egress:local -f components/egress/Dockerfile .
+
       - name: Run tests
         run: |
           set -e
@@ -57,7 +61,7 @@ jobs:
           type = "docker"
           execd_image = "opensandbox/execd:local"
           [egress]
-          image = "opensandbox/egress:latest"
+          image = "opensandbox/egress:local"
           [docker]
           network_mode = "bridge"
           [storage]
@@ -118,6 +122,9 @@ jobs:
           docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
 
+      - name: Build local egress image
+        run: docker build -t opensandbox/egress:local -f components/egress/Dockerfile .
+
       - name: Run tests
         env:
           GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-user-home
@@ -136,7 +143,7 @@ jobs:
           type = "docker"
           execd_image = "opensandbox/execd:local"
           [egress]
-          image = "opensandbox/egress:latest"
+          image = "opensandbox/egress:local"
           [docker]
           network_mode = "bridge"
           [storage]
@@ -210,6 +217,9 @@ jobs:
           docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
 
+      - name: Build local egress image
+        run: docker build -t opensandbox/egress:local -f components/egress/Dockerfile .
+
       - name: Run tests
         run: |
           set -e
@@ -225,7 +235,7 @@ jobs:
           type = "docker"
           execd_image = "opensandbox/execd:local"
           [egress]
-          image = "opensandbox/egress:latest"
+          image = "opensandbox/egress:local"
           [docker]
           network_mode = "bridge"
           [storage]
@@ -289,6 +299,9 @@ jobs:
           docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
 
+      - name: Build local egress image
+        run: docker build -t opensandbox/egress:local -f components/egress/Dockerfile .
+
       - name: Run tests
         run: |
           set -e
@@ -303,7 +316,7 @@ jobs:
           type = "docker"
           execd_image = "opensandbox/execd:local"
           [egress]
-          image = "opensandbox/egress:latest"
+          image = "opensandbox/egress:local"
           [docker]
           network_mode = "bridge"
           [storage]
