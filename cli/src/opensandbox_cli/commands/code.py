@@ -30,7 +30,7 @@ from opensandbox_cli.utils import handle_errors
 @click.group("code", invoke_without_command=True)
 @click.pass_context
 def code_group(ctx: click.Context) -> None:
-    """Execute code in a sandbox (via Code Interpreter)."""
+    """💻 Execute code in a sandbox (via Code Interpreter)."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -82,10 +82,8 @@ def code_run(
         )
 
         if execution.error:
-            click.secho(
-                f"\nError: {execution.error.name}: {execution.error.value}",
-                fg="red",
-                err=True,
+            obj.output.error(
+                f"{execution.error.name}: {execution.error.value}"
             )
             sys.exit(1)
     finally:
@@ -115,7 +113,7 @@ def context_create(obj: ClientContext, sandbox_id: str, language: str) -> None:
     try:
         interpreter = CodeInterpreterSync.create(sandbox)
         ctx = interpreter.codes.create_context(language)
-        obj.output.print_dict(
+        obj.output.success_panel(
             {"context_id": ctx.id, "language": language},
             title="Context Created",
         )
@@ -155,7 +153,7 @@ def context_delete(obj: ClientContext, sandbox_id: str, context_id: str) -> None
     try:
         interpreter = CodeInterpreterSync.create(sandbox)
         interpreter.codes.delete_context(context_id)
-        click.echo(f"Deleted context: {context_id}")
+        obj.output.success(f"Deleted context: {context_id}")
     finally:
         sandbox.close()
 
@@ -173,7 +171,7 @@ def context_delete_all(obj: ClientContext, sandbox_id: str, language: str) -> No
     try:
         interpreter = CodeInterpreterSync.create(sandbox)
         interpreter.codes.delete_contexts(language)
-        click.echo(f"Deleted all {language} contexts")
+        obj.output.success(f"Deleted all {language} contexts")
     finally:
         sandbox.close()
 
@@ -190,6 +188,6 @@ def code_interrupt(obj: ClientContext, sandbox_id: str, execution_id: str) -> No
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
         sandbox.commands.interrupt(execution_id)
-        click.echo(f"Interrupted: {execution_id}")
+        obj.output.success(f"Interrupted: {execution_id}")
     finally:
         sandbox.close()

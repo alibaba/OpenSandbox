@@ -28,7 +28,7 @@ from opensandbox_cli.utils import handle_errors
 @click.group("file", invoke_without_command=True)
 @click.pass_context
 def file_group(ctx: click.Context) -> None:
-    """File operations on a sandbox."""
+    """📁 File operations on a sandbox."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -89,7 +89,7 @@ def file_write(
         if group is not None:
             kwargs["group"] = group
         sandbox.files.write_file(path, content, **kwargs)
-        click.echo(f"Written: {path}")
+        obj.output.success(f"Written: {path}")
     finally:
         sandbox.close()
 
@@ -110,7 +110,7 @@ def file_upload(
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
         sandbox.files.write_file(remote_path, data)
-        click.echo(f"Uploaded: {local_path} -> {remote_path}")
+        obj.output.success(f"Uploaded: {local_path} → {remote_path}")
     finally:
         sandbox.close()
 
@@ -131,7 +131,7 @@ def file_download(
     try:
         content = sandbox.files.read_bytes(remote_path)
         Path(local_path).write_bytes(content)
-        click.echo(f"Downloaded: {remote_path} -> {local_path}")
+        obj.output.success(f"Downloaded: {remote_path} → {local_path}")
     finally:
         sandbox.close()
 
@@ -149,7 +149,7 @@ def file_rm(obj: ClientContext, sandbox_id: str, paths: tuple[str, ...]) -> None
     try:
         sandbox.files.delete_files(list(paths))
         for p in paths:
-            click.echo(f"Deleted: {p}")
+            obj.output.success(f"Deleted: {p}")
     finally:
         sandbox.close()
 
@@ -171,7 +171,7 @@ def file_mv(
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
         sandbox.files.move_files([MoveEntry(source=source, destination=destination)])
-        click.echo(f"Moved: {source} -> {destination}")
+        obj.output.success(f"Moved: {source} → {destination}")
     finally:
         sandbox.close()
 
@@ -211,7 +211,7 @@ def file_mkdir(
             entries.append(WriteEntry(**kwargs))
         sandbox.files.create_directories(entries)
         for p in paths:
-            click.echo(f"Created: {p}")
+            obj.output.success(f"Created: {p}")
     finally:
         sandbox.close()
 
@@ -229,7 +229,7 @@ def file_rmdir(obj: ClientContext, sandbox_id: str, paths: tuple[str, ...]) -> N
     try:
         sandbox.files.delete_directories(list(paths))
         for p in paths:
-            click.echo(f"Removed: {p}")
+            obj.output.success(f"Removed: {p}")
     finally:
         sandbox.close()
 
@@ -251,11 +251,16 @@ def file_search(
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
         results = sandbox.files.search(SearchEntry(path=path, pattern=pattern))
+        if not results:
+            if obj.output.fmt in ("json", "yaml"):
+                obj.output.print_models([], columns=[])
+            else:
+                obj.output.info("No files found.")
+            return
         if obj.output.fmt in ("json", "yaml"):
             obj.output.print_models(results, columns=["path", "size", "mode", "owner", "modified_at"])
         else:
-            for entry in results:
-                click.echo(f"{entry.size:>10}  {entry.owner:<8}  {entry.path}")
+            obj.output.print_models(results, columns=["path", "size", "owner"], title="Search Results")
     finally:
         sandbox.close()
 
@@ -307,7 +312,7 @@ def file_chmod(
         sandbox.files.set_permissions(
             [SetPermissionEntry(path=path, mode=mode, owner=owner, group=group)]
         )
-        click.echo(f"Permissions set: {path}")
+        obj.output.success(f"Permissions set: {path}")
     finally:
         sandbox.close()
 
@@ -332,6 +337,6 @@ def file_replace(
         sandbox.files.replace_contents(
             [ContentReplaceEntry(path=path, old_content=old, new_content=new)]
         )
-        click.echo(f"Replaced in: {path}")
+        obj.output.success(f"Replaced in: {path}")
     finally:
         sandbox.close()

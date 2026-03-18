@@ -19,6 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import click
+from rich.console import Console
+from rich.text import Text
 
 from opensandbox_cli import __version__
 from opensandbox_cli.client import ClientContext
@@ -30,8 +32,32 @@ from opensandbox_cli.commands.sandbox import sandbox_group
 from opensandbox_cli.config import resolve_config
 from opensandbox_cli.output import OutputFormatter
 
+# ---------------------------------------------------------------------------
+# Banner
+# ---------------------------------------------------------------------------
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+BANNER = r"""[bold cyan]
+   ____                   _____                 _ _
+  / __ \                 / ____|               | | |
+ | |  | |_ __   ___ _ _| (___   __ _ _ __   __| | |__   _____  __
+ | |  | | '_ \ / _ \ '_ \___ \ / _` | '_ \ / _` | '_ \ / _ \ \/ /
+ | |__| | |_) |  __/ | | |___) | (_| | | | | (_| | |_) | (_) >  <
+  \____/| .__/ \___|_| |_|____/ \__,_|_| |_|\__,_|_.__/ \___/_/\_\
+        | |
+        |_|[/]  [dim]v{version}[/]
+"""
+
+
+class BannerGroup(click.Group):
+    """Custom Click group that shows a banner before help text."""
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        console = Console(stderr=False)
+        console.print(BANNER.format(version=__version__))
+        super().format_help(ctx, formatter)
+
+
+@click.group(cls=BannerGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.option("--api-key", envvar="OPEN_SANDBOX_API_KEY", default=None, help="API key for authentication.")
 @click.option("--domain", envvar="OPEN_SANDBOX_DOMAIN", default=None, help="API server domain (e.g. localhost:8080).")
 @click.option("--protocol", type=click.Choice(["http", "https"]), default=None, help="Protocol (http/https).")

@@ -56,6 +56,7 @@ def _build_mock_client_context(
     ctx.output = OutputFormatter(output_format, color=False)
     ctx.get_manager.return_value = manager or MagicMock()
     ctx.connect_sandbox.return_value = sandbox or MagicMock()
+    ctx.resolve_sandbox_id.side_effect = lambda prefix: prefix  # passthrough
     ctx.connection_config = MagicMock()
     ctx.close = MagicMock()
     return ctx
@@ -159,8 +160,8 @@ class TestSandboxKill:
         result = _invoke(runner, ["sandbox", "kill", "id1", "id2"], manager=mock_mgr)
         assert result.exit_code == 0
         assert mock_mgr.kill_sandbox.call_count == 2
-        assert "Killed: id1" in result.output
-        assert "Killed: id2" in result.output
+        assert "Sandbox terminated: id1" in result.output
+        assert "Sandbox terminated: id2" in result.output
 
 
 class TestSandboxPause:
@@ -169,7 +170,7 @@ class TestSandboxPause:
         result = _invoke(runner, ["sandbox", "pause", "sb-123"], manager=mock_mgr)
         assert result.exit_code == 0
         mock_mgr.pause_sandbox.assert_called_once_with("sb-123")
-        assert "Paused: sb-123" in result.output
+        assert "Sandbox paused: sb-123" in result.output
 
 
 class TestSandboxResume:
@@ -178,7 +179,7 @@ class TestSandboxResume:
         result = _invoke(runner, ["sandbox", "resume", "sb-123"], manager=mock_mgr)
         assert result.exit_code == 0
         mock_mgr.resume_sandbox.assert_called_once_with("sb-123")
-        assert "Resumed: sb-123" in result.output
+        assert "Sandbox resumed: sb-123" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -226,7 +227,7 @@ class TestFileMv:
             runner, ["file", "mv", "sb-1", "/tmp/old", "/tmp/new"], sandbox=mock_sb
         )
         assert result.exit_code == 0
-        assert "Moved: /tmp/old -> /tmp/new" in result.output
+        assert "Moved: /tmp/old" in result.output and "/tmp/new" in result.output
 
 
 class TestFileMkdir:
@@ -270,7 +271,7 @@ class TestCommandRun:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["execution_id"] == "exec-123"
-        assert data["background"] is True
+        assert data["mode"] == "background"
 
 
 class TestExecShortcut:

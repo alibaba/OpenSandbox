@@ -28,7 +28,7 @@ from opensandbox_cli.utils import handle_errors
 @click.group("config", invoke_without_command=True)
 @click.pass_context
 def config_group(ctx: click.Context) -> None:
-    """Manage CLI configuration."""
+    """⚙️  Manage CLI configuration."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -41,11 +41,22 @@ def config_group(ctx: click.Context) -> None:
 @handle_errors
 def config_init(force: bool, config_path: Path | None) -> None:
     """Create a default configuration file."""
+    # config_init doesn't have @click.pass_obj, get formatter from context
+    ctx = click.get_current_context(silent=True)
+    obj = getattr(ctx, "obj", None) if ctx else None
+    output = getattr(obj, "output", None) if obj else None
+
     try:
         path = init_config_file(config_path, force=force)
-        click.echo(f"Config file created: {path}")
+        if output:
+            output.success(f"Config file created: {path}")
+        else:
+            click.echo(f"Config file created: {path}")
     except FileExistsError as exc:
-        click.secho(str(exc), fg="yellow", err=True)
+        if output:
+            output.warning(str(exc))
+        else:
+            click.secho(str(exc), fg="yellow", err=True)
 
 
 # ---- show -----------------------------------------------------------------
@@ -123,4 +134,12 @@ def config_set(key: str, value: str, config_path: Path | None) -> None:
         return
 
     path.write_text(content)
-    click.echo(f"Set {key} = {value}")
+
+    # config_set doesn't have @click.pass_obj, get formatter from context
+    ctx = click.get_current_context(silent=True)
+    obj = getattr(ctx, "obj", None) if ctx else None
+    output = getattr(obj, "output", None) if obj else None
+    if output:
+        output.success(f"Set {key} = {value}")
+    else:
+        click.echo(f"Set {key} = {value}")

@@ -126,8 +126,19 @@ def handle_errors(fn):  # type: ignore[no-untyped-def]
             # Import here to avoid circular imports at module level
             from opensandbox.exceptions import SandboxException
 
-            if isinstance(exc, SandboxException):
-                click.secho(f"Error: {exc}", fg="red", err=True)
+            # Try to get the OutputFormatter from the Click context
+            ctx = click.get_current_context(silent=True)
+            obj = getattr(ctx, "obj", None) if ctx else None
+            output = getattr(obj, "output", None) if obj else None
+
+            if output and hasattr(output, "error_panel"):
+                if isinstance(exc, SandboxException):
+                    output.error_panel(str(exc), title="Sandbox Error")
+                else:
+                    output.error_panel(
+                        f"{str(exc)}\n\n[dim]Type: {type(exc).__qualname__}[/]",
+                        title=type(exc).__name__,
+                    )
             else:
                 click.secho(f"Error: {exc}", fg="red", err=True)
             sys.exit(1)

@@ -30,7 +30,7 @@ from opensandbox_cli.utils import DURATION, KEY_VALUE, handle_errors
 @click.group("sandbox", invoke_without_command=True)
 @click.pass_context
 def sandbox_group(ctx: click.Context) -> None:
-    """Manage sandbox lifecycle."""
+    """📦 Manage sandbox lifecycle."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -91,9 +91,10 @@ def sandbox_create(
         with open(network_policy_file) as f:
             kwargs["network_policy"] = NetworkPolicy(**json.load(f))
 
-    sandbox = SandboxSync.create(image, **kwargs)
-    obj.output.print_dict(
-        {"id": sandbox.id, "status": "created"},
+    with obj.output.spinner("Creating sandbox..."):
+        sandbox = SandboxSync.create(image, **kwargs)
+    obj.output.success_panel(
+        {"id": sandbox.id, "image": image, "status": "created"},
         title="Sandbox Created",
     )
 
@@ -122,9 +123,43 @@ def sandbox_list(
         page=page,
         page_size=page_size,
     )
-    result = mgr.list_sandbox_infos(filt)
-    obj.output.print_models(
-        result.sandbox_infos,
+    with obj.output.spinner("Fetching sandboxes..."):
+        result = mgr.list_sandbox_infos(filt)
+    if not result.sandbox_infos:
+        if obj.output.fmt in ("json", "yaml"):
+            obj.output.print_rows(
+                [], columns=["id", "status", "image", "created_at", "expires_at"],
+                title="Sandboxes",
+            )
+        else:
+            obj.output.info("No sandboxes found.")
+        return
+
+    raw_rows = [info.model_dump(mode="json") for info in result.sandbox_infos]
+
+    # For machine-readable formats, preserve the original structure
+    if obj.output.fmt in ("json", "yaml"):
+        obj.output.print_rows(
+            raw_rows,
+            columns=["id", "status", "image", "created_at", "expires_at"],
+            title="Sandboxes",
+        )
+        return
+
+    # Flatten nested status/image objects for clean table display
+    rows = []
+    for d in raw_rows:
+        flat = dict(d)
+        status_val = flat.get("status")
+        if isinstance(status_val, dict):
+            flat["status"] = status_val.get("state", str(status_val))
+        image_val = flat.get("image")
+        if isinstance(image_val, dict):
+            flat["image"] = image_val.get("image", str(image_val))
+        rows.append(flat)
+
+    obj.output.print_rows(
+        rows,
         columns=["id", "status", "image", "created_at", "expires_at"],
         title="Sandboxes",
     )
@@ -138,9 +173,28 @@ def sandbox_list(
 @handle_errors
 def sandbox_get(obj: ClientContext, sandbox_id: str) -> None:
     """Get sandbox details."""
+    sandbox_id = obj.resolve_sandbox_id(sandbox_id)
     mgr = obj.get_manager()
     info = mgr.get_sandbox_info(sandbox_id)
-    obj.output.print_model(info, title="Sandbox Info")
+    d = info.model_dump(mode="json")
+
+    # For machine-readable formats, preserve the original structure
+    if obj.output.fmt in ("json", "yaml"):
+        obj.output.print_dict(d, title="Sandbox Info")
+        return
+
+    # Flatten nested objects for clean table display
+    status_val = d.get("status")
+    if isinstance(status_val, dict):
+        d["status"] = status_val.get("state", str(status_val))
+        if status_val.get("reason"):
+            d["status_reason"] = status_val["reason"]
+        if status_val.get("message"):
+            d["status_message"] = status_val["message"]
+    image_val = d.get("image")
+    if isinstance(image_val, dict):
+        d["image"] = image_val.get("image", str(image_val))
+    obj.output.print_dict(d, title="Sandbox Info")
 
 
 # ---- kill -----------------------------------------------------------------
@@ -153,8 +207,10 @@ def sandbox_kill(obj: ClientContext, sandbox_ids: tuple[str, ...]) -> None:
     """Terminate one or more sandboxes."""
     mgr = obj.get_manager()
     for sid in sandbox_ids:
-        mgr.kill_sandbox(sid)
-        click.echo(f"Killed: {sid}")
+        resolved = obj.resolve_sandbox_id(sid)
+        with obj.output.spinner(f"Killing sandbox {resolved}..."):
+            mgr.kill_sandbox(resolved)
+        obj.output.success(f"Sandbox terminated: {resolved}")
 
 
 # ---- pause ----------------------------------------------------------------
@@ -165,9 +221,11 @@ def sandbox_kill(obj: ClientContext, sandbox_ids: tuple[str, ...]) -> None:
 @handle_errors
 def sandbox_pause(obj: ClientContext, sandbox_id: str) -> None:
     """Pause a running sandbox."""
+    sandbox_id = obj.resolve_sandbox_id(sandbox_id)
     mgr = obj.get_manager()
-    mgr.pause_sandbox(sandbox_id)
-    click.echo(f"Paused: {sandbox_id}")
+    with obj.output.spinner("Pausing sandbox..."):
+        mgr.pause_sandbox(sandbox_id)
+    obj.output.success(f"Sandbox paused: {sandbox_id}")
 
 
 # ---- resume ---------------------------------------------------------------
@@ -178,9 +236,11 @@ def sandbox_pause(obj: ClientContext, sandbox_id: str) -> None:
 @handle_errors
 def sandbox_resume(obj: ClientContext, sandbox_id: str) -> None:
     """Resume a paused sandbox."""
+    sandbox_id = obj.resolve_sandbox_id(sandbox_id)
     mgr = obj.get_manager()
-    mgr.resume_sandbox(sandbox_id)
-    click.echo(f"Resumed: {sandbox_id}")
+    with obj.output.spinner("Resuming sandbox..."):
+        mgr.resume_sandbox(sandbox_id)
+    obj.output.success(f"Sandbox resumed: {sandbox_id}")
 
 
 # ---- renew ----------------------------------------------------------------
@@ -192,9 +252,11 @@ def sandbox_resume(obj: ClientContext, sandbox_id: str) -> None:
 @handle_errors
 def sandbox_renew(obj: ClientContext, sandbox_id: str, timeout: timedelta) -> None:
     """Renew sandbox expiration."""
+    sandbox_id = obj.resolve_sandbox_id(sandbox_id)
     mgr = obj.get_manager()
-    resp = mgr.renew_sandbox(sandbox_id, timeout)
-    obj.output.print_dict(
+    with obj.output.spinner("Renewing sandbox..."):
+        resp = mgr.renew_sandbox(sandbox_id, timeout)
+    obj.output.success_panel(
         {"sandbox_id": sandbox_id, "expires_at": str(resp.expires_at)},
         title="Sandbox Renewed",
     )
@@ -228,10 +290,16 @@ def sandbox_health(obj: ClientContext, sandbox_id: str) -> None:
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
         healthy = sandbox.is_healthy()
-        obj.output.print_dict(
-            {"sandbox_id": sandbox_id, "healthy": healthy},
-            title="Health Check",
-        )
+        if obj.output.fmt == "table":
+            if healthy:
+                obj.output.success(f"Sandbox {sandbox_id} is healthy")
+            else:
+                obj.output.error(f"Sandbox {sandbox_id} is unhealthy")
+        else:
+            obj.output.print_dict(
+                {"sandbox_id": sandbox_id, "healthy": healthy},
+                title="Health Check",
+            )
     finally:
         sandbox.close()
 

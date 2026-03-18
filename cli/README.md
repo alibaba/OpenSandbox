@@ -22,6 +22,14 @@ uv add opensandbox-cli
 pipx install opensandbox-cli
 ```
 
+## Overview
+
+```bash
+osb --help
+```
+
+![CLI Help](assets/cli_help.png)
+
 ## Quick Start
 
 ### Step 0: Start the OpenSandbox Server
@@ -74,6 +82,23 @@ osb -o json sandbox list
 ![List Sandboxes](assets/cli_list_sandbox.png)
 
 ![List Sandboxes JSON](assets/cli_list_sandbox_json.png)
+
+### Short ID Matching
+
+Like Docker, you don't need to type the full sandbox ID — just enough characters to uniquely identify the target sandbox:
+
+```bash
+# Full ID
+osb sandbox get db027570-4f86-45f8-b1a8-c31a2dd90da8
+
+# Short prefix — as long as it's unambiguous
+osb sandbox get db02
+osb exec db02 -- echo "hello"
+```
+
+If the prefix matches multiple sandboxes, the CLI will report an error listing the matches so you can be more specific.
+
+![Short ID Matching](assets/cli_sandbox_search.png)
 
 ### Step 5: Execute Commands
 

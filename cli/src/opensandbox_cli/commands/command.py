@@ -32,7 +32,7 @@ from opensandbox_cli.utils import DURATION, handle_errors
 @click.group("command", invoke_without_command=True)
 @click.pass_context
 def command_group(ctx: click.Context) -> None:
-    """Execute commands in a sandbox."""
+    """⚡ Execute commands in a sandbox."""
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
 
@@ -60,33 +60,43 @@ def _run_command(
 
         if background:
             execution = sandbox.commands.run(cmd_str, opts=opts)
-            obj.output.print_dict(
+            obj.output.success_panel(
                 {
                     "execution_id": execution.id,
                     "sandbox_id": sandbox_id,
-                    "background": True,
+                    "mode": "background",
                 },
-                title="Background Command",
+                title="Background Command Started",
             )
             return
 
         # Foreground: stream stdout/stderr to terminal
+        last_text = ""
+
         def on_stdout(msg: OutputMessage) -> None:
+            nonlocal last_text
+            last_text = msg.text
             sys.stdout.write(msg.text)
             sys.stdout.flush()
 
         def on_stderr(msg: OutputMessage) -> None:
+            nonlocal last_text
+            last_text = msg.text
             sys.stderr.write(msg.text)
             sys.stderr.flush()
 
         handlers = ExecutionHandlersSync(on_stdout=on_stdout, on_stderr=on_stderr)
         execution = sandbox.commands.run(cmd_str, opts=opts, handlers=handlers)
 
+        # Ensure terminal prompt starts on a new line
+        if last_text and not last_text.endswith("\n"):
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
         if execution.error:
-            click.secho(
-                f"\nExecution error: {execution.error.name}: {execution.error.value}",
-                fg="red",
-                err=True,
+            obj.output.error_panel(
+                f"{execution.error.name}: {execution.error.value}",
+                title="Execution Error",
             )
             sys.exit(1)
     finally:
@@ -165,7 +175,7 @@ def command_interrupt(obj: ClientContext, sandbox_id: str, execution_id: str) ->
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
         sandbox.commands.interrupt(execution_id)
-        click.echo(f"Interrupted: {execution_id}")
+        obj.output.success(f"Interrupted: {execution_id}")
     finally:
         sandbox.close()
 
@@ -188,5 +198,5 @@ def exec_cmd(
     workdir: str | None,
     timeout: timedelta | None,
 ) -> None:
-    """Execute a command in a sandbox (shortcut for 'command run')."""
+    """🚀 Execute a command in a sandbox (shortcut for 'command run')."""
     _run_command(obj, sandbox_id, command, background, workdir, timeout)
