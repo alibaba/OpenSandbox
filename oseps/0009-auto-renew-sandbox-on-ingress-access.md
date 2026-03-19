@@ -3,7 +3,7 @@ title: Auto-Renew Sandbox on Ingress Access
 authors:
   - "@Pangjiping"
 creation-date: 2026-03-15
-last-updated: 2026-03-18
+last-updated: 2026-03-19
 status: implementing
 ---
 
@@ -210,12 +210,13 @@ Client --> Ingress/Gateway
 Redis usage:
 
 - Queue: **Redis List only** (required). Ingress pushes with LPUSH; server workers pop with BRPOP. No ack—best-effort delivery. Keeps the model simple and avoids Stream/consumer-group complexity.
-- Intent payload (one JSON string per list element) minimum fields:
-  - `sandbox_id`
-  - `observed_at`
-  - `source=ingress`
-  - optional `route_mode`, `request_id`
-- Distributed dedupe lock key:
+- Intent payload (one JSON string per list element):
+  - `sandbox_id` (string, required)
+  - `observed_at` (string, required; RFC3339 or RFC3339Nano)
+  - `port` (int, optional) — sandbox port accessed
+  - `request_uri` (string, optional) — path forwarded to the sandbox
+- Ingress may apply a **client-side throttle** (e.g. min interval per sandbox) so not every request produces an intent; queue key and optional list cap are configurable.
+- Distributed dedupe lock key (server side):
   - `opensandbox:renew:lock:{sandbox_id}` with short TTL
 
 Worker behavior:
@@ -242,25 +243,27 @@ Compared with other MQs (Kafka/NATS/Pulsar):
 
 ### Redis Data Model
 
-This OSEP uses a Redis List for renew-intent events plus a lock key for per-sandbox dedupe.
+This OSEP uses a Redis List for renew-intent events plus a lock key for per-sandbox dedupe (server side).
 
-Required keys:
+**Keys:**
 
-- **Intent list key**: `opensandbox:renew:intent` (Redis List)
-- **Per-sandbox lock key**: `opensandbox:renew:lock:{sandbox_id}`
+- **Intent list key**: configurable, default `opensandbox:renew:intent` (Redis List)
+- **Per-sandbox lock key**: `opensandbox:renew:lock:{sandbox_id}` (server consumer only)
 
-Intent payload (single string per list element, e.g. JSON):
+**Intent payload** (single JSON string per list element):
 
-- `sandbox_id` (string)
-- `observed_at` (unix ms or RFC3339 string)
-- `source` (`ingress`)
-- `request_id` (optional)
-- `route_mode` (optional)
+| Field          | Type   | Required | Description                          |
+|----------------|--------|----------|--------------------------------------|
+| `sandbox_id`   | string | yes      | Sandbox identifier                   |
+| `observed_at`  | string | yes      | Time of access (RFC3339 or RFC3339Nano) |
+| `port`         | int    | no       | Sandbox port accessed                |
+| `request_uri`  | string | no       | Path forwarded to the sandbox        |
 
 Producer (ingress):
 
-- `LPUSH opensandbox:renew:intent <serialized-payload>`
-- Optional: cap list length (e.g. `LTRIM opensandbox:renew:intent 0 max_len-1` after LPUSH) to avoid unbounded growth; overflow is best-effort drop.
+- Push with `LPUSH <queue_key> <serialized-json>`.
+- Optional: cap list length (`LTRIM <queue_key> 0 max_len-1` after LPUSH); overflow is best-effort drop.
+- Ingress may throttle: e.g. at most one intent per sandbox per N seconds (client-side) to limit queue growth.
 
 Consumer (server):
 
@@ -302,7 +305,7 @@ auto_renew_on_access.redis.consumer_concurrency = 8
 Configuration rules:
 
 - `server.auto_renew_on_access.enabled=false` means feature fully disabled.
-- Ingress path renewal requires Redis block enabled and reachable.
+- Ingress path renewal requires Redis block enabled and reachable on the server; the **ingress component** uses its own config (e.g. CLI flags: `--renew-intent-enabled`, `--renew-intent-redis-dsn`, `--renew-intent-queue-key`, `--renew-intent-queue-max-len`, `--renew-intent-min-interval`) to connect to Redis and publish intents. Queue key and default list name should match what the server consumer expects (e.g. `opensandbox:renew:intent`).
 - Server proxy path can run without Redis.
 - Feature is applied per sandbox only when `extensions["auto_renew_on_access"]="true"`.
 - Docker runtime direct mode remains unsupported regardless of this config.
@@ -354,7 +357,7 @@ Success criteria:
 ## Infrastructure Needed
 
 - Redis service for ingress gateway mode.
-- Optional ingress plugin or middleware capability to publish renew intents.
+- Ingress (or gateway) that publishes renew intents (e.g. OpenSandbox Ingress with `--renew-intent-enabled`, Redis DSN, optional queue key / list cap / client-side per-sandbox min-interval throttle).
 
 ## Upgrade & Migration Strategy
 
