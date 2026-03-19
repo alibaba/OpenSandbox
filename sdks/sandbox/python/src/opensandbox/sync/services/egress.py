@@ -30,5 +30,11 @@ class EgressSync(Protocol):
         ...
 
     def patch_rules(self, rules: list[NetworkRule]) -> None:
-        """Patch egress rules via the sidecar policy API."""
+        """Patch egress rules via the sidecar policy API with merge semantics.
+
+        Incoming rules take priority over existing rules with the same target.
+        Existing rules for other targets remain unchanged. Within one patch
+        payload, the first rule for a target wins. The current defaultAction is
+        preserved.
+        """
         ...

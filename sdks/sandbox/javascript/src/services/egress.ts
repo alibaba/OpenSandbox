@@ -16,5 +16,12 @@ import type { NetworkPolicy, NetworkRule } from "../models/sandboxes.js";
 
 export interface Egress {
   getPolicy(): Promise<NetworkPolicy>;
+  /**
+   * Patch egress rules with sidecar merge semantics.
+   *
+   * Incoming rules take priority over existing rules with the same target.
+   * Existing rules for other targets remain unchanged. Within one patch payload,
+   * the first rule for a target wins. The current defaultAction is preserved.
+   */
   patchRules(rules: NetworkRule[]): Promise<void>;
 }

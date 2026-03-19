@@ -258,6 +258,12 @@ const sandbox = await Sandbox.create({
 Runtime egress reads and patches go directly to the sandbox egress sidecar.
 The SDK first resolves the sandbox endpoint on port `18080`, then calls the sidecar `/policy` API.
 
+Patch uses merge semantics:
+- Incoming rules take priority over existing rules with the same `target`.
+- Existing rules for other targets remain unchanged.
+- Within a single patch payload, the first rule for a `target` wins.
+- The current `defaultAction` is preserved.
+
 ```ts
 const policy = await sandbox.getEgressPolicy();
 

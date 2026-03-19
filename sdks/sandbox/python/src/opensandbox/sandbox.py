@@ -233,7 +233,14 @@ class Sandbox:
 
     async def patch_egress_rules(self, rules: list[NetworkRule]) -> None:
         """
-        Overwrite egress rules for this sandbox.
+        Patch egress rules for this sandbox using sidecar merge semantics.
+
+        Rules in this patch payload take priority over existing rules with the
+        same target. Existing rules for other targets remain unchanged. Within a
+        single patch payload, the first rule for a target wins.
+
+        This operation does not replace the entire policy and does not change
+        the current defaultAction.
         """
         await self._egress_service.patch_rules(rules)
 

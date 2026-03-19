@@ -529,7 +529,11 @@ public sealed class Sandbox : IAsyncDisposable
     }
 
     /// <summary>
-    /// Overwrites egress rules for this sandbox.
+    /// Patches egress rules for this sandbox using sidecar merge semantics.
+    ///
+    /// Incoming rules take priority over existing rules with the same target.
+    /// Existing rules for other targets remain unchanged. Within one patch payload,
+    /// the first rule for a target wins. The current defaultAction is preserved.
     /// </summary>
     /// <param name="rules">Patch egress rules payload.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

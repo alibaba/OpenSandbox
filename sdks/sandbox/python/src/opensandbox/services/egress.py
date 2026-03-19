@@ -40,6 +40,12 @@ class Egress(Protocol):
         """
         Patch egress rules via the sidecar policy API.
 
+        Merge semantics:
+        - Incoming rules take priority over existing rules with the same target.
+        - Existing rules for other targets remain in place.
+        - Within one patch payload, the first rule for a target wins.
+        - The current defaultAction is preserved.
+
         Raises:
             SandboxException: if the operation fails
         """
