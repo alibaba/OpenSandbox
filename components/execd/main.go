@@ -32,13 +32,16 @@ import (
 
 // main initializes and starts the execd server.
 func main() {
-	clone3compat.MaybeApply()
+	clone3Compat := clone3compat.MaybeApply()
 
 	version.EchoVersion("OpenSandbox Execd")
 
 	flag.InitFlags()
 
 	log.Init(flag.ServerLogLevel)
+	if clone3Compat {
+		log.Warn("execd running with clone3 compatibility (seccomp returns ENOSYS for clone3)")
+	}
 
 	controller.InitCodeRunner()
 	engine := web.NewRouter(flag.ServerAccessToken)

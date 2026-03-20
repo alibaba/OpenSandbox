@@ -17,4 +17,4 @@
 package clone3compat
 
 // MaybeApply is a no-op on non-Linux platforms.
-func MaybeApply() {}
+func MaybeApply() bool { return false }

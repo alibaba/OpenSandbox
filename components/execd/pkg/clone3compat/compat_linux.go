@@ -34,19 +34,22 @@ const (
 
 // MaybeApply optionally installs a seccomp rule so clone3 returns ENOSYS, matching the
 // behavior of https://github.com/AkihiroSuda/clone3-workaround .
-func MaybeApply() {
+// It returns true if this process is running with that compatibility active (including
+// a post-reexec process that inherited the seccomp filter).
+func MaybeApply() bool {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv(envCompat)))
 	switch mode {
 	case "", "0", "false", "off", "no":
-		return
+		return false
 	case "1", "true", "yes", "on":
 		if err := loadClone3EnosysFilter(); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "execd: %v\n", err)
 			os.Exit(1)
 		}
+		return true
 	case "reexec":
 		if os.Getenv(envApplied) == "1" {
-			return
+			return true
 		}
 		if err := loadClone3EnosysFilter(); err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "execd: %v\n", err)
@@ -66,10 +69,13 @@ func MaybeApply() {
 			_, _ = fmt.Fprintf(os.Stderr, "execd: clone3 compat: exec: %v\n", err)
 			os.Exit(1)
 		}
+		panic("unreachable") // Exec replaces this process.
 	default:
 		_, _ = fmt.Fprintf(os.Stderr, "execd: invalid %s=%q (use 1, true, or reexec)\n", envCompat, os.Getenv(envCompat))
 		os.Exit(1)
 	}
+
+	return false
 }
 
 func loadClone3EnosysFilter() error {
