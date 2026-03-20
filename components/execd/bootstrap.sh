@@ -30,6 +30,9 @@ if ! touch "$EXECD_ENVS" 2>/dev/null; then
 fi
 export EXECD_ENVS
 
+# Fix for Docker 18.09 / old glibc compatibility (Issue #508)
+export LD_ASSUME_KERNEL=2.33.0
+
 echo "starting OpenSandbox Execd daemon at $EXECD."
 $EXECD &
 
