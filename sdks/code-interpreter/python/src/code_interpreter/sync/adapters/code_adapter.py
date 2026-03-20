@@ -81,7 +81,9 @@ class CodesAdapterSync(CodesSync):
     RUN_CODE_PATH = "/code"
     CREATE_CONTEXT_PATH = "/code/context"
 
-    def __init__(self, execd_endpoint: SandboxEndpoint, connection_config: ConnectionConfigSync) -> None:
+    def __init__(
+        self, execd_endpoint: SandboxEndpoint, connection_config: ConnectionConfigSync
+    ) -> None:
         """
         Initialize the code service adapter (sync).
 
@@ -96,7 +98,11 @@ class CodesAdapterSync(CodesSync):
         base_url = f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}"
         timeout_seconds = self.connection_config.request_timeout.total_seconds()
         timeout = httpx.Timeout(timeout_seconds)
-        headers = {"User-Agent": self.connection_config.user_agent, **self.connection_config.headers}
+        headers = {
+            "User-Agent": self.connection_config.user_agent,
+            **self.connection_config.headers,
+            **(self.execd_endpoint.headers or {}),
+        }
 
         self._client = Client(base_url=base_url, timeout=timeout)
         self._httpx_client = httpx.Client(
@@ -107,16 +113,24 @@ class CodesAdapterSync(CodesSync):
         )
         self._client.set_httpx_client(self._httpx_client)
 
-        sse_headers = {**headers, "Accept": "text/event-stream", "Cache-Control": "no-cache"}
+        sse_headers = {
+            **headers,
+            "Accept": "text/event-stream",
+            "Cache-Control": "no-cache",
+        }
         self._sse_client = httpx.Client(
             headers=sse_headers,
-            timeout=httpx.Timeout(connect=timeout_seconds, read=None, write=timeout_seconds, pool=None),
+            timeout=httpx.Timeout(
+                connect=timeout_seconds, read=None, write=timeout_seconds, pool=None
+            ),
             transport=self.connection_config.transport,
         )
 
     def _get_execd_url(self, path: str) -> str:
         """Build URL for execd endpoint."""
-        return f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}{path}"
+        return (
+            f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}{path}"
+        )
 
     def create_context(self, language: str) -> CodeContextSync:
         """
@@ -243,7 +257,11 @@ class CodesAdapterSync(CodesSync):
             raise InvalidArgumentException("Code cannot be empty")
 
         try:
-            if context is not None and language is not None and context.language != language:
+            if (
+                context is not None
+                and language is not None
+                and context.language != language
+            ):
                 raise InvalidArgumentException(
                     f"language '{language}' must match context.language '{context.language}'"
                 )
@@ -251,7 +269,9 @@ class CodesAdapterSync(CodesSync):
             if context is None:
                 # Default context: language default context (server-side behavior).
                 # When context.id is omitted, execd will create/reuse a default session per language.
-                context = CodeContextSync(language=language or SupportedLanguageSync.PYTHON)
+                context = CodeContextSync(
+                    language=language or SupportedLanguageSync.PYTHON
+                )
             api_request = {
                 "code": code,
                 "context": {
@@ -305,7 +325,9 @@ class CodesAdapterSync(CodesSync):
         try:
             from opensandbox.api.execd.api.code_interpreting import interrupt_code
 
-            response_obj = interrupt_code.sync_detailed(client=self._client, id=execution_id)
+            response_obj = interrupt_code.sync_detailed(
+                client=self._client, id=execution_id
+            )
             handle_api_error(response_obj, "Interrupt code execution")
         except Exception as e:
             logger.error("Failed to interrupt code execution", exc_info=e)
