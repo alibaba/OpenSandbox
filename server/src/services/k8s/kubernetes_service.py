@@ -544,39 +544,109 @@ class KubernetesSandboxService(SandboxService):
     
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
-        Pause sandbox (not supported in Kubernetes).
-        
+        Pause a running sandbox by scaling its pod to zero.
+        The workspace PVC is preserved so data persists.
+
         Args:
             sandbox_id: Unique sandbox identifier
-            
+
         Raises:
-            HTTPException: Always raises 501 Not Implemented
+            HTTPException: If sandbox not found, not running, or pause fails
         """
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "code": SandboxErrorCodes.API_NOT_SUPPORTED,
-                "message": "Pause operation is not supported in Kubernetes runtime",
-            },
-        )
-    
+        try:
+            workload = self.workload_provider.get_workload(
+                sandbox_id=sandbox_id,
+                namespace=self.namespace,
+            )
+            if not workload:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={
+                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
+                        "message": f"Sandbox '{sandbox_id}' not found",
+                    },
+                )
+
+            status_info = self.workload_provider.get_status(workload)
+            if status_info["state"] != "Running":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": SandboxErrorCodes.K8S_INVALID_STATE,
+                        "message": (
+                            f"Cannot pause sandbox in state '{status_info['state']}'. "
+                            "Must be Running."
+                        ),
+                    },
+                )
+
+            self.workload_provider.pause_workload(sandbox_id, self.namespace)
+            logger.info(f"Paused sandbox: {sandbox_id}")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error pausing sandbox {sandbox_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.K8S_API_ERROR,
+                    "message": f"Failed to pause sandbox: {str(e)}",
+                },
+            ) from e
+
     def resume_sandbox(self, sandbox_id: str) -> None:
         """
-        Resume sandbox (not supported in Kubernetes).
-        
+        Resume a paused sandbox by scaling its pod back to one.
+        The workspace PVC is remounted automatically.
+
         Args:
             sandbox_id: Unique sandbox identifier
-            
+
         Raises:
-            HTTPException: Always raises 501 Not Implemented
+            HTTPException: If sandbox not found, not paused, or resume fails
         """
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "code": SandboxErrorCodes.API_NOT_SUPPORTED,
-                "message": "Resume operation is not supported in Kubernetes runtime",
-            },
-        )
+        try:
+            workload = self.workload_provider.get_workload(
+                sandbox_id=sandbox_id,
+                namespace=self.namespace,
+            )
+            if not workload:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={
+                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
+                        "message": f"Sandbox '{sandbox_id}' not found",
+                    },
+                )
+
+            status_info = self.workload_provider.get_status(workload)
+            if status_info["state"] != "Paused":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": SandboxErrorCodes.K8S_INVALID_STATE,
+                        "message": (
+                            f"Cannot resume sandbox in state '{status_info['state']}'. "
+                            "Must be Paused."
+                        ),
+                    },
+                )
+
+            self.workload_provider.resume_workload(sandbox_id, self.namespace)
+            logger.info(f"Resumed sandbox: {sandbox_id}")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error resuming sandbox {sandbox_id}: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.K8S_API_ERROR,
+                    "message": f"Failed to resume sandbox: {str(e)}",
+                },
+            ) from e
     
     def renew_expiration(
         self,
@@ -714,6 +784,85 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to get endpoint: {str(e)}",
                 },
             ) from e
+
+    def get_sandbox_pod_name(self, sandbox_id: str) -> str:
+        """
+        Resolve a sandbox ID to its running pod name.
+
+        Raises:
+            HTTPException: 404 if sandbox or pod not found, 409 if paused
+        """
+        workload = self.workload_provider.get_workload(
+            sandbox_id=sandbox_id,
+            namespace=self.namespace,
+        )
+        if not workload:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
+                    "message": f"Sandbox '{sandbox_id}' not found",
+                },
+            )
+
+        status_info = self.workload_provider.get_status(workload)
+        if status_info["state"] == "Paused":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": SandboxErrorCodes.K8S_INVALID_STATE,
+                    "message": "Sandbox is paused. Resume it first.",
+                },
+            )
+
+        pod_name = self.k8s_client.get_pod_name_for_sandbox(
+            namespace=self.namespace,
+            sandbox_id=sandbox_id,
+        )
+        if not pod_name:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": SandboxErrorCodes.K8S_POD_IP_NOT_AVAILABLE,
+                    "message": "No running pod found for this sandbox.",
+                },
+            )
+        return pod_name
+
+    def get_sandbox_logs(
+        self,
+        sandbox_id: str,
+        tail_lines: int = 100,
+        follow: bool = False,
+    ) -> Any:
+        """
+        Get logs from a sandbox pod.
+
+        Returns:
+            str when follow=False, streaming response when follow=True
+        """
+        pod_name = self.get_sandbox_pod_name(sandbox_id)
+        return self.k8s_client.read_pod_log(
+            namespace=self.namespace,
+            pod_name=pod_name,
+            container="sandbox",
+            tail_lines=tail_lines,
+            follow=follow,
+        )
+
+    def exec_sandbox_terminal(self, sandbox_id: str, command: str = "/bin/bash") -> Any:
+        """
+        Open an interactive exec stream to a sandbox pod.
+
+        Returns a WSClient for bidirectional communication.
+        """
+        pod_name = self.get_sandbox_pod_name(sandbox_id)
+        return self.k8s_client.exec_interactive(
+            namespace=self.namespace,
+            pod_name=pod_name,
+            container="sandbox",
+            command=[command],
+        )
 
     def _attach_egress_auth_headers(self, endpoint: Endpoint, workload: Any) -> None:
         token = self._get_egress_auth_token(workload)

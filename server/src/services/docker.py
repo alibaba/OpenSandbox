@@ -1785,6 +1785,14 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         self._attach_egress_auth_headers(endpoint, labels)
         return endpoint
 
+    def get_sandbox_logs(self, sandbox_id: str, tail_lines: int = 100, follow: bool = False):
+        """Get logs from a Docker sandbox container."""
+        raise NotImplementedError("Logs are not yet implemented for Docker runtime")
+
+    def exec_sandbox_terminal(self, sandbox_id: str, command: str = "/bin/bash"):
+        """Open terminal to a Docker sandbox container."""
+        raise NotImplementedError("Terminal is not yet implemented for Docker runtime")
+
     def _attach_egress_auth_headers(
         self,
         endpoint: Endpoint,

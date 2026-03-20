@@ -176,6 +176,28 @@ class WorkloadProvider(ABC):
         """
         pass
 
+    @abstractmethod
+    def pause_workload(self, sandbox_id: str, namespace: str) -> None:
+        """
+        Pause (scale down) a workload, preserving persistent volumes.
+
+        Args:
+            sandbox_id: Unique sandbox identifier
+            namespace: Kubernetes namespace
+        """
+        pass
+
+    @abstractmethod
+    def resume_workload(self, sandbox_id: str, namespace: str) -> None:
+        """
+        Resume (scale up) a previously paused workload.
+
+        Args:
+            sandbox_id: Unique sandbox identifier
+            namespace: Kubernetes namespace
+        """
+        pass
+
     def supports_image_auth(self) -> bool:
         """
         Whether this provider supports per-request image pull authentication.
