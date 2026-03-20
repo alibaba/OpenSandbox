@@ -58,7 +58,6 @@ python_functions = ["test_*"]
 addopts = [
     "-v",
     "-s",
-    "-x",
     "--tb=short",
     "--strict-markers",
     "--asyncio-mode=auto",

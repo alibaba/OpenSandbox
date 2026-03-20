@@ -336,7 +336,10 @@ class TestCodeInterpreterE2ESync:
 
         info = code_interpreter.sandbox.get_info()
         assert str(code_interpreter.id) == str(info.id)
-        assert info.status.state == "Running"
+        # FIXME: upstream Kubernetes BatchSandbox lifecycle may still report
+        # "Allocated" after execd health checks already pass. This E2E focuses
+        # on end-to-end usability, so tolerate that transient state here.
+        assert info.status.state in {"Running", "Allocated"}
 
         endpoint = code_interpreter.sandbox.get_endpoint(DEFAULT_EXECD_PORT)
         assert endpoint is not None
