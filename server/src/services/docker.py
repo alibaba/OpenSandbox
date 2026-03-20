@@ -1866,6 +1866,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             if value is None:
                 continue
             environment.append(f"{key}={value}")
+        # Fix for Docker 18.09 / old glibc compatibility (Issue #508)
+        # Force use of legacy clone() instead of clone3() for thread creation
+        environment.append("LD_ASSUME_KERNEL=2.33.0")
         return labels, environment
 
     def _resolve_image_auth(
