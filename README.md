@@ -25,6 +25,9 @@
   <a href="https://badge.fury.io/js/@alibaba-group%2Fopensandbox">
     <img src="https://badge.fury.io/js/@alibaba-group%2Fopensandbox.svg" alt="npm version" />
   </a>
+  <a href="https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--opensandbox">
+    <img src="https://img.shields.io/badge/CNCF-Landscape-0C66E4" alt="CNCF Landscape" />
+  </a>
   <a href="https://qr.dingtalk.com/action/joingroup?code=v1,k1,A4Bgl5q1I1eNU/r33D18YFNrMY108aFF38V+r19RJOM=&_dt_no_comment=1&origin=11">
     <img src="https://img.shields.io/badge/DingTalk-Join-0089FF?logo=dingtalk&logoColor=white" alt="DingTalk" />
   </a>
@@ -39,6 +42,8 @@
 [Documentation](https://open-sandbox.ai/) | [中文文档](https://open-sandbox.ai/zh/)
 
 OpenSandbox is a **general-purpose sandbox platform** for AI applications, offering multi-language SDKs, unified sandbox APIs, and Docker/Kubernetes runtimes for scenarios like Coding Agents, GUI Agents, Agent Evaluation, AI Code Execution, and RL Training.
+
+OpenSandbox is now listed in the [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--opensandbox).
 
 ## Features
 

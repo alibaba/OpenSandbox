@@ -19,6 +19,9 @@
   <a href="https://badge.fury.io/js/@alibaba-group%2Fopensandbox">
     <img src="https://badge.fury.io/js/@alibaba-group%2Fopensandbox.svg" alt="npm version" />
   </a>
+  <a href="https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--opensandbox">
+    <img src="https://img.shields.io/badge/CNCF-Landscape-0C66E4" alt="CNCF Landscape" />
+  </a>
   <a href="https://qr.dingtalk.com/action/joingroup?code=v1,k1,A4Bgl5q1I1eNU/r33D18YFNrMY108aFF38V+r19RJOM=&_dt_no_comment=1&origin=11">
     <img src="https://img.shields.io/badge/DingTalk-Join-0089FF?logo=dingtalk&logoColor=white" alt="DingTalk" />
   </a>
@@ -33,6 +36,8 @@
 中文 | [English](../README.md)
 
 OpenSandbox 是一个面向 AI 应用场景设计的「通用沙箱平台」，为LLM相关的能力（命令执行、文件操作、代码执行、浏览器操作、Agent 运行等）提供 **多语言 SDK、沙箱接口协议和沙箱运行时**。
+
+OpenSandbox 已进入 [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--opensandbox)。
 
 ## 核心特性
 
