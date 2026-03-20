@@ -474,7 +474,7 @@ class DockerConfig(BaseModel):
         ),
     )
     pids_limit: Optional[int] = Field(
-        default=512,
+        default=4096,
         ge=1,
         description="Maximum number of processes allowed per sandbox container. Set to null to disable the limit.",
     )
