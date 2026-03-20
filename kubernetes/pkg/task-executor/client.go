@@ -145,3 +145,54 @@ func (c *Client) Get(ctx context.Context) (*Task, error) {
 	// No tasks
 	return nil, nil
 }
+
+// Reset calls the reset API on the task-executor to prepare the pod for reuse.
+// Reset is only supported in sidecar mode.
+// This method is idempotent - if a reset is already in progress, it returns the current status.
+func (c *Client) Reset(ctx context.Context, req *ResetRequest) (*ResetResponse, error) {
+	if c == nil {
+		return nil, fmt.Errorf("client is nil")
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal reset request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/reset", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("network error: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("server error: status=%d, body=%s", resp.StatusCode, string(body))
+	}
+
+	var resetResp ResetResponse
+	if err := json.NewDecoder(resp.Body).Decode(&resetResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &resetResp, nil
+}
+
+// NewClientWithTimeout creates a new client with a custom timeout.
+func NewClientWithTimeout(baseURL string, timeout time.Duration) *Client {
+	if baseURL == "" {
+		klog.Warning("baseURL is empty, client may not work properly")
+	}
+	return &Client{
+		baseURL: baseURL,
+		httpClient: &http.Client{
+			Timeout: timeout,
+		},
+	}
+}

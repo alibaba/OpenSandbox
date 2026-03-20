@@ -27,6 +27,10 @@ spec:
       jsonPath: .status.available
       name: AVAILABLE
       type: integer
+    - description: The number of pods being reset in pool.
+      jsonPath: .status.resetting
+      name: RESETTING
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -84,6 +88,46 @@ spec:
                 - poolMax
                 - poolMin
                 type: object
+              podRecyclePolicy:
+                default: Delete
+                description: |-
+                  PodRecyclePolicy specifies how to handle allocated Pods when a pooled BatchSandbox is deleted.
+                  - Delete: (default) Delete the allocated Pod directly.
+                  - Reuse: Reset the Pod before returning it to the pool; if reset fails, delete it.
+                  Note: Reuse policy requires task-executor image to be configured in controller.
+                  If not configured, pods will be deleted with a warning log.
+                enum:
+                - Delete
+                - Reuse
+                type: string
+              resetSpec:
+                description: |-
+                  ResetSpec specifies the reset configuration when PodRecyclePolicy is Reuse.
+                  Ignored when PodRecyclePolicy is Delete.
+                properties:
+                  cleanDirectories:
+                    description: |-
+                      CleanDirectories specifies directories to clean during reset.
+                      Supports glob patterns like "/tmp/*", "/var/cache/**".
+                      Default: ["/tmp"]
+                    items:
+                      type: string
+                    type: array
+                  mainContainerName:
+                    description: |-
+                      MainContainerName specifies which container is the main container for reset purposes.
+                      The main container will be restarted during reset.
+                      If not specified, the first container in the pod template is used.
+                    type: string
+                  timeoutSeconds:
+                    default: 60
+                    description: TimeoutSeconds specifies the timeout for reset operation
+                      in seconds.
+                    format: int64
+                    maximum: 600
+                    minimum: 10
+                    type: integer
+                type: object
               template:
                 description: Pod Template used to create pre-warmed nodes in the pool.
                 x-kubernetes-preserve-unknown-fields: true
@@ -108,6 +152,10 @@ spec:
                   ObservedGeneration is the most recent generation observed for this BatchSandbox. It corresponds to the
                   BatchSandbox's generation, which is updated on mutation by the API Server.
                 format: int64
+                type: integer
+              resetting:
+                description: Resetting is the number of Pods currently being reset.
+                format: int32
                 type: integer
               revision:
                 description: Revision is the latest version of pool

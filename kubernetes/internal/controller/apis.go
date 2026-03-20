@@ -32,6 +32,29 @@ const (
 	AnnoPoolAllocGenerationKey = "pool.opensandbox.io/alloc-generation"
 
 	FinalizerTaskCleanup = "batch-sandbox.sandbox.opensandbox.io/task-cleanup"
+
+	// Pod recycle related constants
+	// LabelPodRecycleState indicates the current recycle state of a pooled Pod
+	// Possible values: "", "Resetting", "ResetSucceeded", "ResetFailed"
+	LabelPodRecycleState = "pool.opensandbox.io/recycle-state"
+
+	// LabelPodReuseEnabled marks a Pod as supporting reuse/recycle
+	LabelPodReuseEnabled = "pool.opensandbox.io/reuse-enabled"
+
+	// FinalizerPodDisposal is used to handle pod disposal before BatchSandbox deletion
+	FinalizerPodDisposal = "batch-sandbox.sandbox.opensandbox.io/pod-disposal"
+)
+
+// Pod recycle state constants
+const (
+	// PodRecycleStateEmpty means the pod is in normal state (not being recycled)
+	PodRecycleStateEmpty = ""
+	// PodRecycleStateResetting means the pod is being reset
+	PodRecycleStateResetting = "Resetting"
+	// PodRecycleStateResetSucceeded means reset completed successfully
+	PodRecycleStateResetSucceeded = "ResetSucceeded"
+	// PodRecycleStateResetFailed means reset failed
+	PodRecycleStateResetFailed = "ResetFailed"
 )
 
 // AnnotationSandboxEndpoints Use the exported constant from pkg/utils

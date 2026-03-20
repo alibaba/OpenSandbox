@@ -53,3 +53,8 @@ func (e *containerExecutor) Inspect(ctx context.Context, task *types.Task) (*typ
 func (e *containerExecutor) Stop(ctx context.Context, task *types.Task) error {
 	return errors.New("container mode is not implemented yet - use process mode instead")
 }
+
+// RestartMainContainer is not implemented for container mode yet.
+func (e *containerExecutor) RestartMainContainer(ctx context.Context, mainContainerName string) error {
+	return errors.New("container mode is not implemented yet - use process mode instead")
+}

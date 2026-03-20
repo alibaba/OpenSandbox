@@ -73,6 +73,10 @@ func main() {
 	var logMaxAge int
 	var logCompress bool
 
+	// Task executor image for pod reset support
+	var taskExecutorImage string
+	var taskExecutorResources string
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -98,6 +102,12 @@ func main() {
 	flag.IntVar(&logMaxBackups, "log-max-backups", 10, "Maximum number of old log files to retain")
 	flag.IntVar(&logMaxAge, "log-max-age", 30, "Maximum number of days to retain old log files")
 	flag.BoolVar(&logCompress, "log-compress", true, "Compress determines if the rotated log files should be compressed using gzip")
+
+	// Task executor image flag
+	flag.StringVar(&taskExecutorImage, "task-executor-image", "",
+		"Task executor image for pod reset support. If not set, Reuse policy will be disabled.")
+	flag.StringVar(&taskExecutorResources, "task-executor-resources", "200m,128Mi",
+		"Task executor sidecar resources in format 'cpu,memory'. Example: '200m,128Mi'. Both request and limit will be set to the same value.")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
@@ -245,10 +255,12 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.PoolReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("pool-controller"),
-		Allocator: controller.NewDefaultAllocator(mgr.GetClient()),
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		Recorder:              mgr.GetEventRecorderFor("pool-controller"),
+		Allocator:             controller.NewDefaultAllocator(mgr.GetClient()),
+		TaskExecutorImage:     taskExecutorImage,
+		TaskExecutorResources: taskExecutorResources,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pool")
 		os.Exit(1)

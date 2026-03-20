@@ -97,3 +97,62 @@ type Terminated struct {
 	// +optional
 	FinishedAt metav1.Time `json:"finishedAt,omitempty"`
 }
+
+// ResetRequest defines the reset request for pod recycling.
+// Reset is only supported in sidecar mode, where task-executor runs as a sidecar
+// and uses nsenter to operate on the main container's namespace.
+type ResetRequest struct {
+	// TimeoutSeconds specifies the timeout for reset operation in seconds.
+	// +optional
+	TimeoutSeconds int64 `json:"timeoutSeconds,omitempty"`
+	// CleanDirectories specifies directories to clean during reset.
+	// Supports glob patterns like "/tmp/*", "/var/cache/**".
+	// +optional
+	CleanDirectories []string `json:"cleanDirectories,omitempty"`
+	// MainContainerName specifies the name of the main container to restart.
+	// If not specified, the default main container name from config will be used.
+	// +optional
+	MainContainerName string `json:"mainContainerName,omitempty"`
+}
+
+// ResetResponse defines the response for reset operation.
+type ResetResponse struct {
+	// Status indicates the result of reset operation.
+	Status ResetStatus `json:"status"`
+	// Message provides additional information about the reset result.
+	Message string `json:"message"`
+	// Details provides detailed information about the reset operation.
+	// +optional
+	Details *ResetDetails `json:"details,omitempty"`
+}
+
+// ResetStatus defines the status of reset operation.
+type ResetStatus string
+
+const (
+	// ResetStatusNone indicates no reset has been initiated yet.
+	// This is the initial state after task-executor starts.
+	ResetStatusNone ResetStatus = "None"
+	// ResetStatusSuccess indicates reset completed successfully.
+	ResetStatusSuccess ResetStatus = "Success"
+	// ResetStatusFailed indicates reset failed.
+	ResetStatusFailed ResetStatus = "Failed"
+	// ResetStatusTimeout indicates reset operation timed out.
+	ResetStatusTimeout ResetStatus = "Timeout"
+	// ResetStatusInProgress indicates reset operation is in progress.
+	// This is returned when Reset is called while a reset is already ongoing.
+	ResetStatusInProgress ResetStatus = "InProgress"
+	// ResetStatusNotSupported indicates reset is not supported in current mode.
+	// Reset is only supported in sidecar mode.
+	ResetStatusNotSupported ResetStatus = "NotSupported"
+)
+
+// ResetDetails provides detailed information about the reset operation.
+type ResetDetails struct {
+	// TasksStopped is the number of tasks that were stopped.
+	TasksStopped int `json:"tasksStopped"`
+	// DirectoriesCleaned is the list of directories that were cleaned.
+	DirectoriesCleaned []string `json:"directoriesCleaned"`
+	// MainContainerRestarted indicates whether the main container was restarted.
+	MainContainerRestarted bool `json:"mainContainerRestarted"`
+}

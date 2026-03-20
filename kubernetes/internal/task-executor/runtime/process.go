@@ -451,3 +451,59 @@ func getProcEnviron(pid int) ([]string, error) {
 	}
 	return envs, nil
 }
+
+// RestartMainContainer restarts the main container by sending SIGTERM
+// This is a public method that can be called directly for reset operations.
+func (e *processExecutor) RestartMainContainer(ctx context.Context, mainContainerName string) error {
+	return e.restartMainContainer(ctx, mainContainerName)
+}
+
+// restartMainContainer restarts the main container by sending SIGTERM first,
+// then SIGKILL if the process doesn't exit gracefully.
+func (e *processExecutor) restartMainContainer(ctx context.Context, mainContainerName string) error {
+	// Find the main container PID by environment variable
+	mainPID, err := e.findPidByEnvVar("SANDBOX_MAIN_CONTAINER", mainContainerName)
+	if err != nil {
+		return fmt.Errorf("failed to find main container: %w", err)
+	}
+
+	klog.InfoS("Found main container for restart", "pid", mainPID, "container", mainContainerName)
+
+	// Step 1: Send SIGTERM for graceful shutdown
+	if err := syscall.Kill(mainPID, syscall.SIGTERM); err != nil {
+		return fmt.Errorf("failed to send SIGTERM to main container: %w", err)
+	}
+
+	klog.InfoS("Sent SIGTERM to main container", "pid", mainPID)
+
+	// Step 2: Wait for process to exit gracefully (container runtime will restart it based on restartPolicy)
+	gracefulTimeout := 30 * time.Second
+	gracefulDeadline := time.Now().Add(gracefulTimeout)
+	for time.Now().Before(gracefulDeadline) {
+		if !isProcessRunning(mainPID) {
+			klog.InfoS("Main container process exited gracefully", "pid", mainPID)
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Step 3: Process didn't exit gracefully, send SIGKILL for forceful termination
+	klog.InfoS("Main container did not exit gracefully, sending SIGKILL", "pid", mainPID)
+	if err := syscall.Kill(mainPID, syscall.SIGKILL); err != nil {
+		return fmt.Errorf("failed to send SIGKILL to main container: %w", err)
+	}
+
+	// Step 4: Wait for SIGKILL to take effect
+	forceKillWaitTimeout := 5 * time.Second
+	forceKillDeadline := time.Now().Add(forceKillWaitTimeout)
+	for time.Now().Before(forceKillDeadline) {
+		if !isProcessRunning(mainPID) {
+			klog.InfoS("Main container process killed forcefully", "pid", mainPID)
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Step 5: Process still running after SIGKILL - this is an error
+	return fmt.Errorf("main container still running after SIGKILL, pid: %d", mainPID)
+}

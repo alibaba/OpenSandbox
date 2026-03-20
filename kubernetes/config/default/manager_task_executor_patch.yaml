@@ -1,0 +1,16 @@
+# Patch to add task-executor-image argument to the controller manager
+# The TASK_EXECUTOR_IMAGE placeholder will be replaced by sed during deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: controller-manager
+  namespace: system
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        args:
+        - --leader-elect
+        - --health-probe-bind-address=:8081
+        - --task-executor-image=TASK_EXECUTOR_IMAGE_PLACEHOLDER

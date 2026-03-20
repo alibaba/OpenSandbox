@@ -142,7 +142,6 @@ type taskClient interface {
 
 const (
 	defaultTimeout        time.Duration = 3 * time.Second
-	defaultTaskPort                     = "5758"
 	defaultSchConcurrency int           = 10
 )
 
@@ -151,7 +150,7 @@ func newTaskClient(ip string) taskClient {
 }
 
 func fmtEndpoint(podIP string) string {
-	return fmt.Sprintf("http://%s:%s", podIP, defaultTaskPort)
+	return fmt.Sprintf("http://%s:%s", podIP, api.GetPort())
 }
 
 type defaultTaskScheduler struct {

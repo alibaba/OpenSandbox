@@ -15,9 +15,13 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +30,7 @@ import (
 
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/config"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/manager"
+	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/runtime"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/types"
 	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
@@ -36,27 +41,57 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
-type Handler struct {
-	manager manager.TaskManager
-	config  *config.Config
+// resetState tracks the state of a reset operation in memory
+type resetState struct {
+	mu        sync.Mutex
+	status    api.ResetStatus
+	message   string
+	details   *api.ResetDetails
+	startTime time.Time
 }
 
-func NewHandler(mgr manager.TaskManager, cfg *config.Config) *Handler {
+type Handler struct {
+	manager  manager.TaskManager
+	executor runtime.Executor // Direct reference for reset operations
+	config   *config.Config
+	reset    *resetState // Reset state tracking (in-memory)
+}
+
+func NewHandler(mgr manager.TaskManager, exec runtime.Executor, cfg *config.Config) *Handler {
 	if mgr == nil {
 		klog.Warning("TaskManager is nil, handler may not work properly")
 	}
 	if cfg == nil {
 		klog.Warning("Config is nil, handler may not work properly")
 	}
-	return &Handler{
-		manager: mgr,
-		config:  cfg,
+	h := &Handler{
+		manager:  mgr,
+		executor: exec,
+		config:   cfg,
+		reset: &resetState{
+			status: api.ResetStatusNone, // Initial state: no reset has been initiated
+		},
 	}
+	return h
+}
+
+// isResetting checks if a reset operation is in progress.
+// During reset, new task creation is blocked to prevent race conditions.
+func (h *Handler) isResetting() bool {
+	h.reset.mu.Lock()
+	defer h.reset.mu.Unlock()
+	return h.reset.status == api.ResetStatusInProgress
 }
 
 func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		writeError(w, http.StatusInternalServerError, "task manager not initialized")
+		return
+	}
+
+	// Block task creation during reset to prevent race conditions
+	if h.isResetting() {
+		writeError(w, http.StatusServiceUnavailable, "task creation is blocked: reset operation in progress")
 		return
 	}
 
@@ -86,9 +121,7 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 
 	response := convertInternalToAPITask(created)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusCreated, response)
 
 	klog.InfoS("task created via API", "name", apiTask.Name)
 }
@@ -96,6 +129,12 @@ func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) SyncTasks(w http.ResponseWriter, r *http.Request) {
 	if h.manager == nil {
 		writeError(w, http.StatusInternalServerError, "task manager not initialized")
+		return
+	}
+
+	// Block task sync during reset to prevent race conditions
+	if h.isResetting() {
+		writeError(w, http.StatusServiceUnavailable, "task sync is blocked: reset operation in progress")
 		return
 	}
 
@@ -130,8 +169,7 @@ func (h *Handler) SyncTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusOK, response)
 
 	klog.V(1).InfoS("tasks synced via API", "count", len(response))
 }
@@ -158,8 +196,7 @@ func (h *Handler) GetTask(w http.ResponseWriter, r *http.Request) {
 
 	response := convertInternalToAPITask(task)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
@@ -182,16 +219,253 @@ func (h *Handler) ListTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	response := map[string]string{
 		"status": "healthy",
 	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// Reset handles the reset operation for pod recycling.
+// This is a non-blocking operation - it returns immediately with the current status.
+// If a reset is already in progress, it returns the current status.
+// If no reset is in progress, it starts a new reset in a goroutine.
+func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
+	if h.manager == nil {
+		writeError(w, http.StatusInternalServerError, "task manager not initialized")
+		return
+	}
+
+	var req api.ResetRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %v", err))
+		return
+	}
+
+	// Check if running in sidecar mode
+	if !h.config.EnableSidecarMode {
+		klog.ErrorS(nil, "Reset is only supported in sidecar mode")
+		writeJSON(w, http.StatusOK, &api.ResetResponse{
+			Status:  api.ResetStatusNotSupported,
+			Message: "Reset is only supported in sidecar mode where task-executor runs as a sidecar container",
+		})
+		return
+	}
+
+	h.reset.mu.Lock()
+
+	// Case 1: Reset already in progress -> return current status (idempotent)
+	if h.reset.status == api.ResetStatusInProgress {
+		klog.InfoS("Reset already in progress, returning current status")
+		resp := h.currentResetResponse()
+		h.reset.mu.Unlock()
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// Case 2: Reset already completed (Success/Failed/Timeout) -> return terminal status
+	// Callers (pollResetStatus) must read the terminal status and act accordingly.
+	// Only allow re-trigger if status is None (initial state).
+	if h.reset.status == api.ResetStatusSuccess ||
+		h.reset.status == api.ResetStatusFailed ||
+		h.reset.status == api.ResetStatusTimeout ||
+		h.reset.status == api.ResetStatusNotSupported {
+		klog.InfoS("Reset already completed, returning terminal status", "status", h.reset.status)
+		resp := h.currentResetResponse()
+		h.reset.mu.Unlock()
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// Case 3: Start a new reset (only when status is None)
+	h.reset.status = api.ResetStatusInProgress
+	h.reset.startTime = time.Now()
+	h.reset.message = "Reset started"
+	h.reset.details = &api.ResetDetails{}
+
+	// Build response before releasing lock
+	resp := h.currentResetResponse()
+
+	klog.InfoS("Starting reset operation", "mainContainer", req.MainContainerName)
+
+	// Release lock before starting goroutine to avoid blocking
+	h.reset.mu.Unlock()
+
+	// Start reset in background goroutine
+	go h.executeReset(req)
+
+	// Return immediately with InProgress status
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// currentResetResponse builds the current reset response
+func (h *Handler) currentResetResponse() *api.ResetResponse {
+	return &api.ResetResponse{
+		Status:  h.reset.status,
+		Message: h.reset.message,
+		Details: h.reset.details,
+	}
+}
+
+// executeReset performs the actual reset operation in a background goroutine
+func (h *Handler) executeReset(req api.ResetRequest) {
+	defer func() {
+		if err := recover(); err != nil {
+			h.reset.mu.Lock()
+			if h.reset.status == api.ResetStatusInProgress {
+				h.reset.status = api.ResetStatusFailed
+				h.reset.message = fmt.Sprintf("reset goroutine panic: %v", err)
+			}
+			h.reset.mu.Unlock()
+			klog.ErrorS(nil, "Reset goroutine panicked", "error", err)
+		}
+	}()
+
+	// Create context with timeout from request
+	timeout := time.Duration(req.TimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 60 * time.Second // Default timeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	klog.InfoS("Starting reset operation", "timeout", timeout)
+
+	// Step 1: Stop and clean up all tasks
+	stopped, err := h.manager.Clear(ctx)
+	if err != nil {
+		h.setResetFailed(fmt.Sprintf("failed to clear tasks: %v", err))
+		return
+	}
+	h.reset.mu.Lock()
+	h.reset.details.TasksStopped = stopped
+	h.reset.mu.Unlock()
+	klog.InfoS("Stopped tasks during reset", "count", stopped)
+
+	// Step 2: Clean task data directory (always clean)
+	if err := h.cleanTaskDataDir(); err != nil {
+		h.setResetFailed(fmt.Sprintf("failed to clean task data dir: %v", err))
+		return
+	}
+
+	// Step 3: Clean user-specified directories
+	if len(req.CleanDirectories) > 0 {
+		cleaned, err := h.cleanDirectories(req.CleanDirectories)
+		if err != nil {
+			h.setResetFailed(fmt.Sprintf("failed to clean directories: %v", err))
+			return
+		}
+		h.reset.mu.Lock()
+		h.reset.details.DirectoriesCleaned = cleaned
+		h.reset.mu.Unlock()
+		klog.InfoS("Cleaned directories during reset", "directories", cleaned)
+	}
+
+	// Step 4: Restart main container
+	mainContainer := req.MainContainerName
+	if mainContainer == "" {
+		mainContainer = h.config.MainContainerName
+	}
+	if mainContainer != "" && h.executor != nil {
+		if err := h.executor.RestartMainContainer(ctx, mainContainer); err != nil {
+			h.setResetFailed(fmt.Sprintf("failed to restart main container: %v", err))
+			return
+		}
+		h.reset.mu.Lock()
+		h.reset.details.MainContainerRestarted = true
+		h.reset.mu.Unlock()
+		klog.InfoS("Restarted main container during reset", "container", mainContainer)
+	}
+
+	// Check if context was cancelled (timeout)
+	if ctx.Err() == context.DeadlineExceeded {
+		h.setResetStatus(api.ResetStatusTimeout, "reset operation timed out")
+		return
+	}
+
+	// Success
+	h.reset.mu.Lock()
+	h.reset.status = api.ResetStatusSuccess
+	h.reset.message = "Reset completed successfully"
+	h.reset.mu.Unlock()
+
+	klog.InfoS("Reset operation completed successfully")
+}
+
+// setResetStatus sets the reset status with given status and message
+func (h *Handler) setResetStatus(status api.ResetStatus, message string) {
+	h.reset.mu.Lock()
+	h.reset.status = status
+	h.reset.message = message
+	h.reset.mu.Unlock()
+	if status == api.ResetStatusFailed || status == api.ResetStatusTimeout {
+		klog.ErrorS(nil, "Reset operation failed", "status", status, "message", message)
+	}
+}
+
+// setResetFailed sets the reset status to failed
+func (h *Handler) setResetFailed(message string) {
+	h.setResetStatus(api.ResetStatusFailed, message)
+}
+
+// cleanTaskDataDir cleans all task data directories
+func (h *Handler) cleanTaskDataDir() error {
+	if h.config.DataDir == "" {
+		return nil
+	}
+
+	entries, err := os.ReadDir(h.config.DataDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read data directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		taskDir := filepath.Join(h.config.DataDir, entry.Name())
+		if err := os.RemoveAll(taskDir); err != nil {
+			klog.ErrorS(err, "Failed to remove task directory", "path", taskDir)
+		} else {
+			klog.InfoS("Removed task directory", "path", taskDir)
+		}
+	}
+	return nil
+}
+
+// cleanDirectories cleans the specified directories using glob patterns
+func (h *Handler) cleanDirectories(dirs []string) ([]string, error) {
+	var cleaned []string
+	for _, dir := range dirs {
+		matches, err := filepath.Glob(dir)
+		if err != nil {
+			klog.ErrorS(err, "Invalid glob pattern", "pattern", dir)
+			continue
+		}
+
+		for _, match := range matches {
+			if err := os.RemoveAll(match); err != nil {
+				klog.ErrorS(err, "Failed to clean directory", "path", match)
+				continue
+			}
+			cleaned = append(cleaned, match)
+			klog.InfoS("Cleaned directory", "path", match)
+		}
+	}
+	return cleaned, nil
+}
+
+// writeJSON writes a JSON response with the given status code
+func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(data)
 }
 
 func (h *Handler) DeleteTask(w http.ResponseWriter, r *http.Request) {

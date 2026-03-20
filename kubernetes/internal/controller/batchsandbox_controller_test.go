@@ -52,6 +52,7 @@ import (
 	taskscheduler "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/scheduler"
 	mock_scheduler "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/scheduler/mock"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/fieldindex"
+	taskexecutor "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
 
 func init() {
@@ -983,5 +984,325 @@ func Test_calPodIndex(t *testing.T) {
 				t.Errorf("calPodIndex() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// ============================================================
+// PodRecyclePolicy Unit Tests
+// ============================================================
+
+func TestHandleResetResponse_AllStatuses(t *testing.T) {
+	tests := []struct {
+		name         string
+		respStatus   taskexecutor.ResetStatus
+		wantLabel    string
+		wantRequeue  bool
+		requeueAfter time.Duration
+	}{
+		{
+			name:        "Success status -> ResetSucceeded label",
+			respStatus:  taskexecutor.ResetStatusSuccess,
+			wantLabel:   PodRecycleStateResetSucceeded,
+			wantRequeue: false,
+		},
+		{
+			name:         "InProgress status -> Resetting label and requeue",
+			respStatus:   taskexecutor.ResetStatusInProgress,
+			wantLabel:    PodRecycleStateResetting,
+			wantRequeue:  true,
+			requeueAfter: 5 * time.Second,
+		},
+		{
+			name:        "Failed status -> ResetFailed label",
+			respStatus:  taskexecutor.ResetStatusFailed,
+			wantLabel:   PodRecycleStateResetFailed,
+			wantRequeue: false,
+		},
+		{
+			name:        "Timeout status -> ResetFailed label",
+			respStatus:  taskexecutor.ResetStatusTimeout,
+			wantLabel:   PodRecycleStateResetFailed,
+			wantRequeue: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup fake client with pod
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+			}
+			fakeClient := fake.NewClientBuilder().WithScheme(testscheme).WithObjects(pod).Build()
+
+			// Create reconciler
+			r := &BatchSandboxReconciler{
+				Client: fakeClient,
+				Scheme: testscheme,
+			}
+
+			// Create response
+			resp := &taskexecutor.ResetResponse{
+				Status:  tt.respStatus,
+				Message: "test message",
+			}
+
+			// Call handleResetResponse
+			result, err := r.handleResetResponse(context.Background(), pod, resp)
+			if err != nil {
+				t.Errorf("handleResetResponse() error = %v", err)
+				return
+			}
+
+			// Verify label
+			if pod.Labels[LabelPodRecycleState] != tt.wantLabel {
+				t.Errorf("handleResetResponse() label = %v, want %v", pod.Labels[LabelPodRecycleState], tt.wantLabel)
+			}
+
+			// Verify requeue
+			if tt.wantRequeue {
+				if result.RequeueAfter != tt.requeueAfter {
+					t.Errorf("handleResetResponse() RequeueAfter = %v, want %v", result.RequeueAfter, tt.requeueAfter)
+				}
+			} else {
+				if result.RequeueAfter != 0 {
+					t.Errorf("handleResetResponse() should not requeue, got RequeueAfter = %v", result.RequeueAfter)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleReusePolicy_StateTransitions(t *testing.T) {
+	tests := []struct {
+		name            string
+		initialState    string
+		wantRequeue     bool
+		wantLabelChange string
+	}{
+		{
+			name:            "Empty state -> start reset",
+			initialState:    PodRecycleStateEmpty,
+			wantRequeue:     true,
+			wantLabelChange: PodRecycleStateResetting,
+		},
+		{
+			name:         "ResetSucceeded state -> clear label",
+			initialState: PodRecycleStateResetSucceeded,
+			wantRequeue:  false,
+		},
+		{
+			name:         "ResetFailed state -> delete pod",
+			initialState: PodRecycleStateResetFailed,
+			wantRequeue:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup pool with Reuse policy
+			pool := &sandboxv1alpha1.Pool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pool",
+					Namespace: "default",
+				},
+				Spec: sandboxv1alpha1.PoolSpec{
+					PodRecyclePolicy: sandboxv1alpha1.PodRecyclePolicyReuse,
+				},
+			}
+
+			// Setup pod with initial state
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					Labels: map[string]string{
+						LabelPodReuseEnabled: "true",
+					},
+				},
+			}
+			if tt.initialState != "" {
+				pod.Labels[LabelPodRecycleState] = tt.initialState
+			}
+
+			// Setup batchsandbox
+			batchSbx := &sandboxv1alpha1.BatchSandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-bs",
+					Namespace: "default",
+				},
+				Spec: sandboxv1alpha1.BatchSandboxSpec{
+					PoolRef: "test-pool",
+				},
+			}
+
+			fakeClient := fake.NewClientBuilder().WithScheme(testscheme).WithObjects(pool, pod, batchSbx).Build()
+
+			r := &BatchSandboxReconciler{
+				Client: fakeClient,
+				Scheme: testscheme,
+			}
+
+			// For Empty state, we expect startPodReset to be called
+			// which requires task-executor client. Since we can't mock it easily,
+			// we just verify the state machine logic for other states.
+			if tt.initialState == PodRecycleStateEmpty {
+				// Empty state requires external API call, skip in this test
+				t.Skip("Empty state requires task-executor API mock")
+			}
+
+			result, err := r.handleReusePolicy(context.Background(), batchSbx, pool, pod)
+			if err != nil {
+				t.Errorf("handleReusePolicy() error = %v", err)
+				return
+			}
+
+			// Verify requeue behavior
+			if tt.wantRequeue {
+				if result.RequeueAfter == 0 {
+					t.Errorf("handleReusePolicy() should requeue")
+				}
+			} else {
+				if result.RequeueAfter != 0 {
+					t.Errorf("handleReusePolicy() should not requeue, got RequeueAfter = %v", result.RequeueAfter)
+				}
+			}
+
+			// Verify label changes
+			if tt.initialState == PodRecycleStateResetSucceeded {
+				if _, exists := pod.Labels[LabelPodRecycleState]; exists {
+					t.Errorf("handleReusePolicy() should clear recycle-state label for ResetSucceeded")
+				}
+			}
+		})
+	}
+}
+
+func TestHandlePodDisposal_DeletePolicy(t *testing.T) {
+	// Setup pool with Delete policy
+	pool := &sandboxv1alpha1.Pool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pool",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.PoolSpec{
+			PodRecyclePolicy: sandboxv1alpha1.PodRecyclePolicyDelete,
+		},
+	}
+
+	// Setup pod
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+	}
+
+	// Setup batchsandbox with allocation
+	batchSbx := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnoAllocStatusKey: `{"pods":["test-pod"]}`,
+			},
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			PoolRef: "test-pool",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(testscheme).WithObjects(pool, pod, batchSbx).Build()
+
+	r := &BatchSandboxReconciler{
+		Client: fakeClient,
+		Scheme: testscheme,
+	}
+
+	// Call handlePodDisposal
+	result, err := r.handlePodDisposal(context.Background(), batchSbx)
+	if err != nil {
+		t.Errorf("handlePodDisposal() error = %v", err)
+		return
+	}
+
+	// Should not requeue
+	if result.RequeueAfter != 0 {
+		t.Errorf("handlePodDisposal() should not requeue for Delete policy")
+	}
+
+	// Pod should be deleted
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "test-pod", Namespace: "default"}, &corev1.Pod{})
+	if err == nil {
+		t.Errorf("handlePodDisposal() should delete pod for Delete policy")
+	}
+	if !errors.IsNotFound(err) {
+		t.Errorf("handlePodDisposal() expected NotFound error, got %v", err)
+	}
+}
+
+func TestHandlePodDisposal_ReusePolicy_Fallback(t *testing.T) {
+	// Setup pool with Reuse policy
+	pool := &sandboxv1alpha1.Pool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pool",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.PoolSpec{
+			PodRecyclePolicy: sandboxv1alpha1.PodRecyclePolicyReuse,
+		},
+	}
+
+	// Setup pod WITHOUT reuse-enabled label (should fallback to delete)
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			// No LabelPodReuseEnabled label
+		},
+	}
+
+	// Setup batchsandbox with allocation
+	batchSbx := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs",
+			Namespace: "default",
+			Annotations: map[string]string{
+				AnnoAllocStatusKey: `{"pods":["test-pod"]}`,
+			},
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			PoolRef: "test-pool",
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(testscheme).WithObjects(pool, pod, batchSbx).Build()
+
+	r := &BatchSandboxReconciler{
+		Client: fakeClient,
+		Scheme: testscheme,
+	}
+
+	// Call handlePodDisposal
+	result, err := r.handlePodDisposal(context.Background(), batchSbx)
+	if err != nil {
+		t.Errorf("handlePodDisposal() error = %v", err)
+		return
+	}
+
+	// Should not requeue
+	if result.RequeueAfter != 0 {
+		t.Errorf("handlePodDisposal() should not requeue")
+	}
+
+	// Pod should be deleted (fallback)
+	err = fakeClient.Get(context.Background(), types.NamespacedName{Name: "test-pod", Namespace: "default"}, &corev1.Pod{})
+	if err == nil {
+		t.Errorf("handlePodDisposal() should delete pod (fallback to delete)")
+	}
+	if !errors.IsNotFound(err) {
+		t.Errorf("handlePodDisposal() expected NotFound error, got %v", err)
 	}
 }

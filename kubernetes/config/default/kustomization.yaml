@@ -40,6 +40,11 @@ patches:
 - path: manager_metrics_patch.yaml
   target:
     kind: Deployment
+# [TASK-EXECUTOR] Patch to add task-executor-image argument for PodRecyclePolicy Reuse support
+- path: manager_task_executor_patch.yaml
+  target:
+    kind: Deployment
+    name: controller-manager
 
 # Uncomment the patches line if you enable Metrics and CertManager
 # [METRICS-WITH-CERTS] To enable metrics protected with certManager, uncomment the following line.

@@ -21,11 +21,13 @@ import (
 	gerrors "errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -33,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -65,9 +68,11 @@ var (
 // PoolReconciler reconciles a Pool object
 type PoolReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Recorder  record.EventRecorder
-	Allocator Allocator
+	Scheme                *runtime.Scheme
+	Recorder              record.EventRecorder
+	Allocator             Allocator
+	TaskExecutorImage     string // TaskExecutorImage is the image for task-executor sidecar. If empty, Reuse policy is disabled.
+	TaskExecutorResources string // TaskExecutorResources is the resources for task-executor sidecar in format "cpu,memory". Default: "200m,128Mi"
 }
 
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=pools,verbs=get;list;watch;create;update;patch;delete
@@ -308,6 +313,10 @@ func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alp
 	idlePods := make([]string, 0)
 	for _, pod := range pods {
 		if _, ok := status.PodAllocation[pod.Name]; !ok {
+			// Skip pods that are being reset
+			if pod.Labels[LabelPodRecycleState] == PodRecycleStateResetting {
+				continue
+			}
 			idlePods = append(idlePods, pod.Name)
 		}
 	}
@@ -406,7 +415,15 @@ func (r *PoolReconciler) scalePool(ctx context.Context, args *scaleArgs) error {
 func (r *PoolReconciler) updatePoolStatus(ctx context.Context, latestRevision string, pool *sandboxv1alpha1.Pool, pods []*corev1.Pod, podAllocation map[string]string) error {
 	oldStatus := pool.Status.DeepCopy()
 	availableCnt := int32(0)
+	resettingCnt := int32(0)
+
 	for _, pod := range pods {
+		// Count pods that are being reset
+		if pod.Labels[LabelPodRecycleState] == PodRecycleStateResetting {
+			resettingCnt++
+			continue // Resetting pods are not available
+		}
+
 		if _, ok := podAllocation[pod.Name]; ok {
 			continue
 		}
@@ -415,10 +432,12 @@ func (r *PoolReconciler) updatePoolStatus(ctx context.Context, latestRevision st
 		}
 		availableCnt++
 	}
+
 	pool.Status.ObservedGeneration = pool.Generation
 	pool.Status.Total = int32(len(pods))
 	pool.Status.Allocated = int32(len(podAllocation))
 	pool.Status.Available = availableCnt
+	pool.Status.Resetting = resettingCnt
 	pool.Status.Revision = latestRevision
 	if equality.Semantic.DeepEqual(oldStatus, pool.Status) {
 		return nil
@@ -474,8 +493,18 @@ func (r *PoolReconciler) createPoolPod(ctx context.Context, pool *sandboxv1alpha
 	pod.Namespace = pool.Namespace
 	pod.Name = ""
 	pod.GenerateName = pool.Name + "-"
+	if pod.Labels == nil {
+		pod.Labels = make(map[string]string)
+	}
 	pod.Labels[LabelPoolName] = pool.Name
 	pod.Labels[LabelPoolRevision] = latestRevision
+
+	// Inject task-executor sidecar if Reuse policy is enabled and TaskExecutorImage is configured
+	if pool.Spec.PodRecyclePolicy == sandboxv1alpha1.PodRecyclePolicyReuse && r.TaskExecutorImage != "" {
+		r.injectTaskExecutor(pod, pool)
+		pod.Labels[LabelPodReuseEnabled] = "true"
+	}
+
 	if err := ctrl.SetControllerReference(pool, pod, r.Scheme); err != nil {
 		return err
 	}
@@ -486,4 +515,131 @@ func (r *PoolReconciler) createPoolPod(ctx context.Context, pool *sandboxv1alpha
 	PoolScaleExpectations.ExpectScale(controllerutils.GetControllerKey(pool), expectations.Create, pod.Name)
 	r.Recorder.Eventf(pool, corev1.EventTypeNormal, "SuccessfulCreate", "Created pool pod: %v", pod.Name)
 	return nil
+}
+
+// injectTaskExecutor injects task-executor sidecar into the pod for reset support
+func (r *PoolReconciler) injectTaskExecutor(pod *corev1.Pod, pool *sandboxv1alpha1.Pool) {
+	// Enable process namespace sharing for sidecar communication
+	shareProcessNamespace := true
+	pod.Spec.ShareProcessNamespace = &shareProcessNamespace
+
+	// Ensure restartPolicy allows container restart for Reuse policy
+	// If restartPolicy is Never, the container won't restart after SIGTERM
+	if pod.Spec.RestartPolicy == corev1.RestartPolicyNever {
+		klog.InfoS("Changing restartPolicy from Never to Always for Reuse policy support",
+			"pod", pod.Name, "pool", pool.Name)
+		pod.Spec.RestartPolicy = corev1.RestartPolicyAlways
+	}
+
+	// Get main container name
+	mainContainerName := r.getMainContainerName(pool, pod)
+
+	// Add sandbox-storage volume to pod spec (used by both main container and task-executor)
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: "sandbox-storage",
+		VolumeSource: corev1.VolumeSource{
+			EmptyDir: &corev1.EmptyDirVolumeSource{},
+		},
+	})
+
+	// Add sandbox-storage volumeMount and env to main container
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == mainContainerName {
+			pod.Spec.Containers[i].Env = append(pod.Spec.Containers[i].Env,
+				corev1.EnvVar{
+					Name:  "SANDBOX_MAIN_CONTAINER",
+					Value: mainContainerName,
+				})
+			pod.Spec.Containers[i].VolumeMounts = append(pod.Spec.Containers[i].VolumeMounts,
+				corev1.VolumeMount{
+					Name:      "sandbox-storage",
+					MountPath: "/var/lib/sandbox",
+				})
+			break
+		}
+	}
+
+	// Parse task-executor resources from config
+	cpu, memory := r.parseTaskExecutorResources()
+
+	// Inject task-executor sidecar
+	taskExecutorContainer := corev1.Container{
+		Name:            "task-executor",
+		Image:           r.TaskExecutorImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Env: []corev1.EnvVar{
+			{Name: "ENABLE_SIDECAR_MODE", Value: "true"},
+			{Name: "MAIN_CONTAINER_NAME", Value: mainContainerName},
+		},
+		// Security context required for nsenter to access other container namespaces
+		SecurityContext: &corev1.SecurityContext{
+			Capabilities: &corev1.Capabilities{
+				Add: []corev1.Capability{
+					"SYS_PTRACE", // Required for nsenter to access other process namespaces
+				},
+			},
+		},
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse(cpu),
+				corev1.ResourceMemory: resource.MustParse(memory),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse(cpu),
+				corev1.ResourceMemory: resource.MustParse(memory),
+			},
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{
+				Name:      "sandbox-storage",
+				MountPath: "/var/lib/sandbox",
+			},
+		},
+	}
+	pod.Spec.Containers = append(pod.Spec.Containers, taskExecutorContainer)
+}
+
+// parseTaskExecutorResources parses the task-executor resources config.
+// Format: "cpu,memory" (e.g., "200m,128Mi")
+// Returns (cpu, memory) with defaults "200m", "128Mi" if parsing fails.
+func (r *PoolReconciler) parseTaskExecutorResources() (cpu, memory string) {
+	const (
+		defaultCPU    = "200m"
+		defaultMemory = "128Mi"
+	)
+
+	if r.TaskExecutorResources == "" {
+		return defaultCPU, defaultMemory
+	}
+
+	parts := strings.Split(r.TaskExecutorResources, ",")
+	if len(parts) != 2 {
+		klog.InfoS("Invalid task-executor-resources format, using defaults",
+			"input", r.TaskExecutorResources, "expected", "cpu,memory")
+		return defaultCPU, defaultMemory
+	}
+
+	cpu = strings.TrimSpace(parts[0])
+	memory = strings.TrimSpace(parts[1])
+
+	if cpu == "" || memory == "" {
+		klog.InfoS("Empty cpu or memory in task-executor-resources, using defaults",
+			"cpu", cpu, "memory", memory)
+		return defaultCPU, defaultMemory
+	}
+
+	return cpu, memory
+}
+
+// getMainContainerName returns the main container name for reset purposes
+func (r *PoolReconciler) getMainContainerName(pool *sandboxv1alpha1.Pool, pod *corev1.Pod) string {
+	// Use explicitly configured main container name
+	if pool.Spec.ResetSpec != nil && pool.Spec.ResetSpec.MainContainerName != "" {
+		return pool.Spec.ResetSpec.MainContainerName
+	}
+	// Default to first container
+	if len(pod.Spec.Containers) > 0 {
+		return pod.Spec.Containers[0].Name
+	}
+	return ""
 }

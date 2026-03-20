@@ -263,6 +263,32 @@ func (m *taskManager) Stop() {
 	klog.InfoS("task manager stopped")
 }
 
+// GetExecutor returns the underlying executor for reset operations.
+func (m *taskManager) GetExecutor() runtime.Executor {
+	return m.executor
+}
+
+// Clear immediately stops and cleans up all tasks.
+// Used for reset scenario: synchronous stop + clean store + clean memory.
+// Returns the number of tasks that were stopped.
+func (m *taskManager) Clear(ctx context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stopped := 0
+	for name, task := range m.tasks {
+		if !isTerminalState(task.Status.State) {
+			if err := m.executor.Stop(ctx, task); err != nil {
+				klog.ErrorS(err, "failed to stop task", "name", name)
+			}
+			stopped++
+		}
+		m.store.Delete(ctx, name)
+		delete(m.tasks, name)
+	}
+	return stopped, nil
+}
+
 // createTaskLocked creates a task without acquiring the lock
 func (m *taskManager) createTaskLocked(ctx context.Context, task *types.Task) error {
 	if task == nil || task.Name == "" {

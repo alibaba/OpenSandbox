@@ -17,6 +17,7 @@ package manager
 import (
 	"context"
 
+	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/runtime"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/types"
 )
 
@@ -37,4 +38,12 @@ type TaskManager interface {
 	Start(ctx context.Context)
 
 	Stop()
+
+	// GetExecutor returns the underlying executor for reset operations.
+	GetExecutor() runtime.Executor
+
+	// Clear immediately stops and cleans up all tasks.
+	// Used for reset scenario: synchronous stop + clean store + clean memory.
+	// Returns the number of tasks that were stopped.
+	Clear(ctx context.Context) (int, error)
 }

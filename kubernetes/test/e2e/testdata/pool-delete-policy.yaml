@@ -1,0 +1,19 @@
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: {{.PoolName}}
+  namespace: {{.Namespace}}
+spec:
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: {{.TaskExecutorImage}}
+        command: ["/bin/sh", "-c", "sleep infinity"]
+  capacitySpec:
+    bufferMax: 0
+    bufferMin: 0
+    poolMax: 5
+    poolMin: 2
+  # podRecyclePolicy: Delete is the default, explicitly set for clarity
+  podRecyclePolicy: Delete

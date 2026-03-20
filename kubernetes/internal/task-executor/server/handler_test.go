@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/config"
+	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/runtime"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/types"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils"
 	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
@@ -99,9 +100,43 @@ func (m *MockTaskManager) Delete(ctx context.Context, id string) error {
 func (m *MockTaskManager) Start(ctx context.Context) {}
 func (m *MockTaskManager) Stop()                     {}
 
+// GetExecutor returns a mock executor for testing
+func (m *MockTaskManager) GetExecutor() runtime.Executor {
+	return &MockExecutor{}
+}
+
+// Clear stops and cleans up all tasks (for testing)
+func (m *MockTaskManager) Clear(ctx context.Context) (int, error) {
+	if m.err != nil {
+		return 0, m.err
+	}
+	count := len(m.tasks)
+	m.tasks = make(map[string]*types.Task)
+	return count, nil
+}
+
+// MockExecutor implements runtime.Executor for testing
+type MockExecutor struct{}
+
+func (e *MockExecutor) Start(ctx context.Context, task *types.Task) error {
+	return nil
+}
+
+func (e *MockExecutor) Inspect(ctx context.Context, task *types.Task) (*types.Status, error) {
+	return &types.Status{}, nil
+}
+
+func (e *MockExecutor) Stop(ctx context.Context, task *types.Task) error {
+	return nil
+}
+
+func (e *MockExecutor) RestartMainContainer(ctx context.Context, mainContainerName string) error {
+	return nil
+}
+
 func TestHandler_Health(t *testing.T) {
 	cfg := &config.Config{}
-	h := NewHandler(NewMockTaskManager(), cfg)
+	h := NewHandler(NewMockTaskManager(), &MockExecutor{}, cfg)
 	req := httptest.NewRequest("GET", "/health", nil)
 	w := httptest.NewRecorder()
 
@@ -115,7 +150,7 @@ func TestHandler_Health(t *testing.T) {
 func TestHandler_CreateTask(t *testing.T) {
 	mgr := NewMockTaskManager()
 	cfg := &config.Config{}
-	h := NewHandler(mgr, cfg)
+	h := NewHandler(mgr, &MockExecutor{}, cfg)
 
 	task := api.Task{
 		Name: "test-task",
@@ -143,7 +178,7 @@ func TestHandler_GetTask(t *testing.T) {
 	mgr := NewMockTaskManager()
 	mgr.tasks["test-task"] = &types.Task{Name: "test-task"}
 	cfg := &config.Config{}
-	h := NewHandler(mgr, cfg)
+	h := NewHandler(mgr, &MockExecutor{}, cfg)
 
 	router := NewRouter(h)
 	req := httptest.NewRequest("GET", "/tasks/test-task", nil)
@@ -166,7 +201,7 @@ func TestHandler_DeleteTask(t *testing.T) {
 	mgr := NewMockTaskManager()
 	mgr.tasks["test-task"] = &types.Task{Name: "test-task"}
 	cfg := &config.Config{}
-	h := NewHandler(mgr, cfg)
+	h := NewHandler(mgr, &MockExecutor{}, cfg)
 	router := NewRouter(h)
 
 	req := httptest.NewRequest("DELETE", "/tasks/test-task", nil)
@@ -188,7 +223,7 @@ func TestHandler_ListTasks(t *testing.T) {
 	mgr.tasks["task-1"] = &types.Task{Name: "task-1"}
 	mgr.tasks["task-2"] = &types.Task{Name: "task-2"}
 	cfg := &config.Config{}
-	h := NewHandler(mgr, cfg)
+	h := NewHandler(mgr, &MockExecutor{}, cfg)
 
 	req := httptest.NewRequest("GET", "/getTasks", nil)
 	w := httptest.NewRecorder()
@@ -209,7 +244,7 @@ func TestHandler_ListTasks(t *testing.T) {
 func TestHandler_SyncTasks(t *testing.T) {
 	mgr := NewMockTaskManager()
 	cfg := &config.Config{}
-	h := NewHandler(mgr, cfg)
+	h := NewHandler(mgr, &MockExecutor{}, cfg)
 
 	tasks := []api.Task{
 		{Name: "task-1", Process: &api.Process{}},
@@ -234,7 +269,7 @@ func TestHandler_Errors(t *testing.T) {
 	mgr := NewMockTaskManager()
 	mgr.err = errors.New("mock error")
 	cfg := &config.Config{}
-	h := NewHandler(mgr, cfg)
+	h := NewHandler(mgr, &MockExecutor{}, cfg)
 
 	// Create fail
 	task := api.Task{Name: "fail"}
@@ -425,5 +460,156 @@ func TestConvertInternalToAPITask_Timeout(t *testing.T) {
 		assert.Equal(t, int32(137), apiTask.ProcessStatus.Terminated.ExitCode)
 		assert.Equal(t, now.Unix(), apiTask.ProcessStatus.Terminated.StartedAt.Unix())
 		assert.Equal(t, later.Unix(), apiTask.ProcessStatus.Terminated.FinishedAt.Unix())
+	})
+}
+
+// ============================================================
+// Reset API State Machine Tests
+// ============================================================
+
+func TestReset_StateMachine(t *testing.T) {
+	t.Run("Initial state is None", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		// Initial state should be None
+		assert.Equal(t, api.ResetStatusNone, h.reset.status)
+	})
+
+	t.Run("None -> InProgress on first call", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		body, _ := json.Marshal(api.ResetRequest{})
+		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		h.Reset(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp api.ResetResponse
+		json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, api.ResetStatusInProgress, resp.Status)
+
+		// Internal state should be InProgress
+		assert.Equal(t, api.ResetStatusInProgress, h.reset.status)
+	})
+
+	t.Run("InProgress -> InProgress (idempotent)", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		// Set state to InProgress manually
+		h.reset.status = api.ResetStatusInProgress
+
+		body, _ := json.Marshal(api.ResetRequest{})
+		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		h.Reset(w, req)
+
+		var resp api.ResetResponse
+		json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, api.ResetStatusInProgress, resp.Status)
+	})
+
+	t.Run("Terminal status not retrigger", func(t *testing.T) {
+		terminalStatuses := []api.ResetStatus{
+			api.ResetStatusSuccess,
+			api.ResetStatusFailed,
+			api.ResetStatusTimeout,
+		}
+
+		for _, status := range terminalStatuses {
+			t.Run(string(status), func(t *testing.T) {
+				mgr := NewMockTaskManager()
+				cfg := &config.Config{EnableSidecarMode: true}
+				h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+				// Set terminal state
+				h.reset.status = status
+				h.reset.message = "previous result"
+
+				body, _ := json.Marshal(api.ResetRequest{})
+				req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
+				w := httptest.NewRecorder()
+
+				h.Reset(w, req)
+
+				var resp api.ResetResponse
+				json.NewDecoder(w.Body).Decode(&resp)
+				// Should return the same terminal status, not start new reset
+				assert.Equal(t, status, resp.Status)
+				assert.Equal(t, "previous result", resp.Message)
+			})
+		}
+	})
+
+	t.Run("NotSupported in non-sidecar mode", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: false}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		body, _ := json.Marshal(api.ResetRequest{})
+		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		h.Reset(w, req)
+
+		var resp api.ResetResponse
+		json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, api.ResetStatusNotSupported, resp.Status)
+	})
+}
+
+func TestCreateTask_BlockedDuringReset(t *testing.T) {
+	t.Run("Create task blocked during reset", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		// Set state to InProgress
+		h.reset.status = api.ResetStatusInProgress
+
+		task := api.Task{Name: "blocked-task", Process: &api.Process{Command: []string{"echo"}}}
+		body, _ := json.Marshal(task)
+		req := httptest.NewRequest("POST", "/tasks", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		h.CreateTask(w, req)
+
+		// Should return 503 Service Unavailable
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+
+		// Task should not be created
+		_, exists := mgr.tasks["blocked-task"]
+		assert.False(t, exists)
+	})
+
+	t.Run("Create task allowed after reset completes", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		// Set state to Success (terminal state)
+		h.reset.status = api.ResetStatusSuccess
+
+		task := api.Task{Name: "allowed-task", Process: &api.Process{Command: []string{"echo"}}}
+		body, _ := json.Marshal(task)
+		req := httptest.NewRequest("POST", "/tasks", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		h.CreateTask(w, req)
+
+		// Should succeed
+		assert.Equal(t, http.StatusCreated, w.Code)
+
+		// Task should be created
+		_, exists := mgr.tasks["allowed-task"]
+		assert.True(t, exists)
 	})
 }

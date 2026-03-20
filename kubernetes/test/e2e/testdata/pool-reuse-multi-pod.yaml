@@ -1,0 +1,30 @@
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: {{.PoolName}}
+  namespace: {{.Namespace}}
+spec:
+  template:
+    metadata:
+      labels:
+        app: sandbox
+    spec:
+      containers:
+      - name: sandbox-container
+        image: {{.TaskExecutorImage}}
+        command: ["/bin/sh", "-c", "sleep infinity"]
+        env:
+        - name: SANDBOX_MAIN_CONTAINER
+          value: "sandbox-container"
+  capacitySpec:
+    bufferMax: 0
+    bufferMin: 0
+    poolMax: 10
+    poolMin: {{.PoolMin}}
+  # Reuse policy for multi-pod concurrent reset testing
+  podRecyclePolicy: Reuse
+  resetSpec:
+    mainContainerName: sandbox-container
+    cleanDirectories:
+    - /tmp
+    timeoutSeconds: 60

@@ -27,4 +27,8 @@ type Executor interface {
 	Inspect(ctx context.Context, task *types.Task) (*types.Status, error)
 
 	Stop(ctx context.Context, task *types.Task) error
+
+	// RestartMainContainer restarts the main container (used for reset).
+	// This is separated from Reset for cleaner responsibility division.
+	RestartMainContainer(ctx context.Context, mainContainerName string) error
 }

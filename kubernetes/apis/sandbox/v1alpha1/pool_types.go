@@ -32,6 +32,19 @@ type PoolSpec struct {
 	// CapacitySpec controls the size of the resource pool.
 	// +kubebuilder:validation:Required
 	CapacitySpec CapacitySpec `json:"capacitySpec"`
+	// PodRecyclePolicy specifies how to handle allocated Pods when a pooled BatchSandbox is deleted.
+	// - Delete: (default) Delete the allocated Pod directly.
+	// - Reuse: Reset the Pod before returning it to the pool; if reset fails, delete it.
+	// Note: Reuse policy requires task-executor image to be configured in controller.
+	// If not configured, pods will be deleted with a warning log.
+	// +optional
+	// +kubebuilder:default=Delete
+	// +kubebuilder:validation:Enum=Delete;Reuse
+	PodRecyclePolicy PodRecyclePolicy `json:"podRecyclePolicy,omitempty"`
+	// ResetSpec specifies the reset configuration when PodRecyclePolicy is Reuse.
+	// Ignored when PodRecyclePolicy is Delete.
+	// +optional
+	ResetSpec *ResetSpec `json:"resetSpec,omitempty"`
 }
 
 type CapacitySpec struct {
@@ -53,6 +66,38 @@ type CapacitySpec struct {
 	PoolMin int32 `json:"poolMin"`
 }
 
+// PodRecyclePolicy defines the policy for recycling pooled Pods.
+type PodRecyclePolicy string
+
+const (
+	// PodRecyclePolicyDelete deletes the allocated Pod directly.
+	// This is the default behavior.
+	PodRecyclePolicyDelete PodRecyclePolicy = "Delete"
+	// PodRecyclePolicyReuse resets the Pod before returning it to the pool.
+	// Requires task-executor image to be configured in controller.
+	PodRecyclePolicyReuse PodRecyclePolicy = "Reuse"
+)
+
+// ResetSpec specifies how to reset a Pod before returning it to the pool.
+type ResetSpec struct {
+	// MainContainerName specifies which container is the main container for reset purposes.
+	// The main container will be restarted during reset.
+	// If not specified, the first container in the pod template is used.
+	// +optional
+	MainContainerName string `json:"mainContainerName,omitempty"`
+	// CleanDirectories specifies directories to clean during reset.
+	// Supports glob patterns like "/tmp/*", "/var/cache/**".
+	// Default: ["/tmp"]
+	// +optional
+	CleanDirectories []string `json:"cleanDirectories,omitempty"`
+	// TimeoutSeconds specifies the timeout for reset operation in seconds.
+	// +optional
+	// +kubebuilder:default=60
+	// +kubebuilder:validation:Minimum=10
+	// +kubebuilder:validation:Maximum=600
+	TimeoutSeconds int64 `json:"timeoutSeconds,omitempty"`
+}
+
 // PoolStatus defines the observed state of Pool.
 type PoolStatus struct {
 	// ObservedGeneration is the most recent generation observed for this BatchSandbox. It corresponds to the
@@ -66,6 +111,9 @@ type PoolStatus struct {
 	Allocated int32 `json:"allocated"`
 	// Available is the number of nodes currently available in the pool.
 	Available int32 `json:"available"`
+	// Resetting is the number of Pods currently being reset.
+	// +optional
+	Resetting int32 `json:"resetting,omitempty"`
 }
 
 // +genclient
@@ -75,6 +123,7 @@ type PoolStatus struct {
 // +kubebuilder:printcolumn:name="TOTAL",type="integer",JSONPath=".status.total",description="The number of all nodes in pool."
 // +kubebuilder:printcolumn:name="ALLOCATED",type="integer",JSONPath=".status.allocated",description="The number of allocated nodes in pool."
 // +kubebuilder:printcolumn:name="AVAILABLE",type="integer",JSONPath=".status.available",description="The number of available nodes in pool."
+// +kubebuilder:printcolumn:name="RESETTING",type="integer",JSONPath=".status.resetting",description="The number of pods being reset in pool."
 // Pool is the Schema for the pools API.
 type Pool struct {
 	metav1.TypeMeta   `json:",inline"`

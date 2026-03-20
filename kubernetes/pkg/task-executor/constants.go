@@ -12,22 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package server
+package task_executor
 
-import (
-	"net/http"
+import "os"
+
+const (
+	// DefaultPort is the default port for task-executor API
+	DefaultPort = "5758"
+	// PortEnvVar is the environment variable name for custom port
+	PortEnvVar = "TASK_EXECUTOR_PORT"
 )
 
-func NewRouter(h *Handler) http.Handler {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("POST /setTasks", h.SyncTasks)
-	mux.HandleFunc("GET /getTasks", h.ListTasks)
-	mux.HandleFunc("POST /tasks", h.CreateTask)
-	mux.HandleFunc("GET /tasks/{id}", h.GetTask)
-	mux.HandleFunc("DELETE /tasks/{id}", h.DeleteTask)
-	mux.HandleFunc("GET /health", h.Health)
-	mux.HandleFunc("POST /reset", h.Reset)
-
-	return mux
+// GetPort returns the task-executor port from environment variable or default
+func GetPort() string {
+	if port := os.Getenv(PortEnvVar); port != "" {
+		return port
+	}
+	return DefaultPort
 }

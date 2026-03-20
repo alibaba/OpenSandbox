@@ -89,3 +89,13 @@ func (e *compositeExecutor) Stop(ctx context.Context, task *types.Task) error {
 	}
 	return delegate.Stop(ctx, task)
 }
+
+// RestartMainContainer restarts the main container (used for reset).
+// It uses the process executor for restart operations.
+func (e *compositeExecutor) RestartMainContainer(ctx context.Context, mainContainerName string) error {
+	// Restart is only supported by process executor
+	if e.processExec == nil {
+		return fmt.Errorf("process executor not available for restart")
+	}
+	return e.processExec.RestartMainContainer(ctx, mainContainerName)
+}

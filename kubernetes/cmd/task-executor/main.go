@@ -70,7 +70,7 @@ func main() {
 	klog.InfoS("task manager started")
 
 	// Initialize HTTP Handler and Router
-	handler := server.NewHandler(taskManager, cfg)
+	handler := server.NewHandler(taskManager, exec, cfg)
 	router := server.NewRouter(handler)
 
 	// Create HTTP Server
