@@ -37,6 +37,8 @@ execd_image = "opensandbox/execd:v1.0.7"
 # Egress configuration
 # -----------------------------------------------------------------
 image = "opensandbox/egress:v1.0.3"
+# Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
+mode = "dns"
 
 [storage]
 # Volume and storage configuration

@@ -19,12 +19,15 @@ import pytest
 from src import config as config_module
 from src.config import (
     AppConfig,
+    EGRESS_MODE_DNS,
+    EGRESS_MODE_DNS_NFT,
+    EgressConfig,
     GatewayConfig,
     GatewayRouteModeConfig,
     IngressConfig,
     RuntimeConfig,
     ServerConfig,
-    StorageConfig
+    StorageConfig,
 )
 
 
@@ -601,3 +604,9 @@ def test_kubernetes_runtime_with_firecracker_is_valid():
     assert cfg.secure_runtime is not None
     assert cfg.secure_runtime.type == "firecracker"
     assert cfg.secure_runtime.k8s_runtime_class == "kata-fc"
+
+
+def test_egress_config_mode_literal():
+    assert EgressConfig(image="opensandbox/egress:v1").mode == EGRESS_MODE_DNS
+    cfg = EgressConfig(image="opensandbox/egress:v1", mode=EGRESS_MODE_DNS_NFT)
+    assert cfg.mode == EGRESS_MODE_DNS_NFT

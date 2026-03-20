@@ -50,6 +50,9 @@ GATEWAY_ROUTE_MODE_WILDCARD = "wildcard"
 GATEWAY_ROUTE_MODE_HEADER = "header"
 GATEWAY_ROUTE_MODE_URI = "uri"
 
+EGRESS_MODE_DNS = "dns"
+EGRESS_MODE_DNS_NFT = "dns+nft"
+
 
 def _is_valid_ip(host: str) -> bool:
     try:
@@ -350,6 +353,13 @@ class EgressConfig(BaseModel):
         description="Container image for the egress sidecar (used when network policy is requested).",
         min_length=1,
     )
+    mode: Literal[
+        EGRESS_MODE_DNS,
+        EGRESS_MODE_DNS_NFT,
+    ] = Field(
+        default=EGRESS_MODE_DNS,
+        description="Egress enforcement passed to the sidecar as OPENSANDBOX_EGRESS_MODE (dns or dns+nft).",
+    )
 
 
 class RuntimeConfig(BaseModel):
@@ -617,6 +627,8 @@ __all__ = [
     "StorageConfig",
     "KubernetesRuntimeConfig",
     "EgressConfig",
+    "EGRESS_MODE_DNS",
+    "EGRESS_MODE_DNS_NFT",
     "SecureRuntimeConfig",
     "DEFAULT_CONFIG_PATH",
     "CONFIG_ENV_VAR",

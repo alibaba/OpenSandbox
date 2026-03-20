@@ -39,7 +39,7 @@ from src.api.schema import (
     Sandbox,
     SandboxStatus,
 )
-from src.config import AppConfig, get_config
+from src.config import AppConfig, EGRESS_MODE_DNS, get_config
 from src.services.constants import (
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_ID_LABEL,
@@ -302,6 +302,11 @@ class KubernetesSandboxService(SandboxService):
             resource_limits = request.resource_limits.root
         
         try:
+            egress_mode = (
+                self.app_config.egress.mode
+                if self.app_config.egress
+                else EGRESS_MODE_DNS
+            )
             # Get egress image if network policy is provided
             egress_image = None
             egress_auth_token = None
@@ -332,6 +337,7 @@ class KubernetesSandboxService(SandboxService):
                 network_policy=request.network_policy,
                 egress_image=egress_image,
                 egress_auth_token=egress_auth_token,
+                egress_mode=egress_mode,
                 volumes=request.volumes,
             )
             

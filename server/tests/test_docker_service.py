@@ -24,12 +24,14 @@ from pydantic import ValidationError
 
 from src.config import (
     AppConfig,
+    EGRESS_MODE_DNS,
     EgressConfig,
     RuntimeConfig,
     ServerConfig,
     StorageConfig,
     IngressConfig,
 )
+from src.services.constants import EGRESS_MODE_ENV, OPENSANDBOX_EGRESS_TOKEN
 from src.services.constants import (
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_EXPIRES_AT_LABEL,
@@ -398,7 +400,8 @@ def test_egress_sidecar_injection_and_capabilities(mock_docker):
     assert labels[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] == "egress-token"
 
     sidecar_env = sidecar_kwargs["environment"]
-    assert "OPENSANDBOX_EGRESS_TOKEN=egress-token" in sidecar_env
+    assert f"{OPENSANDBOX_EGRESS_TOKEN}=egress-token" in sidecar_env
+    assert f"{EGRESS_MODE_ENV}={EGRESS_MODE_DNS}" in sidecar_env
 
 
 # ---------------------------------------------------------------------------

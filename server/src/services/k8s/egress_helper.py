@@ -23,15 +23,19 @@ import json
 from typing import Dict, Any, List, Optional
 
 from src.api.schema import NetworkPolicy
-
-# Environment variable name for passing network policy to egress sidecar
-EGRESS_RULES_ENV = "OPENSANDBOX_EGRESS_RULES"
+from src.config import EGRESS_MODE_DNS
+from src.services.constants import (
+    EGRESS_MODE_ENV,
+    EGRESS_RULES_ENV,
+    OPENSANDBOX_EGRESS_TOKEN,
+)
 
 
 def build_egress_sidecar_container(
     egress_image: str,
     network_policy: NetworkPolicy,
     egress_auth_token: Optional[str] = None,
+    egress_mode: str = EGRESS_MODE_DNS,
 ) -> Dict[str, Any]:
     """
     Build egress sidecar container specification for Kubernetes Pod.
@@ -52,7 +56,9 @@ def build_egress_sidecar_container(
     Args:
         egress_image: Container image for the egress sidecar
         network_policy: Network policy configuration to enforce
-        
+        egress_auth_token: Optional bearer token for egress HTTP API
+        egress_mode: ``dns`` or ``dns+nft`` (``OPENSANDBOX_EGRESS_MODE``)
+
     Returns:
         Dict containing container specification compatible with Kubernetes Pod spec.
         This dict can be directly added to the Pod's containers list.
@@ -87,12 +93,16 @@ def build_egress_sidecar_container(
         {
             "name": EGRESS_RULES_ENV,
             "value": policy_payload,
-        }
+        },
+        {
+            "name": EGRESS_MODE_ENV,
+            "value": egress_mode,
+        },
     ]
     if egress_auth_token:
         env.append(
             {
-                "name": "OPENSANDBOX_EGRESS_TOKEN",
+                "name": OPENSANDBOX_EGRESS_TOKEN,
                 "value": egress_auth_token,
             }
         )
@@ -197,6 +207,7 @@ def apply_egress_to_spec(
     network_policy: Optional[NetworkPolicy],
     egress_image: Optional[str],
     egress_auth_token: Optional[str] = None,
+    egress_mode: str = EGRESS_MODE_DNS,
 ) -> None:
     """
     Apply egress sidecar configuration to Pod spec.
@@ -210,7 +221,8 @@ def apply_egress_to_spec(
         containers: List of container dicts (will be modified in place)
         network_policy: Optional network policy configuration
         egress_image: Optional egress sidecar image
-        
+        egress_mode: ``dns`` or ``dns+nft`` (default ``EGRESS_MODE_DNS``).
+
     Example:
         ```python
         containers = [main_container_dict]
@@ -231,12 +243,13 @@ def apply_egress_to_spec(
     """
     if not network_policy or not egress_image:
         return
-    
+
     # Build and add egress sidecar container
     sidecar_container = build_egress_sidecar_container(
         egress_image=egress_image,
         network_policy=network_policy,
         egress_auth_token=egress_auth_token,
+        egress_mode=egress_mode,
     )
     containers.append(sidecar_container)
     

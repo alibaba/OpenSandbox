@@ -29,7 +29,7 @@ from src.services.constants import (
     SandboxErrorCodes,
 )
 from src.api.schema import ImageAuth, ListSandboxesRequest, NetworkPolicy
-from src.config import EgressConfig
+from src.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT, EgressConfig
 from src.api.schema import Endpoint
 
 
@@ -244,7 +244,34 @@ class TestKubernetesSandboxServiceCreate:
 
         _, kwargs = k8s_service.workload_provider.create_workload.call_args
         assert kwargs["egress_auth_token"] == "egress-token"
+        assert kwargs["egress_mode"] == EGRESS_MODE_DNS
         assert kwargs["annotations"][SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] == "egress-token"
+
+    def test_create_sandbox_with_network_policy_passes_egress_mode_dns_nft_from_config(
+        self, k8s_service, create_sandbox_request
+    ):
+        create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
+        k8s_service.app_config.egress = EgressConfig(
+            image="opensandbox/egress:v1.0.3",
+            mode=EGRESS_MODE_DNS_NFT,
+        )
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-id", "uid": "uid-1"
+        }
+        k8s_service.workload_provider.get_workload.return_value = MagicMock()
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running", "reason": "", "message": "",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+
+        with patch(
+            "src.services.k8s.kubernetes_service.generate_egress_token",
+            return_value="egress-token",
+        ):
+            k8s_service.create_sandbox(create_sandbox_request)
+
+        _, kwargs = k8s_service.workload_provider.create_workload.call_args
+        assert kwargs["egress_mode"] == EGRESS_MODE_DNS_NFT
 
     def test_get_endpoint_merges_egress_auth_header_from_instance_metadata(
         self, k8s_service

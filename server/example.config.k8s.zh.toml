@@ -66,3 +66,10 @@ batchsandbox_template_file = "~/batchsandbox-template.yaml"
 [ingress]
 # Ingress exposure mode: direct (default) or gateway
 mode = "direct"
+
+[egress]
+# Egress configuration
+# -----------------------------------------------------------------
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.3"
+# Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
+mode = "dns"

@@ -59,6 +59,9 @@ from src.api.schema import (
 )
 from src.config import AppConfig, get_config
 from src.services.constants import (
+    EGRESS_MODE_ENV,
+    EGRESS_RULES_ENV,
+    OPENSANDBOX_EGRESS_TOKEN,
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_EMBEDDING_PROXY_PORT_LABEL,
     SANDBOX_EXPIRES_AT_LABEL,
@@ -92,7 +95,6 @@ from src.services.validators import (
     ensure_valid_host_path,
     ensure_volumes_valid,
 )
-
 logger = logging.getLogger(__name__)
 
 
@@ -110,7 +112,6 @@ BOOTSTRAP_PATH = posixpath.join(OPENSANDBOX_DIR, "bootstrap.sh")
 HOST_NETWORK_MODE = "host"
 BRIDGE_NETWORK_MODE = "bridge"
 PENDING_FAILURE_TTL_SECONDS = int(os.environ.get("PENDING_FAILURE_TTL", "3600"))
-EGRESS_RULES_ENV = "OPENSANDBOX_EGRESS_RULES"
 EGRESS_SIDECAR_LABEL = "opensandbox.io/egress-sidecar-for"
 
 
@@ -1989,9 +1990,12 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         self._ensure_image_available(egress_image, None, sandbox_id)
 
         policy_payload = json.dumps(network_policy.model_dump(by_alias=True, exclude_none=True))
+        assert self.app_config.egress is not None  # validated by ensure_egress_configured with networkPolicy
+        egress_mode = self.app_config.egress.mode
         sidecar_env = [
             f"{EGRESS_RULES_ENV}={policy_payload}",
-            f"OPENSANDBOX_EGRESS_TOKEN={egress_token}",
+            f"{EGRESS_MODE_ENV}={egress_mode}",
+            f"{OPENSANDBOX_EGRESS_TOKEN}={egress_token}",
         ]
 
         sidecar_host_config_kwargs: dict[str, Any] = {

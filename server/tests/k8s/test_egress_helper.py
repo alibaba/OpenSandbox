@@ -19,8 +19,9 @@ Unit tests for egress helper functions.
 import json
 
 from src.api.schema import NetworkPolicy, NetworkRule
+from src.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT
+from src.services.constants import EGRESS_MODE_ENV, EGRESS_RULES_ENV, OPENSANDBOX_EGRESS_TOKEN
 from src.services.k8s.egress_helper import (
-    EGRESS_RULES_ENV,
     apply_egress_to_spec,
     build_egress_sidecar_container,
     build_security_context_for_sandbox_container,
@@ -59,9 +60,11 @@ class TestBuildEgressSidecarContainer:
         container = build_egress_sidecar_container(egress_image, network_policy)
 
         env_vars = container["env"]
-        assert len(env_vars) == 1
+        assert len(env_vars) == 2
         assert env_vars[0]["name"] == EGRESS_RULES_ENV
         assert env_vars[0]["value"] is not None
+        assert env_vars[1]["name"] == EGRESS_MODE_ENV
+        assert env_vars[1]["value"] == EGRESS_MODE_DNS
 
     def test_contains_egress_token_when_provided(self):
         egress_image = "opensandbox/egress:v1.0.3"
@@ -77,7 +80,24 @@ class TestBuildEgressSidecarContainer:
         )
 
         env_vars = {env["name"]: env["value"] for env in container["env"]}
-        assert env_vars["OPENSANDBOX_EGRESS_TOKEN"] == "egress-token"
+        assert env_vars[OPENSANDBOX_EGRESS_TOKEN] == "egress-token"
+        assert env_vars[EGRESS_MODE_ENV] == EGRESS_MODE_DNS
+
+    def test_egress_mode_dns_nft(self):
+        egress_image = "opensandbox/egress:v1.0.3"
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        container = build_egress_sidecar_container(
+            egress_image,
+            network_policy,
+            egress_mode=EGRESS_MODE_DNS_NFT,
+        )
+
+        env_vars = {env["name"]: env["value"] for env in container["env"]}
+        assert env_vars[EGRESS_MODE_ENV] == EGRESS_MODE_DNS_NFT
 
     def test_serializes_network_policy_correctly(self):
         """Test that network policy is correctly serialized to JSON."""

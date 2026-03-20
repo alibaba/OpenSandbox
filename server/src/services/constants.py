@@ -27,6 +27,14 @@ OPEN_SANDBOX_INGRESS_HEADER = "OpenSandbox-Ingress-To"
 OPEN_SANDBOX_EGRESS_AUTH_HEADER = "OPENSANDBOX-EGRESS-AUTH"
 SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY = "opensandbox.io/egress-auth-token"
 
+# Environment variable name for passing network policy to egress sidecar
+EGRESS_RULES_ENV = "OPENSANDBOX_EGRESS_RULES"
+# Must match components/egress/pkg/constants/configuration.go EnvEgressMode
+EGRESS_MODE_ENV = "OPENSANDBOX_EGRESS_MODE"
+# Must match components/egress/pkg/constants/configuration.go EnvEgressToken
+OPENSANDBOX_EGRESS_TOKEN = "OPENSANDBOX_EGRESS_TOKEN"
+
+
 class SandboxErrorCodes:
     """Canonical error codes for sandbox service operations."""
 
@@ -101,5 +109,8 @@ __all__ = [
     "OPEN_SANDBOX_INGRESS_HEADER",
     "OPEN_SANDBOX_EGRESS_AUTH_HEADER",
     "SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY",
+    "EGRESS_RULES_ENV",
+    "EGRESS_MODE_ENV",
+    "OPENSANDBOX_EGRESS_TOKEN",
     "SandboxErrorCodes",
 ]

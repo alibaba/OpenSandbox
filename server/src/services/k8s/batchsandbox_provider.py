@@ -29,7 +29,7 @@ from kubernetes.client import (
     V1VolumeMount,
 )
 
-from src.config import AppConfig, INGRESS_MODE_GATEWAY
+from src.config import AppConfig, EGRESS_MODE_DNS, INGRESS_MODE_GATEWAY
 from src.services.helpers import format_ingress_endpoint
 from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 from src.services.k8s.image_pull_secret_helper import (
@@ -115,6 +115,7 @@ class BatchSandboxProvider(WorkloadProvider):
         volumes: Optional[List[Volume]] = None,
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
+        egress_mode: str = EGRESS_MODE_DNS,
     ) -> Dict[str, Any]:
         """
         Create a BatchSandbox workload.
@@ -223,6 +224,7 @@ class BatchSandboxProvider(WorkloadProvider):
             network_policy=network_policy,
             egress_image=egress_image,
             egress_auth_token=egress_auth_token,
+            egress_mode=egress_mode,
         )
 
         # Add user-specified volumes if provided

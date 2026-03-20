@@ -255,38 +255,74 @@ EOF
    - Informer settings are **beta** and enabled by default to reduce API calls; set `informer_enabled = false` to turn off.
    - Resync and watch timeouts control how often the cache refreshes; tune for your cluster API limits.
 
-### Egress sidecar for `networkPolicy`
+### Egress configuration
 
-- **Required when using `networkPolicy`**: Configure the sidecar image. The `egress.image` setting is mandatory when requests include `networkPolicy`:
-   ```toml
-   [runtime]
-   type = "docker"
-   execd_image = "opensandbox/execd:v1.0.7"
-   
-   [egress]
-   image = "opensandbox/egress:v1.0.3"
-   ```
-- Supported only in Docker bridge mode; requests with `networkPolicy` are rejected when `network_mode=host` or when `egress.image` is not configured.
-- Main container shares the sidecar netns and explicitly drops `NET_ADMIN`; the sidecar keeps `NET_ADMIN` to manage iptables.
-- IPv6 is disabled in the shared namespace when the egress sidecar is injected to keep policy enforcement consistent.
-- Sidecar image is pulled before start; delete/expire/failure paths attempt to clean up the sidecar as well.
-- Request example (`CreateSandboxRequest` with `networkPolicy`):
-   ```json
-   {
-     "image": {"uri": "python:3.11-slim"},
-     "entrypoint": ["python", "-m", "http.server", "8000"],
-     "timeout": 3600,
-     "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
-     "networkPolicy": {
-       "defaultAction": "deny",
-       "egress": [
-         {"action": "allow", "target": "pypi.org"},
-         {"action": "allow", "target": "*.python.org"}
-       ]
-     }
-   }
-   ```
-- When `networkPolicy` is empty or omitted, no sidecar is injected (allow-all at start).
+The **`[egress]`** block configures the **egress sidecar** image and enforcement mode. The server only starts this sidecar when a sandbox is created **with** a `networkPolicy` (outbound allow/deny rules). If the create request omits `networkPolicy`, no egress sidecar is added and outbound traffic is not restricted by this mechanism.
+
+#### Keys
+
+| Key | Type | Default | Required | Description |
+|-----|------|---------|----------|-------------|
+| `image` | string | — | **Yes** whenever `networkPolicy` is used in a create request | OCI image containing the egress binary. Pulled before the sidecar starts. |
+| `mode` | `dns` or `dns+nft` | `dns` | No | How the sidecar enforces policy. Written to the sidecar as `OPENSANDBOX_EGRESS_MODE` (see below). |
+
+#### `mode` values
+
+- **`dns`**: DNS-based enforcement via the in-sidecar DNS proxy. No nftables layer-2 rules from this path. **CIDR and static IP targets in the policy are not enforced** (use domain-style rules only if you rely on `dns` mode).
+- **`dns+nft`**: Same DNS path, plus nftables where available (see the [egress component README](../components/egress/README.md) for capabilities and fallbacks). **CIDR and static IP allow/deny rules are supported** via nftables when the table is applied successfully.
+
+#### Per-request `networkPolicy`
+
+- Rules are defined on **`CreateSandboxRequest.networkPolicy`** (default action and ordered egress rules: hostnames / patterns, and IP or CIDR entries when using **`dns+nft`**).
+- The serialized policy is passed into the sidecar as **`OPENSANDBOX_EGRESS_RULES`** (JSON).
+- An auth token may be attached for the egress HTTP API; see runtime behavior below.
+
+#### Docker runtime
+
+- **`egress.image` must be set** in config when clients send `networkPolicy`; otherwise the request is rejected.
+- Outbound policy requires **`docker.network_mode = "bridge"`**. Requests with `networkPolicy` are rejected for `network_mode=host` or for user-defined Docker networks that are incompatible with the sidecar attachment model.
+- The main sandbox container shares the sidecar’s network namespace, **drops `NET_ADMIN`**, and relies on the sidecar for policy; the sidecar **keeps `NET_ADMIN`**.
+- **IPv6** is disabled in the shared namespace so allow/deny behavior stays consistent.
+
+#### Kubernetes runtime
+
+- When `networkPolicy` is present, the workload pod includes an **egress** container built from `egress.image`, plus pod-level sysctls aligned with the Docker behavior (e.g. IPv6 disabled in the pod netns).
+- **`egress.image`** is required in the same way as for Docker.
+
+#### Operational notes
+
+- The sidecar image is pulled (or validated) before start; delete, expiry, and failure paths attempt to remove the sidecar.
+- For deeper behavior (DNS proxy, nftables, limits), refer to the **egress** component documentation under `components/egress/`.
+
+#### Example (`~/.sandbox.toml`)
+
+```toml
+[runtime]
+type = "docker"
+execd_image = "opensandbox/execd:v1.0.7"
+
+[egress]
+image = "opensandbox/egress:v1.0.3"
+mode = "dns"
+```
+
+#### Example create request with `networkPolicy`
+
+```json
+{
+  "image": {"uri": "python:3.11-slim"},
+  "entrypoint": ["python", "-m", "http.server", "8000"],
+  "timeout": 3600,
+  "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+  "networkPolicy": {
+    "defaultAction": "deny",
+    "egress": [
+      {"action": "allow", "target": "pypi.org"},
+      {"action": "allow", "target": "*.python.org"}
+    ]
+  }
+}
+```
 
 ### Run the server
 
@@ -501,9 +537,10 @@ curl -X DELETE \
 
 ### Egress configuration
 
-| Key           | Type   | Required | Description                    |
-|---------------|--------|----------|--------------------------------|
-| `egress.image` | string | **Required when using `networkPolicy`** | Container image with egress binary. Must be configured when `networkPolicy` is provided in sandbox creation requests. |
+| Key | Type | Default | Required if using `networkPolicy` | Description |
+|-----|------|---------|-----------------------------------|-------------|
+| `egress.image` | string | — | Yes | Egress sidecar image (OCI reference). |
+| `egress.mode` | `dns` \| `dns+nft` | `dns` | No | `OPENSANDBOX_EGRESS_MODE`. CIDR/IP rules need `dns+nft`; `dns` is domain-oriented only. |
 
 ### Docker configuration
 

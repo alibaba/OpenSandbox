@@ -231,23 +231,59 @@ mode = "direct"  # Docker 运行时仅支持 direct（直连，无 L7 网关）
    - Informer 配置为 **Beta**，默认开启以减少 API 压力；若需关闭设置 `informer_enabled = false`。
    - resync / watch 超时用于控制缓存刷新频率，可根据集群 API 限流调优。
 
-### Egress sidecar 配置与使用
+### Egress 配置（`[egress]` 配置块）
 
-- **使用 `networkPolicy` 时必需**：配置 sidecar 镜像。当请求携带 `networkPolicy` 时，`egress.image` 配置项是必需的：
+**`[egress]`** 用于配置 **egress 侧车** 的镜像与执行模式。仅当创建沙箱的请求中带有 **`networkPolicy`**（出站允许/拒绝规则）时，服务器才会注入该侧车；若请求未带 `networkPolicy`，不会添加 egress 侧车，也不会通过该机制限制出站流量。
+
+#### 配置项
+
+| 键 | 类型 | 默认值 | 何时必填 | 说明 |
+|----|------|--------|----------|------|
+| `image` | string | — | 任意一次创建请求携带 `networkPolicy` 时 **必填** | 包含 egress 可执行文件的容器镜像；侧车启动前会拉取或校验镜像。 |
+| `mode` | `dns` 或 `dns+nft` | `dns` | 否 | 侧车如何执行策略，写入环境变量 `OPENSANDBOX_EGRESS_MODE`（见下）。 |
+
+#### `mode` 取值
+
+- **`dns`**：通过侧车内 DNS 代理做基于域名的策略；不依赖本路径下的 nftables 二层规则。**策略中的 CIDR、静态 IP 类目标不会被强制执行**（若只用 `dns` 模式，请使用域名类规则）。
+- **`dns+nft`**：在 `dns` 的基础上启用 nftables（能力与回退行为见 [egress 组件说明](../components/egress/README.md)）。**支持 CIDR 与静态 IP 的放行/拒绝规则**（nftables 表成功下发时生效）。
+
+#### 请求体中的 `networkPolicy`
+
+- 规则在 **`CreateSandboxRequest.networkPolicy`** 中声明（默认动作与有序的 egress 规则：域名/通配符；在使用 **`dns+nft`** 时还可包含 IP 或 CIDR 条目）。
+- 序列化后的策略以 JSON 形式注入侧车环境变量 **`OPENSANDBOX_EGRESS_RULES`**。
+- 可能同时下发用于 egress HTTP API 的鉴权信息（与运行时行为一致）。
+
+#### Docker 运行时
+
+- 客户端传入 `networkPolicy` 时，配置中必须设置 **`egress.image`**，否则请求会被拒绝。
+- 出站策略要求 **`docker.network_mode = "bridge"`**；`network_mode=host` 或与侧车挂载模型不兼容的用户自定义网络下，携带 `networkPolicy` 的请求会被拒绝。
+- 主沙箱容器与侧车 **共享网络命名空间**，主容器 **drop `NET_ADMIN`**，由侧车保留 **`NET_ADMIN`** 完成策略相关操作。
+- 共享 netns 内会 **禁用 IPv6**，以保证放行/拒绝行为一致。
+
+#### Kubernetes 运行时
+
+- 当请求带有 `networkPolicy` 时，工作负载 Pod 中会增加基于 **`egress.image`** 的 **egress** 容器，并在 Pod 级设置与 Docker 侧一致的 sysctl（例如在 Pod netns 内禁用 IPv6）。
+- **`egress.image`** 的必填规则与 Docker 相同。
+
+#### 运维说明
+
+- 侧车镜像在启动前拉取或校验；删除、过期、失败等路径会尽量清理侧车。
+- DNS 代理、nftables、能力边界等详见仓库内 **`components/egress/`** 文档。
+
+#### 配置示例（`~/.sandbox.toml`）
+
 ```toml
 [runtime]
 type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.7"
+execd_image = "opensandbox/execd:v1.0.7"
 
 [egress]
-image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.3"
+image = "opensandbox/egress:v1.0.3"
+mode = "dns"
 ```
 
-- 仅支持 Docker bridge 模式（`network_mode=host` 时会拒绝携带 `networkPolicy` 的请求，或当 `egress.image` 未配置时也会拒绝）。
-- 主容器共享 sidecar 网络命名空间，主容器会显式 drop `NET_ADMIN`，sidecar 保留 `NET_ADMIN` 完成 iptables。
-- 注入 sidecar 时会在共享 netns 内默认禁用 IPv6，以保持策略生效一致性。
-- 侧车镜像会在启动前自动拉取；删除/过期/失败时会尝试同步清理 sidecar。
-- 请求体示例（`CreateSandboxRequest` 中携带 `networkPolicy`）：
+#### 带 `networkPolicy` 的创建请求示例
+
 ```json
 {
   "image": {"uri": "python:3.11-slim"},
@@ -263,7 +299,6 @@ image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0
   }
 }
 ```
-- `networkPolicy` 为空/缺省时不注入 sidecar，默认 allow-all。
 
 ### 启动服务
 
@@ -477,9 +512,10 @@ curl -X DELETE \
 
 ### Egress 配置
 
-| 键           | 类型     | 必需 | 描述                    |
-|---------------|--------|----|--------------------------------|
-| `egress.image` | string | **使用 `networkPolicy` 时必需** | 包含 egress 二进制文件的容器镜像。当创建沙箱的请求中包含 `networkPolicy` 时，必须配置此项。               |
+| 键 | 类型 | 默认值 | 使用 `networkPolicy` 时是否必填 | 说明 |
+|----|------|--------|--------------------------------|------|
+| `egress.image` | string | — | 是 | Egress 侧车镜像（OCI 引用）。 |
+| `egress.mode` | `dns` \| `dns+nft` | `dns` | 否 | `OPENSANDBOX_EGRESS_MODE`。CIDR/IP 类规则需 `dns+nft`；`dns` 仅面向域名类策略。 |
 
 ### Docker 配置
 

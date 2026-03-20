@@ -22,9 +22,17 @@ from unittest.mock import MagicMock
 from kubernetes.client import ApiException
 
 from src.api.schema import ImageSpec, ImageAuth, NetworkPolicy, NetworkRule
-from src.config import AppConfig, ExecdInitResources, KubernetesRuntimeConfig, RuntimeConfig
+from src.config import (
+    AppConfig,
+    EGRESS_MODE_DNS,
+    EGRESS_MODE_DNS_NFT,
+    ExecdInitResources,
+    KubernetesRuntimeConfig,
+    RuntimeConfig,
+)
 from src.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
 from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
+from src.services.constants import OPENSANDBOX_EGRESS_TOKEN
 from src.services.k8s.image_pull_secret_helper import IMAGE_AUTH_SECRET_PREFIX
 from src.services.k8s.volume_helper import apply_volumes_to_pod_spec
 
@@ -1235,7 +1243,8 @@ class TestBatchSandboxProviderEgress:
         # Verify sidecar has environment variable
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
         assert "OPENSANDBOX_EGRESS_RULES" in env_vars
-        
+        assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS
+
         # Verify sidecar has NET_ADMIN capability
         assert "securityContext" in sidecar
         assert "capabilities" in sidecar["securityContext"]
@@ -1271,7 +1280,36 @@ class TestBatchSandboxProviderEgress:
         sidecar = next((c for c in containers if c["name"] == "egress"), None)
         assert sidecar is not None
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
-        assert env_vars["OPENSANDBOX_EGRESS_TOKEN"] == "egress-token"
+        assert env_vars[OPENSANDBOX_EGRESS_TOKEN] == "egress-token"
+        assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS
+
+    def test_create_workload_with_egress_mode_dns_nft(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            network_policy=NetworkPolicy(default_action="deny", egress=[]),
+            egress_image="opensandbox/egress:v1.0.3",
+            egress_mode=EGRESS_MODE_DNS_NFT,
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        containers = body["spec"]["template"]["spec"]["containers"]
+        sidecar = next((c for c in containers if c["name"] == "egress"), None)
+        assert sidecar is not None
+        env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
+        assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS_NFT
 
     def test_create_workload_with_network_policy_adds_ipv6_disable_sysctls(self, mock_k8s_client):
         """
