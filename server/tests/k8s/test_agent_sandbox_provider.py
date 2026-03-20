@@ -540,11 +540,8 @@ class TestAgentSandboxProviderEgress:
         assert "OPENSANDBOX_EGRESS_RULES" in env_vars
         assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS
 
-        # Verify sidecar has NET_ADMIN capability
-        assert "securityContext" in sidecar
-        assert "capabilities" in sidecar["securityContext"]
-        assert "add" in sidecar["securityContext"]["capabilities"]
-        assert "NET_ADMIN" in sidecar["securityContext"]["capabilities"]["add"]
+        assert sidecar.get("securityContext", {}).get("privileged") is True
+        assert "net.ipv6.conf.all.disable_ipv6=1" in sidecar["command"][2]
 
     def test_create_workload_with_network_policy_persists_annotation_and_sidecar_token(self, mock_k8s_client):
         provider = AgentSandboxProvider(mock_k8s_client)
@@ -606,10 +603,7 @@ class TestAgentSandboxProviderEgress:
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
         assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS_NFT
 
-    def test_create_workload_with_network_policy_adds_ipv6_disable_sysctls(self, mock_k8s_client):
-        """
-        Test case: Verify IPv6 disable sysctls are added to Pod spec
-        """
+    def test_create_workload_with_network_policy_does_not_add_pod_ipv6_sysctls(self, mock_k8s_client):
         provider = AgentSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -637,22 +631,11 @@ class TestAgentSandboxProviderEgress:
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         pod_spec = body["spec"]["podTemplate"]["spec"]
-        
-        # Verify securityContext with sysctls exists
-        assert "securityContext" in pod_spec
-        assert "sysctls" in pod_spec["securityContext"]
-        
-        sysctls = pod_spec["securityContext"]["sysctls"]
-        sysctl_names = {s["name"] for s in sysctls}
-        
-        # Verify all IPv6 disable sysctls are present
-        assert "net.ipv6.conf.all.disable_ipv6" in sysctl_names
-        assert "net.ipv6.conf.default.disable_ipv6" in sysctl_names
-        assert "net.ipv6.conf.lo.disable_ipv6" in sysctl_names
-        
-        # Verify all values are "1"
-        for sysctl in sysctls:
-            assert sysctl["value"] == "1"
+
+        assert "securityContext" not in pod_spec or "sysctls" not in pod_spec.get("securityContext", {})
+
+        sidecar = next(c for c in pod_spec["containers"] if c["name"] == "egress")
+        assert sidecar["command"][2].startswith("sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1")
 
     def test_create_workload_with_network_policy_drops_net_admin_from_main_container(self, mock_k8s_client):
         """

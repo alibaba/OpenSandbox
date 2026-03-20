@@ -30,6 +30,13 @@ from src.services.constants import (
     OPENSANDBOX_EGRESS_TOKEN,
 )
 
+# Privileged sidecar: IPv6 disable is applied at container start (see EGRESS_K8S_START_COMMAND), not via Pod sysctls.
+EGRESS_K8S_START_COMMAND = [
+    "/bin/sh",
+    "-c",
+    "sudo sysctl -w net.ipv6.conf.all.disable_ipv6=1 && /egress",
+]
+
 
 def build_egress_sidecar_container(
     egress_image: str,
@@ -42,16 +49,15 @@ def build_egress_sidecar_container(
     
     This function creates a container spec that can be added to a Pod's containers
     list. The sidecar container will:
-    - Run the egress image
+    - Run **privileged** with a startup command that runs ``sysctl`` then ``/egress``
     - Receive network policy via OPENSANDBOX_EGRESS_RULES environment variable
-    - Have NET_ADMIN capability to manage iptables
-    
+
     Note: In Kubernetes, containers in the same Pod share the network namespace,
     so the main container can access the sidecar's ports (44772 for execd, 8080 for HTTP)
     via localhost without explicit port declarations.
-    
-    Important: IPv6 should be disabled at the Pod level (not container level) using
-    build_ipv6_disable_sysctls() and adding the result to Pod's securityContext.sysctls.
+
+    IPv6 for ``all`` interfaces is disabled inside the sidecar start script; Pod-level
+    ``net.ipv6.conf.all.disable_ipv6`` sysctl injection is not used.
     
     Args:
         egress_image: Container image for the egress sidecar
@@ -73,15 +79,6 @@ def build_egress_sidecar_container(
             )
         )
         pod_spec["containers"].append(sidecar)
-        
-        # Disable IPv6 at Pod level (extends existing sysctls)
-        if "securityContext" not in pod_spec:
-            pod_spec["securityContext"] = {}
-        existing_sysctls = pod_spec["securityContext"].get("sysctls")
-        new_sysctls = build_ipv6_disable_sysctls()
-        pod_spec["securityContext"]["sysctls"] = _merge_sysctls(
-            existing_sysctls, new_sysctls
-        )
         ```
     """
     # Serialize network policy to JSON for environment variable
@@ -111,29 +108,26 @@ def build_egress_sidecar_container(
     container_spec: Dict[str, Any] = {
         "name": "egress",
         "image": egress_image,
+        "command": EGRESS_K8S_START_COMMAND,
         "env": env,
         "securityContext": _build_security_context_for_egress(),
     }
-    
+
     return container_spec
 
 
 def _build_security_context_for_egress() -> Dict[str, Any]:
     """
     Build security context for egress sidecar container.
-    
-    The egress sidecar needs NET_ADMIN capability to manage iptables rules
-    for network policy enforcement.
-    
-    This is an internal helper function used by build_egress_sidecar_container().
-    
+
+    The sidecar runs **privileged** so it can manage iptables/nft and run sysctl
+    inside the container network namespace at startup.
+
     Returns:
-        Dict containing security context configuration with NET_ADMIN capability.
+        Dict containing security context with ``privileged: true``.
     """
     return {
-        "capabilities": {
-            "add": ["NET_ADMIN"],
-        },
+        "privileged": True,
     }
 
 
@@ -164,43 +158,6 @@ def build_security_context_for_sandbox_container(
     }
 
 
-def _merge_sysctls(
-    existing_sysctls: Optional[List[Dict[str, str]]],
-    new_sysctls: List[Dict[str, str]],
-) -> List[Dict[str, str]]:
-    """
-    Merge new sysctls into existing sysctls, avoiding duplicates.
-    
-    If a sysctl with the same name already exists, the new value will
-    override the existing one (last write wins).
-    
-    Args:
-        existing_sysctls: Existing sysctls list or None
-        new_sysctls: New sysctls to merge in
-        
-    Returns:
-        Merged list of sysctls with no duplicate names
-    """
-    if not existing_sysctls:
-        return new_sysctls.copy()
-    
-    # Create a dict to track sysctls by name (for deduplication)
-    sysctls_dict: Dict[str, str] = {}
-    
-    # First, add existing sysctls
-    for sysctl in existing_sysctls:
-        if isinstance(sysctl, dict) and "name" in sysctl:
-            sysctls_dict[sysctl["name"]] = sysctl.get("value", "")
-    
-    # Then, add/override with new sysctls
-    for sysctl in new_sysctls:
-        if isinstance(sysctl, dict) and "name" in sysctl:
-            sysctls_dict[sysctl["name"]] = sysctl.get("value", "")
-    
-    # Convert back to list format
-    return [{"name": name, "value": value} for name, value in sysctls_dict.items()]
-
-
 def apply_egress_to_spec(
     pod_spec: Dict[str, Any],
     containers: List[Dict[str, Any]],
@@ -212,9 +169,9 @@ def apply_egress_to_spec(
     """
     Apply egress sidecar configuration to Pod spec.
     
-    This function adds the egress sidecar container to the containers list
-    and configures IPv6 disable sysctls at the Pod level when network policy
-    is provided. Existing sysctls are preserved and merged with the new ones.
+    This function adds the egress sidecar container to the containers list.
+    It does **not** mutate Pod ``securityContext.sysctls`` for IPv6; the sidecar
+    disables ``net.ipv6.conf.all.disable_ipv6`` via its startup command.
     
     Args:
         pod_spec: Pod specification dict (will be modified in place)
@@ -236,10 +193,6 @@ def apply_egress_to_spec(
         )
         ```
         
-    Note:
-        This function extends existing sysctls rather than overwriting them.
-        If a sysctl with the same name already exists, the egress-related
-        sysctls will override it (last write wins).
     """
     if not network_policy or not egress_image:
         return
@@ -252,16 +205,6 @@ def apply_egress_to_spec(
         egress_mode=egress_mode,
     )
     containers.append(sidecar_container)
-    
-    # Disable IPv6 at Pod level, merging with existing sysctls
-    if "securityContext" not in pod_spec:
-        pod_spec["securityContext"] = {}
-    
-    existing_sysctls = pod_spec["securityContext"].get("sysctls")
-    new_sysctls = build_ipv6_disable_sysctls()
-    pod_spec["securityContext"]["sysctls"] = _merge_sysctls(
-        existing_sysctls, new_sysctls
-    )
 
 
 def build_security_context_from_dict(
@@ -295,9 +238,9 @@ def build_security_context_from_dict(
     """
     if not security_context_dict:
         return None
-    
+
     from kubernetes.client import V1SecurityContext, V1Capabilities
-    
+
     capabilities = None
     if "capabilities" in security_context_dict:
         caps_dict = security_context_dict["capabilities"]
@@ -307,8 +250,16 @@ def build_security_context_from_dict(
             add=add_caps if add_caps else None,
             drop=drop_caps if drop_caps else None,
         )
-    
-    return V1SecurityContext(capabilities=capabilities)
+
+    privileged = security_context_dict.get("privileged")
+
+    if capabilities is None and privileged is None:
+        return None
+
+    return V1SecurityContext(
+        capabilities=capabilities,
+        privileged=privileged,
+    )
 
 
 def serialize_security_context_to_dict(
@@ -343,7 +294,7 @@ def serialize_security_context_to_dict(
         return None
     
     result: Dict[str, Any] = {}
-    
+
     if security_context.capabilities:
         caps: Dict[str, Any] = {}
         if security_context.capabilities.add:
@@ -352,28 +303,8 @@ def serialize_security_context_to_dict(
             caps["drop"] = security_context.capabilities.drop
         if caps:
             result["capabilities"] = caps
-    
+
+    if security_context.privileged is not None:
+        result["privileged"] = security_context.privileged
+
     return result if result else None
-
-
-def build_ipv6_disable_sysctls() -> list[Dict[str, str]]:
-    """
-    Build sysctls configuration to disable IPv6 in the Pod.
-    
-    When egress sidecar is used, IPv6 should be disabled in the shared network
-    namespace to keep policy enforcement consistent. This matches the Docker
-    implementation behavior.
-    
-    Returns:
-        List of sysctl configurations to disable IPv6 at Pod level.
-        
-    Note:
-        These sysctls need to be set at the Pod's securityContext level, not
-        at the container level. The calling code should merge this into the
-        Pod spec's securityContext.sysctls field.
-    """
-    return [
-        {"name": "net.ipv6.conf.all.disable_ipv6", "value": "1"},
-        {"name": "net.ipv6.conf.default.disable_ipv6", "value": "1"},
-        {"name": "net.ipv6.conf.lo.disable_ipv6", "value": "1"},
-    ]

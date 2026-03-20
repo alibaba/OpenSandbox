@@ -22,10 +22,10 @@ from src.api.schema import NetworkPolicy, NetworkRule
 from src.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT
 from src.services.constants import EGRESS_MODE_ENV, EGRESS_RULES_ENV, OPENSANDBOX_EGRESS_TOKEN
 from src.services.k8s.egress_helper import (
+    EGRESS_K8S_START_COMMAND,
     apply_egress_to_spec,
     build_egress_sidecar_container,
     build_security_context_for_sandbox_container,
-    build_ipv6_disable_sysctls,
 )
 
 
@@ -158,8 +158,8 @@ class TestBuildEgressSidecarContainer:
         assert "defaultAction" not in policy_dict or policy_dict.get("defaultAction") is None
         assert "egress" in policy_dict
 
-    def test_security_context_has_net_admin_capability(self):
-        """Test that security context includes NET_ADMIN capability."""
+    def test_security_context_is_privileged(self):
+        """Egress sidecar runs privileged (Kubernetes)."""
         egress_image = "opensandbox/egress:v1.0.3"
         network_policy = NetworkPolicy(
             default_action="deny",
@@ -169,9 +169,16 @@ class TestBuildEgressSidecarContainer:
         container = build_egress_sidecar_container(egress_image, network_policy)
 
         security_context = container["securityContext"]
-        assert "capabilities" in security_context
-        assert "add" in security_context["capabilities"]
-        assert "NET_ADMIN" in security_context["capabilities"]["add"]
+        assert security_context.get("privileged") is True
+
+    def test_start_command_runs_sysctl_then_egress(self):
+        container = build_egress_sidecar_container(
+            "opensandbox/egress:v1.0.3",
+            NetworkPolicy(default_action="deny", egress=[]),
+        )
+        assert container["command"] == EGRESS_K8S_START_COMMAND
+        assert "net.ipv6.conf.all.disable_ipv6=1" in container["command"][2]
+        assert container["command"][2].endswith("&& /egress")
 
     def test_container_spec_is_valid_kubernetes_format(self):
         """Test that returned container spec is in valid Kubernetes format."""
@@ -194,6 +201,7 @@ class TestBuildEgressSidecarContainer:
         assert len(container["env"]) > 0
         assert "name" in container["env"][0]
         assert "value" in container["env"][0]
+        assert "command" in container
 
     def test_handles_wildcard_domains(self):
         """Test that wildcard domains in egress rules are handled correctly."""
@@ -233,49 +241,6 @@ class TestBuildSecurityContextForMainContainer:
         assert "NET_ADMIN" in result["capabilities"]["drop"]
 
 
-class TestBuildIpv6DisableSysctls:
-    """Tests for build_ipv6_disable_sysctls function."""
-
-    def test_returns_list_of_sysctls(self):
-        """Test that function returns a list of sysctl configurations."""
-        sysctls = build_ipv6_disable_sysctls()
-        
-        assert isinstance(sysctls, list)
-        assert len(sysctls) == 3
-
-    def test_contains_all_required_ipv6_disable_sysctls(self):
-        """Test that all required IPv6 disable sysctls are present."""
-        sysctls = build_ipv6_disable_sysctls()
-        
-        sysctl_names = {s["name"] for s in sysctls}
-        expected_names = {
-            "net.ipv6.conf.all.disable_ipv6",
-            "net.ipv6.conf.default.disable_ipv6",
-            "net.ipv6.conf.lo.disable_ipv6",
-        }
-        
-        assert sysctl_names == expected_names
-
-    def test_all_sysctls_have_value_one(self):
-        """Test that all sysctls have value "1"."""
-        sysctls = build_ipv6_disable_sysctls()
-        
-        for sysctl in sysctls:
-            assert sysctl["value"] == "1"
-            assert "name" in sysctl
-
-    def test_sysctls_are_in_valid_kubernetes_format(self):
-        """Test that sysctls are in valid Kubernetes format."""
-        sysctls = build_ipv6_disable_sysctls()
-        
-        for sysctl in sysctls:
-            assert isinstance(sysctl, dict)
-            assert "name" in sysctl
-            assert "value" in sysctl
-            assert isinstance(sysctl["name"], str)
-            assert isinstance(sysctl["value"], str)
-
-
 class TestApplyEgressToSpec:
     """Tests for apply_egress_to_spec function."""
 
@@ -300,8 +265,8 @@ class TestApplyEgressToSpec:
         assert containers[0]["name"] == "egress"
         assert containers[0]["image"] == egress_image
 
-    def test_adds_ipv6_disable_sysctls(self):
-        """Test that IPv6 disable sysctls are added to Pod spec."""
+    def test_does_not_add_pod_sysctls_for_ipv6(self):
+        """IPv6 disable is not merged into Pod securityContext.sysctls (sidecar start script)."""
         pod_spec: dict = {}
         containers: list = []
         network_policy = NetworkPolicy(
@@ -317,20 +282,15 @@ class TestApplyEgressToSpec:
             egress_image=egress_image,
         )
 
-        assert "securityContext" in pod_spec
-        assert "sysctls" in pod_spec["securityContext"]
-        sysctls = pod_spec["securityContext"]["sysctls"]
-        assert len(sysctls) == 3
-        sysctl_names = {s["name"] for s in sysctls}
-        assert "net.ipv6.conf.all.disable_ipv6" in sysctl_names
+        assert "securityContext" not in pod_spec
 
-    def test_extends_existing_sysctls(self):
-        """Test that existing sysctls are preserved and merged."""
+    def test_preserves_existing_pod_sysctls_without_merging_ipv6(self):
+        """Existing Pod sysctls are left unchanged when egress is applied."""
         pod_spec: dict = {
             "securityContext": {
                 "sysctls": [
                     {"name": "net.core.somaxconn", "value": "1024"},
-                    {"name": "net.ipv6.conf.all.disable_ipv6", "value": "0"},  # Will be overridden
+                    {"name": "net.ipv6.conf.all.disable_ipv6", "value": "0"},
                 ]
             }
         }
@@ -350,19 +310,10 @@ class TestApplyEgressToSpec:
 
         sysctls = pod_spec["securityContext"]["sysctls"]
         sysctl_dict = {s["name"]: s["value"] for s in sysctls}
-        
-        # Verify existing sysctl is preserved
-        assert "net.core.somaxconn" in sysctl_dict
+
         assert sysctl_dict["net.core.somaxconn"] == "1024"
-        
-        # Verify IPv6 sysctls are added/updated
-        assert "net.ipv6.conf.all.disable_ipv6" in sysctl_dict
-        assert sysctl_dict["net.ipv6.conf.all.disable_ipv6"] == "1"  # Overridden
-        assert "net.ipv6.conf.default.disable_ipv6" in sysctl_dict
-        assert "net.ipv6.conf.lo.disable_ipv6" in sysctl_dict
-        
-        # Verify total count (1 existing + 3 IPv6, but one was overridden, so 4 total)
-        assert len(sysctls) == 4
+        assert sysctl_dict["net.ipv6.conf.all.disable_ipv6"] == "0"
+        assert len(sysctls) == 2
 
     def test_no_op_when_no_network_policy(self):
         """Test that function does nothing when network_policy is None."""

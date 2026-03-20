@@ -262,7 +262,7 @@ mode = "direct"  # Docker 运行时仅支持 direct（直连，无 L7 网关）
 
 #### Kubernetes 运行时
 
-- 当请求带有 `networkPolicy` 时，工作负载 Pod 中会增加基于 **`egress.image`** 的 **egress** 容器，并在 Pod 级设置与 Docker 侧一致的 sysctl（例如在 Pod netns 内禁用 IPv6）。
+- 当请求带有 `networkPolicy` 时，工作负载 Pod 中除主容器外，还会增加基于 **`egress.image`** 的 **egress** 侧车。
 - **`egress.image`** 的必填规则与 Docker 相同。
 
 #### 运维说明

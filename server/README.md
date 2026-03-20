@@ -286,7 +286,7 @@ The **`[egress]`** block configures the **egress sidecar** image and enforcement
 
 #### Kubernetes runtime
 
-- When `networkPolicy` is present, the workload pod includes an **egress** container built from `egress.image`, plus pod-level sysctls aligned with the Docker behavior (e.g. IPv6 disabled in the pod netns).
+- When `networkPolicy` is present, the workload pod includes an **egress** sidecar built from `egress.image`, in addition to the main sandbox container.
 - **`egress.image`** is required in the same way as for Docker.
 
 #### Operational notes
