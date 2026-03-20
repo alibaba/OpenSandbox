@@ -61,7 +61,10 @@ no_new_privileges = true
 # Optional: set an AppArmor profile name (e.g., "docker-default") when AppArmor is enabled
 apparmor_profile = ""
 # Limit process count to reduce host impact from fork bombs; set to null to disable
-pids_limit = 512
+# TODO: For production environments, it is recommended to set this to '4096' or higher to avoid
+# "can't start new thread" errors when multiple sandboxes are running concurrently.
+# See: https://github.com/alibaba/OpenSandbox/issues/447
+pids_limit = 4096
 # Seccomp profile: empty string uses Docker default; set to an absolute path for a custom profile
 seccomp_profile = ""
 
