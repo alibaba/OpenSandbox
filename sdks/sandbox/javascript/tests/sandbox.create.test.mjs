@@ -143,3 +143,76 @@ test("Sandbox creates and reuses egress service during sandbox lifecycle", async
   assert.equal(egressStackCalls[0].egressBaseUrl, `http://127.0.0.1:${DEFAULT_EGRESS_PORT}`);
   assert.deepEqual(egressStackCalls[0].endpointHeaders, { "x-port": String(DEFAULT_EGRESS_PORT) });
 });
+
+test("Sandbox.create passes OSSFS volume to request", async () => {
+  const { adapterFactory, recordedRequests } = createAdapterFactory();
+
+  await Sandbox.create({
+    adapterFactory,
+    connectionConfig: { domain: "http://127.0.0.1:8080" },
+    image: "python:3.12",
+    skipHealthCheck: true,
+    volumes: [
+      {
+        name: "oss-data",
+        ossfs: {
+          bucket: "my-bucket",
+          endpoint: "oss-cn-hangzhou.aliyuncs.com",
+          version: "2.0",
+          accessKeyId: "ak-id",
+          accessKeySecret: "ak-secret",
+        },
+        mountPath: "/data",
+        readOnly: false,
+      },
+    ],
+  });
+
+  assert.equal(recordedRequests.length, 1);
+  assert.equal(recordedRequests[0].volumes.length, 1);
+  assert.equal(recordedRequests[0].volumes[0].name, "oss-data");
+  assert.equal(recordedRequests[0].volumes[0].ossfs.bucket, "my-bucket");
+  assert.equal(recordedRequests[0].volumes[0].ossfs.endpoint, "oss-cn-hangzhou.aliyuncs.com");
+});
+
+test("Sandbox.create rejects volume with no backend", async () => {
+  const { adapterFactory } = createAdapterFactory();
+
+  await assert.rejects(
+    Sandbox.create({
+      adapterFactory,
+      connectionConfig: { domain: "http://127.0.0.1:8080" },
+      image: "python:3.12",
+      skipHealthCheck: true,
+      volumes: [{ name: "empty", mountPath: "/mnt" }],
+    }),
+    /must specify exactly one backend \(host, pvc, ossfs\)/
+  );
+});
+
+test("Sandbox.create rejects volume with multiple backends", async () => {
+  const { adapterFactory } = createAdapterFactory();
+
+  await assert.rejects(
+    Sandbox.create({
+      adapterFactory,
+      connectionConfig: { domain: "http://127.0.0.1:8080" },
+      image: "python:3.12",
+      skipHealthCheck: true,
+      volumes: [
+        {
+          name: "conflicting",
+          host: { path: "/tmp" },
+          ossfs: {
+            bucket: "b",
+            endpoint: "e",
+            accessKeyId: "id",
+            accessKeySecret: "secret",
+          },
+          mountPath: "/mnt",
+        },
+      ],
+    }),
+    /must specify exactly one backend \(host, pvc, ossfs\)/
+  );
+});

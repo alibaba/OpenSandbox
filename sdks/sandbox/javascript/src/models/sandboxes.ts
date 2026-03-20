@@ -93,11 +93,50 @@ export interface PVC extends Record<string, unknown> {
 }
 
 /**
+ * Alibaba Cloud OSS mount backend via ossfs.
+ *
+ * The runtime mounts a host-side OSS path under `storage.ossfs_mount_root`
+ * so the container sees the bucket contents at the specified mount path.
+ *
+ * In Docker runtime, OSSFS backend requires OpenSandbox Server to run on a Linux host with FUSE support.
+ */
+export interface OSSFS extends Record<string, unknown> {
+  /**
+   * OSS bucket name.
+   */
+  bucket: string;
+  /**
+   * OSS endpoint (e.g., "oss-cn-hangzhou.aliyuncs.com").
+   */
+  endpoint: string;
+  /**
+   * ossfs major version used by runtime mount integration.
+   * @default "2.0"
+   */
+  version?: "1.0" | "2.0";
+  /**
+   * Additional ossfs mount options.
+   *
+   * - `1.0`: mounts with `ossfs ... -o <option>`
+   * - `2.0`: mounts with `ossfs2 mount ... -c <config-file>` and encodes options as `--<option>` lines in the config file
+   */
+  options?: string[];
+  /**
+   * OSS access key ID for inline credentials mode.
+   */
+  accessKeyId: string;
+  /**
+   * OSS access key secret for inline credentials mode.
+   */
+  accessKeySecret: string;
+}
+
+/**
  * Storage mount definition for a sandbox.
  *
  * Each volume entry contains:
  * - A unique name identifier
- * - Exactly one backend (host, pvc) with backend-specific fields
+ * - Exactly one backend (host, pvc, ossfs) with backend-specific fields
  * - Common mount settings (mountPath, readOnly, subPath)
  */
 export interface Volume extends Record<string, unknown> {
@@ -106,13 +145,17 @@ export interface Volume extends Record<string, unknown> {
    */
   name: string;
   /**
-   * Host path bind mount backend (mutually exclusive with pvc).
+   * Host path bind mount backend (mutually exclusive with pvc, ossfs).
    */
   host?: Host;
   /**
-   * Kubernetes PVC mount backend (mutually exclusive with host).
+   * Kubernetes PVC mount backend (mutually exclusive with host, ossfs).
    */
   pvc?: PVC;
+  /**
+   * Alibaba Cloud OSSFS mount backend (mutually exclusive with host, pvc).
+   */
+  ossfs?: OSSFS;
   /**
    * Absolute path inside the container where the volume is mounted.
    */

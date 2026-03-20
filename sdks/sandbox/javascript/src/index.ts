@@ -39,6 +39,7 @@ export type {
   NetworkPolicy,
   NetworkRule,
   NetworkRuleAction,
+  OSSFS,
   PVC,
   RenewSandboxExpirationRequest,
   RenewSandboxExpirationResponse,
