@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kubernetes import client, config
 from kubernetes.client import ApiException, CoreV1Api, CustomObjectsApi, NodeV1Api
+from kubernetes.stream import stream as k8s_stream
 
 from src.config import KubernetesRuntimeConfig
 from src.services.k8s.informer import WorkloadInformer
@@ -295,3 +296,153 @@ class K8sClient:
         if self._read_limiter:
             self._read_limiter.acquire()
         return self.get_node_v1_api().read_runtime_class(name)
+
+    # ------------------------------------------------------------------
+    # PVC operations
+    # ------------------------------------------------------------------
+
+    def create_pvc(
+        self,
+        namespace: str,
+        name: str,
+        storage_size: str,
+        labels: Optional[Dict[str, str]] = None,
+    ) -> Any:
+        """Create a PersistentVolumeClaim."""
+        if self._write_limiter:
+            self._write_limiter.acquire()
+        pvc = client.V1PersistentVolumeClaim(
+            metadata=client.V1ObjectMeta(name=name, labels=labels),
+            spec=client.V1PersistentVolumeClaimSpec(
+                access_modes=["ReadWriteOnce"],
+                resources=client.V1VolumeResourceRequirements(
+                    requests={"storage": storage_size},
+                ),
+            ),
+        )
+        return self.get_core_v1_api().create_namespaced_persistent_volume_claim(
+            namespace=namespace,
+            body=pvc,
+        )
+
+    def delete_pvc(self, namespace: str, name: str) -> None:
+        """Delete a PersistentVolumeClaim. No-op if already deleted."""
+        if self._write_limiter:
+            self._write_limiter.acquire()
+        try:
+            self.get_core_v1_api().delete_namespaced_persistent_volume_claim(
+                name=name,
+                namespace=namespace,
+            )
+        except ApiException as e:
+            if e.status == 404:
+                logger.debug("PVC %s already deleted", name)
+                return
+            raise
+
+    def get_pvc(self, namespace: str, name: str) -> Optional[Any]:
+        """Get a PersistentVolumeClaim. Returns None if not found."""
+        if self._read_limiter:
+            self._read_limiter.acquire()
+        try:
+            return self.get_core_v1_api().read_namespaced_persistent_volume_claim(
+                name=name,
+                namespace=namespace,
+            )
+        except ApiException as e:
+            if e.status == 404:
+                return None
+            raise
+
+    # ------------------------------------------------------------------
+    # Pod log operations
+    # ------------------------------------------------------------------
+
+    def read_pod_log(
+        self,
+        namespace: str,
+        pod_name: str,
+        container: str = "sandbox",
+        tail_lines: Optional[int] = None,
+        follow: bool = False,
+    ) -> Any:
+        """Read logs from a pod container.
+
+        Args:
+            namespace: Kubernetes namespace
+            pod_name: Pod name
+            container: Container name (default: "sandbox")
+            tail_lines: Number of lines from the end to return
+            follow: If True, returns a streaming response object
+
+        Returns:
+            str when follow=False, urllib3.HTTPResponse when follow=True
+        """
+        if self._read_limiter:
+            self._read_limiter.acquire()
+        kwargs: Dict[str, Any] = {
+            "name": pod_name,
+            "namespace": namespace,
+            "container": container,
+        }
+        if tail_lines is not None:
+            kwargs["tail_lines"] = tail_lines
+        if follow:
+            kwargs["follow"] = True
+            kwargs["_preload_content"] = False
+        return self.get_core_v1_api().read_namespaced_pod_log(**kwargs)
+
+    # ------------------------------------------------------------------
+    # Pod exec operations
+    # ------------------------------------------------------------------
+
+    def exec_interactive(
+        self,
+        namespace: str,
+        pod_name: str,
+        container: str = "sandbox",
+        command: Optional[List[str]] = None,
+    ) -> Any:
+        """Open an interactive exec stream to a pod (with PTY).
+
+        Returns a WSClient object with .write_stdin(), .read_stdout(),
+        .read_stderr(), .is_open(), .close() methods.
+        """
+        if command is None:
+            command = ["/bin/bash"]
+        if self._read_limiter:
+            self._read_limiter.acquire()
+        return k8s_stream(
+            self.get_core_v1_api().connect_get_namespaced_pod_exec,
+            name=pod_name,
+            namespace=namespace,
+            container=container,
+            command=command,
+            stdin=True,
+            stdout=True,
+            stderr=True,
+            tty=True,
+            _preload_content=False,
+        )
+
+    # ------------------------------------------------------------------
+    # Pod name resolution
+    # ------------------------------------------------------------------
+
+    def get_pod_name_for_sandbox(
+        self,
+        namespace: str,
+        sandbox_id: str,
+    ) -> Optional[str]:
+        """Find the running pod name for a sandbox by label selector.
+
+        Returns the first running pod name, or None.
+        """
+        pods = self.list_pods(
+            namespace=namespace,
+            label_selector=f"opensandbox.io/id={sandbox_id}",
+        )
+        for pod in pods:
+            if pod.status and pod.status.phase == "Running":
+                return pod.metadata.name
+        return None

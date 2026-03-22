@@ -50,6 +50,13 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     RequestIdFilter without passing request_id explicitly.
     """
 
+    async def __call__(self, scope, receive, send):
+        """Pass WebSocket connections through without request ID processing."""
+        if scope["type"] == "websocket":
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         raw = request.headers.get(X_REQUEST_ID_HEADER)
         request_id = (raw and raw.strip()) or uuid.uuid4().hex

@@ -343,6 +343,10 @@ class StorageConfig(BaseModel):
             "'ossfs_mount_root/<bucket>/<volume.subPath?>'."
         ),
     )
+    default_workspace_volume_size: str = Field(
+        default="1Gi",
+        description="Default storage size for auto-created workspace PVCs.",
+    )
 
 
 class EgressConfig(BaseModel):

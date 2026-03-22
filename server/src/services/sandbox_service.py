@@ -21,6 +21,7 @@ This module defines the abstract interface for sandbox services.
 
 from abc import ABC, abstractmethod
 import socket
+from typing import Any, Optional
 from uuid import uuid4
 
 from src.api.schema import (
@@ -220,5 +221,39 @@ class SandboxService(ABC):
 
         Raises:
             HTTPException: If sandbox not found or endpoint not available
+        """
+        pass
+
+    @abstractmethod
+    def get_sandbox_logs(
+        self,
+        sandbox_id: str,
+        tail_lines: int = 100,
+        follow: bool = False,
+    ) -> Any:
+        """
+        Get logs from a sandbox.
+
+        Args:
+            sandbox_id: Unique sandbox identifier
+            tail_lines: Number of lines from the end
+            follow: Stream logs in real time
+
+        Returns:
+            str when follow=False, streaming response when follow=True
+        """
+        pass
+
+    @abstractmethod
+    def exec_sandbox_terminal(self, sandbox_id: str, command: str = "/bin/bash") -> Any:
+        """
+        Open an interactive terminal session to a sandbox.
+
+        Args:
+            sandbox_id: Unique sandbox identifier
+            command: Shell command to execute
+
+        Returns:
+            A bidirectional stream object
         """
         pass

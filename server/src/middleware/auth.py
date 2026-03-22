@@ -65,6 +65,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Read the API key directly from config; suitable for dev/test usage
         self.valid_api_keys = self._load_api_keys()
 
+    async def __call__(self, scope, receive, send):
+        """Pass WebSocket connections through without HTTP auth."""
+        if scope["type"] == "websocket":
+            await self.app(scope, receive, send)
+            return
+        await super().__call__(scope, receive, send)
+
     def _load_api_keys(self) -> set:
         """
         Load valid API keys from configuration.

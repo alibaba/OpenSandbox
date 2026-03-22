@@ -19,10 +19,12 @@ This module defines FastAPI routes that map to the OpenAPI specification endpoin
 All business logic is delegated to the service layer that backs each operation.
 """
 
+import asyncio
+import logging
 from typing import List, Optional
 
 import httpx
-from fastapi import APIRouter, Header, Query, Request, status
+from fastapi import APIRouter, Header, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import Response, StreamingResponse
 
@@ -497,3 +499,124 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
         raise HTTPException(
             status_code=500, detail=f"An internal error occurred in the proxy: {e}"
         )
+
+
+# ============================================================================
+# Sandbox Logs & Terminal
+# ============================================================================
+
+_lifecycle_logger = logging.getLogger(__name__)
+
+
+@router.get(
+    "/sandboxes/{sandbox_id}/logs",
+    responses={
+        200: {"description": "Pod logs returned successfully"},
+        404: {"description": "Sandbox or pod not found"},
+        409: {"description": "Sandbox is paused"},
+        500: {"description": "An unexpected server error occurred"},
+    },
+)
+async def get_sandbox_logs(
+    sandbox_id: str,
+    tail: int = Query(100, ge=1, le=10000, description="Number of lines from the end"),
+    follow: bool = Query(False, description="Stream logs in real time"),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+) -> Response:
+    """
+    Get logs from a sandbox pod.
+
+    Returns the stdout/stderr output of the sandbox container.
+    Use follow=true for real-time streaming via Server-Sent Events.
+    """
+    if follow:
+        resp = sandbox_service.get_sandbox_logs(
+            sandbox_id, tail_lines=tail, follow=True
+        )
+
+        async def stream_logs():
+            try:
+                for line in resp:
+                    if isinstance(line, bytes):
+                        yield line
+                    else:
+                        yield line.encode("utf-8")
+            except Exception:
+                pass
+            finally:
+                resp.close()
+
+        return StreamingResponse(
+            stream_logs(),
+            media_type="text/plain; charset=utf-8",
+        )
+    else:
+        logs = sandbox_service.get_sandbox_logs(
+            sandbox_id, tail_lines=tail, follow=False
+        )
+        return Response(content=logs, media_type="text/plain; charset=utf-8")
+
+
+@router.websocket("/sandboxes/{sandbox_id}/terminal")
+async def sandbox_terminal(websocket: WebSocket, sandbox_id: str):
+    """
+    Interactive WebSocket terminal to a sandbox pod.
+
+    Opens an interactive shell (bash) in the sandbox container.
+    Clients send keystrokes as text, receive terminal output as text.
+    """
+    await websocket.accept()
+
+    try:
+        ws_client = sandbox_service.exec_sandbox_terminal(sandbox_id)
+    except HTTPException as e:
+        detail = e.detail
+        if isinstance(detail, dict):
+            reason = detail.get("message", str(detail))
+        else:
+            reason = str(detail)
+        await websocket.close(code=1008, reason=reason[:123])
+        return
+    except Exception as e:
+        await websocket.close(code=1011, reason=str(e)[:123])
+        return
+
+    async def read_from_k8s():
+        """Read from K8s exec stream → send to WebSocket."""
+        try:
+            while ws_client.is_open():
+                data = await asyncio.to_thread(ws_client.read_stdout, timeout=1)
+                if data:
+                    await websocket.send_text(data)
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:
+            _lifecycle_logger.debug("K8s read loop ended: %s", e)
+
+    async def write_to_k8s():
+        """Receive from WebSocket → write to K8s exec stream."""
+        try:
+            while True:
+                data = await websocket.receive_text()
+                ws_client.write_stdin(data)
+        except WebSocketDisconnect:
+            pass
+        except Exception as e:
+            _lifecycle_logger.debug("WebSocket write loop ended: %s", e)
+
+    read_task = asyncio.create_task(read_from_k8s())
+    write_task = asyncio.create_task(write_to_k8s())
+
+    try:
+        done, pending = await asyncio.wait(
+            [read_task, write_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+    finally:
+        ws_client.close()
+        try:
+            await websocket.close()
+        except Exception:
+            pass

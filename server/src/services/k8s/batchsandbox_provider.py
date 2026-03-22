@@ -701,6 +701,14 @@ class BatchSandboxProvider(WorkloadProvider):
             grace_period_seconds=0,
         )
     
+    def pause_workload(self, sandbox_id: str, namespace: str) -> None:
+        """Pause is not supported for BatchSandbox provider."""
+        raise NotImplementedError("Pause is not supported for BatchSandbox provider")
+
+    def resume_workload(self, sandbox_id: str, namespace: str) -> None:
+        """Resume is not supported for BatchSandbox provider."""
+        raise NotImplementedError("Resume is not supported for BatchSandbox provider")
+
     def list_workloads(self, namespace: str, label_selector: str) -> List[Dict[str, Any]]:
         """List BatchSandboxes matching label selector."""
         return self.k8s_client.list_custom_objects(

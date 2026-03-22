@@ -33,6 +33,7 @@ from src.config import AppConfig, EGRESS_MODE_DNS
 from src.services.helpers import format_ingress_endpoint
 from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
+from src.services.constants import SANDBOX_ID_LABEL
 from src.services.k8s.client import K8sClient
 from src.services.k8s.egress_helper import (
     apply_egress_to_spec,
@@ -102,6 +103,12 @@ class AgentSandboxProvider(WorkloadProvider):
         self.ingress_config = app_config.ingress if app_config else None
         self.execd_init_resources = k8s_config.execd_init_resources if k8s_config else None
 
+        # Workspace volume configuration
+        self._workspace_volume_size = (
+            app_config.storage.default_workspace_volume_size
+            if app_config and app_config.storage else "1Gi"
+        )
+
         # Initialize secure runtime resolver
         self.resolver = SecureRuntimeResolver(app_config) if app_config else None
         self.runtime_class = (
@@ -110,6 +117,9 @@ class AgentSandboxProvider(WorkloadProvider):
 
     def _resource_name(self, sandbox_id: str) -> str:
         return _to_dns1035_label(sandbox_id, prefix="sandbox")
+
+    def _pvc_name(self, sandbox_id: str) -> str:
+        return f"workspace-{self._resource_name(sandbox_id)}"
 
     def _resource_name_candidates(self, sandbox_id: str) -> List[str]:
         candidates = []
@@ -165,6 +175,24 @@ class AgentSandboxProvider(WorkloadProvider):
         if volumes:
             apply_volumes_to_pod_spec(pod_spec, volumes)
 
+        # Auto-create and attach workspace PVC
+        pvc_name = self._pvc_name(sandbox_id)
+        self.k8s_client.create_pvc(
+            namespace=namespace,
+            name=pvc_name,
+            storage_size=self._workspace_volume_size,
+            labels={SANDBOX_ID_LABEL: sandbox_id},
+        )
+        pod_spec["volumes"].append({
+            "name": "workspace",
+            "persistentVolumeClaim": {"claimName": pvc_name},
+        })
+        pod_spec["containers"][0].setdefault("volumeMounts", []).append({
+            "name": "workspace",
+            "mountPath": "/workspace",
+            "readOnly": False,
+        })
+
         if self.service_account:
             pod_spec["serviceAccountName"] = self.service_account
 
@@ -199,13 +227,21 @@ class AgentSandboxProvider(WorkloadProvider):
         else:
             sandbox["spec"]["shutdownTime"] = expires_at.isoformat()
 
-        created = self.k8s_client.create_custom_object(
-            group=self.group,
-            version=self.version,
-            namespace=namespace,
-            plural=self.plural,
-            body=sandbox,
-        )
+        try:
+            created = self.k8s_client.create_custom_object(
+                group=self.group,
+                version=self.version,
+                namespace=namespace,
+                plural=self.plural,
+                body=sandbox,
+            )
+        except Exception:
+            # Clean up orphaned PVC if Sandbox CR creation fails
+            try:
+                self.k8s_client.delete_pvc(namespace=namespace, name=pvc_name)
+            except Exception as cleanup_err:
+                logger.warning("Failed to clean up PVC %s: %s", pvc_name, cleanup_err)
+            raise
 
         return {
             "name": created["metadata"]["name"],
@@ -402,7 +438,7 @@ class AgentSandboxProvider(WorkloadProvider):
         return None
 
     def delete_workload(self, sandbox_id: str, namespace: str) -> None:
-        """Delete the Sandbox CRD for the given sandbox ID."""
+        """Delete the Sandbox CRD and associated workspace PVC."""
         sandbox = self.get_workload(sandbox_id, namespace)
         if not sandbox:
             raise Exception(f"Sandbox for sandbox {sandbox_id} not found")
@@ -414,6 +450,47 @@ class AgentSandboxProvider(WorkloadProvider):
             plural=self.plural,
             name=sandbox["metadata"]["name"],
             grace_period_seconds=0,
+        )
+
+        # Clean up the workspace PVC
+        pvc_name = self._pvc_name(sandbox_id)
+        try:
+            self.k8s_client.delete_pvc(namespace=namespace, name=pvc_name)
+        except Exception as e:
+            logger.warning("Failed to delete PVC %s: %s", pvc_name, e)
+
+    def pause_workload(self, sandbox_id: str, namespace: str) -> None:
+        """Pause a sandbox by scaling replicas to 0."""
+        sandbox = self.get_workload(sandbox_id, namespace)
+        if not sandbox:
+            raise Exception(f"Sandbox {sandbox_id} not found")
+        current_replicas = sandbox.get("spec", {}).get("replicas", 1)
+        if current_replicas == 0:
+            raise Exception(f"Sandbox {sandbox_id} is already paused")
+        self.k8s_client.patch_custom_object(
+            group=self.group,
+            version=self.version,
+            namespace=namespace,
+            plural=self.plural,
+            name=sandbox["metadata"]["name"],
+            body={"spec": {"replicas": 0}},
+        )
+
+    def resume_workload(self, sandbox_id: str, namespace: str) -> None:
+        """Resume a paused sandbox by scaling replicas to 1."""
+        sandbox = self.get_workload(sandbox_id, namespace)
+        if not sandbox:
+            raise Exception(f"Sandbox {sandbox_id} not found")
+        current_replicas = sandbox.get("spec", {}).get("replicas", 1)
+        if current_replicas != 0:
+            raise Exception(f"Sandbox {sandbox_id} is not paused")
+        self.k8s_client.patch_custom_object(
+            group=self.group,
+            version=self.version,
+            namespace=namespace,
+            plural=self.plural,
+            name=sandbox["metadata"]["name"],
+            body={"spec": {"replicas": 1}},
         )
 
     def list_workloads(self, namespace: str, label_selector: str) -> List[Dict[str, Any]]:
@@ -463,6 +540,16 @@ class AgentSandboxProvider(WorkloadProvider):
 
     def get_status(self, workload: Dict[str, Any]) -> Dict[str, Any]:
         """Derive sandbox state from the Sandbox CRD status conditions."""
+        # Check if sandbox is paused (replicas == 0)
+        spec = workload.get("spec", {})
+        if spec.get("replicas", 1) == 0:
+            return {
+                "state": "Paused",
+                "reason": "SANDBOX_PAUSED",
+                "message": "Sandbox is paused (scaled to zero)",
+                "last_transition_at": workload.get("metadata", {}).get("creationTimestamp"),
+            }
+
         status = workload.get("status", {})
         conditions = status.get("conditions", [])
 
