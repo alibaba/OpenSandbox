@@ -54,7 +54,7 @@ async def _create_sandbox(
     return await Sandbox.create(
         image=SandboxImageSpec(image),
         connection_config=connection_config,
-        resource={"cpu": "1", "memory": "2Gi"},
+        resource={"cpu": "100m", "memory": "64Mi"},
         timeout=timeout,
         ready_timeout=ready_timeout,
         metadata=metadata,

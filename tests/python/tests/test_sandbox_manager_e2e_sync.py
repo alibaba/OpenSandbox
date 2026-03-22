@@ -50,7 +50,7 @@ class TestSandboxManagerE2ESync:
             s1 = SandboxSync.create(
                 image=SandboxImageSpec(get_sandbox_image()),
                 connection_config=cfg,
-                resource={"cpu": "1", "memory": "2Gi"},
+                resource={"cpu": "100m", "memory": "64Mi"},
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "team": "t1", "env": "prod"},
@@ -60,7 +60,7 @@ class TestSandboxManagerE2ESync:
             s2 = SandboxSync.create(
                 image=SandboxImageSpec(get_sandbox_image()),
                 connection_config=cfg,
-                resource={"cpu": "1", "memory": "2Gi"},
+                resource={"cpu": "100m", "memory": "64Mi"},
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "team": "t1", "env": "dev"},
@@ -70,7 +70,7 @@ class TestSandboxManagerE2ESync:
             s3 = SandboxSync.create(
                 image=SandboxImageSpec(get_sandbox_image()),
                 connection_config=cfg,
-                resource={"cpu": "1", "memory": "2Gi"},
+                resource={"cpu": "100m", "memory": "64Mi"},
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "env": "prod"},
@@ -140,7 +140,7 @@ class TestSandboxManagerE2ESync:
             s1 = SandboxSync.create(
                 image=SandboxImageSpec(get_sandbox_image()),
                 connection_config=cfg,
-                resource={"cpu": "1", "memory": "2Gi"},
+                resource={"cpu": "100m", "memory": "64Mi"},
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "team": "t1", "env": "prod"},
@@ -150,7 +150,7 @@ class TestSandboxManagerE2ESync:
             s2 = SandboxSync.create(
                 image=SandboxImageSpec(get_sandbox_image()),
                 connection_config=cfg,
-                resource={"cpu": "1", "memory": "2Gi"},
+                resource={"cpu": "100m", "memory": "64Mi"},
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "team": "t1", "env": "dev"},
@@ -160,7 +160,7 @@ class TestSandboxManagerE2ESync:
             s3 = SandboxSync.create(
                 image=SandboxImageSpec(get_sandbox_image()),
                 connection_config=cfg,
-                resource={"cpu": "1", "memory": "2Gi"},
+                resource={"cpu": "100m", "memory": "64Mi"},
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "env": "prod"},
