@@ -205,13 +205,15 @@ class TestSandboxE2ESync:
         assert info.created_at is not None
         assert info.expires_at is not None
         assert info.expires_at > info.created_at
-        assert info.entrypoint == ["tail", "-f", "/dev/null"]
+        # Docker runtime reports the SDK default as-is; Kubernetes may prefix bootstrap.sh.
+        assert info.entrypoint[-3:] == ["tail", "-f", "/dev/null"], info.entrypoint
 
         duration = info.expires_at - info.created_at
+        # Matches SandboxSync.create(..., timeout=timedelta(minutes=5)); allow skew across runtimes.
         min_duration = timedelta(minutes=1)
-        max_duration = timedelta(minutes=3)
+        max_duration = timedelta(minutes=6)
         assert min_duration <= duration <= max_duration, (
-            f"Duration {duration} should be between 1 and 3 minutes"
+            f"Duration {duration} should be between {min_duration} and {max_duration}"
         )
 
         assert info.metadata is not None
@@ -287,6 +289,9 @@ class TestSandboxE2ESync:
     @pytest.mark.timeout(120)
     @pytest.mark.order(1)
     def test_01a_network_policy_create(self) -> None:
+        if is_kubernetes_runtime():
+            pytest.skip("Network policy is not covered in the Kubernetes runtime suite")
+
         logger.info("=" * 80)
         logger.info("TEST 1a: Creating sandbox with networkPolicy (sync)")
         logger.info("=" * 80)
@@ -322,6 +327,9 @@ class TestSandboxE2ESync:
     @pytest.mark.timeout(180)
     @pytest.mark.order(1)
     def test_01aa_network_policy_get_and_patch(self) -> None:
+        if is_kubernetes_runtime():
+            pytest.skip("Network policy is not covered in the Kubernetes runtime suite")
+
         logger.info("=" * 80)
         logger.info("TEST 1aa: networkPolicy get/patch (sync)")
         logger.info("=" * 80)

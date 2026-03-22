@@ -32,6 +32,7 @@ from uuid import uuid4
 import pytest
 from opensandbox import Sandbox, SandboxManager
 from opensandbox.config import ConnectionConfig
+from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.sandboxes import (
     SandboxFilter,
     SandboxImageSpec,
@@ -40,6 +41,10 @@ from opensandbox.models.sandboxes import (
 from tests.base_e2e_test import create_connection_config, get_sandbox_image
 
 logger = logging.getLogger(__name__)
+
+# Kubernetes may use Pending / Allocated during lifecycle; narrow filters omit them and list E2E flakes.
+_STATES_OR_BROAD = ["Pending", "Allocated", "Running", "Paused"]
+_STATES_NOT_PAUSED = ["Pending", "Allocated", "Running"]
 
 
 async def _create_sandbox(
@@ -54,7 +59,7 @@ async def _create_sandbox(
     return await Sandbox.create(
         image=SandboxImageSpec(image),
         connection_config=connection_config,
-        resource={"cpu": "1", "memory": "2Gi"},
+        resource={"cpu": "100m", "memory": "64Mi"},
         timeout=timeout,
         ready_timeout=ready_timeout,
         metadata=metadata,
@@ -91,6 +96,8 @@ class TestSandboxManagerE2E:
     s1: Sandbox | None = None
     s2: Sandbox | None = None
     s3: Sandbox | None = None
+    #: True if s3 was paused successfully (Docker); False if pause is unsupported (e.g. Kubernetes HTTP 501).
+    s3_paused: bool = False
 
     @pytest.fixture(scope="class", autouse=True)
     async def _manager_setup(self, request):
@@ -134,9 +141,20 @@ class TestSandboxManagerE2E:
         assert await cls.s2.is_healthy() is True
         assert await cls.s3.is_healthy() is True
 
-        # Pause s3 to create a deterministic non-Running state for OR-state tests.
-        await cls.manager.pause_sandbox(cls.s3.id)
-        await _wait_for_state(manager=cls.manager, sandbox_id=cls.s3.id, expected_state="Paused")
+        cls.s3_paused = False
+        try:
+            await cls.manager.pause_sandbox(cls.s3.id)
+            await _wait_for_state(manager=cls.manager, sandbox_id=cls.s3.id, expected_state="Paused")
+            cls.s3_paused = True
+        except SandboxApiException as exc:
+            # Kubernetes runtime returns 501 for pause; keep all sandboxes Running and relax state-filter asserts.
+            if exc.status_code == 501:
+                logger.warning(
+                    "pause_sandbox not supported (HTTP %s); manager state-filter E2E uses all-Running sandboxes",
+                    exc.status_code,
+                )
+            else:
+                raise
 
         try:
             yield
@@ -175,7 +193,11 @@ class TestSandboxManagerE2E:
 
         # states filter is OR: should return sandboxes in ANY of the requested states.
         result = await manager.list_sandbox_infos(
-            SandboxFilter(states=["Running", "Paused"], metadata={"tag": TestSandboxManagerE2E.tag}, page_size=50)
+            SandboxFilter(
+                states=_STATES_OR_BROAD,
+                metadata={"tag": TestSandboxManagerE2E.tag},
+                page_size=50,
+            )
         )
         ids = {info.id for info in result.sandbox_infos}
         assert {TestSandboxManagerE2E.s1.id, TestSandboxManagerE2E.s2.id, TestSandboxManagerE2E.s3.id}.issubset(ids)
@@ -184,17 +206,29 @@ class TestSandboxManagerE2E:
             SandboxFilter(states=["Paused"], metadata={"tag": TestSandboxManagerE2E.tag}, page_size=50)
         )
         paused_ids = {info.id for info in paused_only.sandbox_infos}
-        assert TestSandboxManagerE2E.s3.id in paused_ids
-        assert TestSandboxManagerE2E.s1.id not in paused_ids
-        assert TestSandboxManagerE2E.s2.id not in paused_ids
-
         running_only = await manager.list_sandbox_infos(
-            SandboxFilter(states=["Running"], metadata={"tag": TestSandboxManagerE2E.tag}, page_size=50)
+            SandboxFilter(
+                states=_STATES_NOT_PAUSED,
+                metadata={"tag": TestSandboxManagerE2E.tag},
+                page_size=50,
+            )
         )
         running_ids = {info.id for info in running_only.sandbox_infos}
-        assert TestSandboxManagerE2E.s1.id in running_ids
-        assert TestSandboxManagerE2E.s2.id in running_ids
-        assert TestSandboxManagerE2E.s3.id not in running_ids
+
+        if TestSandboxManagerE2E.s3_paused:
+            assert TestSandboxManagerE2E.s3.id in paused_ids
+            assert TestSandboxManagerE2E.s1.id not in paused_ids
+            assert TestSandboxManagerE2E.s2.id not in paused_ids
+            assert TestSandboxManagerE2E.s1.id in running_ids
+            assert TestSandboxManagerE2E.s2.id in running_ids
+            assert TestSandboxManagerE2E.s3.id not in running_ids
+        else:
+            assert TestSandboxManagerE2E.s3.id not in paused_ids
+            assert TestSandboxManagerE2E.s1.id not in paused_ids
+            assert TestSandboxManagerE2E.s2.id not in paused_ids
+            assert TestSandboxManagerE2E.s1.id in running_ids
+            assert TestSandboxManagerE2E.s2.id in running_ids
+            assert TestSandboxManagerE2E.s3.id in running_ids
 
     @pytest.mark.timeout(600)
     async def test_02_metadata_filter_and_logic(self):

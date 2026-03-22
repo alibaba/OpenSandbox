@@ -7,6 +7,12 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 20 * * *"
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'workflows/real-k8s-e2e.yml'
+      - 'scripts/python-k8s-e2e.sh'
+      - 'kubernetes/charts/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,7 +20,7 @@ concurrency:
 
 jobs:
   python-k8s-e2e:
-    name: Python E2E (kind + kubernetes runtime)
+    name: Python E2E
     runs-on: ubuntu-latest
     env:
       KIND_CLUSTER: opensandbox-e2e

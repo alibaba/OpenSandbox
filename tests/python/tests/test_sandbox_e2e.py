@@ -207,13 +207,16 @@ class TestSandboxE2E:
         assert info.created_at is not None
         assert info.expires_at is not None
         assert info.expires_at > info.created_at
-        assert info.entrypoint == ["tail", "-f", "/dev/null"]
+        # Docker runtime reports the SDK default as-is; Kubernetes may prefix bootstrap.sh.
+        assert info.entrypoint[-3:] == ["tail", "-f", "/dev/null"], info.entrypoint
 
         duration = info.expires_at - info.created_at
+        # Matches Sandbox.create(..., timeout=timedelta(minutes=5)); allow skew across runtimes.
         min_duration = timedelta(minutes=1)
-        max_duration = timedelta(minutes=3)
-        assert min_duration <= duration <= max_duration, \
-            f"Duration {duration} should be between 1 and 3 minutes"
+        max_duration = timedelta(minutes=6)
+        assert min_duration <= duration <= max_duration, (
+            f"Duration {duration} should be between {min_duration} and {max_duration}"
+        )
 
         assert info.metadata is not None
         assert info.metadata.get("tag") == "e2e-test"
@@ -324,6 +327,9 @@ class TestSandboxE2E:
     @pytest.mark.timeout(120)
     @pytest.mark.order(1)
     async def test_01a_network_policy_create(self):
+        if is_kubernetes_runtime():
+            pytest.skip("Network policy is not covered in the Kubernetes runtime suite")
+
         logger.info("=" * 80)
         logger.info("TEST 1a: Creating sandbox with networkPolicy (async)")
         logger.info("=" * 80)
@@ -355,6 +361,9 @@ class TestSandboxE2E:
     @pytest.mark.timeout(180)
     @pytest.mark.order(1)
     async def test_01aa_network_policy_get_and_patch(self):
+        if is_kubernetes_runtime():
+            pytest.skip("Network policy is not covered in the Kubernetes runtime suite")
+
         logger.info("=" * 80)
         logger.info("TEST 1aa: networkPolicy get/patch (async)")
         logger.info("=" * 80)
@@ -420,6 +429,9 @@ class TestSandboxE2E:
     @pytest.mark.timeout(180)
     @pytest.mark.order(1)
     async def test_01ab_network_policy_get_and_patch_with_server_proxy(self):
+        if is_kubernetes_runtime():
+            pytest.skip("Network policy is not covered in the Kubernetes runtime suite")
+
         logger.info("=" * 80)
         logger.info("TEST 1ab: networkPolicy get/patch with server proxy (async)")
         logger.info("=" * 80)

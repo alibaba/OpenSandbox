@@ -28,6 +28,9 @@
   <a href="https://github.com/alibaba/OpenSandbox/actions">
     <img src="https://github.com/alibaba/OpenSandbox/actions/workflows/real-e2e.yml/badge.svg?branch=main" alt="E2E Status" />
   </a>
+  <a href="https://github.com/alibaba/OpenSandbox/actions">
+    <img src="https://github.com/alibaba/OpenSandbox/actions/workflows/real-k8s-e2e.yml/badge.svg?branch=main" alt="E2E Status" />
+  </a>
 </p>
 
   <hr />
