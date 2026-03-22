@@ -207,7 +207,8 @@ class TestSandboxE2E:
         assert info.created_at is not None
         assert info.expires_at is not None
         assert info.expires_at > info.created_at
-        assert info.entrypoint == ["tail", "-f", "/dev/null"]
+        # Docker runtime reports the SDK default as-is; Kubernetes may prefix bootstrap.sh.
+        assert info.entrypoint[-3:] == ["tail", "-f", "/dev/null"], info.entrypoint
 
         duration = info.expires_at - info.created_at
         min_duration = timedelta(minutes=1)

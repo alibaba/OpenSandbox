@@ -27,14 +27,19 @@ import time
 from datetime import timedelta
 from uuid import uuid4
 
+import logging
+
 import pytest
 from opensandbox import SandboxManagerSync, SandboxSync
+from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.sandboxes import (
     SandboxFilter,
     SandboxImageSpec,
 )
 
 from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
+
+logger = logging.getLogger(__name__)
 
 
 class TestSandboxManagerE2ESync:
@@ -82,15 +87,25 @@ class TestSandboxManagerE2ESync:
             assert s2.is_healthy() is True
             assert s3.is_healthy() is True
 
-            # Pause s3 and wait for state transition
-            manager.pause_sandbox(s3.id)
-            deadline = time.time() + 180
-            while time.time() < deadline:
-                info = manager.get_sandbox_info(s3.id)
-                if info.status.state == "Paused":
-                    break
-                time.sleep(1)
-            assert manager.get_sandbox_info(s3.id).status.state == "Paused"
+            s3_paused = False
+            try:
+                manager.pause_sandbox(s3.id)
+                deadline = time.time() + 180
+                while time.time() < deadline:
+                    info = manager.get_sandbox_info(s3.id)
+                    if info.status.state == "Paused":
+                        break
+                    time.sleep(1)
+                assert manager.get_sandbox_info(s3.id).status.state == "Paused"
+                s3_paused = True
+            except SandboxApiException as exc:
+                if exc.status_code == 501:
+                    logger.warning(
+                        "pause_sandbox not supported (HTTP %s); manager state-filter E2E uses all-Running sandboxes",
+                        exc.status_code,
+                    )
+                else:
+                    raise
 
             # OR states
             both = manager.list_sandbox_infos(
@@ -103,17 +118,25 @@ class TestSandboxManagerE2ESync:
                 SandboxFilter(states=["Paused"], metadata={"tag": tag}, page_size=50)
             )
             paused_ids = {info.id for info in paused_only.sandbox_infos}
-            assert s3.id in paused_ids
-            assert s1.id not in paused_ids
-            assert s2.id not in paused_ids
-
             running_only = manager.list_sandbox_infos(
                 SandboxFilter(states=["Running"], metadata={"tag": tag}, page_size=50)
             )
             running_ids = {info.id for info in running_only.sandbox_infos}
-            assert s1.id in running_ids
-            assert s2.id in running_ids
-            assert s3.id not in running_ids
+
+            if s3_paused:
+                assert s3.id in paused_ids
+                assert s1.id not in paused_ids
+                assert s2.id not in paused_ids
+                assert s1.id in running_ids
+                assert s2.id in running_ids
+                assert s3.id not in running_ids
+            else:
+                assert s3.id not in paused_ids
+                assert s1.id not in paused_ids
+                assert s2.id not in paused_ids
+                assert s1.id in running_ids
+                assert s2.id in running_ids
+                assert s3.id in running_ids
         finally:
             for s in [s1, s2, s3]:
                 if s is None:
