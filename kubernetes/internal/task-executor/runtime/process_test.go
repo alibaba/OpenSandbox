@@ -473,7 +473,7 @@ func TestWaitForNewContainer_Timeout(t *testing.T) {
 	// This should timeout since no process with this env var exists
 	err := pExecutor.waitForNewContainer(ctx, oldPID, containerName)
 	assert.Error(t, err, "Should return error when context times out")
-	assert.Contains(t, err.Error(), "cancelled while waiting", "Error should indicate cancellation")
+	assert.Contains(t, err.Error(), "canceled while waiting", "Error should indicate cancellation")
 }
 
 // TestWaitForNewContainer_ContextCancellation tests that the function
@@ -500,7 +500,7 @@ func TestWaitForNewContainer_ContextCancellation(t *testing.T) {
 
 	err := pExecutor.waitForNewContainer(ctx, oldPID, containerName)
 	assert.Error(t, err, "Should return error when context is cancelled")
-	assert.Contains(t, err.Error(), "cancelled", "Error should indicate cancellation")
+	assert.Contains(t, err.Error(), "canceled", "Error should indicate cancellation")
 }
 
 // TestWaitForNewContainer_SamePID tests that the function ignores

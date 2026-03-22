@@ -388,7 +388,7 @@ func (h *Handler) executeReset(req api.ResetRequest) {
 		klog.InfoS("Restarted main container during reset", "container", mainContainer)
 	}
 
-	// Check if context was cancelled (timeout)
+	// Check if context was canceled (timeout)
 	if ctx.Err() == context.DeadlineExceeded {
 		h.setResetStatus(api.ResetStatusTimeout, "reset operation timed out")
 		return

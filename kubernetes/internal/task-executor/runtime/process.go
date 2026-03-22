@@ -530,10 +530,10 @@ func (e *processExecutor) waitForNewContainer(ctx context.Context, oldPID int, m
 	readyBuffer := 2 * time.Second
 
 	for time.Now().Before(startDeadline) {
-		// Check if context is cancelled
+		// Check if context is canceled
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("cancelled while waiting for new container: %w", ctx.Err())
+			return fmt.Errorf("canceled while waiting for new container: %w", ctx.Err())
 		default:
 		}
 
