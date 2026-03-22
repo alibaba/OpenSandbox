@@ -166,7 +166,7 @@ install-e2e-deps:
 	@$(MAKE) install
 	@echo "Installing OpenSandbox controller..."
 	@cd config/manager && $(KUSTOMIZE) edit set image controller=$(CONTROLLER_IMG)
-	@$(KUSTOMIZE) build config/default | kubectl apply -f -
+	@$(KUSTOMIZE) build config/default | sed 's|TASK_EXECUTOR_IMAGE_PLACEHOLDER|$(TASK_EXECUTOR_IMG)|g' | kubectl apply -f -
 	@echo "Waiting for controller to be ready..."
 	@kubectl wait --for=condition=available --timeout=120s deployment -n opensandbox-system opensandbox-controller-manager || \
 		{ kubectl describe deployment -n opensandbox-system opensandbox-controller-manager; exit 1; }

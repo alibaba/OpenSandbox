@@ -167,6 +167,7 @@ spec:
             required:
             - allocated
             - available
+            - resetting
             - revision
             - total
             type: object

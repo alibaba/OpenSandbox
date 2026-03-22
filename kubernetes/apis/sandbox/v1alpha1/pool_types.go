@@ -111,8 +111,7 @@ type PoolStatus struct {
 	// Available is the number of nodes currently available in the pool.
 	Available int32 `json:"available"`
 	// Resetting is the number of Pods currently being reset.
-	// +optional
-	Resetting int32 `json:"resetting,omitempty"`
+	Resetting int32 `json:"resetting"`
 }
 
 // +genclient

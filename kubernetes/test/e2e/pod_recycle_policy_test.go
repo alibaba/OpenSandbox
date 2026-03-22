@@ -60,7 +60,7 @@ var _ = Describe("PodRecyclePolicy", Ordered, func() {
 			poolYAML, err := renderTemplate("testdata/pool-delete-policy.yaml", map[string]interface{}{
 				"PoolName":          poolName,
 				"Namespace":         testNamespace,
-				"TaskExecutorImage": taskExecutorImage,
+				"TaskExecutorImage": utils.TaskExecutorImage,
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -146,7 +146,7 @@ var _ = Describe("PodRecyclePolicy", Ordered, func() {
 			By("creating a Pool without podRecyclePolicy field (old behavior)")
 			poolYAML, err := renderTemplate("testdata/pool-basic.yaml", map[string]interface{}{
 				"PoolName":     poolName,
-				"SandboxImage": sandboxImage,
+				"SandboxImage": utils.SandboxImage,
 				"Namespace":    testNamespace,
 				"BufferMax":    3,
 				"BufferMin":    1,
@@ -240,7 +240,7 @@ var _ = Describe("PodRecyclePolicy", Ordered, func() {
 			poolYAML, err := renderTemplate("testdata/pool-reuse-policy.yaml", map[string]interface{}{
 				"PoolName":          poolName,
 				"Namespace":         testNamespace,
-				"TaskExecutorImage": taskExecutorImage,
+				"TaskExecutorImage": utils.TaskExecutorImage,
 				"PoolMax":           1, // Use poolMax=1 so there is only 1 pod, ensuring the same pod is reused
 				"PoolMin":           1,
 			})
@@ -463,7 +463,7 @@ var _ = Describe("PodRecyclePolicy - Multiple Pods Reuse", Ordered, func() {
 			poolYAML, err := renderTemplate("testdata/pool-reuse-multi-pod.yaml", map[string]interface{}{
 				"PoolName":          poolName,
 				"Namespace":         testNamespace,
-				"TaskExecutorImage": taskExecutorImage,
+				"TaskExecutorImage": utils.TaskExecutorImage,
 				"PoolMin":           3,
 			})
 			Expect(err).NotTo(HaveOccurred())
