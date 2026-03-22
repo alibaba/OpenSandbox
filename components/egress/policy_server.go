@@ -20,11 +20,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/netip"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -52,9 +49,6 @@ type nftApplier interface {
 }
 
 // startPolicyServer launches a lightweight HTTP API for updating the egress policy at runtime.
-// Supported endpoints:
-//   - GET  /policy : returns the currently enforced policy.
-//   - POST /policy : replace the policy; empty body resets to default deny-all.
 //
 // nameserverIPs are merged into every applied policy so system DNS stays allowed (e.g. private DNS).
 func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier, enforcementMode string, addr string, token string, nameserverIPs []netip.Addr, policyFile string) error {
@@ -168,27 +162,16 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
+	raw, err := readPolicyRequestBody(r)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to read body: %v", err), http.StatusBadRequest)
 		return
 	}
-	raw := strings.TrimSpace(string(body))
+
 	if raw == "" {
 		log.Infof("policy API: reset to default deny-all")
 		def := policy.DefaultDenyPolicy()
-		if s.nft != nil {
-			defWithNS := def.WithExtraAllowIPs(s.nameserverIPs)
-			if err := s.nft.ApplyStatic(r.Context(), defWithNS); err != nil {
-				log.Errorf("policy API: nftables apply failed on reset: %v", err)
-				http.Error(w, fmt.Sprintf("failed to apply nftables: %v", err), http.StatusInternalServerError)
-				return
-			}
-		}
-		s.proxy.UpdatePolicy(def)
-		if err := s.persistPolicy(def); err != nil {
-			log.Errorf("policy API: persist policy failed: %v", err)
-			http.Error(w, fmt.Sprintf("failed to persist policy: %v", err), http.StatusInternalServerError)
+		if !s.commitPolicy(r.Context(), w, def, "reset") {
 			return
 		}
 		log.Infof("policy API: proxy and nftables updated to deny_all")
@@ -208,20 +191,10 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	if !s.enforceEgressRuleLimit(w, len(pol.Egress)) {
 		return
 	}
+
 	mode := modeFromPolicy(pol)
 	log.Infof("policy API: updating policy to mode=%s, enforcement=%s", mode, s.enforcementMode)
-	if s.nft != nil {
-		polWithNS := pol.WithExtraAllowIPs(s.nameserverIPs)
-		if err := s.nft.ApplyStatic(r.Context(), polWithNS); err != nil {
-			log.Errorf("policy API: nftables apply failed: %v", err)
-			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)
-			return
-		}
-	}
-	s.proxy.UpdatePolicy(pol)
-	if err := s.persistPolicy(pol); err != nil {
-		log.Errorf("policy API: persist policy failed: %v", err)
-		http.Error(w, fmt.Sprintf("failed to persist policy: %v", err), http.StatusInternalServerError)
+	if !s.commitPolicy(r.Context(), w, pol, "post") {
 		return
 	}
 	log.Infof("policy API: proxy and nftables updated successfully")
@@ -232,50 +205,25 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handlePatch adds or replaces egress rules by merging with the current policy.
-// It is a convenience wrapper over the full replace flow: we still read -> merge -> apply.
-// Request body supports {"egress":[{"action":"allow","target":"example.com"}, ...]}.
+// handlePatch merges JSON egress rules into the current policy (PATCH body = array of rules).
 func (s *policyServer) handlePatch(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1MB limit
-	if err != nil {
+	raw, err := readPolicyRequestBody(r)
+	if err != nil || raw == "" {
 		http.Error(w, fmt.Sprintf("failed to read body: %v", err), http.StatusBadRequest)
-		return
-	}
-	raw := strings.TrimSpace(string(body))
-	if raw == "" {
-		http.Error(w, "patch body cannot be empty", http.StatusBadRequest)
 		return
 	}
 
 	var patchRules []policy.EgressRule
-	if err = json.Unmarshal([]byte(raw), &patchRules); err != nil {
+	if err := json.Unmarshal([]byte(raw), &patchRules); err != nil || len(patchRules) == 0 {
 		http.Error(w, fmt.Sprintf("invalid patch rules: %v", err), http.StatusBadRequest)
 		return
 	}
-	if len(patchRules) == 0 {
-		http.Error(w, "patch must include at least one egress rule", http.StatusBadRequest)
-		return
-	}
 
-	base := s.proxy.CurrentPolicy()
-	if base == nil {
-		base = policy.DefaultDenyPolicy()
-	}
-	baseCopy := *base
-	baseCopy.Egress = append([]policy.EgressRule(nil), base.Egress...)
-
-	merged := mergeEgressRules(baseCopy.Egress, patchRules)
-
-	// Reuse parser to normalize targets/actions.
-	rawMerged, _ := json.Marshal(policy.NetworkPolicy{
-		DefaultAction: baseCopy.DefaultAction,
-		Egress:        merged,
-	})
-	newPolicy, err := policy.ParsePolicy(string(rawMerged))
+	newPolicy, err := patchMergedPolicy(s.proxy.CurrentPolicy(), patchRules)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("invalid merged policy: %v", err), http.StatusBadRequest)
 		return
@@ -286,18 +234,7 @@ func (s *policyServer) handlePatch(w http.ResponseWriter, r *http.Request) {
 
 	mode := modeFromPolicy(newPolicy)
 	log.Infof("policy API: patching policy with %d new rule(s), mode=%s, enforcement=%s", len(patchRules), mode, s.enforcementMode)
-	if s.nft != nil {
-		polWithNS := newPolicy.WithExtraAllowIPs(s.nameserverIPs)
-		if err := s.nft.ApplyStatic(r.Context(), polWithNS); err != nil {
-			log.Errorf("policy API: nftables apply failed on patch: %v", err)
-			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)
-			return
-		}
-	}
-	s.proxy.UpdatePolicy(newPolicy)
-	if err := s.persistPolicy(newPolicy); err != nil {
-		log.Errorf("policy API: persist policy failed: %v", err)
-		http.Error(w, fmt.Sprintf("failed to persist policy: %v", err), http.StatusInternalServerError)
+	if !s.commitPolicy(r.Context(), w, newPolicy, "patch") {
 		return
 	}
 	log.Infof("policy API: patch applied successfully")
@@ -306,6 +243,24 @@ func (s *policyServer) handlePatch(w http.ResponseWriter, r *http.Request) {
 		Mode:            mode,
 		EnforcementMode: s.enforcementMode,
 	})
+}
+
+// commitPolicy applies one logical update: persist (if configured) → nft → in-memory policy.
+func (s *policyServer) commitPolicy(ctx context.Context, w http.ResponseWriter, pol *policy.NetworkPolicy, op string) bool {
+	if err := s.persistPolicy(pol); err != nil {
+		log.Errorf("policy API: persist policy failed: %v", err)
+		http.Error(w, fmt.Sprintf("failed to persist policy: %v", err), http.StatusInternalServerError)
+		return false
+	}
+	if s.nft != nil {
+		if err := s.nft.ApplyStatic(ctx, pol.WithExtraAllowIPs(s.nameserverIPs)); err != nil {
+			log.Errorf("policy API: nftables apply failed (%s): %v", op, err)
+			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)
+			return false
+		}
+	}
+	s.proxy.UpdatePolicy(pol)
+	return true
 }
 
 func (s *policyServer) authorize(r *http.Request) bool {
@@ -322,21 +277,6 @@ func (s *policyServer) authorize(r *http.Request) bool {
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) == 1
 }
 
-func maxEgressRulesFromEnv() int {
-	s := strings.TrimSpace(os.Getenv(constants.EnvMaxEgressRules))
-	if s == "" {
-		return constants.DefaultMaxEgressRules
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
-		return constants.DefaultMaxEgressRules
-	}
-	if n == 0 {
-		return 0
-	}
-	return n
-}
-
 func (s *policyServer) enforceEgressRuleLimit(w http.ResponseWriter, egressCount int) bool {
 	if s.maxEgressRules <= 0 {
 		return true
@@ -346,62 +286,6 @@ func (s *policyServer) enforceEgressRuleLimit(w http.ResponseWriter, egressCount
 		return false
 	}
 	return true
-}
-
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func modeFromPolicy(p *policy.NetworkPolicy) string {
-	if p == nil {
-		return "deny_all"
-	}
-	if p.DefaultAction == policy.ActionAllow && len(p.Egress) == 0 {
-		return "allow_all"
-	} else if p.DefaultAction == policy.ActionDeny && len(p.Egress) == 0 {
-		return "deny_all"
-	}
-
-	return "enforcing"
-}
-
-// mergeEgressRules joins base rules and additions, deduping by target (last writer wins).
-func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
-	if len(additions) == 0 {
-		return base
-	}
-	out := make([]policy.EgressRule, 0, len(base)+len(additions))
-	seen := make(map[string]struct{})
-
-	// Priority: additions first; base rules only if target not overridden.
-	for _, r := range additions {
-		key := mergeKey(r)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, r)
-	}
-	for _, r := range base {
-		key := mergeKey(r)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, r)
-	}
-	return out
-}
-
-// mergeKey normalizes domain targets to lowercase for dedupe;
-// IP/CIDR targets are kept as-is.
-func mergeKey(r policy.EgressRule) string {
-	if r.Target == "" {
-		return r.Target
-	}
-	return strings.ToLower(r.Target)
 }
 
 func (s *policyServer) persistPolicy(p *policy.NetworkPolicy) error {
