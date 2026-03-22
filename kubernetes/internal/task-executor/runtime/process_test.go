@@ -19,10 +19,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/config"
@@ -30,6 +32,13 @@ import (
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/utils"
 	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
+
+// skipIfNotLinux skips the test if not running on Linux (requires /proc filesystem)
+func skipIfNotLinux(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Skipping test that requires /proc filesystem (Linux only)")
+	}
+}
 
 func setupTestExecutor(t *testing.T) (Executor, string) {
 	dataDir := t.TempDir()
@@ -409,4 +418,161 @@ func TestProcessExecutor_NoTimeout(t *testing.T) {
 
 	// Cleanup
 	executor.Stop(ctx, task)
+}
+
+// TestWaitForNewContainer_Success tests the successful case where a new container
+// process appears after the old one was terminated.
+func TestWaitForNewContainer_Success(t *testing.T) {
+	skipIfNotLinux(t)
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not found")
+	}
+
+	executor, _ := setupTestExecutor(t)
+	pExecutor := executor.(*processExecutor)
+	ctx := context.Background()
+	containerName := "test-container"
+
+	// Start a "new" process with the SANDBOX_MAIN_CONTAINER env var
+	// This simulates the new container process that appears after restart
+	cmd := exec.Command("sleep", "30")
+	cmd.Env = append(os.Environ(), "SANDBOX_MAIN_CONTAINER="+containerName)
+	require.NoError(t, cmd.Start())
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	}()
+
+	// Use an impossible PID as "old PID" to simulate the old process has exited
+	oldPID := 99999999
+
+	// Wait for the new container - should find the process we just started
+	err := pExecutor.waitForNewContainer(ctx, oldPID, containerName)
+	assert.NoError(t, err, "Should successfully find the new container process")
+}
+
+// TestWaitForNewContainer_Timeout tests the case where no new container
+// process appears within the timeout period.
+func TestWaitForNewContainer_Timeout(t *testing.T) {
+	skipIfNotLinux(t)
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not found")
+	}
+
+	executor, _ := setupTestExecutor(t)
+	pExecutor := executor.(*processExecutor)
+
+	// Create a context with a short timeout to speed up the test
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Use an impossible PID as old PID and a non-existent container name
+	oldPID := 99999999
+	containerName := "non-existent-container"
+
+	// This should timeout since no process with this env var exists
+	err := pExecutor.waitForNewContainer(ctx, oldPID, containerName)
+	assert.Error(t, err, "Should return error when context times out")
+	assert.Contains(t, err.Error(), "cancelled while waiting", "Error should indicate cancellation")
+}
+
+// TestWaitForNewContainer_ContextCancellation tests that the function
+// properly handles context cancellation.
+func TestWaitForNewContainer_ContextCancellation(t *testing.T) {
+	skipIfNotLinux(t)
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not found")
+	}
+
+	executor, _ := setupTestExecutor(t)
+	pExecutor := executor.(*processExecutor)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel the context after a short delay
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		cancel()
+	}()
+
+	oldPID := 99999999
+	containerName := "non-existent-container"
+
+	err := pExecutor.waitForNewContainer(ctx, oldPID, containerName)
+	assert.Error(t, err, "Should return error when context is cancelled")
+	assert.Contains(t, err.Error(), "cancelled", "Error should indicate cancellation")
+}
+
+// TestWaitForNewContainer_SamePID tests that the function ignores
+// processes with the same PID as the old one.
+func TestWaitForNewContainer_SamePID(t *testing.T) {
+	skipIfNotLinux(t)
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not found")
+	}
+
+	executor, _ := setupTestExecutor(t)
+	pExecutor := executor.(*processExecutor)
+	containerName := "test-container-same-pid"
+
+	// Start a process with the env var
+	cmd := exec.Command("sleep", "30")
+	cmd.Env = append(os.Environ(), "SANDBOX_MAIN_CONTAINER="+containerName)
+	require.NoError(t, cmd.Start())
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	}()
+
+	// Use the SAME PID as the running process - this simulates
+	// the old process is still running (hasn't been killed yet)
+	oldPID := cmd.Process.Pid
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Should timeout because the only process found has the same PID as oldPID
+	err := pExecutor.waitForNewContainer(ctx, oldPID, containerName)
+	assert.Error(t, err, "Should return error when only same PID exists")
+}
+
+// TestIsProcessRunning tests the isProcessRunning helper function.
+func TestIsProcessRunning(t *testing.T) {
+	// Test with current process PID - should be running
+	currentPID := os.Getpid()
+	assert.True(t, isProcessRunning(currentPID), "Current process should be running")
+
+	// Test with a non-existent PID - should not be running
+	assert.False(t, isProcessRunning(99999999), "Non-existent PID should not be running")
+}
+
+// TestFindPidByEnvVar tests the findPidByEnvVar function.
+func TestFindPidByEnvVar(t *testing.T) {
+	skipIfNotLinux(t)
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep not found")
+	}
+
+	executor, _ := setupTestExecutor(t)
+	pExecutor := executor.(*processExecutor)
+	envName := "TEST_ENV_VAR"
+	envValue := "test-value-123"
+
+	// Start a process with the test env var
+	cmd := exec.Command("sleep", "5")
+	cmd.Env = append(os.Environ(), envName+"="+envValue)
+	require.NoError(t, cmd.Start())
+	defer func() {
+		cmd.Process.Kill()
+		cmd.Wait()
+	}()
+
+	// Should find the process we just started
+	pid, err := pExecutor.findPidByEnvVar(envName, envValue)
+	assert.NoError(t, err, "Should find process with the env var")
+	assert.Equal(t, cmd.Process.Pid, pid, "Should return the correct PID")
+
+	// Test with non-existent env var
+	_, err = pExecutor.findPidByEnvVar("NON_EXISTENT_VAR", "nonexistent")
+	assert.Error(t, err, "Should return error for non-existent env var")
 }

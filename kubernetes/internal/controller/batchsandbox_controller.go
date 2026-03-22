@@ -678,7 +678,7 @@ func (r *BatchSandboxReconciler) handleReusePolicy(ctx context.Context, batchSbx
 	case PodRecycleStateResetting:
 		// Must poll the Reset API to detect completion/failure
 		log.Info("Pod is being reset, polling status", "pod", pod.Name)
-		return r.pollResetStatus(ctx, pool, pod)
+		return r.pollResetStatus(ctx, batchSbx, pool, pod)
 
 	case PodRecycleStateResetSucceeded:
 		// Clear the recycle state label. If cleanup fails, requeue to retry.
@@ -702,7 +702,7 @@ func (r *BatchSandboxReconciler) handleReusePolicy(ctx context.Context, batchSbx
 
 	default:
 		log.Info("Starting pod reset", "pod", pod.Name)
-		if err := r.startPodReset(ctx, pool, pod); err != nil {
+		if err := r.startPodReset(ctx, batchSbx, pool, pod); err != nil {
 			log.Error(err, "Failed to start pod reset", "pod", pod.Name)
 			if pod.Labels == nil {
 				pod.Labels = make(map[string]string)
@@ -718,7 +718,7 @@ func (r *BatchSandboxReconciler) handleReusePolicy(ctx context.Context, batchSbx
 }
 
 // callResetAPI calls the task-executor Reset API and returns the response.
-func (r *BatchSandboxReconciler) callResetAPI(ctx context.Context, pool *sandboxv1alpha1.Pool, pod *corev1.Pod) (*taskexecutor.ResetResponse, error) {
+func (r *BatchSandboxReconciler) callResetAPI(ctx context.Context, batchSbx *sandboxv1alpha1.BatchSandbox, pool *sandboxv1alpha1.Pool, pod *corev1.Pod) (*taskexecutor.ResetResponse, error) {
 	log := logf.FromContext(ctx)
 
 	timeoutSeconds := int64(60)
@@ -745,12 +745,13 @@ func (r *BatchSandboxReconciler) callResetAPI(ctx context.Context, pool *sandbox
 	)
 
 	resetReq := &taskexecutor.ResetRequest{
+		Version:           string(batchSbx.UID),
 		TimeoutSeconds:    timeoutSeconds,
 		CleanDirectories:  cleanDirectories,
 		MainContainerName: mainContainerName,
 	}
 
-	log.V(1).Info("Calling task-executor reset API", "pod", pod.Name, "podIP", pod.Status.PodIP)
+	log.V(1).Info("Calling task-executor reset API", "pod", pod.Name, "podIP", pod.Status.PodIP, "version", resetReq.Version)
 
 	return client.Reset(ctx, resetReq)
 }
@@ -791,8 +792,8 @@ func (r *BatchSandboxReconciler) handleResetResponse(ctx context.Context, pod *c
 }
 
 // pollResetStatus polls the Reset API to detect completion or failure.
-func (r *BatchSandboxReconciler) pollResetStatus(ctx context.Context, pool *sandboxv1alpha1.Pool, pod *corev1.Pod) (ctrl.Result, error) {
-	resp, err := r.callResetAPI(ctx, pool, pod)
+func (r *BatchSandboxReconciler) pollResetStatus(ctx context.Context, batchSbx *sandboxv1alpha1.BatchSandbox, pool *sandboxv1alpha1.Pool, pod *corev1.Pod) (ctrl.Result, error) {
+	resp, err := r.callResetAPI(ctx, batchSbx, pool, pod)
 	if err != nil {
 		logf.FromContext(ctx).Error(err, "Failed to poll reset status", "pod", pod.Name)
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
@@ -801,7 +802,7 @@ func (r *BatchSandboxReconciler) pollResetStatus(ctx context.Context, pool *sand
 }
 
 // startPodReset starts the reset process for a pod.
-func (r *BatchSandboxReconciler) startPodReset(ctx context.Context, pool *sandboxv1alpha1.Pool, pod *corev1.Pod) error {
+func (r *BatchSandboxReconciler) startPodReset(ctx context.Context, batchSbx *sandboxv1alpha1.BatchSandbox, pool *sandboxv1alpha1.Pool, pod *corev1.Pod) error {
 	log := logf.FromContext(ctx)
 
 	if pod.Labels == nil {
@@ -812,7 +813,7 @@ func (r *BatchSandboxReconciler) startPodReset(ctx context.Context, pool *sandbo
 		return err
 	}
 
-	resp, err := r.callResetAPI(ctx, pool, pod)
+	resp, err := r.callResetAPI(ctx, batchSbx, pool, pod)
 	if err != nil {
 		log.Error(err, "Failed to call task-executor reset API", "pod", pod.Name)
 		return err

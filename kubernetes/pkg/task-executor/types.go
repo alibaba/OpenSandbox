@@ -102,6 +102,9 @@ type Terminated struct {
 // Reset is only supported in sidecar mode, where task-executor runs as a sidecar
 // and uses nsenter to operate on the main container's namespace.
 type ResetRequest struct {
+	// Version is required and should be the BatchSandbox UID.
+	// It is used to distinguish between retry of same request vs new reset request.
+	Version string `json:"version"`
 	// TimeoutSeconds specifies the timeout for reset operation in seconds.
 	// +optional
 	TimeoutSeconds int64 `json:"timeoutSeconds,omitempty"`

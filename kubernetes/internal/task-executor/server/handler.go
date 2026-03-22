@@ -44,6 +44,7 @@ type ErrorResponse struct {
 type resetState struct {
 	mu        sync.Mutex
 	status    api.ResetStatus
+	version   string // Version of current reset (BatchSandbox UID)
 	message   string
 	details   *api.ResetDetails
 	startTime time.Time
@@ -78,6 +79,14 @@ func (h *Handler) isResetting() bool {
 	h.reset.mu.Lock()
 	defer h.reset.mu.Unlock()
 	return h.reset.status == api.ResetStatusInProgress
+}
+
+// isTerminalStatus returns true if the reset status is terminal (completed).
+func isTerminalStatus(status api.ResetStatus) bool {
+	return status == api.ResetStatusSuccess ||
+		status == api.ResetStatusFailed ||
+		status == api.ResetStatusTimeout ||
+		status == api.ResetStatusNotSupported
 }
 
 func (h *Handler) CreateTask(w http.ResponseWriter, r *http.Request) {
@@ -240,6 +249,16 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Step 1: Validate version is required
+	if req.Version == "" {
+		klog.ErrorS(nil, "Reset request missing version")
+		writeJSON(w, http.StatusUnprocessableEntity, &api.ResetResponse{
+			Status:  api.ResetStatusFailed,
+			Message: "version is required for reset operation",
+		})
+		return
+	}
+
 	if !h.config.EnableSidecarMode {
 		klog.ErrorS(nil, "Reset is only supported in sidecar mode")
 		writeJSON(w, http.StatusOK, &api.ResetResponse{
@@ -251,36 +270,40 @@ func (h *Handler) Reset(w http.ResponseWriter, r *http.Request) {
 
 	h.reset.mu.Lock()
 
-	// Case 1: Reset already in progress -> return current status (idempotent)
-	if h.reset.status == api.ResetStatusInProgress {
-		klog.InfoS("Reset already in progress, returning current status")
+	// Case A: version matches + InProgress -> return current status (idempotent retry)
+	if h.reset.version == req.Version && h.reset.status == api.ResetStatusInProgress {
+		klog.InfoS("Reset already in progress for same version, returning current status", "version", req.Version)
 		resp := h.currentResetResponse()
 		h.reset.mu.Unlock()
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
-	// Case 2: Reset already completed -> return terminal status
-	if h.reset.status == api.ResetStatusSuccess ||
-		h.reset.status == api.ResetStatusFailed ||
-		h.reset.status == api.ResetStatusTimeout ||
-		h.reset.status == api.ResetStatusNotSupported {
-		klog.InfoS("Reset already completed, returning terminal status", "status", h.reset.status)
+	// Case B: version matches + terminal status -> return result (idempotent query)
+	if h.reset.version == req.Version && isTerminalStatus(h.reset.status) {
+		klog.InfoS("Reset already completed for same version, returning result", "version", req.Version, "status", h.reset.status)
 		resp := h.currentResetResponse()
 		h.reset.mu.Unlock()
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 
-	// Case 3: Start a new reset
+	// Case C: version mismatch (or first reset) -> start new reset
+	if h.reset.version != "" {
+		klog.InfoS("New version detected, starting new reset", "previousVersion", h.reset.version, "newVersion", req.Version)
+	} else {
+		klog.InfoS("Starting first reset", "version", req.Version)
+	}
+
 	h.reset.status = api.ResetStatusInProgress
+	h.reset.version = req.Version
 	h.reset.startTime = time.Now()
 	h.reset.message = "Reset started"
 	h.reset.details = &api.ResetDetails{}
 
 	resp := h.currentResetResponse()
 
-	klog.InfoS("Starting reset operation", "mainContainer", req.MainContainerName)
+	klog.InfoS("Starting reset operation", "mainContainer", req.MainContainerName, "version", req.Version)
 
 	h.reset.mu.Unlock()
 

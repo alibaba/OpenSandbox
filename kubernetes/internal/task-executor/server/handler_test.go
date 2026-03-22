@@ -477,12 +477,32 @@ func TestReset_StateMachine(t *testing.T) {
 		assert.Equal(t, api.ResetStatusNone, h.reset.status)
 	})
 
-	t.Run("None -> InProgress on first call", func(t *testing.T) {
+	t.Run("Version is required - returns 422", func(t *testing.T) {
 		mgr := NewMockTaskManager()
 		cfg := &config.Config{EnableSidecarMode: true}
 		h := NewHandler(mgr, &MockExecutor{}, cfg)
 
+		// Missing version
 		body, _ := json.Marshal(api.ResetRequest{})
+		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		h.Reset(w, req)
+
+		assert.Equal(t, http.StatusUnprocessableEntity, w.Code)
+
+		var resp api.ResetResponse
+		json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, api.ResetStatusFailed, resp.Status)
+		assert.Contains(t, resp.Message, "version is required")
+	})
+
+	t.Run("First reset with version -> InProgress", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		body, _ := json.Marshal(api.ResetRequest{Version: "batchsandbox-uid-123"})
 		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
 		w := httptest.NewRecorder()
 
@@ -494,19 +514,21 @@ func TestReset_StateMachine(t *testing.T) {
 		json.NewDecoder(w.Body).Decode(&resp)
 		assert.Equal(t, api.ResetStatusInProgress, resp.Status)
 
-		// Internal state should be InProgress
+		// Internal state should be InProgress and version stored
 		assert.Equal(t, api.ResetStatusInProgress, h.reset.status)
+		assert.Equal(t, "batchsandbox-uid-123", h.reset.version)
 	})
 
-	t.Run("InProgress -> InProgress (idempotent)", func(t *testing.T) {
+	t.Run("Same version + InProgress -> idempotent", func(t *testing.T) {
 		mgr := NewMockTaskManager()
 		cfg := &config.Config{EnableSidecarMode: true}
 		h := NewHandler(mgr, &MockExecutor{}, cfg)
 
-		// Set state to InProgress manually
+		// Set state to InProgress with version
 		h.reset.status = api.ResetStatusInProgress
+		h.reset.version = "batchsandbox-uid-123"
 
-		body, _ := json.Marshal(api.ResetRequest{})
+		body, _ := json.Marshal(api.ResetRequest{Version: "batchsandbox-uid-123"})
 		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
 		w := httptest.NewRecorder()
 
@@ -515,38 +537,90 @@ func TestReset_StateMachine(t *testing.T) {
 		var resp api.ResetResponse
 		json.NewDecoder(w.Body).Decode(&resp)
 		assert.Equal(t, api.ResetStatusInProgress, resp.Status)
+		// Version should remain the same
+		assert.Equal(t, "batchsandbox-uid-123", h.reset.version)
 	})
 
-	t.Run("Terminal status not retrigger", func(t *testing.T) {
-		terminalStatuses := []api.ResetStatus{
-			api.ResetStatusSuccess,
-			api.ResetStatusFailed,
-			api.ResetStatusTimeout,
-		}
+	t.Run("Same version + Success -> idempotent", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
 
-		for _, status := range terminalStatuses {
-			t.Run(string(status), func(t *testing.T) {
-				mgr := NewMockTaskManager()
-				cfg := &config.Config{EnableSidecarMode: true}
-				h := NewHandler(mgr, &MockExecutor{}, cfg)
+		// Set terminal state with version
+		h.reset.status = api.ResetStatusSuccess
+		h.reset.version = "batchsandbox-uid-123"
+		h.reset.message = "Reset completed successfully"
 
-				// Set terminal state
-				h.reset.status = status
-				h.reset.message = "previous result"
+		body, _ := json.Marshal(api.ResetRequest{Version: "batchsandbox-uid-123"})
+		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
+		w := httptest.NewRecorder()
 
-				body, _ := json.Marshal(api.ResetRequest{})
-				req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
-				w := httptest.NewRecorder()
+		h.Reset(w, req)
 
-				h.Reset(w, req)
+		var resp api.ResetResponse
+		json.NewDecoder(w.Body).Decode(&resp)
+		assert.Equal(t, api.ResetStatusSuccess, resp.Status)
+		assert.Equal(t, "Reset completed successfully", resp.Message)
+	})
 
-				var resp api.ResetResponse
-				json.NewDecoder(w.Body).Decode(&resp)
-				// Should return the same terminal status, not start new reset
-				assert.Equal(t, status, resp.Status)
-				assert.Equal(t, "previous result", resp.Message)
-			})
-		}
+	t.Run("Different version -> start new reset", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		// Set terminal state with old version
+		h.reset.status = api.ResetStatusSuccess
+		h.reset.version = "batchsandbox-uid-old"
+		h.reset.message = "Previous reset done"
+
+		body, _ := json.Marshal(api.ResetRequest{Version: "batchsandbox-uid-new"})
+		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		h.Reset(w, req)
+
+		var resp api.ResetResponse
+		json.NewDecoder(w.Body).Decode(&resp)
+		// Should start new reset
+		assert.Equal(t, api.ResetStatusInProgress, resp.Status)
+		// Version should be updated
+		assert.Equal(t, "batchsandbox-uid-new", h.reset.version)
+	})
+
+	t.Run("Multiple version changes -> each triggers new reset", func(t *testing.T) {
+		mgr := NewMockTaskManager()
+		cfg := &config.Config{EnableSidecarMode: true}
+		h := NewHandler(mgr, &MockExecutor{}, cfg)
+
+		// First reset
+		body1, _ := json.Marshal(api.ResetRequest{Version: "version-1"})
+		req1 := httptest.NewRequest("POST", "/reset", bytes.NewReader(body1))
+		w1 := httptest.NewRecorder()
+		h.Reset(w1, req1)
+		assert.Equal(t, api.ResetStatusInProgress, h.reset.status)
+		assert.Equal(t, "version-1", h.reset.version)
+
+		// Simulate completion
+		h.reset.status = api.ResetStatusSuccess
+
+		// Second reset with new version
+		body2, _ := json.Marshal(api.ResetRequest{Version: "version-2"})
+		req2 := httptest.NewRequest("POST", "/reset", bytes.NewReader(body2))
+		w2 := httptest.NewRecorder()
+		h.Reset(w2, req2)
+		assert.Equal(t, api.ResetStatusInProgress, h.reset.status)
+		assert.Equal(t, "version-2", h.reset.version)
+
+		// Simulate completion
+		h.reset.status = api.ResetStatusSuccess
+
+		// Third reset with yet another version
+		body3, _ := json.Marshal(api.ResetRequest{Version: "version-3"})
+		req3 := httptest.NewRequest("POST", "/reset", bytes.NewReader(body3))
+		w3 := httptest.NewRecorder()
+		h.Reset(w3, req3)
+		assert.Equal(t, api.ResetStatusInProgress, h.reset.status)
+		assert.Equal(t, "version-3", h.reset.version)
 	})
 
 	t.Run("NotSupported in non-sidecar mode", func(t *testing.T) {
@@ -554,7 +628,7 @@ func TestReset_StateMachine(t *testing.T) {
 		cfg := &config.Config{EnableSidecarMode: false}
 		h := NewHandler(mgr, &MockExecutor{}, cfg)
 
-		body, _ := json.Marshal(api.ResetRequest{})
+		body, _ := json.Marshal(api.ResetRequest{Version: "batchsandbox-uid-123"})
 		req := httptest.NewRequest("POST", "/reset", bytes.NewReader(body))
 		w := httptest.NewRecorder()
 

@@ -482,6 +482,10 @@ func (e *processExecutor) restartMainContainer(ctx context.Context, mainContaine
 	for time.Now().Before(gracefulDeadline) {
 		if !isProcessRunning(mainPID) {
 			klog.InfoS("Main container process exited gracefully", "pid", mainPID)
+			// Step 2.1: Wait for the new container to start
+			if err := e.waitForNewContainer(ctx, mainPID, mainContainerName); err != nil {
+				return fmt.Errorf("failed to wait for new container: %w", err)
+			}
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
@@ -499,6 +503,10 @@ func (e *processExecutor) restartMainContainer(ctx context.Context, mainContaine
 	for time.Now().Before(forceKillDeadline) {
 		if !isProcessRunning(mainPID) {
 			klog.InfoS("Main container process killed forcefully", "pid", mainPID)
+			// Step 4.1: Wait for the new container to start
+			if err := e.waitForNewContainer(ctx, mainPID, mainContainerName); err != nil {
+				return fmt.Errorf("failed to wait for new container: %w", err)
+			}
 			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -506,4 +514,47 @@ func (e *processExecutor) restartMainContainer(ctx context.Context, mainContaine
 
 	// Step 5: Process still running after SIGKILL - this is an error
 	return fmt.Errorf("main container still running after SIGKILL, pid: %d", mainPID)
+}
+
+// waitForNewContainer waits for the new main container to start after the old one was terminated.
+// It polls for a new PID with the same SANDBOX_MAIN_CONTAINER environment variable,
+// ensuring the replacement container is running before returning.
+func (e *processExecutor) waitForNewContainer(ctx context.Context, oldPID int, mainContainerName string) error {
+	klog.InfoS("Waiting for new main container to start", "oldPID", oldPID, "container", mainContainerName)
+
+	// Total timeout for new container to start
+	startTimeout := 60 * time.Second
+	startDeadline := time.Now().Add(startTimeout)
+
+	// Small buffer after finding new PID to ensure container is fully ready
+	readyBuffer := 2 * time.Second
+
+	for time.Now().Before(startDeadline) {
+		// Check if context is cancelled
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cancelled while waiting for new container: %w", ctx.Err())
+		default:
+		}
+
+		// Try to find a new PID for the main container
+		newPID, err := e.findPidByEnvVar("SANDBOX_MAIN_CONTAINER", mainContainerName)
+		if err == nil && newPID != oldPID && isProcessRunning(newPID) {
+			klog.InfoS("Found new main container process", "newPID", newPID, "oldPID", oldPID)
+
+			// Wait a short buffer to ensure the container is fully ready
+			time.Sleep(readyBuffer)
+
+			// Verify the new PID is still running after the buffer
+			if isProcessRunning(newPID) {
+				klog.InfoS("New main container is ready", "newPID", newPID)
+				return nil
+			}
+			klog.InfoS("New main container process exited during buffer, continuing to wait", "newPID", newPID)
+		}
+
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("timeout waiting for new main container to start after %v", startTimeout)
 }

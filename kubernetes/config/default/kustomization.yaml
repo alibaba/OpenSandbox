@@ -35,13 +35,10 @@ resources:
 
 # Uncomment the patches line if you enable Metrics
 patches:
-# [METRICS] The following patch will enable the metrics endpoint using HTTPS and the port :8443.
+# [METRICS] The following patch enables the metrics endpoint using HTTPS and the port :8443.
+# It also adds task-executor-image argument for PodRecyclePolicy Reuse support.
 # More info: https://book.kubebuilder.io/reference/metrics
-- path: manager_metrics_patch.yaml
-  target:
-    kind: Deployment
-# [TASK-EXECUTOR] Patch to add task-executor-image argument for PodRecyclePolicy Reuse support
-- path: manager_task_executor_patch.yaml
+- path: manager_args_patch.yaml
   target:
     kind: Deployment
     name: controller-manager
