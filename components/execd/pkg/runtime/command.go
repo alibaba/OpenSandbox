@@ -140,8 +140,8 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		close(done)
 		wg.Wait()
 		request.Hooks.OnExecuteInit(session)
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "CommandExecError", EValue: err.Error()})
-		log.Error("CommandExecError: error starting commands: %v", err)
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: commandInitError, EValue: err.Error()})
+		log.Error("%s: error starting commands: %v", commandInitError, err)
 		return nil
 	}
 
@@ -185,23 +185,25 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) {
 			exitCode := exitError.ExitCode()
-			eName = "CommandExecError"
+			eName = commandExecError
 			eValue = strconv.Itoa(exitCode)
 			eCode = exitCode
 		} else {
-			eName = "CommandExecError"
+			eName = commandExecError
 			eValue = err.Error()
 			eCode = 1
 		}
 		traceback = []string{err.Error()}
 
 		request.Hooks.OnExecuteError(&execute.ErrorOutput{
-			EName:     eName,
+			EName: eName,
+			// Deprecated: EValue is deprecated for command, use ExitCode instead
 			EValue:    eValue,
+			ExitCode:  eCode,
 			Traceback: traceback,
 		})
 
-		log.Error("CommandExecError: error running commands: %v", err)
+		log.Error("%s: error running commands: %v", commandExecError, err)
 		c.markCommandFinished(session, eCode, err.Error())
 		return nil
 	}
@@ -268,7 +270,7 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	}
 	if err != nil {
 		cancel()
-		log.Error("CommandExecError: error starting commands: %v", err)
+		log.Error("%s: error starting commands: %v", commandInitError, err)
 		kernel.running = false
 		c.storeCommandKernel(session, kernel)
 		c.markCommandFinished(session, 255, err.Error())
@@ -285,7 +287,7 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 		err = cmd.Wait()
 		cancel()
 		if err != nil {
-			log.Error("CommandExecError: error running commands: %v", err)
+			log.Error("%s: error running commands: %v", commandExecError, err)
 			exitCode := 1
 			var exitError *exec.ExitError
 			if errors.As(err, &exitError) {

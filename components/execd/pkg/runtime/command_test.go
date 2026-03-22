@@ -212,8 +212,8 @@ func TestRunCommand_Error(t *testing.T) {
 	require.Equal(t, []string{"before"}, stdoutLines)
 	require.Empty(t, stderrLines, "expected no stderr")
 	require.NotNil(t, gotErr, "expected error hook to be called")
-	require.Equal(t, "CommandExecError", gotErr.EName)
-	require.Equal(t, "3", gotErr.EValue)
+	require.Equal(t, commandExecError, gotErr.EName)
+	require.Equal(t, 3, gotErr.ExitCode)
 }
 
 // TestStdLogDescriptor_AutoCreatesTempDir verifies that stdLogDescriptor

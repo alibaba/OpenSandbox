@@ -119,8 +119,9 @@ func (c *Controller) runJupyterCode(ctx context.Context, kernel *jupyterKernel, 
 			}
 
 			request.Hooks.OnExecuteError(&execute.ErrorOutput{
-				EName:  "ContextCancelled",
-				EValue: "Interrupt kernel",
+				EName:    "ContextCancelled",
+				EValue:   "Interrupt kernel",
+				ExitCode: 255,
 			})
 			return errors.New("context cancelled, interrupt kernel")
 		}

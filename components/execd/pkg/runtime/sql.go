@@ -43,14 +43,14 @@ func (c *Controller) runSQL(ctx context.Context, request *ExecuteCodeRequest) er
 	request.Hooks.OnExecuteInit(uuid.New().String())
 	err := c.initDB()
 	if err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBInitError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBInitError", EValue: err.Error(), ExitCode: 255})
 		log.Error("DBInitError: error initializing db server: %v", err)
 		return err
 	}
 
 	err = c.db.PingContext(ctx)
 	if err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBPingError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBPingError", EValue: err.Error(), ExitCode: 255})
 		log.Error("DBPingError: error pinging db server: %v", err)
 		return err
 	}
@@ -69,14 +69,14 @@ func (c *Controller) executeSelectSQLQuery(ctx context.Context, request *Execute
 
 	rows, err := c.db.QueryContext(ctx, request.Code)
 	if err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBQueryError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBQueryError", EValue: err.Error(), ExitCode: 255})
 		return nil
 	}
 	defer rows.Close()
 
 	columns, err := rows.Columns()
 	if err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBQueryError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBQueryError", EValue: err.Error(), ExitCode: 255})
 		return nil
 	}
 
@@ -90,7 +90,7 @@ func (c *Controller) executeSelectSQLQuery(ctx context.Context, request *Execute
 	for rows.Next() {
 		err := rows.Scan(scanArgs...)
 		if err != nil {
-			request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "RowScanError", EValue: err.Error()})
+			request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "RowScanError", EValue: err.Error(), ExitCode: 255})
 			return nil
 		}
 		row := make([]any, len(columns))
@@ -104,7 +104,7 @@ func (c *Controller) executeSelectSQLQuery(ctx context.Context, request *Execute
 		result = append(result, row)
 	}
 	if err := rows.Err(); err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "RowIterationError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "RowIterationError", EValue: err.Error(), ExitCode: 255})
 		return nil
 	}
 
@@ -114,7 +114,7 @@ func (c *Controller) executeSelectSQLQuery(ctx context.Context, request *Execute
 	}
 	bytes, err := json.Marshal(queryResult)
 	if err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "JSONMarshalError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "JSONMarshalError", EValue: err.Error(), ExitCode: 255})
 		return nil
 	}
 	request.Hooks.OnExecuteResult(
@@ -133,7 +133,7 @@ func (c *Controller) executeUpdateSQLQuery(ctx context.Context, request *Execute
 
 	result, err := c.db.ExecContext(ctx, request.Code)
 	if err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBExecError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBExecError", EValue: err.Error(), ExitCode: 255})
 		return err
 	}
 
@@ -144,7 +144,7 @@ func (c *Controller) executeUpdateSQLQuery(ctx context.Context, request *Execute
 	}
 	bytes, err := json.Marshal(queryResult)
 	if err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "JSONMarshalError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "JSONMarshalError", EValue: err.Error(), ExitCode: 255})
 		return err
 	}
 	request.Hooks.OnExecuteResult(

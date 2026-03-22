@@ -1063,6 +1063,10 @@ components:
               type: string
               description: Error value/message
               example: "name 'undefined_var' is not defined"
+            exit_code:
+              type: integer
+              description: Non-zero exit code if the command has finished
+              example: 1
             traceback:
               type: array
               items:

@@ -206,6 +206,9 @@ type ErrorOutput struct {
 	// EValue is the value of the error
 	EValue string `json:"evalue"`
 
+	// ExitCode is the exit code of the command
+	ExitCode int `json:"exit_code"`
+
 	// Traceback is the traceback of the error
 	Traceback []string `json:"traceback"`
 }
@@ -214,8 +217,9 @@ func (e *ErrorOutput) String() string {
 	return fmt.Sprintf(`
 Error: %s
 Value: %s
+ExitCode: %d
 Traceback: %s
-`, e.EName, e.EValue, strings.Join(e.Traceback, "\n"))
+`, e.EName, e.EValue, e.ExitCode, strings.Join(e.Traceback, "\n"))
 }
 
 // StatusUpdate represents kernel status update

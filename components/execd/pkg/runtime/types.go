@@ -108,3 +108,6 @@ type bashSession struct {
 	// Set after cmd.Start(), cleared when run() returns. Used by close() to kill the process group.
 	currentProcessPid int
 }
+
+const commandExecError = "CommandExecError"
+const commandInitError = "CommandInitError"

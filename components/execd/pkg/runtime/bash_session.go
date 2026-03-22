@@ -287,12 +287,14 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 		}
 		if request.Hooks.OnExecuteError != nil {
 			request.Hooks.OnExecuteError(&execute.ErrorOutput{
-				EName:     "CommandExecError",
+				EName: commandExecError,
+				// Deprecated: EValue is deprecated for command, use ExitCode instead
 				EValue:    strconv.Itoa(userExitCode),
+				ExitCode:  userExitCode,
 				Traceback: []string{errMsg},
 			})
 		}
-		log.Error("CommandExecError: %s (command: %q)", errMsg, request.Code)
+		log.Error("%s: %s (command: %q)", commandExecError, errMsg, request.Code)
 		return nil
 	}
 

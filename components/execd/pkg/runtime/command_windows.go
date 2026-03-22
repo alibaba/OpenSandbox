@@ -61,8 +61,8 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 
 	err = cmd.Start()
 	if err != nil {
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "CommandExecError", EValue: err.Error()})
-		log.Error("CommandExecError: error starting commands: %v", err)
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: commandInitError, EValue: err.Error()})
+		log.Error("%s: error starting commands: %v", commandInitError, err)
 		return nil
 	}
 
@@ -78,25 +78,29 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	if err != nil {
 		var eName, eValue string
 		var traceback []string
+		var eCode int
 
 		var exitError *exec.ExitError
 		if errors.As(err, &exitError) {
-			exitCode := exitError.ExitCode()
-			eName = "CommandExecError"
-			eValue = strconv.Itoa(exitCode)
+			eCode = exitError.ExitCode()
+			eName = commandExecError
+			eValue = strconv.Itoa(eCode)
 		} else {
-			eName = "CommandExecError"
+			eName = commandExecError
 			eValue = err.Error()
+			eCode = 1
 		}
 		traceback = []string{err.Error()}
 
 		request.Hooks.OnExecuteError(&execute.ErrorOutput{
-			EName:     eName,
+			EName: eName,
+			// Deprecated: EValue is deprecated for command, use ExitCode instead
 			EValue:    eValue,
+			ExitCode:  eCode,
 			Traceback: traceback,
 		})
 
-		log.Error("CommandExecError: error running commands: %v", err)
+		log.Error("%s: error running commands: %v", commandExecError, err)
 		return nil
 	}
 	request.Hooks.OnExecuteComplete(time.Since(startAt))
@@ -131,7 +135,7 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	safego.Go(func() {
 		err := cmd.Start()
 		if err != nil {
-			log.Error("CommandExecError: error starting commands: %v", err)
+			log.Error("%s: error starting commands: %v", commandInitError, err)
 			pipe.Close() // best-effort
 			cancel()
 			return
@@ -161,7 +165,7 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 		devNull.Close() // best-effort
 
 		if err != nil {
-			log.Error("CommandExecError: error running commands: %v", err)
+			log.Error("%s: error running commands: %v", commandExecError, err)
 			exitCode := 1
 			var exitError *exec.ExitError
 			if errors.As(err, &exitError) {
