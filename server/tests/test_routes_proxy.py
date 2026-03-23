@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from src.api import lifecycle
 from src.api.schema import Endpoint
+from src.middleware.auth import SANDBOX_API_KEY_HEADER
 from src.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER
 
 
@@ -126,6 +127,7 @@ def test_proxy_forwards_filtered_headers_and_query(
     assert "trailer" not in lowered_headers
     assert "authorization" not in lowered_headers
     assert "cookie" not in lowered_headers
+    assert SANDBOX_API_KEY_HEADER.lower() not in lowered_headers
     assert "x-hop-temp" not in lowered_headers
     assert lowered_headers.get("x-trace") == "trace-1"
     assert fake_client.response.aclose_called is True

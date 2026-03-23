@@ -28,6 +28,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import AppConfig, get_config
 
+SANDBOX_API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
+
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """
     Middleware for API Key authentication.
@@ -35,8 +38,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
     Validates the OPEN-SANDBOX-API-KEY header for all requests except health check.
     Returns 401 Unauthorized if authentication fails.
     """
-
-    API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
 
     # Paths that don't require authentication
     EXEMPT_PATHS = ["/health", "/docs", "/redoc", "/openapi.json"]
@@ -104,7 +105,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Extract API key from header
-        api_key = request.headers.get(self.API_KEY_HEADER)
+        api_key = request.headers.get(SANDBOX_API_KEY_HEADER)
 
         # Validate API key
         if not api_key:
@@ -113,7 +114,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={
                     "code": "MISSING_API_KEY",
                     "message": "Authentication credentials are missing. "
-                              "Provide API key via OPEN-SANDBOX-API-KEY header.",
+                              f"Provide API key via {SANDBOX_API_KEY_HEADER} header.",
                 },
             )
 

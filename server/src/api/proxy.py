@@ -24,6 +24,7 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import StreamingResponse
 
 from src.api import lifecycle
+from src.middleware.auth import SANDBOX_API_KEY_HEADER
 
 # RFC 2616 Section 13.5.1
 HOP_BY_HOP_HEADERS = {
@@ -41,6 +42,7 @@ HOP_BY_HOP_HEADERS = {
 SENSITIVE_HEADERS = {
     "authorization",
     "cookie",
+    SANDBOX_API_KEY_HEADER.lower(),
 }
 
 router = APIRouter(tags=["Sandboxes"])
