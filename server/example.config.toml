@@ -31,12 +31,10 @@ max_sandbox_timeout_seconds = 86400
 [renew_intent]
 enabled = false
 min_interval_seconds = 60
-
-[renew_intent.redis]
-enabled = false
-# dsn = "redis://127.0.0.1:6379/0"
-queue_key = "opensandbox:renew:intent"
-consumer_concurrency = 8
+redis.enabled = false
+# redis.dsn = "redis://127.0.0.1:6379/0"
+redis.queue_key = "opensandbox:renew:intent"
+redis.consumer_concurrency = 8
 
 [runtime]
 # Runtime selection (docker | kubernetes)

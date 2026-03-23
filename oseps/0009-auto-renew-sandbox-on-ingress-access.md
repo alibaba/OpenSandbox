@@ -296,12 +296,10 @@ Use the root config file: lifecycle API settings stay under `[server]`; renew-on
 [renew_intent]
 enabled = false
 min_interval_seconds = 60
-
-[renew_intent.redis]
-enabled = false
-dsn = "redis://127.0.0.1:6379/0"
-queue_key = "opensandbox:renew:intent"
-consumer_concurrency = 8
+redis.enabled = false
+redis.dsn = "redis://127.0.0.1:6379/0"
+redis.queue_key = "opensandbox:renew:intent"
+redis.consumer_concurrency = 8
 ```
 
 Configuration rules:

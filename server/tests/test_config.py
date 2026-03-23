@@ -111,7 +111,7 @@ def test_renew_intent_redis_requires_dsn_when_enabled():
     assert cfg.dsn == "redis://127.0.0.1:6379/0"
 
 
-def test_load_config_renew_intent_nested(tmp_path, monkeypatch):
+def test_load_config_renew_intent_dotted_redis_keys(tmp_path, monkeypatch):
     _reset_config(monkeypatch)
     toml = textwrap.dedent(
         """
@@ -122,12 +122,10 @@ def test_load_config_renew_intent_nested(tmp_path, monkeypatch):
         [renew_intent]
         enabled = true
         min_interval_seconds = 30
-
-        [renew_intent.redis]
-        enabled = true
-        dsn = "redis://example:6379/1"
-        queue_key = "custom:renew"
-        consumer_concurrency = 4
+        redis.enabled = true
+        redis.dsn = "redis://example:6379/1"
+        redis.queue_key = "custom:renew"
+        redis.consumer_concurrency = 4
 
         [runtime]
         type = "docker"
@@ -145,6 +143,35 @@ def test_load_config_renew_intent_nested(tmp_path, monkeypatch):
     assert ar.redis.dsn == "redis://example:6379/1"
     assert ar.redis.queue_key == "custom:renew"
     assert ar.redis.consumer_concurrency == 4
+
+
+def test_load_config_renew_intent_legacy_redis_subtable(tmp_path, monkeypatch):
+    """[renew_intent.redis] remains accepted (same parsed shape as dotted keys)."""
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [renew_intent]
+        enabled = true
+
+        [renew_intent.redis]
+        enabled = true
+        dsn = "redis://legacy:6379/0"
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.renew_intent.redis.enabled is True
+    assert loaded.renew_intent.redis.dsn == "redis://legacy:6379/0"
 
 
 def test_kubernetes_runtime_fills_missing_block():

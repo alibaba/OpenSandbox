@@ -554,7 +554,7 @@ curl -X DELETE \
 | 目的 | 操作 |
 |------|------|
 | **关闭（默认）** | `~/.sandbox.toml` 中保持 `[renew_intent] enabled = false`（见 `example.config.zh.toml`）。 |
-| **开启** | 设置 `[renew_intent] enabled = true`。若使用 **Ingress + Redis** 模式，按 OSEP 打开 `[renew_intent.redis]` 并配置 `dsn`。 |
+| **开启** | 设置 `[renew_intent] enabled = true`。若使用 **Ingress + Redis** 模式，在同一 `[renew_intent]` 表中设置 `redis.enabled = true` 与 `redis.dsn`（见 OSEP）。 |
 | **其它配置项** | `min_interval_seconds`、`queue_key`、`consumer_concurrency` 等见 OSEP 与 `example.config.zh.toml` 的 `[renew_intent]`。 |
 
 **按沙箱接入**

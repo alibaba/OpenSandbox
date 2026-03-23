@@ -19,7 +19,7 @@ import os
 import shutil
 import types
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
+from typing import Any, FrozenSet, Union, get_args, get_origin
 
 import uvicorn
 from pydantic import BaseModel
@@ -161,6 +161,7 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
         *,
         placeholders: dict[str, str] | None = None,
         extra_comments: list[str] | None = None,
+        dotted_nested: FrozenSet[str] | None = None,
     ) -> str:
         lines: list[str] = []
         if extra_comments:
@@ -168,6 +169,7 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
         lines.append(f"[{section}]")
 
         placeholders = placeholders or {}
+        dotted_nested = dotted_nested or frozenset()
 
         for field_name, field in model.model_fields.items():
             if _is_basemodel_type(field.annotation):
@@ -179,15 +181,33 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
             lines.append(f"{key} = {value}")
             lines.append("")
 
+        for field_name, field in model.model_fields.items():
+            if field_name not in dotted_nested or not _is_basemodel_type(field.annotation):
+                continue
+            inner = _strip_optional(field.annotation)
+            if not isinstance(inner, type) or not issubclass(inner, BaseModel):
+                continue
+            for sub_name, sub_field in inner.model_fields.items():
+                sub_key = f"{field_name}.{sub_name}"
+                value = placeholders.get(sub_key, _placeholder_for_field(sub_field))
+                if sub_field.description:
+                    lines.append(f"# {sub_field.description}")
+                lines.append(f"{sub_key} = {value}")
+                lines.append("")
+
         nested_blocks: list[str] = []
         for field_name, field in model.model_fields.items():
             if not _is_basemodel_type(field.annotation):
+                continue
+            if field_name in dotted_nested:
                 continue
             inner = _strip_optional(field.annotation)
             if not isinstance(inner, type) or not issubclass(inner, BaseModel):
                 continue
             nested_path = f"{section}.{field_name}"
-            nested_blocks.append(_render_section(nested_path, inner, placeholders=None, extra_comments=None))
+            nested_blocks.append(
+                _render_section(nested_path, inner, placeholders=None, extra_comments=None)
+            )
 
         if nested_blocks:
             if lines and lines[-1] == "":
@@ -210,7 +230,11 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
         _render_section(
             "renew_intent",
             RenewIntentConfig,
-            extra_comments=["Renew-intent: top-level section (not under [server])."],
+            extra_comments=[
+                "Renew-intent: top-level section (not under [server]). "
+                "Redis options use dotted keys in this table (redis.enabled, redis.queue_key, …)."
+            ],
+            dotted_nested=frozenset({"redis"}),
         ),
         _render_section("runtime", RuntimeConfig),
         _render_section("docker", DockerConfig),

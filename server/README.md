@@ -579,7 +579,7 @@ Extends sandbox TTL when access is observed (via the lifecycle **server proxy** 
 | Goal | What to do |
 |------|------------|
 | **Off (default)** | Keep `[renew_intent] enabled = false` in `~/.sandbox.toml` (see `example.config.toml`). |
-| **On** | Set `[renew_intent] enabled = true`. For **ingress + Redis** mode, also enable `[renew_intent.redis]` and set `dsn` as described in OSEP-0009. |
+| **On** | Set `[renew_intent] enabled = true`. For **ingress + Redis** mode, set `redis.enabled = true` and `redis.dsn` in the same `[renew_intent]` table (see OSEP-0009). |
 | **Other keys** | `min_interval_seconds`, `queue_key`, `consumer_concurrency` — see OSEP-0009 and `[renew_intent]` in `example.config.toml`. |
 
 **Per sandbox**

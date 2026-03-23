@@ -119,7 +119,7 @@ class RenewIntentRedisConfig(BaseModel):
     def require_dsn_when_redis_enabled(self) -> "RenewIntentRedisConfig":
         if self.enabled and (self.dsn is None or not str(self.dsn).strip()):
             raise ValueError(
-                "renew_intent.redis.dsn must be set when renew_intent.redis.enabled is true."
+                "[renew_intent] redis.dsn must be set when redis.enabled is true."
             )
         return self
 
@@ -144,7 +144,11 @@ class RenewIntentConfig(BaseModel):
     )
     redis: RenewIntentRedisConfig = Field(
         default_factory=RenewIntentRedisConfig,
-        description="🧪 [EXPERIMENTAL] Redis queue consumer for ingress gateway renew-intent mode.",
+        description=(
+            "🧪 [EXPERIMENTAL] Redis queue consumer for ingress gateway renew-intent mode. "
+            "In TOML, set keys under the same [renew_intent] table as redis.enabled, "
+            "redis.dsn, redis.queue_key, redis.consumer_concurrency (dotted keys)."
+        ),
     )
 
 
