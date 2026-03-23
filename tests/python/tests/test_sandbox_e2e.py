@@ -442,10 +442,11 @@ class TestSandboxE2E:
 
         cfg = create_connection_config_server_proxy()
         assert cfg.use_server_proxy is True
+        sandbox_ttl = timedelta(minutes=4)
         sandbox = await Sandbox.create(
             image=SandboxImageSpec(get_sandbox_image()),
             connection_config=cfg,
-            timeout=timedelta(minutes=4),
+            timeout=sandbox_ttl,
             ready_timeout=timedelta(seconds=90),
             extensions={ACCESS_RENEW_EXTEND_SECONDS_KEY: "300"},
             network_policy=NetworkPolicy(
@@ -454,10 +455,12 @@ class TestSandboxE2E:
             ),
         )
         try:
-            await asyncio.sleep(5)
+            boot = await sandbox.get_info()
+            assert boot.expires_at is not None
+            # Baseline from create contract only: ready/ping may already move expires_at.
+            nominal_expires_at = boot.created_at + sandbox_ttl
 
-            info0 = await sandbox.get_info()
-            assert info0.expires_at is not None
+            await asyncio.sleep(5)
 
             egress_endpoint = await sandbox.get_endpoint(DEFAULT_EGRESS_PORT)
             assert f"/sandboxes/{sandbox.id}/proxy/{DEFAULT_EGRESS_PORT}" in egress_endpoint.endpoint
@@ -498,20 +501,17 @@ class TestSandboxE2E:
             bumped = False
             while time.monotonic() < deadline:
                 info = await sandbox.get_info()
-                if (
-                    info.expires_at is not None
-                    and info.expires_at > info0.expires_at + min_delta
-                ):
+                if info.expires_at is not None and info.expires_at > nominal_expires_at + min_delta:
                     bumped = True
                     logger.info(
-                        "Access renew bumped expires_at: %s -> %s",
-                        info0.expires_at,
+                        "Access renew: expires_at=%s above nominal (created_at+timeout)=%s",
                         info.expires_at,
+                        nominal_expires_at,
                     )
                     break
                 await asyncio.sleep(2.0)
             assert bumped, (
-                "expires_at did not increase enough after proxied traffic; "
+                "expires_at did not exceed created_at + create timeout + slack after proxied traffic; "
                 "set [renew_intent] enabled = true on the lifecycle server."
             )
         finally:
