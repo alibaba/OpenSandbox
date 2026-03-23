@@ -17,9 +17,12 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import types
 from pathlib import Path
+from typing import Any, Union, get_args, get_origin
 
 import uvicorn
+from pydantic import BaseModel
 
 from src.config import (
     AgentSandboxRuntimeConfig,
@@ -29,10 +32,29 @@ from src.config import (
     EgressConfig,
     IngressConfig,
     KubernetesRuntimeConfig,
+    RenewOnAccessConfig,
     RuntimeConfig,
     ServerConfig,
     StorageConfig,
 )
+
+
+def _strip_optional(annotation: Any) -> Any:
+    """Unwrap Optional / Union[..., None] to the inner type."""
+    if annotation is None:
+        return None
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is Union or origin is types.UnionType:
+        filtered = [a for a in args if a is not type(None)]
+        if len(filtered) == 1:
+            return filtered[0]
+    return annotation
+
+
+def _is_basemodel_type(annotation: Any) -> bool:
+    inner = _strip_optional(annotation)
+    return isinstance(inner, type) and issubclass(inner, BaseModel)
 
 EXAMPLE_FILE_MAP = {
     "docker": "example.config.toml",
@@ -148,12 +170,30 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
         placeholders = placeholders or {}
 
         for field_name, field in model.model_fields.items():
+            if _is_basemodel_type(field.annotation):
+                continue
             key = field.alias or field_name
             value = placeholders.get(key, _placeholder_for_field(field))
             if field.description:
                 lines.append(f"# {field.description}")
             lines.append(f"{key} = {value}")
             lines.append("")
+
+        nested_blocks: list[str] = []
+        for field_name, field in model.model_fields.items():
+            if not _is_basemodel_type(field.annotation):
+                continue
+            inner = _strip_optional(field.annotation)
+            if not isinstance(inner, type) or not issubclass(inner, BaseModel):
+                continue
+            nested_path = f"{section}.{field_name}"
+            nested_blocks.append(_render_section(nested_path, inner, placeholders=None, extra_comments=None))
+
+        if nested_blocks:
+            if lines and lines[-1] == "":
+                lines.pop()
+            lines.append("")
+            lines.extend(nested_blocks)
 
         if lines and lines[-1] == "":
             lines.pop()
@@ -167,6 +207,11 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
     sections = [
         "# Generated from OpenSandbox config schema. Remove sections you do not use.",
         _render_section("server", ServerConfig),
+        _render_section(
+            "renew_on_access",
+            RenewOnAccessConfig,
+            extra_comments=["OSEP-0009: renew on reverse-proxy access. Top-level section (not under [server])."],
+        ),
         _render_section("runtime", RuntimeConfig),
         _render_section("docker", DockerConfig),
         _render_section(

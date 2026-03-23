@@ -15,10 +15,12 @@
 import textwrap
 
 import pytest
+from pydantic import ValidationError
 
 from src import config as config_module
 from src.config import (
     AppConfig,
+    RenewOnAccessRedisConfig,
     EGRESS_MODE_DNS,
     EGRESS_MODE_DNS_NFT,
     EgressConfig,
@@ -87,6 +89,62 @@ def test_docker_runtime_disallows_kubernetes_block():
 def test_server_config_defaults_include_max_sandbox_timeout():
     server_cfg = ServerConfig()
     assert server_cfg.max_sandbox_timeout_seconds is None
+
+
+def test_renew_on_access_defaults():
+    cfg = AppConfig(runtime=RuntimeConfig(type="docker", execd_image="opensandbox/execd:latest"))
+    ar = cfg.renew_on_access
+    assert ar.enabled is False
+    assert ar.min_interval_seconds == 60
+    assert ar.redis.enabled is False
+    assert ar.redis.dsn is None
+    assert ar.redis.queue_key == "opensandbox:renew:intent"
+    assert ar.redis.consumer_concurrency == 8
+
+
+def test_renew_on_access_redis_requires_dsn_when_enabled():
+    with pytest.raises(ValidationError):
+        RenewOnAccessRedisConfig(enabled=True, dsn=None)
+    with pytest.raises(ValidationError):
+        RenewOnAccessRedisConfig(enabled=True, dsn="   ")
+    cfg = RenewOnAccessRedisConfig(enabled=True, dsn="redis://127.0.0.1:6379/0")
+    assert cfg.dsn == "redis://127.0.0.1:6379/0"
+
+
+def test_load_config_renew_on_access_nested(tmp_path, monkeypatch):
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [renew_on_access]
+        enabled = true
+        min_interval_seconds = 30
+
+        [renew_on_access.redis]
+        enabled = true
+        dsn = "redis://example:6379/1"
+        queue_key = "custom:renew"
+        consumer_concurrency = 4
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    ar = loaded.renew_on_access
+    assert ar.enabled is True
+    assert ar.min_interval_seconds == 30
+    assert ar.redis.enabled is True
+    assert ar.redis.dsn == "redis://example:6379/1"
+    assert ar.redis.queue_key == "custom:renew"
+    assert ar.redis.consumer_concurrency == 4
 
 
 def test_kubernetes_runtime_fills_missing_block():

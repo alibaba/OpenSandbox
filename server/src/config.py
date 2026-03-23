@@ -87,6 +87,55 @@ def _is_wildcard_domain(host: str) -> bool:
     return bool(_WILDCARD_DOMAIN_RE.match(host))
 
 
+class RenewOnAccessRedisConfig(BaseModel):
+    """Redis List consumer and distributed lock settings (OSEP-0009 ingress gateway path)."""
+
+    enabled: bool = Field(
+        default=False,
+        description="When true, server workers consume renew intents from Redis (ingress gateway path).",
+    )
+    dsn: Optional[str] = Field(
+        default=None,
+        description='Redis DSN (e.g. "redis://127.0.0.1:6379/0"). Required when redis.enabled is true.',
+    )
+    queue_key: str = Field(
+        default="opensandbox:renew:intent",
+        min_length=1,
+        description="Redis List key for LPUSH/BRPOP renew-intent JSON payloads.",
+    )
+    consumer_concurrency: int = Field(
+        default=8,
+        ge=1,
+        description="Number of concurrent BRPOP worker tasks.",
+    )
+
+    @model_validator(mode="after")
+    def require_dsn_when_redis_enabled(self) -> "RenewOnAccessRedisConfig":
+        if self.enabled and (self.dsn is None or not str(self.dsn).strip()):
+            raise ValueError(
+                "renew_on_access.redis.dsn must be set when renew_on_access.redis.enabled is true."
+            )
+        return self
+
+
+class RenewOnAccessConfig(BaseModel):
+    """Access-driven sandbox expiration renewal (OSEP-0009)."""
+
+    enabled: bool = Field(
+        default=False,
+        description="Master switch for auto-renew on reverse-proxy access. When false, renew-intent logic is off.",
+    )
+    min_interval_seconds: int = Field(
+        default=60,
+        ge=1,
+        description="Minimum seconds between successful renewals for the same sandbox (cooldown).",
+    )
+    redis: RenewOnAccessRedisConfig = Field(
+        default_factory=RenewOnAccessRedisConfig,
+        description="Redis queue consumer settings for ingress gateway renew-intent mode.",
+    )
+
+
 class GatewayRouteModeConfig(BaseModel):
     """Routing strategy for gateway ingress exposure."""
 
@@ -494,6 +543,10 @@ class AppConfig(BaseModel):
     """Root application configuration model."""
 
     server: ServerConfig = Field(default_factory=ServerConfig)
+    renew_on_access: RenewOnAccessConfig = Field(
+        default_factory=RenewOnAccessConfig,
+        description="Auto-renew sandbox expiration when reverse-proxy access is observed (OSEP-0009).",
+    )
     runtime: RuntimeConfig = Field(..., description="Sandbox runtime configuration.")
     kubernetes: Optional[KubernetesRuntimeConfig] = None
     agent_sandbox: Optional["AgentSandboxRuntimeConfig"] = None
@@ -616,6 +669,8 @@ def get_config_path() -> Path:
 
 __all__ = [
     "AppConfig",
+    "RenewOnAccessConfig",
+    "RenewOnAccessRedisConfig",
     "ServerConfig",
     "RuntimeConfig",
     "IngressConfig",

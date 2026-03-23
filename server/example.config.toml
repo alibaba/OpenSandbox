@@ -27,6 +27,18 @@ log_level = "INFO"
 # Maximum TTL for sandboxes that specify timeout. Comment out this line to disable the upper bound.
 max_sandbox_timeout_seconds = 86400
 
+# Auto-renew sandbox expiration on reverse-proxy access (OSEP-0009). Disabled by default.
+# Server-proxy path does not require Redis; ingress gateway mode needs redis.enabled and a reachable DSN.
+[renew_on_access]
+enabled = false
+min_interval_seconds = 60
+
+[renew_on_access.redis]
+enabled = false
+# dsn = "redis://127.0.0.1:6379/0"
+queue_key = "opensandbox:renew:intent"
+consumer_concurrency = 8
+
 [runtime]
 # Runtime selection (docker | kubernetes)
 # -----------------------------------------------------------------
