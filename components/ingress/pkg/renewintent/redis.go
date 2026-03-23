@@ -84,11 +84,14 @@ func (p *RedisPublisher) shouldSendIntent(sandboxID string) bool {
 	if p.cfg.MinInterval <= 0 {
 		return true
 	}
+
 	now := time.Now()
-	if v, ok := p.lastSent.Load(sandboxID); ok {
-		if now.Sub(v.(time.Time)) < p.cfg.MinInterval {
-			return false
-		}
+	prev, loaded := p.lastSent.LoadOrStore(sandboxID, now)
+	if !loaded {
+		return true
+	}
+	if now.Sub(prev.(time.Time)) < p.cfg.MinInterval {
+		return false
 	}
 	p.lastSent.Store(sandboxID, now)
 	return true
