@@ -64,8 +64,8 @@ source = "vcs"
 
 [tool.hatch.version.raw-options]
 root = ".."
-tag_regex = "^python/cli/v(?P<version>\\d+\\.\\d+\\.\\d+(?:[\\.\\w\\+\\-]*)?)$"
-git_describe_command = 'git describe --dirty --tags --long --match "python/cli/v*"'
+tag_regex = "^cli/v(?P<version>\\d+\\.\\d+\\.\\d+(?:[\\.\\w\\+\\-]*)?)$"
+git_describe_command = 'git describe --dirty --tags --long --match "cli/v*"'
 fallback_version = "0.1.0"
 
 [tool.hatch.build]
