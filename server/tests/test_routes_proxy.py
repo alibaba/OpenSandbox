@@ -27,10 +27,14 @@ class _FakeStreamingResponse:
         self.status_code = status_code
         self.headers = httpx.Headers(headers or {})
         self._chunks = chunks or []
+        self.aclose_called = False
 
     async def aiter_bytes(self):
         for chunk in self._chunks:
             yield chunk
+
+    async def aclose(self):
+        self.aclose_called = True
 
 
 class _FakeAsyncClient:
@@ -124,6 +128,7 @@ def test_proxy_forwards_filtered_headers_and_query(
     assert "cookie" not in lowered_headers
     assert "x-hop-temp" not in lowered_headers
     assert lowered_headers.get("x-trace") == "trace-1"
+    assert fake_client.response.aclose_called is True
 
 
 def test_proxy_forwards_get_request_with_query_params(

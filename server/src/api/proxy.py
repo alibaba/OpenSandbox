@@ -16,6 +16,8 @@
 HTTP proxy routes for reaching services inside sandboxes via the lifecycle API.
 """
 
+from collections.abc import AsyncIterator
+
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.exceptions import HTTPException
@@ -42,6 +44,20 @@ SENSITIVE_HEADERS = {
 }
 
 router = APIRouter(tags=["Sandboxes"])
+
+
+async def _stream_backend_response(resp: httpx.Response) -> AsyncIterator[bytes]:
+    """
+    Yield backend body chunks and always close the httpx streaming response.
+
+    httpx requires ``await resp.aclose()`` for ``stream=True`` responses so connections
+    return to the pool; Starlette's StreamingResponse does not do this automatically.
+    """
+    try:
+        async for chunk in resp.aiter_bytes():
+            yield chunk
+    finally:
+        await resp.aclose()
 
 
 @router.api_route(
@@ -114,7 +130,7 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
         }
 
         return StreamingResponse(
-            content=resp.aiter_bytes(),
+            content=_stream_backend_response(resp),
             status_code=resp.status_code,
             headers=response_headers,
         )
