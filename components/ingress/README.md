@@ -76,7 +76,7 @@ wss://ingress.opensandbox.io/my-sandbox/8080/ws
 
 When enabled, the ingress publishes **renew-intent** events to a Redis list on each proxied request (after resolving the sandbox). The OpenSandbox server consumes these events and may extend sandbox expiration for sandboxes that opted in at creation time. See [OSEP-0009](https://github.com/alibaba/opensandbox/blob/main/oseps/0009-auto-renew-sandbox-on-ingress-access.md) for the full design.
 
-**Requirements:** The server must have `renew_on_access` (and Redis consumer for ingress mode) enabled; the sandbox must opt in via `extensions["access.renew.extend.seconds"]` (positive integer string, see OSEP-0009). This feature is best-effort and disabled by default.
+**Requirements:** The server must have `renew_on_access` (and Redis consumer for ingress mode) enabled; the sandbox must opt in via `extensions["access.renew.extend.seconds"]` (decimal integer string between **300** and **86400** seconds, see OSEP-0009). This feature is best-effort and disabled by default.
 
 | Flag | Default | Description |
 |------|---------|-------------|

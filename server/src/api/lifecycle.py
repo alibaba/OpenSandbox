@@ -26,6 +26,7 @@ from fastapi import APIRouter, Header, Query, Request, status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import Response, StreamingResponse
 
+from src.extensions import validate_extensions
 from src.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
@@ -103,7 +104,7 @@ async def create_sandbox(
     Raises:
         HTTPException: If sandbox creation scheduling fails
     """
-
+    validate_extensions(request.extensions)
     return await sandbox_service.create_sandbox(request)
 
 

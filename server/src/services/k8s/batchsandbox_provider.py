@@ -178,6 +178,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 expires_at=expires_at,
                 entrypoint=entrypoint,
                 env=env,
+                annotations=annotations,
             )
         
         # Extract extra pod spec fragments from template (volumes/volumeMounts only).
@@ -315,6 +316,7 @@ class BatchSandboxProvider(WorkloadProvider):
         expires_at: Optional[datetime],
         entrypoint: List[str],
         env: Dict[str, str],
+        annotations: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Create BatchSandbox workload from a pre-warmed resource pool.
@@ -355,6 +357,8 @@ class BatchSandboxProvider(WorkloadProvider):
             },
             "spec": spec,
         }
+        if annotations:
+            runtime_manifest["metadata"]["annotations"] = annotations
         
         # Pool-based creation does not need template merging
         # Create BatchSandbox directly

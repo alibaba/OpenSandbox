@@ -27,6 +27,7 @@ from typing import Optional, Dict, Any
 
 from fastapi import HTTPException, status
 
+from src.extensions import apply_access_renew_extend_seconds_to_mapping
 from src.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
@@ -315,7 +316,9 @@ class KubernetesSandboxService(SandboxService):
                 egress_image = self.app_config.egress.image if self.app_config.egress else None
                 egress_auth_token = generate_egress_token()
                 annotations[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] = egress_auth_token
-            
+
+            apply_access_renew_extend_seconds_to_mapping(annotations, request.extensions)
+
             # Validate volumes before creating workload
             ensure_volumes_valid(
                 request.volumes,
@@ -764,7 +767,7 @@ class KubernetesSandboxService(SandboxService):
             spec = workload.spec
             labels = metadata.labels or {}
             creation_timestamp = metadata.creation_timestamp
-        
+
         sandbox_id = labels.get(SANDBOX_ID_LABEL, "")
         
         # Get expiration from provider

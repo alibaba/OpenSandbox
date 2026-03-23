@@ -31,6 +31,7 @@ from src.config import (
     StorageConfig,
     IngressConfig,
 )
+from src.extensions import ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY
 from src.services.constants import EGRESS_MODE_ENV, OPENSANDBOX_EGRESS_TOKEN
 from src.services.constants import (
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
@@ -734,6 +735,21 @@ def test_build_labels_marks_manual_cleanup_without_expiration():
     assert labels[SANDBOX_ID_LABEL] == "sandbox-manual"
     assert labels[SANDBOX_MANUAL_CLEANUP_LABEL] == "true"
     assert "opensandbox.io/expires-at" not in labels
+
+
+def test_build_labels_stores_extensions_json():
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        entrypoint=["python"],
+        extensions={"access.renew.extend.seconds": "3600"},
+    )
+
+    labels, _ = service._build_labels_and_env("sandbox-ext", request, None)
+
+    assert labels[ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY] == "3600"
 
 
 @pytest.mark.asyncio

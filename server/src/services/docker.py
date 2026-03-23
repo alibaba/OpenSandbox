@@ -43,6 +43,10 @@ import docker
 from docker.errors import DockerException, ImageNotFound, NotFound as DockerNotFound
 from fastapi import HTTPException, status
 
+from src.extensions import (
+    ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY,
+    apply_access_renew_extend_seconds_to_mapping,
+)
 from src.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
@@ -610,7 +614,13 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         metadata = {
             key: value
             for key, value in labels.items()
-            if key not in {SANDBOX_ID_LABEL, SANDBOX_EXPIRES_AT_LABEL, SANDBOX_MANUAL_CLEANUP_LABEL}
+            if key
+            not in {
+                SANDBOX_ID_LABEL,
+                SANDBOX_EXPIRES_AT_LABEL,
+                SANDBOX_MANUAL_CLEANUP_LABEL,
+                ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY,
+            }
         } or None
         entrypoint = container.attrs.get("Config", {}).get("Cmd") or []
         if isinstance(entrypoint, str):
@@ -1859,6 +1869,8 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
         else:
             labels[SANDBOX_EXPIRES_AT_LABEL] = expires_at.isoformat()
+
+        apply_access_renew_extend_seconds_to_mapping(labels, request.extensions)
 
         env_dict = request.env or {}
         environment = []

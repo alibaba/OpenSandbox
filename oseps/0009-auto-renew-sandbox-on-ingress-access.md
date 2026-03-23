@@ -143,21 +143,21 @@ If any condition is missing, access events are ignored for renewal.
 
 Given current API schema (`extensions: Dict[str, str]`), this OSEP proposes:
 
-- `extensions["access.renew.extend.seconds"]` = positive integer string (e.g. `"1800"`)
+- `extensions["access.renew.extend.seconds"]` = decimal integer **string** in the inclusive range **300–86400** seconds (**5 minutes** to **24 hours**), e.g. `"1800"`.
 
 **Meaning:** When auto-renew on access is triggered for this sandbox, each renewal extends expiration by this many seconds. The key thus both opts the sandbox in and defines the per-renewal extension duration.
 
 **Behavior rules:**
 
-- Missing key or invalid value (non-positive integer string) means no auto-renew on access for that sandbox.
-- Valid value (e.g. `"1800"`) enables auto-renew subject to policy gating; each successful renewal uses `new_expires_at = now + (value of access.renew.extend.seconds)`.
-- Invalid values are rejected at sandbox creation time with 4xx validation error.
+- Missing key means no renew-on-access for that sandbox.
+- If the key is present, the value must parse as an integer in **300–86400**; otherwise the create request fails with **400** (validated in the HTTP API layer via `validate_extensions` in `src/extensions/validation.py` before the runtime service runs).
+- Valid value enables auto-renew subject to policy gating; each successful renewal uses `new_expires_at = now + (value of access.renew.extend.seconds)`.
 
 ### Control Strategy to Prevent Renewal Storms
 
 Both modes share the same strict control policy. An access event triggers renewal only when all checks pass:
 
-1. **Opt-in check**: sandbox has a valid positive `access.renew.extend.seconds` in extensions.
+1. **Opt-in check**: sandbox has `access.renew.extend.seconds` in extensions within **300–86400** (validated at creation).
 2. **Sandbox state check**: sandbox must be `Running`.
 3. **Validity check**: server decides whether the renewal attempt should proceed (e.g. `new_expires_at` meaningfully extends current expiration, lifecycle rules). There is **no** separate configurable “remaining TTL must be below N seconds” knob in server config.
 4. **Cooldown check**: no successful renewal for this sandbox within `min_interval_seconds`.
@@ -309,7 +309,7 @@ Configuration rules:
 - `renew_on_access.enabled=false` means feature fully disabled.
 - Ingress path renewal requires Redis block enabled and reachable on the server; the **ingress component** uses its own config (e.g. CLI flags: `--renew-intent-enabled`, `--renew-intent-redis-dsn`, `--renew-intent-queue-key`, `--renew-intent-queue-max-len`, `--renew-intent-min-interval`) to connect to Redis and publish intents. Queue key and default list name should match what the server consumer expects (e.g. `opensandbox:renew:intent`).
 - Server proxy path can run without Redis.
-- Per-renewal extension duration is **not** a server setting: it comes only from sandbox `extensions["access.renew.extend.seconds"]` (set at creation). Missing, invalid, or non-positive integer string means no renew-on-access for that sandbox.
+- Per-renewal extension duration is **not** a server setting: it comes only from sandbox `extensions["access.renew.extend.seconds"]` (set at creation to **300–86400** seconds or creation fails with **400**). Omit the key to disable renew-on-access for that sandbox.
 - Docker runtime direct mode remains unsupported regardless of this config.
 
 Create request example:
