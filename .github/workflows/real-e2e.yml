@@ -67,6 +67,9 @@ jobs:
           network_mode = "bridge"
           [storage]
           allowed_host_paths = ["/tmp/opensandbox-e2e"]
+          [renew_intent]
+          enabled = true
+          min_interval_seconds = 60
           EOF
 
           ./scripts/python-e2e.sh

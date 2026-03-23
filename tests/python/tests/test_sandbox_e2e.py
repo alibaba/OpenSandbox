@@ -67,6 +67,9 @@ from tests.base_e2e_test import (
 
 logger = logging.getLogger(__name__)
 
+# Keep in sync with server ``src/extensions/keys.py``
+ACCESS_RENEW_EXTEND_SECONDS_KEY = "access.renew.extend.seconds"
+
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
@@ -426,9 +429,10 @@ class TestSandboxE2E:
                 pass
             await sandbox.close()
 
-    @pytest.mark.timeout(180)
+    @pytest.mark.timeout(240)
     @pytest.mark.order(1)
     async def test_01ab_network_policy_get_and_patch_with_server_proxy(self):
+        """Also covers access renew on proxy traffic (needs ``[renew_intent] enabled = true``)."""
         if is_kubernetes_runtime():
             pytest.skip("Network policy is not covered in the Kubernetes runtime suite")
 
@@ -437,11 +441,13 @@ class TestSandboxE2E:
         logger.info("=" * 80)
 
         cfg = create_connection_config_server_proxy()
+        assert cfg.use_server_proxy is True
         sandbox = await Sandbox.create(
             image=SandboxImageSpec(get_sandbox_image()),
             connection_config=cfg,
-            timeout=timedelta(minutes=5),
-            ready_timeout=timedelta(seconds=30),
+            timeout=timedelta(minutes=4),
+            ready_timeout=timedelta(seconds=90),
+            extensions={ACCESS_RENEW_EXTEND_SECONDS_KEY: "300"},
             network_policy=NetworkPolicy(
                 defaultAction="deny",
                 egress=[NetworkRule(action="allow", target="pypi.org")],
@@ -449,6 +455,9 @@ class TestSandboxE2E:
         )
         try:
             await asyncio.sleep(5)
+
+            info0 = await sandbox.get_info()
+            assert info0.expires_at is not None
 
             egress_endpoint = await sandbox.get_endpoint(DEFAULT_EGRESS_PORT)
             assert f"/sandboxes/{sandbox.id}/proxy/{DEFAULT_EGRESS_PORT}" in egress_endpoint.endpoint
@@ -480,6 +489,30 @@ class TestSandboxE2E:
             assert any(
                 rule.target == "pypi.org" and rule.action == "deny"
                 for rule in patched_policy.egress
+            )
+
+            assert await sandbox.is_healthy()
+
+            deadline = time.monotonic() + 30.0
+            min_delta = timedelta(seconds=30)
+            bumped = False
+            while time.monotonic() < deadline:
+                info = await sandbox.get_info()
+                if (
+                    info.expires_at is not None
+                    and info.expires_at > info0.expires_at + min_delta
+                ):
+                    bumped = True
+                    logger.info(
+                        "Access renew bumped expires_at: %s -> %s",
+                        info0.expires_at,
+                        info.expires_at,
+                    )
+                    break
+                await asyncio.sleep(2.0)
+            assert bumped, (
+                "expires_at did not increase enough after proxied traffic; "
+                "set [renew_intent] enabled = true on the lifecycle server."
             )
         finally:
             try:
