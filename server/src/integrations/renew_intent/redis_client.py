@@ -23,6 +23,11 @@ import redis.asyncio as redis_async
 from redis.asyncio import Redis
 
 from src.config import AppConfig
+from src.integrations.renew_intent.logutil import (
+    RENEW_EVENT_REDIS_CONNECTED,
+    RENEW_SOURCE_REDIS_QUEUE,
+    renew_bundle,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,15 +35,7 @@ logger = logging.getLogger(__name__)
 async def connect_renew_intent_redis_from_config(
     app_config: AppConfig,
 ) -> Optional[Redis]:
-    """
-    Build an async Redis client from config and verify connectivity with PING.
-
-    Returns:
-        Connected client, or ``None`` when renew-intent Redis mode is off.
-
-    Raises:
-        redis.exceptions.RedisError: When connection or PING fails while Redis is enabled.
-    """
+    """Connect (with ``PING``) or ``None`` if renew-intent Redis is disabled."""
     ri = app_config.renew_intent
     if not ri.enabled or not ri.redis.enabled:
         return None
@@ -52,11 +49,13 @@ async def connect_renew_intent_redis_from_config(
         decode_responses=True,
     )
     await client.ping()
-    logger.info(
-        "Redis connected for renew-intent (queue_key=%s, consumer_concurrency=%s)",
-        ri.redis.queue_key,
-        ri.redis.consumer_concurrency,
+    line, ex = renew_bundle(
+        event=RENEW_EVENT_REDIS_CONNECTED,
+        source=RENEW_SOURCE_REDIS_QUEUE,
+        queue_key=ri.redis.queue_key,
+        consumer_concurrency=ri.redis.consumer_concurrency,
     )
+    logger.info(f"renew_intent {line}", extra=ex)
     return client
 
 

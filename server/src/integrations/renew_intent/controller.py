@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
@@ -25,6 +26,13 @@ from fastapi import HTTPException
 from src.api.schema import RenewSandboxExpirationRequest
 from src.integrations.renew_intent.constants import COOLDOWN_KEY_PREFIX
 from src.integrations.renew_intent.intent import RenewIntent
+from src.integrations.renew_intent.logutil import (
+    RENEW_EVENT_FAILED,
+    RENEW_EVENT_SUCCEEDED,
+    RENEW_SOURCE_REDIS_QUEUE,
+    RENEW_SOURCE_SERVER_PROXY,
+    renew_bundle,
+)
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -34,6 +42,12 @@ if TYPE_CHECKING:
     from src.services.sandbox_service import SandboxService
 
 logger = logging.getLogger(__name__)
+
+
+def _http_detail_str(detail: object) -> str:
+    if isinstance(detail, dict):
+        return str(detail.get("message", detail))
+    return str(detail)
 
 
 class AccessRenewController:
@@ -55,32 +69,20 @@ class AccessRenewController:
     def cooldown_key(self, sandbox_id: str) -> str:
         return f"{COOLDOWN_KEY_PREFIX}{sandbox_id}"
 
-    def _try_renew_sync(self, sandbox_id: str) -> bool:
+    def _try_renew_sync(self, sandbox_id: str, *, source: str) -> bool:
         try:
             sandbox = self._sandbox_service.get_sandbox(sandbox_id)
-        except HTTPException as exc:
-            logger.debug(
-                "renew_intent: get_sandbox %s failed: %s",
-                sandbox_id,
-                exc.detail,
-            )
+        except HTTPException:
             return False
 
         if sandbox.status.state.lower() != "running":
-            logger.debug(
-                "renew_intent: skip %s state=%s",
-                sandbox_id,
-                sandbox.status.state,
-            )
             return False
 
         if sandbox.expires_at is None:
-            logger.debug("renew_intent: skip %s no expires_at", sandbox_id)
             return False
 
         extend = self._extension_service.get_access_renew_extend_seconds(sandbox_id)
         if extend is None:
-            logger.debug("renew_intent: skip %s not opted in", sandbox_id)
             return False
 
         now = datetime.now(timezone.utc)
@@ -95,24 +97,49 @@ class AccessRenewController:
         try:
             self._sandbox_service.renew_expiration(sandbox_id, req)
         except HTTPException as exc:
-            logger.warning(
-                "renew_intent: renew_expiration failed sandbox=%s detail=%s",
-                sandbox_id,
-                exc.detail,
+            detail_s = _http_detail_str(exc.detail)
+            line, ex = renew_bundle(
+                event=RENEW_EVENT_FAILED,
+                source=source,
+                sandbox_id=sandbox_id,
+                skip_reason="renew_expiration_rejected",
+                http_detail=detail_s,
+                http_status=getattr(exc, "status_code", None),
             )
+            logger.warning(f"renew_intent {line} detail={detail_s}", extra=ex)
             return False
-        logger.info("renew_intent: renewed sandbox=%s until %s", sandbox_id, new_expires)
+        except Exception as exc:
+            line, ex = renew_bundle(
+                event=RENEW_EVENT_FAILED,
+                source=source,
+                sandbox_id=sandbox_id,
+                skip_reason="renew_expiration_error",
+                error_type=type(exc).__name__,
+            )
+            logger.exception(f"renew_intent {line}", extra=ex)
+            return False
+
+        new_expires_iso = new_expires.isoformat()
+        line, ex = renew_bundle(
+            event=RENEW_EVENT_SUCCEEDED,
+            source=source,
+            sandbox_id=sandbox_id,
+            new_expires_at=new_expires_iso,
+        )
+        logger.info(f"renew_intent {line}", extra=ex)
         return True
 
-    def attempt_renew_sync(self, sandbox_id: str) -> bool:
+    def attempt_renew_sync(self, sandbox_id: str, *, source: str = RENEW_SOURCE_SERVER_PROXY) -> bool:
         """Run gates + renew; does not write Redis (cooldown handled by caller)."""
-        return self._try_renew_sync(sandbox_id)
+        return self._try_renew_sync(sandbox_id, source=source)
 
     async def process_intent_after_lock(self, intent: RenewIntent) -> None:
         """Renew after lock; on success set cooldown in Redis when configured."""
-        import asyncio
-
-        ok = await asyncio.to_thread(self._try_renew_sync, intent.sandbox_id)
+        ok = await asyncio.to_thread(
+            self._try_renew_sync,
+            intent.sandbox_id,
+            source=RENEW_SOURCE_REDIS_QUEUE,
+        )
         if ok and self._redis is not None:
             await self._redis.set(
                 self.cooldown_key(intent.sandbox_id),

@@ -17,12 +17,9 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -56,25 +53,19 @@ def _parse_rfc3339_time(value: str) -> Optional[datetime]:
 
 
 def parse_renew_intent_json(raw: str) -> Optional[RenewIntent]:
-    """
-    Parse ingress LPUSH payload. Returns None if malformed.
-    """
+    """Parse ingress LPUSH JSON payload; return ``None`` if invalid."""
     try:
         data: dict[str, Any] = json.loads(raw)
-    except (json.JSONDecodeError, TypeError) as exc:
-        logger.debug("renew_intent: invalid JSON: %s", exc)
+    except (json.JSONDecodeError, TypeError):
         return None
     sid = data.get("sandbox_id")
     if not isinstance(sid, str) or not sid.strip():
-        logger.debug("renew_intent: missing sandbox_id")
         return None
     obs_raw = data.get("observed_at")
     if not isinstance(obs_raw, str) or not obs_raw.strip():
-        logger.debug("renew_intent: missing observed_at")
         return None
     observed_at = _parse_rfc3339_time(obs_raw)
     if observed_at is None:
-        logger.debug("renew_intent: bad observed_at %r", obs_raw)
         return None
 
     port: Optional[int] = None

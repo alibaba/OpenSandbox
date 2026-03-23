@@ -25,6 +25,11 @@ from typing import TYPE_CHECKING
 
 from src.integrations.renew_intent.constants import PROXY_RENEW_MAX_TRACKED_SANDBOXES
 from src.integrations.renew_intent.controller import AccessRenewController
+from src.integrations.renew_intent.logutil import (
+    RENEW_EVENT_TASK_FAILED,
+    RENEW_SOURCE_SERVER_PROXY,
+    renew_bundle,
+)
 
 if TYPE_CHECKING:
     from src.config import AppConfig
@@ -102,16 +107,18 @@ class ProxyRenewCoordinator:
                 now = time.monotonic()
                 last = st.last_success_monotonic
                 if last is not None and (now - last) < self._min_interval:
-                    logger.debug(
-                        "renew_intent: proxy skip min_interval sandbox=%s (%.1fs < %.1fs)",
-                        sandbox_id,
-                        now - last,
-                        self._min_interval,
-                    )
                     return
 
-                ok = await asyncio.to_thread(self._controller.attempt_renew_sync, sandbox_id)
+                ok = await asyncio.to_thread(
+                    self._controller.attempt_renew_sync,
+                    sandbox_id,
+                )
                 if ok:
                     st.last_success_monotonic = time.monotonic()
         except Exception:
-            logger.exception("renew_intent: proxy renew task failed sandbox=%s", sandbox_id)
+            line, ex = renew_bundle(
+                event=RENEW_EVENT_TASK_FAILED,
+                source=RENEW_SOURCE_SERVER_PROXY,
+                sandbox_id=sandbox_id,
+            )
+            logger.exception(f"renew_intent {line}", extra=ex)

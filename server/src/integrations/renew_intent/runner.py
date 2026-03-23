@@ -33,6 +33,12 @@ from src.integrations.renew_intent.constants import (
 )
 from src.integrations.renew_intent.controller import AccessRenewController
 from src.integrations.renew_intent.intent import parse_renew_intent_json
+from src.integrations.renew_intent.logutil import (
+    RENEW_EVENT_WORKERS_NOT_STARTED,
+    RENEW_EVENT_WORKERS_STARTED,
+    RENEW_SOURCE_REDIS_QUEUE,
+    renew_bundle,
+)
 from src.services.extension_service import ExtensionService, require_extension_service
 from src.services.factory import create_sandbox_service
 from src.services.sandbox_service import SandboxService
@@ -44,7 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 class RenewIntentRunner:
-    """Owns Redis client, BRPOP workers, and AccessRenewController."""
+    """Redis client, BRPOP workers, and ``AccessRenewController``."""
 
     def __init__(
         self,
@@ -74,25 +80,35 @@ class RenewIntentRunner:
         try:
             redis_client = await connect_renew_intent_redis_from_config(app_config)
         except (RedisError, OSError, TimeoutError) as exc:
-            logger.error(
-                "renew_intent: Redis unavailable, workers not started: %s",
-                exc,
+            line, ex = renew_bundle(
+                event=RENEW_EVENT_WORKERS_NOT_STARTED,
+                source=RENEW_SOURCE_REDIS_QUEUE,
+                skip_reason="redis_connect_failed",
+                error_type=type(exc).__name__,
             )
+            logger.error(f"renew_intent {line} error={exc!s}", extra=ex)
             return None
 
         if redis_client is None:
-            logger.warning("renew_intent: Redis client is None; workers not started")
+            line, ex = renew_bundle(
+                event=RENEW_EVENT_WORKERS_NOT_STARTED,
+                source=RENEW_SOURCE_REDIS_QUEUE,
+                skip_reason="redis_client_none",
+            )
+            logger.warning(f"renew_intent {line}", extra=ex)
             return None
 
         sandbox_service = create_sandbox_service(config=app_config)
         extension_service = require_extension_service(sandbox_service)
         runner = cls(app_config, sandbox_service, extension_service, redis_client)
         runner._spawn_workers()
-        logger.info(
-            "renew_intent: started %s BRPOP workers on queue %s",
-            runner._concurrency,
-            runner._queue_key,
+        line, ex = renew_bundle(
+            event=RENEW_EVENT_WORKERS_STARTED,
+            source=RENEW_SOURCE_REDIS_QUEUE,
+            worker_count=runner._concurrency,
+            queue_key=runner._queue_key,
         )
+        logger.info(f"renew_intent {line}", extra=ex)
         return runner
 
     def _spawn_workers(self) -> None:
@@ -116,31 +132,16 @@ class RenewIntentRunner:
             return
 
         if self._is_stale(intent.observed_at):
-            logger.debug(
-                "renew_intent: dropped stale intent sandbox=%s",
-                intent.sandbox_id,
-            )
             return
 
         lock_key = f"{LOCK_KEY_PREFIX}{intent.sandbox_id}"
         acquired = await self._redis.set(lock_key, "1", nx=True, ex=LOCK_TTL_SECONDS)
         if not acquired:
-            logger.debug(
-                "renew_intent: lock busy sandbox=%s",
-                intent.sandbox_id,
-            )
             return
 
-        try:
-            if await self._redis.exists(self._controller.cooldown_key(intent.sandbox_id)):
-                logger.debug(
-                    "renew_intent: cooldown sandbox=%s",
-                    intent.sandbox_id,
-                )
-                return
-            await self._controller.process_intent_after_lock(intent)
-        finally:
-            pass
+        if await self._redis.exists(self._controller.cooldown_key(intent.sandbox_id)):
+            return
+        await self._controller.process_intent_after_lock(intent)
 
     async def _worker_loop(self, worker_id: int) -> None:
         while not self._stop.is_set():
@@ -152,11 +153,13 @@ class RenewIntentRunner:
             except asyncio.CancelledError:
                 raise
             except (RedisError, OSError) as exc:
-                logger.warning(
-                    "renew_intent: worker %s Redis error: %s",
-                    worker_id,
-                    exc,
+                line, ex = renew_bundle(
+                    event="worker_redis_error",
+                    source=RENEW_SOURCE_REDIS_QUEUE,
+                    worker_id=worker_id,
+                    error_type=type(exc).__name__,
                 )
+                logger.warning(f"renew_intent {line} error={exc!s}", extra=ex)
                 await asyncio.sleep(1.0)
                 continue
 
@@ -168,11 +171,13 @@ class RenewIntentRunner:
             try:
                 await self._handle_payload(payload)
             except Exception as exc:
-                logger.exception(
-                    "renew_intent: worker %s handle error: %s",
-                    worker_id,
-                    exc,
+                line, ex = renew_bundle(
+                    event="worker_handle_error",
+                    source=RENEW_SOURCE_REDIS_QUEUE,
+                    worker_id=worker_id,
+                    error_type=type(exc).__name__,
                 )
+                logger.exception(f"renew_intent {line}", extra=ex)
 
     async def stop(self) -> None:
         self._stop.set()
@@ -183,7 +188,7 @@ class RenewIntentRunner:
         try:
             await self._redis.aclose()
         except Exception as exc:
-            logger.debug("renew_intent: redis close: %s", exc)
+            logger.debug(f"renew_intent redis_close error={exc!s}")
 
 
 async def start_renew_intent_runner(app_config: AppConfig) -> Optional[RenewIntentRunner]:
