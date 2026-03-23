@@ -12,13 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
+from typing import Any, cast
+
 import httpx
 from fastapi.testclient import TestClient
+from websockets.typing import Origin
 
+import src.api.proxy as proxy_api
 from src.api import lifecycle
 from src.api.schema import Endpoint
 from src.middleware.auth import SANDBOX_API_KEY_HEADER
-from src.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER
+from src.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER, OPEN_SANDBOX_INGRESS_HEADER
 
 
 class _FakeStreamingResponse:
@@ -70,6 +75,51 @@ class _FakeAsyncClient:
         return self.response
 
 
+def _set_http_client(client: TestClient, fake_client: _FakeAsyncClient) -> None:
+    cast(Any, client.app).state.http_client = fake_client
+
+
+class _FakeBackendWebSocket:
+    def __init__(self, message: str = "backend-ready", subprotocol: str | None = "claw.v1"):
+        self.message = message
+        self.subprotocol = subprotocol
+        self.sent: list[str | bytes] = []
+        self.close_calls: list[tuple[int, str]] = []
+        self._delivered = False
+
+    async def send(self, payload: str | bytes) -> None:
+        self.sent.append(payload)
+
+    async def recv(self) -> str:
+        if not self._delivered:
+            self._delivered = True
+            return self.message
+        await asyncio.Future()
+        raise AssertionError("unreachable")
+
+    async def close(self, code: int = 1000, reason: str = "") -> None:
+        self.close_calls.append((code, reason))
+
+
+class _FakeWebSocketConnector:
+    def __init__(self, backend: _FakeBackendWebSocket):
+        self.backend = backend
+        self.calls: list[dict] = []
+
+    def __call__(self, uri: str, **kwargs):
+        self.calls.append({"uri": uri, **kwargs})
+        backend = self.backend
+
+        class _ContextManager:
+            async def __aenter__(self):
+                return backend
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        return _ContextManager()
+
+
 def test_proxy_forwards_filtered_headers_and_query(
     client: TestClient,
     auth_headers: dict,
@@ -91,7 +141,7 @@ def test_proxy_forwards_filtered_headers_and_query(
         headers={"x-backend": "yes"},
         chunks=[b"proxy-ok"],
     )
-    client.app.state.http_client = fake_client
+    _set_http_client(client, fake_client)
 
     headers = {
         **auth_headers,
@@ -133,6 +183,46 @@ def test_proxy_forwards_filtered_headers_and_query(
     assert fake_client.response.aclose_called is True
 
 
+def test_proxy_root_path_forwards_endpoint_headers_and_query(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert sandbox_id == "sbx-123"
+            assert port == 44772
+            assert resolve_internal is True
+            return Endpoint(
+                endpoint="10.57.1.91:40109/base",
+                headers={OPEN_SANDBOX_INGRESS_HEADER: "sbx-123-44772"},
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(chunks=[b"root-ok"])
+    _set_http_client(client, fake_client)
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/44772",
+        params={"q": "search"},
+        headers={**auth_headers, "X-Trace": "trace-root"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"root-ok"
+    assert fake_client.built is not None
+    assert fake_client.built["url"] == "http://10.57.1.91:40109/base"
+    assert fake_client.built["params"] == "q=search"
+    lowered_headers = {
+        key.lower(): value for key, value in fake_client.built["headers"].items()
+    }
+    assert lowered_headers["opensandbox-ingress-to"] == "sbx-123-44772"
+    assert lowered_headers["x-trace"] == "trace-root"
+
+
 def test_proxy_forwards_get_request_with_query_params(
     client: TestClient,
     auth_headers: dict,
@@ -160,7 +250,7 @@ def test_proxy_forwards_get_request_with_query_params(
         headers={"content-type": "application/json"},
         chunks=[b'[{"name":"file.txt","size":100}]'],
     )
-    client.app.state.http_client = fake_client
+    _set_http_client(client, fake_client)
 
     response = client.get(
         "/v1/sandboxes/sbx-123/proxy/44772/files/search",
@@ -199,7 +289,7 @@ def test_proxy_forwards_delete_request_with_body(
         headers={"content-type": "application/json"},
         chunks=[b'{"deleted":true}'],
     )
-    client.app.state.http_client = fake_client
+    _set_http_client(client, fake_client)
 
     response = client.request(
         "DELETE",
@@ -239,7 +329,7 @@ def test_proxy_filters_response_hop_by_hop_headers(
         },
         chunks=[b"proxy-ok"],
     )
-    client.app.state.http_client = fake_client
+    _set_http_client(client, fake_client)
 
     response = client.get(
         "/v1/sandboxes/sbx-123/proxy/44772/healthz",
@@ -266,7 +356,7 @@ def test_proxy_rejects_websocket_upgrade(
             return Endpoint(endpoint="10.57.1.91:40109")
 
     monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
-    client.app.state.http_client = _FakeAsyncClient()
+    _set_http_client(client, _FakeAsyncClient())
 
     response = client.get(
         "/v1/sandboxes/sbx-123/proxy/44772/ws",
@@ -288,7 +378,7 @@ def test_proxy_rejects_websocket_upgrade_for_post_and_mixed_case_header(
             return Endpoint(endpoint="10.57.1.91:40109")
 
     monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
-    client.app.state.http_client = _FakeAsyncClient()
+    _set_http_client(client, _FakeAsyncClient())
 
     response = client.post(
         "/v1/sandboxes/sbx-123/proxy/44772/ws",
@@ -298,6 +388,58 @@ def test_proxy_rejects_websocket_upgrade_for_post_and_mixed_case_header(
 
     assert response.status_code == 400
     assert response.json()["message"] == "Websocket upgrade is not supported yet"
+
+
+def test_proxy_websocket_relays_messages_and_forwards_safe_headers(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert sandbox_id == "sbx-123"
+            assert port == 44772
+            assert resolve_internal is True
+            return Endpoint(
+                endpoint="10.57.1.91:40109/proxy/44772",
+                headers={OPEN_SANDBOX_INGRESS_HEADER: "sbx-123-44772"},
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    backend = _FakeBackendWebSocket()
+    connector = _FakeWebSocketConnector(backend)
+    monkeypatch.setattr(proxy_api.websockets, "connect", connector)
+
+    with client.websocket_connect(
+        "/v1/sandboxes/sbx-123/proxy/44772/ws?token=abc",
+        headers={
+            **auth_headers,
+            "Authorization": "Bearer top-secret",
+            "Cookie": "sid=secret",
+            "Origin": "https://ui.example.com",
+            "X-Trace": "trace-ws",
+        },
+        subprotocols=["claw.v1"],
+    ) as websocket:
+        assert websocket.receive_text() == "backend-ready"
+        websocket.send_text("client-ready")
+
+    assert backend.sent == ["client-ready"]
+    assert backend.close_calls[0][0] == 1000
+
+    call = connector.calls[0]
+    assert call["uri"] == "ws://10.57.1.91:40109/proxy/44772/ws?token=abc"
+    assert call["origin"] == Origin("https://ui.example.com")
+    assert call["subprotocols"] == ["claw.v1"]
+    lowered_headers = {
+        key.lower(): value for key, value in (call["additional_headers"] or {}).items()
+    }
+    assert "authorization" not in lowered_headers
+    assert "cookie" not in lowered_headers
+    assert "origin" not in lowered_headers
+    assert lowered_headers["opensandbox-ingress-to"] == "sbx-123-44772"
+    assert lowered_headers["x-trace"] == "trace-ws"
 
 
 def test_proxy_maps_connect_error_to_502(
@@ -313,7 +455,7 @@ def test_proxy_maps_connect_error_to_502(
     monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
     fake_client = _FakeAsyncClient()
     fake_client.raise_connect_error = True
-    client.app.state.http_client = fake_client
+    _set_http_client(client, fake_client)
 
     response = client.get(
         "/v1/sandboxes/sbx-123/proxy/44772/healthz",
@@ -337,7 +479,7 @@ def test_proxy_maps_unexpected_error_to_500(
     monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
     fake_client = _FakeAsyncClient()
     fake_client.raise_generic_error = True
-    client.app.state.http_client = fake_client
+    _set_http_client(client, fake_client)
 
     response = client.get(
         "/v1/sandboxes/sbx-123/proxy/44772/healthz",
@@ -367,7 +509,7 @@ def test_proxy_forwards_18080_without_server_side_egress_auth_check(
         headers={"content-type": "application/json"},
         chunks=[b'{"code":"UNAUTHORIZED"}'],
     )
-    client.app.state.http_client = fake_client
+    _set_http_client(client, fake_client)
 
     response = client.get(
         "/v1/sandboxes/sbx-123/proxy/18080/policy",
@@ -400,7 +542,7 @@ def test_proxy_forwards_egress_auth_header_for_18080(
         headers={"content-type": "application/json"},
         chunks=[b'{"status":"ok"}'],
     )
-    client.app.state.http_client = fake_client
+    _set_http_client(client, fake_client)
 
     response = client.get(
         "/v1/sandboxes/sbx-123/proxy/18080/policy",
