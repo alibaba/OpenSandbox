@@ -21,10 +21,8 @@ All business logic is delegated to the service layer that backs each operation.
 
 from typing import List, Optional
 
-import httpx
 from fastapi import APIRouter, Header, Query, Request, status
-from fastapi.exceptions import HTTPException
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 
 from src.extensions import validate_extensions
 from src.api.schema import (
@@ -41,24 +39,6 @@ from src.api.schema import (
     SandboxFilter,
 )
 from src.services.factory import create_sandbox_service
-
-# RFC 2616 Section 13.5.1
-HOP_BY_HOP_HEADERS = {
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailer",
-    "transfer-encoding",
-    "upgrade",
-}
-
-# Headers that shouldn't be forwarded to untrusted/internal backends
-SENSITIVE_HEADERS = {
-    "authorization",
-    "cookie",
-}
 
 # Initialize router
 router = APIRouter(tags=["Sandboxes"])
@@ -414,91 +394,3 @@ async def get_sandbox_endpoint(
         endpoint.endpoint = f"{base_url}/sandboxes/{sandbox_id}/proxy/{port}"
 
     return endpoint
-
-
-@router.api_route(
-    "/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}",
-    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
-)
-async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port: int, full_path: str):
-    """
-    Receives all incoming requests, determines the target sandbox from path parameter,
-    and asynchronously proxies the request to it.
-    """
-
-    endpoint = sandbox_service.get_endpoint(sandbox_id, port, resolve_internal=True)
-
-    proxy_renew = getattr(request.app.state, "proxy_renew_coordinator", None)
-    if proxy_renew is not None:
-        proxy_renew.schedule(sandbox_id)
-
-    target_host = endpoint.endpoint
-    query_string = request.url.query
-
-    client: httpx.AsyncClient = request.app.state.http_client
-
-    try:
-        upgrade_header = request.headers.get("Upgrade", "")
-        if upgrade_header.lower() == "websocket":
-            raise HTTPException(status_code=400, detail="Websocket upgrade is not supported yet")
-
-        # Filter headers
-        hop_by_hop = set(HOP_BY_HOP_HEADERS)
-        connection_header = request.headers.get("connection")
-        if connection_header:
-            hop_by_hop.update(
-                header.strip().lower()
-                for header in connection_header.split(",")
-                if header.strip()
-            )
-        headers = {}
-        for key, value in request.headers.items():
-            key_lower = key.lower()
-            if (
-                key_lower != "host"
-                and key_lower not in hop_by_hop
-                and key_lower not in SENSITIVE_HEADERS
-            ):
-                headers[key] = value
-
-        req = client.build_request(
-            method=request.method,
-            url=f"http://{target_host}/{full_path}",
-            params=query_string if query_string else None,
-            headers=headers,
-            content=request.stream() if request.method in ("POST", "PUT", "PATCH", "DELETE") else None,
-        )
-
-        resp = await client.send(req, stream=True)
-
-        hop_by_hop = set(HOP_BY_HOP_HEADERS)
-        connection_header = resp.headers.get("connection")
-        if connection_header:
-            hop_by_hop.update(
-                header.strip().lower()
-                for header in connection_header.split(",")
-                if header.strip()
-            )
-        response_headers = {
-            key: value
-            for key, value in resp.headers.items()
-            if key.lower() not in hop_by_hop
-        }
-
-        return StreamingResponse(
-            content=resp.aiter_bytes(),
-            status_code=resp.status_code,
-            headers=response_headers,
-        )
-    except httpx.ConnectError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not connect to the backend sandbox {endpoint}: {e}",
-        )
-    except HTTPException:
-        # Preserve explicit HTTP exceptions raised above (e.g. websocket upgrade not supported).
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"An internal error occurred in the proxy: {e}"
-        )

@@ -42,7 +42,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     EXEMPT_PATHS = ["/health", "/docs", "/redoc", "/openapi.json"]
 
     # Strict pattern for proxy-to-sandbox: /sandboxes/{id}/proxy/{port}/... with numeric port only.
-    # Matches the actual route in lifecycle.py; rejects path traversal (..) and malformed port.
+    # Matches the actual route in proxy.py; rejects path traversal (..) and malformed port.
     _PROXY_PATH_RE = re.compile(r"^(/v1)?/sandboxes/[^/]+/proxy/\d+(/|$)")
 
     @staticmethod
