@@ -88,25 +88,31 @@ def _is_wildcard_domain(host: str) -> bool:
 
 
 class RenewIntentRedisConfig(BaseModel):
-    """Redis list consumer settings for renew-intent queue."""
+    """🧪 [EXPERIMENTAL] Redis list consumer for renew-intent queue (ingress gateway path)."""
 
     enabled: bool = Field(
         default=False,
-        description="When true, server workers consume renew intents from Redis (ingress gateway path).",
+        description=(
+            "🧪 [EXPERIMENTAL] When true, server workers consume renew intents from Redis "
+            "(ingress gateway path)."
+        ),
     )
     dsn: Optional[str] = Field(
         default=None,
-        description='Redis DSN (e.g. "redis://127.0.0.1:6379/0"). Required when redis.enabled is true.',
+        description=(
+            '🧪 [EXPERIMENTAL] Redis DSN (e.g. "redis://127.0.0.1:6379/0"). '
+            "Required when redis.enabled is true."
+        ),
     )
     queue_key: str = Field(
         default="opensandbox:renew:intent",
         min_length=1,
-        description="Redis List key for LPUSH/BRPOP renew-intent JSON payloads.",
+        description="🧪 [EXPERIMENTAL] Redis List key for LPUSH/BRPOP renew-intent JSON payloads.",
     )
     consumer_concurrency: int = Field(
         default=8,
         ge=1,
-        description="Number of concurrent BRPOP worker tasks.",
+        description="🧪 [EXPERIMENTAL] Number of concurrent BRPOP worker tasks.",
     )
 
     @model_validator(mode="after")
@@ -119,20 +125,26 @@ class RenewIntentRedisConfig(BaseModel):
 
 
 class RenewIntentConfig(BaseModel):
-    """Renew sandbox expiration when access is observed (proxy and/or Redis queue)."""
+    """🧪 [EXPERIMENTAL] Renew sandbox expiration when access is observed (proxy and/or Redis queue)."""
 
     enabled: bool = Field(
         default=False,
-        description="Master switch for auto-renew on reverse-proxy access. When false, renew-intent logic is off.",
+        description=(
+            "🧪 [EXPERIMENTAL] Master switch for auto-renew on reverse-proxy access and/or Redis "
+            "ingress intents. When false, renew-intent logic is off."
+        ),
     )
     min_interval_seconds: int = Field(
         default=60,
         ge=1,
-        description="Minimum seconds between successful renewals for the same sandbox (cooldown).",
+        description=(
+            "🧪 [EXPERIMENTAL] Minimum seconds between successful renewals for the same sandbox "
+            "(cooldown)."
+        ),
     )
     redis: RenewIntentRedisConfig = Field(
         default_factory=RenewIntentRedisConfig,
-        description="Redis queue consumer settings for ingress gateway renew-intent mode.",
+        description="🧪 [EXPERIMENTAL] Redis queue consumer for ingress gateway renew-intent mode.",
     )
 
 

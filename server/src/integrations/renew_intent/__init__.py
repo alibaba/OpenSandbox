@@ -12,9 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from src.integrations.renew_intent.consumer import RenewIntentConsumer, start_renew_intent_consumer
 from src.integrations.renew_intent.runner import RenewIntentRunner, start_renew_intent_runner
 
 __all__ = [
+    "RenewIntentConsumer",
     "RenewIntentRunner",
+    "start_renew_intent_consumer",
     "start_renew_intent_runner",
 ]

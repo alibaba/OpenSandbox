@@ -18,6 +18,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.config import AppConfig, RenewIntentConfig, RuntimeConfig, ServerConfig
+from src.integrations.renew_intent.consumer import RenewIntentConsumer, RenewWorkItem
+from src.integrations.renew_intent.logutil import RENEW_SOURCE_SERVER_PROXY
 from src.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator
 
 
@@ -32,10 +34,14 @@ def _app_config(*, renew_enabled: bool = True, min_interval: int = 60) -> AppCon
     )
 
 
+def _consumer(cfg: AppConfig) -> RenewIntentConsumer:
+    return RenewIntentConsumer(cfg, MagicMock(), MagicMock(), redis_client=None)
+
+
 @pytest.mark.asyncio
 async def test_proxy_schedule_noop_when_disabled(monkeypatch):
     cfg = _app_config(renew_enabled=False)
-    coord = ProxyRenewCoordinator(cfg, MagicMock(), MagicMock())
+    coord = ProxyRenewCoordinator(cfg, _consumer(cfg))
     created: list[asyncio.Task[None]] = []
 
     def capture_task(coro, *, name=None):
@@ -50,69 +56,84 @@ async def test_proxy_schedule_noop_when_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_proxy_schedule_noop_when_consumer_none():
+    cfg = _app_config(renew_enabled=True)
+    coord = ProxyRenewCoordinator(cfg, None)
+    coord.schedule("sbx-1")
+
+
+@pytest.mark.asyncio
 async def test_proxy_min_interval_skips_second_attempt(monkeypatch):
     cfg = _app_config(renew_enabled=True, min_interval=60)
-    coord = ProxyRenewCoordinator(cfg, MagicMock(), MagicMock())
-
+    consumer = _consumer(cfg)
     attempts = {"n": 0}
 
-    def attempt(_sid: str) -> bool:
+    def attempt(_sid: str, *, source: str) -> bool:
         attempts["n"] += 1
         return True
 
-    coord._controller.attempt_renew_sync = attempt  # type: ignore[method-assign]
+    consumer._controller.attempt_renew_sync = attempt  # type: ignore[method-assign]
 
-    seq = iter([100.0, 100.0, 100.5])  # now, last_success stamp, second _run now()
+    seq = iter([100.0, 100.0, 100.5])
 
     def mono():
         return next(seq, 999.0)
 
     monkeypatch.setattr(
-        "src.integrations.renew_intent.proxy_renew.time.monotonic",
+        "src.integrations.renew_intent.consumer.time.monotonic",
         mono,
     )
 
-    await coord._run("sbx-1")
-    await coord._run("sbx-1")
+    work = RenewWorkItem(
+        source=RENEW_SOURCE_SERVER_PROXY,
+        sandbox_id="sbx-1",
+        observed_at=MagicMock(),
+    )
+    await consumer._process_work(work)
+    await consumer._process_work(work)
     assert attempts["n"] == 1
 
 
 @pytest.mark.asyncio
 async def test_proxy_second_attempt_after_cooldown_window(monkeypatch):
     cfg = _app_config(renew_enabled=True, min_interval=60)
-    coord = ProxyRenewCoordinator(cfg, MagicMock(), MagicMock())
-
+    consumer = _consumer(cfg)
     attempts = {"n": 0}
 
-    def attempt(_sid: str) -> bool:
+    def attempt(_sid: str, *, source: str) -> bool:
         attempts["n"] += 1
         return True
 
-    coord._controller.attempt_renew_sync = attempt  # type: ignore[method-assign]
+    consumer._controller.attempt_renew_sync = attempt  # type: ignore[method-assign]
 
-    seq = iter([100.0, 100.0, 200.0, 200.0])  # run1 now+stamp; run2 now+stamp
+    seq = iter([100.0, 100.0, 200.0, 200.0])
 
     def mono():
         return next(seq, 999.0)
 
     monkeypatch.setattr(
-        "src.integrations.renew_intent.proxy_renew.time.monotonic",
+        "src.integrations.renew_intent.consumer.time.monotonic",
         mono,
     )
 
-    await coord._run("sbx-1")
-    await coord._run("sbx-1")
+    work = RenewWorkItem(
+        source=RENEW_SOURCE_SERVER_PROXY,
+        sandbox_id="sbx-1",
+        observed_at=MagicMock(),
+    )
+    await consumer._process_work(work)
+    await consumer._process_work(work)
     assert attempts["n"] == 2
 
 
-def test_proxy_lru_drops_oldest_unlocked_entries():
+def test_consumer_mem_lru_drops_oldest_unlocked_entries():
     cfg = _app_config(renew_enabled=True)
-    coord = ProxyRenewCoordinator(cfg, MagicMock(), MagicMock())
-    coord._max_tracked = 2
+    consumer = _consumer(cfg)
+    consumer._max_tracked = 2
 
-    coord._ensure_mru("a")
-    coord._ensure_mru("b")
-    assert set(coord._states) == {"a", "b"}
+    consumer._ensure_mru_mem("a")
+    consumer._ensure_mru_mem("b")
+    assert set(consumer._mem_states) == {"a", "b"}
 
-    coord._ensure_mru("c")
-    assert set(coord._states) == {"b", "c"}
+    consumer._ensure_mru_mem("c")
+    assert set(consumer._mem_states) == {"b", "c"}

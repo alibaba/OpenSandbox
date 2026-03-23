@@ -15,12 +15,6 @@
 # Drop intents whose observed_at is older than this (vs wall clock).
 INTENT_MAX_AGE_SECONDS = 300
 
-# Short-lived per-sandbox lock while processing one intent (must exceed renew critical section).
-LOCK_TTL_SECONDS = 45
-
-LOCK_KEY_PREFIX = "opensandbox:renew:lock:"
-COOLDOWN_KEY_PREFIX = "opensandbox:renew:cooldown:"
-
 # BRPOP block timeout so workers periodically observe shutdown.
 BRPOP_TIMEOUT_SECONDS = 5
 

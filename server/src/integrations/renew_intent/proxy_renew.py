@@ -12,113 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Server proxy path: background renew attempts with per-sandbox lock and rate limit."""
+"""Server proxy path: enqueue renew work into ``RenewIntentConsumer`` (non-blocking)."""
 
 from __future__ import annotations
 
-import asyncio
-import logging
-import time
-from collections import OrderedDict
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-from src.integrations.renew_intent.constants import PROXY_RENEW_MAX_TRACKED_SANDBOXES
-from src.integrations.renew_intent.controller import AccessRenewController
-from src.integrations.renew_intent.logutil import (
-    RENEW_EVENT_TASK_FAILED,
-    RENEW_SOURCE_SERVER_PROXY,
-    renew_bundle,
-)
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from src.config import AppConfig
-    from src.services.extension_service import ExtensionService
-    from src.services.sandbox_service import SandboxService
-
-logger = logging.getLogger(__name__)
-
-
-@dataclass
-class _ProxyRenewState:
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    last_success_monotonic: float | None = None
+    from src.integrations.renew_intent.consumer import RenewIntentConsumer
 
 
 class ProxyRenewCoordinator:
-    """Schedule renew attempts for `/sandboxes/{id}/proxy/...` without blocking the proxy."""
+    """Forward ``/sandboxes/{id}/proxy/...`` hits into the unified renew consumer."""
 
     def __init__(
         self,
         app_config: "AppConfig",
-        sandbox_service: "SandboxService",
-        extension_service: "ExtensionService",
+        consumer: Optional["RenewIntentConsumer"],
     ) -> None:
         self._app_config = app_config
-        self._controller = AccessRenewController(
-            app_config,
-            sandbox_service,
-            extension_service,
-            redis=None,
-        )
-        self._states: OrderedDict[str, _ProxyRenewState] = OrderedDict()
-        self._max_tracked = PROXY_RENEW_MAX_TRACKED_SANDBOXES
-        self._min_interval = float(app_config.renew_intent.min_interval_seconds)
-
-    def _ensure_mru(self, sandbox_id: str) -> _ProxyRenewState:
-        if sandbox_id in self._states:
-            st = self._states[sandbox_id]
-            self._states.move_to_end(sandbox_id)
-        else:
-            st = _ProxyRenewState()
-            self._states[sandbox_id] = st
-            self._states.move_to_end(sandbox_id)
-        self._evict_lru_unlocked()
-        return st
-
-    def _evict_lru_unlocked(self) -> None:
-        """Drop oldest scheduled ids until under cap; skip entries whose lock is held."""
-        rotations = 0
-        max_rotations = max(len(self._states), 1)
-        while len(self._states) > self._max_tracked and rotations < max_rotations:
-            k, st = self._states.popitem(last=False)
-            if st.lock.locked():
-                self._states[k] = st
-                self._states.move_to_end(k)
-                rotations += 1
-            else:
-                rotations = 0
+        self._consumer = consumer
 
     def schedule(self, sandbox_id: str) -> None:
-        """If ``renew_intent.enabled``, start a background renew task for this sandbox."""
-        if not self._app_config.renew_intent.enabled:
+        if not self._app_config.renew_intent.enabled or self._consumer is None:
             return
-        st = self._ensure_mru(sandbox_id)
-        asyncio.create_task(
-            self._run(sandbox_id, st),
-            name=f"renew_intent_proxy_{sandbox_id}",
-        )
-
-    async def _run(self, sandbox_id: str, st: _ProxyRenewState | None = None) -> None:
-        if st is None:
-            st = self._states.get(sandbox_id) or self._ensure_mru(sandbox_id)
-        try:
-            async with st.lock:
-                now = time.monotonic()
-                last = st.last_success_monotonic
-                if last is not None and (now - last) < self._min_interval:
-                    return
-
-                ok = await asyncio.to_thread(
-                    self._controller.attempt_renew_sync,
-                    sandbox_id,
-                )
-                if ok:
-                    st.last_success_monotonic = time.monotonic()
-        except Exception:
-            line, ex = renew_bundle(
-                event=RENEW_EVENT_TASK_FAILED,
-                source=RENEW_SOURCE_SERVER_PROXY,
-                sandbox_id=sandbox_id,
-            )
-            logger.exception(f"renew_intent {line}", extra=ex)
+        self._consumer.submit_from_proxy(sandbox_id)

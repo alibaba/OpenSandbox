@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from src.integrations.renew_intent.intent import parse_renew_intent_json
-from src.integrations.renew_intent.runner import RenewIntentRunner
+from src.integrations.renew_intent.consumer import RenewIntentConsumer
 
 
 def test_parse_matches_ingress_intent_shape():
@@ -47,4 +47,4 @@ def test_parse_rejects_bad_json():
     ],
 )
 def test_stale_gate(observed_at, expect_stale):
-    assert RenewIntentRunner._is_stale(observed_at) is expect_stale
+    assert RenewIntentConsumer._is_stale(observed_at) is expect_stale

@@ -27,13 +27,16 @@ log_level = "INFO"
 # Maximum TTL for sandboxes that specify timeout. Comment out this line to disable the upper bound.
 max_sandbox_timeout_seconds = 86400
 
-# Auto-renew sandbox expiration on reverse-proxy access (OSEP-0009). Disabled by default.
-# Server-proxy path does not require Redis; ingress gateway mode needs redis.enabled and a reachable DSN.
+# 🧪 [EXPERIMENTAL] Auto-renew sandbox expiration on access (OSEP-0009). Disabled by default.
+# Server-proxy path does not require Redis; ingress gateway mode needs redis.enabled and a DSN.
+# When enabled and Redis consumer starts, the server logs:
+#   🧪 [EXPERIMENTAL] renew_intent is enabled: Redis BRPOP runner started (...)
 [renew_intent]
 enabled = false
 min_interval_seconds = 60
 
 [renew_intent.redis]
+# 🧪 [EXPERIMENTAL] BRPOP workers for LPUSH renew-intent payloads from the ingress gateway.
 enabled = false
 # dsn = "redis://127.0.0.1:6379/0"
 queue_key = "opensandbox:renew:intent"

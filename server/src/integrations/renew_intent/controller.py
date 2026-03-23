@@ -19,12 +19,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 
 from src.api.schema import RenewSandboxExpirationRequest
-from src.integrations.renew_intent.constants import COOLDOWN_KEY_PREFIX
 from src.integrations.renew_intent.intent import RenewIntent
 from src.integrations.renew_intent.logutil import (
     RENEW_EVENT_FAILED,
@@ -35,9 +34,6 @@ from src.integrations.renew_intent.logutil import (
 )
 
 if TYPE_CHECKING:
-    from redis.asyncio import Redis
-
-    from src.config import AppConfig
     from src.services.extension_service import ExtensionService
     from src.services.sandbox_service import SandboxService
 
@@ -51,23 +47,15 @@ def _http_detail_str(detail: object) -> str:
 
 
 class AccessRenewController:
-    """``redis`` optional: set cooldown key after success when connected; omit for proxy-only path."""
+    """Eligibility gates and ``renew_expiration``; rate limiting is expected upstream (ingress / proxy)."""
 
     def __init__(
         self,
-        app_config: "AppConfig",
         sandbox_service: "SandboxService",
         extension_service: "ExtensionService",
-        redis: Optional["Redis"],
     ) -> None:
-        self._app_config = app_config
         self._sandbox_service = sandbox_service
         self._extension_service = extension_service
-        self._redis = redis
-        self._min_interval = app_config.renew_intent.min_interval_seconds
-
-    def cooldown_key(self, sandbox_id: str) -> str:
-        return f"{COOLDOWN_KEY_PREFIX}{sandbox_id}"
 
     def _try_renew_sync(self, sandbox_id: str, *, source: str) -> bool:
         try:
@@ -130,19 +118,12 @@ class AccessRenewController:
         return True
 
     def attempt_renew_sync(self, sandbox_id: str, *, source: str = RENEW_SOURCE_SERVER_PROXY) -> bool:
-        """Run gates + renew; does not write Redis (cooldown handled by caller)."""
+        """Run gates + renew (sync)."""
         return self._try_renew_sync(sandbox_id, source=source)
 
+    async def renew_after_gates(self, sandbox_id: str, *, source: str) -> None:
+        """Run renew in a worker thread (caller holds per-sandbox serialization)."""
+        await asyncio.to_thread(self._try_renew_sync, sandbox_id, source=source)
+
     async def process_intent_after_lock(self, intent: RenewIntent) -> None:
-        """Renew after lock; on success set cooldown in Redis when configured."""
-        ok = await asyncio.to_thread(
-            self._try_renew_sync,
-            intent.sandbox_id,
-            source=RENEW_SOURCE_REDIS_QUEUE,
-        )
-        if ok and self._redis is not None:
-            await self._redis.set(
-                self.cooldown_key(intent.sandbox_id),
-                "1",
-                ex=self._min_interval,
-            )
+        await self.renew_after_gates(intent.sandbox_id, source=RENEW_SOURCE_REDIS_QUEUE)

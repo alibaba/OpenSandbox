@@ -31,7 +31,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src.config import load_config
-from src.integrations.renew_intent import start_renew_intent_runner
+from src.integrations.renew_intent import start_renew_intent_consumer
 from uvicorn.config import LOGGING_CONFIG as UVICORN_LOGGING_CONFIG
 
 # Load configuration before initializing routers/middleware
@@ -113,19 +113,24 @@ async def lifespan(app: FastAPI):
         logger.error("Secure runtime validation failed: %s", exc)
         raise
 
-    app.state.renew_intent_runner = await start_renew_intent_runner(app_config)
+    ext = require_extension_service(sandbox_service)
+    app.state.renew_intent_consumer = await start_renew_intent_consumer(
+        app_config,
+        sandbox_service,
+        ext,
+    )
+    app.state.renew_intent_runner = app.state.renew_intent_consumer
 
     app.state.proxy_renew_coordinator = ProxyRenewCoordinator(
         app_config,
-        sandbox_service,
-        require_extension_service(sandbox_service),
+        app.state.renew_intent_consumer,
     )
 
     yield
 
-    runner = getattr(app.state, "renew_intent_runner", None)
-    if runner is not None:
-        await runner.stop()
+    consumer = getattr(app.state, "renew_intent_consumer", None)
+    if consumer is not None:
+        await consumer.stop()
     await app.state.http_client.aclose()
 
 
