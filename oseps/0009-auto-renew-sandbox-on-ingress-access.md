@@ -74,7 +74,7 @@ An access-driven renewal mechanism is needed, but it must be strongly rate-contr
 - The implementation must work with existing lifecycle API and runtime providers.
 - Reverse proxy traffic must be the only trigger source for this proposal.
 - Auto-renew must be disabled unless all three conditions are met:
-  - server supports and enables `renew_on_access`,
+  - server supports and enables `renew_intent`,
   - ingress supports and enables renew-intent signaling (for ingress mode),
   - sandbox creation request explicitly opts in via `extensions`.
 - Renewal requests must be bounded by deduplication and throttling controls.
@@ -133,9 +133,9 @@ Explicitly unsupported:
 This feature uses explicit "three-party handshake" activation.
 
 1. **Server-side capability switch**
-   - `renew_on_access.enabled = true` must be set (top-level TOML section `[renew_on_access]`, model field on root `AppConfig`).
+   - `renew_intent.enabled = true` must be set (top-level TOML section `[renew_intent]`, model field on root `AppConfig`).
 2. **Ingress-side capability switch** (ingress mode only)
-   - ingress must be configured to publish renew-intents (`renew_on_access.redis.enabled = true` and ingress integration enabled).
+   - ingress must be configured to publish renew-intents (`renew_intent.redis.enabled = true` and ingress integration enabled).
 3. **Sandbox-level opt-in and duration**
    - sandbox must declare in `CreateSandboxRequest.extensions` how long each automatic renewal extends expiration (see below). Presence of a valid value opts the sandbox in.
 
@@ -283,7 +283,7 @@ Notes:
 
 ### Configuration
 
-Use the root config file: lifecycle API settings stay under `[server]`; renew-on-access is a **separate top-level section** `[renew_on_access]` (not nested under `[server]`), alongside `[runtime]`, `[docker]`, etc.
+Use the root config file: lifecycle API settings stay under `[server]`; renew-on-access is a **separate top-level section** `[renew_intent]` (not nested under `[server]`), alongside `[runtime]`, `[docker]`, etc.
 
 ```toml
 [server]
@@ -291,13 +291,13 @@ Use the root config file: lifecycle API settings stay under `[server]`; renew-on
 
 # Auto-detected by request path:
 # - server-proxy path uses local trigger (no Redis required)
-# - ingress path uses Redis consumer when renew_on_access.redis is enabled
+# - ingress path uses Redis consumer when renew_intent.redis is enabled
 
-[renew_on_access]
+[renew_intent]
 enabled = false
 min_interval_seconds = 60
 
-[renew_on_access.redis]
+[renew_intent.redis]
 enabled = false
 dsn = "redis://127.0.0.1:6379/0"
 queue_key = "opensandbox:renew:intent"
@@ -306,7 +306,7 @@ consumer_concurrency = 8
 
 Configuration rules:
 
-- `renew_on_access.enabled=false` means feature fully disabled.
+- `renew_intent.enabled=false` means feature fully disabled.
 - Ingress path renewal requires Redis block enabled and reachable on the server; the **ingress component** uses its own config (e.g. CLI flags: `--renew-intent-enabled`, `--renew-intent-redis-dsn`, `--renew-intent-queue-key`, `--renew-intent-queue-max-len`, `--renew-intent-min-interval`) to connect to Redis and publish intents. Queue key and default list name should match what the server consumer expects (e.g. `opensandbox:renew:intent`).
 - Server proxy path can run without Redis.
 - Per-renewal extension duration is **not** a server setting: it comes only from sandbox `extensions["access.renew.extend.seconds"]` (set at creation to **300–86400** seconds or creation fails with **400**). Omit the key to disable renew-on-access for that sandbox.
@@ -369,5 +369,5 @@ Success criteria:
   2. Enable in server proxy path for canary validation.
   3. Enable ingress + Redis path progressively.
 - Rollback:
-  - Disable `renew_on_access.enabled` (and `renew_on_access.redis.enabled` for ingress mode).
+  - Disable `renew_intent.enabled` (and `renew_intent.redis.enabled` for ingress mode).
   - Existing manual renewal flow remains unchanged.

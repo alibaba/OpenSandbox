@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from src import config as config_module
 from src.config import (
     AppConfig,
-    RenewOnAccessRedisConfig,
+    RenewIntentRedisConfig,
     EGRESS_MODE_DNS,
     EGRESS_MODE_DNS_NFT,
     EgressConfig,
@@ -91,9 +91,9 @@ def test_server_config_defaults_include_max_sandbox_timeout():
     assert server_cfg.max_sandbox_timeout_seconds is None
 
 
-def test_renew_on_access_defaults():
+def test_renew_intent_defaults():
     cfg = AppConfig(runtime=RuntimeConfig(type="docker", execd_image="opensandbox/execd:latest"))
-    ar = cfg.renew_on_access
+    ar = cfg.renew_intent
     assert ar.enabled is False
     assert ar.min_interval_seconds == 60
     assert ar.redis.enabled is False
@@ -102,16 +102,16 @@ def test_renew_on_access_defaults():
     assert ar.redis.consumer_concurrency == 8
 
 
-def test_renew_on_access_redis_requires_dsn_when_enabled():
+def test_renew_intent_redis_requires_dsn_when_enabled():
     with pytest.raises(ValidationError):
-        RenewOnAccessRedisConfig(enabled=True, dsn=None)
+        RenewIntentRedisConfig(enabled=True, dsn=None)
     with pytest.raises(ValidationError):
-        RenewOnAccessRedisConfig(enabled=True, dsn="   ")
-    cfg = RenewOnAccessRedisConfig(enabled=True, dsn="redis://127.0.0.1:6379/0")
+        RenewIntentRedisConfig(enabled=True, dsn="   ")
+    cfg = RenewIntentRedisConfig(enabled=True, dsn="redis://127.0.0.1:6379/0")
     assert cfg.dsn == "redis://127.0.0.1:6379/0"
 
 
-def test_load_config_renew_on_access_nested(tmp_path, monkeypatch):
+def test_load_config_renew_intent_nested(tmp_path, monkeypatch):
     _reset_config(monkeypatch)
     toml = textwrap.dedent(
         """
@@ -119,11 +119,11 @@ def test_load_config_renew_on_access_nested(tmp_path, monkeypatch):
         host = "127.0.0.1"
         port = 9000
 
-        [renew_on_access]
+        [renew_intent]
         enabled = true
         min_interval_seconds = 30
 
-        [renew_on_access.redis]
+        [renew_intent.redis]
         enabled = true
         dsn = "redis://example:6379/1"
         queue_key = "custom:renew"
@@ -138,7 +138,7 @@ def test_load_config_renew_on_access_nested(tmp_path, monkeypatch):
     config_path.write_text(toml)
 
     loaded = config_module.load_config(config_path)
-    ar = loaded.renew_on_access
+    ar = loaded.renew_intent
     assert ar.enabled is True
     assert ar.min_interval_seconds == 30
     assert ar.redis.enabled is True

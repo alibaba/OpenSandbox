@@ -62,6 +62,7 @@ from src.api.schema import (
     SandboxStatus,
 )
 from src.config import AppConfig, get_config
+from src.services.extension_service import ExtensionService
 from src.services.constants import (
     EGRESS_MODE_ENV,
     EGRESS_RULES_ENV,
@@ -127,7 +128,7 @@ class PendingSandbox:
     status: SandboxStatus
 
 
-class DockerSandboxService(OSSFSMixin, SandboxService):
+class DockerSandboxService(OSSFSMixin, SandboxService, ExtensionService):
     """
     Docker-based implementation of SandboxService.
 
@@ -1648,6 +1649,20 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                     "message": f"Failed to resume sandbox container: {str(exc)}",
                 },
             ) from exc
+
+    def get_access_renew_extend_seconds(self, sandbox_id: str) -> Optional[int]:
+        try:
+            container = self._get_container_by_sandbox_id(sandbox_id)
+        except HTTPException:
+            return None
+        labels = container.attrs.get("Config", {}).get("Labels") or {}
+        raw = labels.get(ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY)
+        if raw is None or not str(raw).strip():
+            return None
+        try:
+            return int(str(raw).strip())
+        except ValueError:
+            return None
 
     def renew_expiration(
         self,

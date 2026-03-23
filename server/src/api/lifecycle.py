@@ -428,6 +428,10 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
 
     endpoint = sandbox_service.get_endpoint(sandbox_id, port, resolve_internal=True)
 
+    proxy_renew = getattr(request.app.state, "proxy_renew_coordinator", None)
+    if proxy_renew is not None:
+        proxy_renew.schedule(sandbox_id)
+
     target_host = endpoint.endpoint
     query_string = request.url.query
 

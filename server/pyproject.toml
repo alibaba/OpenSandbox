@@ -47,6 +47,7 @@ dependencies = [
     "httpx[socks]",
     "kubernetes",
     "pydantic",
+    "redis>=5",
     "pydantic-settings",
     "pyyaml",
     "tomli; python_version < \"3.11\"",

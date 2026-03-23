@@ -26,7 +26,7 @@ from src.extensions import (
 
 
 class TestValidateCreateSandboxExtensionsAccessRenewExtendSeconds:
-    """OSEP-0009: access.renew.extend.seconds in [300, 86400] when present."""
+    """access.renew.extend.seconds in [300, 86400] when present."""
 
     def test_omitted_extensions_ok(self):
         validate_extensions(None)

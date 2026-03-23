@@ -28,6 +28,7 @@ from typing import Optional, Dict, Any
 from fastapi import HTTPException, status
 
 from src.extensions import apply_access_renew_extend_seconds_to_mapping
+from src.extensions.keys import ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY
 from src.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
@@ -51,6 +52,7 @@ from src.services.constants import (
 from src.services.endpoint_auth import generate_egress_token
 from src.services.endpoint_auth import build_egress_auth_headers, merge_endpoint_headers
 from src.services.helpers import matches_filter
+from src.services.extension_service import ExtensionService
 from src.services.sandbox_service import SandboxService
 from src.services.validators import (
     calculate_expiration_or_raise,
@@ -67,7 +69,7 @@ from src.services.k8s.provider_factory import create_workload_provider
 logger = logging.getLogger(__name__)
 
 
-class KubernetesSandboxService(SandboxService):
+class KubernetesSandboxService(SandboxService, ExtensionService):
     """
     Kubernetes-based implementation of SandboxService.
     
@@ -586,7 +588,28 @@ class KubernetesSandboxService(SandboxService):
                 "message": "Resume operation is not supported in Kubernetes runtime",
             },
         )
-    
+
+    def get_access_renew_extend_seconds(self, sandbox_id: str) -> Optional[int]:
+        workload = self.workload_provider.get_workload(
+            sandbox_id=sandbox_id,
+            namespace=self.namespace,
+        )
+        if not workload:
+            return None
+        if isinstance(workload, dict):
+            annotations = workload.get("metadata", {}).get("annotations") or {}
+        else:
+            md = getattr(workload, "metadata", None)
+            raw_ann = getattr(md, "annotations", None) if md else None
+            annotations = raw_ann if isinstance(raw_ann, dict) else {}
+        raw = annotations.get(ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY)
+        if raw is None or not str(raw).strip():
+            return None
+        try:
+            return int(str(raw).strip())
+        except ValueError:
+            return None
+
     def renew_expiration(
         self,
         sandbox_id: str,
