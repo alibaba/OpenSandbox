@@ -1,0 +1,554 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage:
+  scripts/release/create-release.sh --target <target> --version <version> [options]
+
+Required:
+  --target <target>     Release target key, e.g.:
+                        js/sandbox
+                        js/code-interpreter
+                        python/sandbox
+                        python/code-interpreter
+                        python/mcp/sandbox
+                        java/sandbox
+                        java/code-interpreter
+                        csharp/sandbox
+                        csharp/code-interpreter
+                        cli
+                        server
+                        docker/execd
+                        docker/code-interpreter
+                        docker/ingress
+                        docker/egress
+                        k8s/controller
+                        k8s/task-executor
+                        helm/opensandbox-controller
+                        helm/opensandbox-server
+                        helm/opensandbox
+  --version <version>   Release version string. For v-prefixed targets, script normalizes
+                        to tags like <target>/v<version> automatically.
+
+Options:
+  --from-tag <tag>      Override previous release tag boundary.
+  --path <path>         Add extra path filter (repeatable).
+  --no-path-filter      Disable default target path filters.
+  --push                Push tag to origin (required to trigger tag-based workflows).
+  --dry-run             Print computed results without creating tag/release.
+  --initial-release     Allow release without previous tag (uses full history).
+  --help                Show this help.
+
+Examples:
+  scripts/release/create-release.sh --target js/sandbox --version 1.0.5 --dry-run
+  scripts/release/create-release.sh --target server --version 0.2.0 --push
+  scripts/release/create-release.sh --target docker/execd --version v0.3.0 --push
+EOF
+}
+
+log() {
+  echo "[release] $*"
+}
+
+warn() {
+  echo "[release][warn] $*" >&2
+}
+
+die() {
+  echo "[release][error] $*" >&2
+  exit 1
+}
+
+require_cmd() {
+  local cmd="$1"
+  command -v "$cmd" >/dev/null 2>&1 || die "Missing required command: $cmd"
+}
+
+is_semver_like() {
+  local version="${1#v}"
+  [[ "$version" =~ ^[0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.-]+)?$ ]]
+}
+
+semver_lt() {
+  local left="${1#v}"
+  local right="${2#v}"
+  [[ "$(printf '%s\n%s\n' "$left" "$right" | sort -V | head -n1)" == "$left" && "$left" != "$right" ]]
+}
+
+semver_gt() {
+  local left="${1#v}"
+  local right="${2#v}"
+  [[ "$(printf '%s\n%s\n' "$left" "$right" | sort -V | tail -n1)" == "$left" && "$left" != "$right" ]]
+}
+
+normalize_handle() {
+  local author="$1"
+  local email="$2"
+  local candidate=""
+
+  if [[ "$email" =~ ^([0-9]+\+)?([^@]+)@users\.noreply\.github\.com$ ]]; then
+    candidate="${BASH_REMATCH[2]}"
+  else
+    candidate="${email%@*}"
+  fi
+
+  candidate="$(echo "$candidate" | tr -cd '[:alnum:]_.-')"
+  if [[ -n "$candidate" ]]; then
+    printf '@%s' "$candidate"
+  else
+    printf '%s' "$author"
+  fi
+}
+
+TARGET=""
+VERSION=""
+FROM_TAG=""
+DRY_RUN=false
+PUSH_TAG=false
+INITIAL_RELEASE=false
+NO_PATH_FILTER=false
+CUSTOM_PATH_FILTERS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --target)
+      [[ $# -ge 2 ]] || die "--target requires a value"
+      TARGET="$2"
+      shift 2
+      ;;
+    --version)
+      [[ $# -ge 2 ]] || die "--version requires a value"
+      VERSION="$2"
+      shift 2
+      ;;
+    --from-tag)
+      [[ $# -ge 2 ]] || die "--from-tag requires a value"
+      FROM_TAG="$2"
+      shift 2
+      ;;
+    --path)
+      [[ $# -ge 2 ]] || die "--path requires a value"
+      CUSTOM_PATH_FILTERS+=("$2")
+      shift 2
+      ;;
+    --no-path-filter)
+      NO_PATH_FILTER=true
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --push)
+      PUSH_TAG=true
+      shift
+      ;;
+    --initial-release)
+      INITIAL_RELEASE=true
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      die "Unknown argument: $1"
+      ;;
+  esac
+done
+
+[[ -n "$TARGET" ]] || die "--target is required"
+[[ -n "$VERSION" ]] || die "--version is required"
+
+require_cmd git
+require_cmd rg
+if [[ "$DRY_RUN" != true ]]; then
+  require_cmd gh
+fi
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "Must run inside a git repository"
+
+TAG_NEEDS_V=false
+DISPLAY_NAME=""
+WORKFLOW_HINT=""
+TARGET_PATH_FILTERS=()
+
+# Registry: maps all publishable targets to tag conventions.
+case "$TARGET" in
+  js/sandbox)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="JavaScript Sandbox SDK"
+    WORKFLOW_HINT=".github/workflows/publish-js-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/sandbox/javascript" "specs/sandbox-lifecycle.yml")
+    ;;
+  js/code-interpreter)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="JavaScript Code Interpreter SDK"
+    WORKFLOW_HINT=".github/workflows/publish-js-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/code-interpreter/javascript" "specs/execd-api.yaml")
+    ;;
+  python/sandbox)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="Python Sandbox SDK"
+    WORKFLOW_HINT=".github/workflows/publish-python-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/sandbox/python" "specs/sandbox-lifecycle.yml")
+    ;;
+  python/code-interpreter)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="Python Code Interpreter SDK"
+    WORKFLOW_HINT=".github/workflows/publish-python-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/code-interpreter/python" "specs/execd-api.yaml")
+    ;;
+  python/mcp/sandbox)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="Python MCP Sandbox SDK"
+    WORKFLOW_HINT=".github/workflows/publish-python-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/mcp/sandbox/python" "specs/sandbox-lifecycle.yml")
+    ;;
+  java/sandbox)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="Java Sandbox SDK"
+    WORKFLOW_HINT=".github/workflows/publish-java-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/sandbox/kotlin" "specs/sandbox-lifecycle.yml")
+    ;;
+  java/code-interpreter)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="Java Code Interpreter SDK"
+    WORKFLOW_HINT=".github/workflows/publish-java-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/code-interpreter/kotlin" "specs/execd-api.yaml")
+    ;;
+  csharp/sandbox)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="CSharp Sandbox SDK"
+    WORKFLOW_HINT=".github/workflows/publish-csharp-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/sandbox/csharp" "specs/sandbox-lifecycle.yml")
+    ;;
+  csharp/code-interpreter)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="CSharp Code Interpreter SDK"
+    WORKFLOW_HINT=".github/workflows/publish-csharp-sdks.yml"
+    TARGET_PATH_FILTERS=("sdks/code-interpreter/csharp" "specs/execd-api.yaml")
+    ;;
+  cli)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="OpenSandbox CLI"
+    WORKFLOW_HINT=".github/workflows/publish-cli.yml"
+    TARGET_PATH_FILTERS=("cli")
+    ;;
+  server)
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="OpenSandbox Server"
+    WORKFLOW_HINT=".github/workflows/publish-server.yml"
+    TARGET_PATH_FILTERS=("server" "specs/sandbox-lifecycle.yml")
+    ;;
+  docker/execd)
+    DISPLAY_NAME="Component Image execd"
+    WORKFLOW_HINT=".github/workflows/publish-components.yml"
+    TARGET_PATH_FILTERS=("components/execd")
+    ;;
+  docker/code-interpreter)
+    DISPLAY_NAME="Component Image code-interpreter"
+    WORKFLOW_HINT=".github/workflows/publish-components.yml"
+    TARGET_PATH_FILTERS=("sandboxes/code-interpreter")
+    ;;
+  docker/ingress)
+    DISPLAY_NAME="Component Image ingress"
+    WORKFLOW_HINT=".github/workflows/publish-components.yml"
+    TARGET_PATH_FILTERS=("components/ingress")
+    ;;
+  docker/egress)
+    DISPLAY_NAME="Component Image egress"
+    WORKFLOW_HINT=".github/workflows/publish-components.yml"
+    TARGET_PATH_FILTERS=("components/egress")
+    ;;
+  k8s/controller)
+    DISPLAY_NAME="K8s Component controller"
+    WORKFLOW_HINT=".github/workflows/publish-components.yml"
+    TARGET_PATH_FILTERS=("kubernetes")
+    ;;
+  k8s/task-executor)
+    DISPLAY_NAME="K8s Component task-executor"
+    WORKFLOW_HINT=".github/workflows/publish-components.yml"
+    TARGET_PATH_FILTERS=("kubernetes")
+    ;;
+  helm/opensandbox-controller)
+    DISPLAY_NAME="Helm opensandbox-controller"
+    WORKFLOW_HINT=".github/workflows/publish-helm-chart.yml"
+    TARGET_PATH_FILTERS=("kubernetes/charts/opensandbox-controller")
+    ;;
+  helm/opensandbox-server)
+    DISPLAY_NAME="Helm opensandbox-server"
+    WORKFLOW_HINT=".github/workflows/publish-helm-chart.yml"
+    TARGET_PATH_FILTERS=("kubernetes/charts/opensandbox-server")
+    ;;
+  helm/opensandbox)
+    DISPLAY_NAME="Helm opensandbox"
+    WORKFLOW_HINT=".github/workflows/publish-helm-chart.yml"
+    TARGET_PATH_FILTERS=("kubernetes/charts/opensandbox")
+    ;;
+  *)
+    die "Unsupported target '$TARGET'. Run with --help for supported target list."
+    ;;
+esac
+
+VERSION_NO_V="${VERSION#v}"
+if [[ "$TAG_NEEDS_V" == true ]]; then
+  NEW_TAG="${TARGET}/v${VERSION_NO_V}"
+  TAG_PREFIX="${TARGET}/v"
+  VERSION_LABEL="v${VERSION_NO_V}"
+else
+  NEW_TAG="${TARGET}/${VERSION}"
+  TAG_PREFIX="${TARGET}/"
+  VERSION_LABEL="$VERSION"
+fi
+
+if [[ -n "$FROM_TAG" ]] && ! git rev-parse -q --verify "refs/tags/${FROM_TAG}" >/dev/null; then
+  die "--from-tag '${FROM_TAG}' does not exist"
+fi
+
+resolve_previous_tag() {
+  local explicit="$1"
+  if [[ -n "$explicit" ]]; then
+    printf '%s' "$explicit"
+    return 0
+  fi
+
+  local tags_output
+  tags_output="$(git tag --list "${TAG_PREFIX}*" | rg -v "^${NEW_TAG}$" || true)"
+  if [[ -z "$tags_output" ]]; then
+    printf ''
+    return 0
+  fi
+
+  if is_semver_like "$VERSION_NO_V"; then
+    local semver_candidates=""
+    local tag suffix
+    while IFS= read -r tag; do
+      [[ -n "$tag" ]] || continue
+      suffix="${tag#${TAG_PREFIX}}"
+      if is_semver_like "$suffix" && semver_lt "$suffix" "$VERSION_NO_V"; then
+        semver_candidates+="${suffix}|${tag}"$'\n'
+      fi
+    done <<<"$tags_output"
+
+    if [[ -n "$semver_candidates" ]]; then
+      printf '%s' "$semver_candidates" \
+        | sort -t'|' -k1,1V \
+        | tail -n1 \
+        | awk -F'|' '{print $2}'
+      return 0
+    fi
+  fi
+
+  git for-each-ref --sort=-creatordate --format='%(refname:strip=2)' "refs/tags/${TAG_PREFIX}*" \
+    | rg -v "^${NEW_TAG}$" \
+    | head -n1
+}
+
+PREVIOUS_TAG="$(resolve_previous_tag "$FROM_TAG")"
+
+if [[ -z "$PREVIOUS_TAG" && "$INITIAL_RELEASE" != true ]]; then
+  die "No previous tag found for target '${TARGET}'. Pass --from-tag or --initial-release."
+fi
+
+if [[ -n "$PREVIOUS_TAG" ]] && is_semver_like "$VERSION_NO_V"; then
+  PREVIOUS_SUFFIX="${PREVIOUS_TAG#${TAG_PREFIX}}"
+  if is_semver_like "$PREVIOUS_SUFFIX" && ! semver_gt "$VERSION_NO_V" "$PREVIOUS_SUFFIX"; then
+    die "Version '${VERSION_LABEL}' is not greater than previous '${PREVIOUS_SUFFIX}'"
+  fi
+fi
+
+log "Target: ${TARGET}"
+log "Workflow: ${WORKFLOW_HINT}"
+log "New tag: ${NEW_TAG}"
+if [[ -n "$PREVIOUS_TAG" ]]; then
+  log "Previous tag: ${PREVIOUS_TAG}"
+else
+  log "Previous tag: <none> (initial release mode)"
+fi
+
+if [[ -n "$PREVIOUS_TAG" ]]; then
+  LOG_RANGE="${PREVIOUS_TAG}..HEAD"
+else
+  LOG_RANGE="HEAD"
+fi
+
+LOG_PATH_FILTERS=()
+if [[ "$NO_PATH_FILTER" != true ]]; then
+  LOG_PATH_FILTERS=("${TARGET_PATH_FILTERS[@]}")
+fi
+if [[ "${#CUSTOM_PATH_FILTERS[@]}" -gt 0 ]]; then
+  LOG_PATH_FILTERS+=("${CUSTOM_PATH_FILTERS[@]}")
+fi
+
+if [[ "${#LOG_PATH_FILTERS[@]}" -gt 0 ]]; then
+  log "Path filters: $(printf '%s ' "${LOG_PATH_FILTERS[@]}" | sed 's/[[:space:]]*$//')"
+else
+  log "Path filters: <none> (whole range)"
+fi
+
+FEATURES=()
+BUG_FIXES=()
+BREAKING_CHANGES=()
+MISC_ITEMS=()
+CONTRIBUTORS=()
+CONTRIBUTORS_INDEX=$'\n'
+
+add_contributor() {
+  local author="$1"
+  local email="$2"
+  local handle
+  handle="$(normalize_handle "$author" "$email")"
+  if [[ "$CONTRIBUTORS_INDEX" != *$'\n'"$handle"$'\n'* ]]; then
+    CONTRIBUTORS_INDEX+="${handle}"$'\n'
+    CONTRIBUTORS+=("$handle")
+  fi
+}
+
+format_entry() {
+  local subject="$1"
+  local body="$2"
+  local text="$subject"
+
+  if [[ ! "$subject" =~ \(\#[0-9]+\)$ ]]; then
+    if [[ "$subject" =~ \#([0-9]+) ]]; then
+      text="${subject} (#${BASH_REMATCH[1]})"
+    elif [[ "$body" =~ \#([0-9]+) ]]; then
+      text="${subject} (#${BASH_REMATCH[1]})"
+    fi
+  fi
+
+  printf -- '- %s' "$text"
+}
+
+categorize_commit() {
+  local subject="$1"
+  local body="$2"
+  local entry="$3"
+
+  if [[ "$body" == *"BREAKING CHANGE"* ]] || printf '%s' "$subject" | rg -q '^[[:alpha:]]+(\([^)]+\))?!:'; then
+    BREAKING_CHANGES+=("$entry")
+  elif printf '%s' "$subject" | rg -q '^feat(\([^)]+\))?:\s'; then
+    FEATURES+=("$entry")
+  elif printf '%s' "$subject" | rg -q '^fix(\([^)]+\))?:\s'; then
+    BUG_FIXES+=("$entry")
+  else
+    MISC_ITEMS+=("$entry")
+  fi
+}
+
+while IFS= read -r -d $'\x1e' record; do
+  [[ -n "$record" ]] || continue
+  _hash="${record%%$'\x1f'*}"
+  _rest="${record#*$'\x1f'}"
+  _subject="${_rest%%$'\x1f'*}"
+  _rest="${_rest#*$'\x1f'}"
+  _body="${_rest%%$'\x1f'*}"
+  _rest="${_rest#*$'\x1f'}"
+  _author="${_rest%%$'\x1f'*}"
+  _email="${_rest#*$'\x1f'}"
+
+  [[ -n "${_subject:-}" ]] || continue
+  entry="$(format_entry "$_subject" "${_body:-}")"
+  categorize_commit "$_subject" "${_body:-}" "$entry"
+  add_contributor "${_author:-unknown}" "${_email:-unknown@unknown}"
+done < <(
+  GIT_LOG_ARGS=(--no-merges --pretty=format:'%H%x1f%s%x1f%b%x1f%an%x1f%ae%x1e' "$LOG_RANGE")
+  if [[ "${#LOG_PATH_FILTERS[@]}" -gt 0 ]]; then
+    GIT_LOG_ARGS+=(--)
+    GIT_LOG_ARGS+=("${LOG_PATH_FILTERS[@]}")
+  fi
+  git log "${GIT_LOG_ARGS[@]}"
+)
+
+render_section() {
+  local title="$1"
+  shift
+  local -a items=("$@")
+  local item
+  local printed=0
+  echo "### ${title}"
+  for item in "${items[@]}"; do
+    if [[ -n "$item" ]]; then
+      echo "$item"
+      printed=1
+    fi
+  done
+  if [[ "$printed" -eq 0 ]]; then
+    echo "- None"
+  fi
+  echo
+}
+
+NOTES_FILE="$(mktemp -t opensandbox-release-notes.XXXXXX.md)"
+{
+  echo "# ${DISPLAY_NAME} ${VERSION_LABEL}"
+  echo
+  echo "## What's New"
+  echo
+  if [[ -n "$PREVIOUS_TAG" ]]; then
+    echo "Changes included since \`${PREVIOUS_TAG}\`."
+  else
+    echo "Initial release for this target."
+  fi
+  if [[ "${#LOG_PATH_FILTERS[@]}" -gt 0 ]]; then
+    echo "Scoped paths: \`$(printf '%s ' "${LOG_PATH_FILTERS[@]}" | sed 's/[[:space:]]*$//')\`."
+  fi
+  echo
+  render_section "✨ Features" "${FEATURES[@]-}"
+  render_section "🐛 Bug Fixes" "${BUG_FIXES[@]-}"
+  render_section "⚠️ Breaking Changes" "${BREAKING_CHANGES[@]-}"
+  render_section "📦 Misc" "${MISC_ITEMS[@]-}"
+  echo "## 👥 Contributors"
+  echo
+  echo "Thanks to these contributors ❤️"
+  echo
+  if [[ "$CONTRIBUTORS_INDEX" == $'\n' ]]; then
+    echo "- None"
+  else
+    printf -- '- %s\n' "${CONTRIBUTORS[@]-}"
+  fi
+} >"$NOTES_FILE"
+
+if [[ "$DRY_RUN" == true ]]; then
+  log "Dry run enabled. No tag/release side effects will be performed."
+  log "Computed range: ${LOG_RANGE}"
+  echo
+  log "Generated release notes preview:"
+  echo "------------------------------------------------------------"
+  cat "$NOTES_FILE"
+  echo "------------------------------------------------------------"
+  rm -f "$NOTES_FILE"
+  exit 0
+fi
+
+if git rev-parse -q --verify "refs/tags/${NEW_TAG}" >/dev/null; then
+  warn "Tag '${NEW_TAG}' already exists. Reusing existing tag."
+else
+  git tag -a "$NEW_TAG" -m "release: ${DISPLAY_NAME} ${VERSION_LABEL}"
+  log "Created tag: ${NEW_TAG}"
+fi
+
+if [[ "$PUSH_TAG" == true ]]; then
+  git push origin "$NEW_TAG"
+  log "Pushed tag to origin: ${NEW_TAG}"
+else
+  warn "Tag not pushed. Use --push to trigger tag-based publish workflows."
+fi
+
+RELEASE_TITLE="${DISPLAY_NAME} ${VERSION_LABEL}"
+if gh release view "$NEW_TAG" >/dev/null 2>&1; then
+  gh release edit "$NEW_TAG" \
+    --title "$RELEASE_TITLE" \
+    --notes-file "$NOTES_FILE"
+  log "Updated GitHub Release: ${NEW_TAG}"
+else
+  gh release create "$NEW_TAG" \
+    --title "$RELEASE_TITLE" \
+    --notes-file "$NOTES_FILE"
+  log "Created GitHub Release: ${NEW_TAG}"
+fi
+
+rm -f "$NOTES_FILE"
+log "Release automation completed."

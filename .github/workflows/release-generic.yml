@@ -1,0 +1,119 @@
+name: Generic Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Release target key"
+        required: true
+        type: choice
+        options:
+          - js/sandbox
+          - js/code-interpreter
+          - python/sandbox
+          - python/code-interpreter
+          - python/mcp/sandbox
+          - java/sandbox
+          - java/code-interpreter
+          - csharp/sandbox
+          - csharp/code-interpreter
+          - cli
+          - server
+          - docker/execd
+          - docker/code-interpreter
+          - docker/ingress
+          - docker/egress
+          - k8s/controller
+          - k8s/task-executor
+          - helm/opensandbox-controller
+          - helm/opensandbox-server
+          - helm/opensandbox
+      version:
+        description: "Version to release (e.g. 1.0.5 or v0.3.0)"
+        required: true
+        type: string
+      from_tag:
+        description: "Optional previous tag override"
+        required: false
+        type: string
+      no_path_filter:
+        description: "Disable default target path filtering"
+        required: true
+        default: false
+        type: boolean
+      extra_paths:
+        description: "Optional extra paths (comma-separated)"
+        required: false
+        type: string
+      initial_release:
+        description: "Allow release without previous tag"
+        required: true
+        default: false
+        type: boolean
+      push_tag:
+        description: "Push new tag to origin"
+        required: true
+        default: false
+        type: boolean
+      dry_run:
+        description: "Preview only, no side effects"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Ensure script executable
+        run: chmod +x scripts/release/create-release.sh
+
+      - name: Run generic release script
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ARGS=(
+            --target "${{ inputs.target }}"
+            --version "${{ inputs.version }}"
+          )
+
+          if [[ -n "${{ inputs.from_tag }}" ]]; then
+            ARGS+=(--from-tag "${{ inputs.from_tag }}")
+          fi
+
+          if [[ "${{ inputs.no_path_filter }}" == "true" ]]; then
+            ARGS+=(--no-path-filter)
+          fi
+
+          if [[ -n "${{ inputs.extra_paths }}" ]]; then
+            IFS=',' read -r -a EXTRA_PATHS <<< "${{ inputs.extra_paths }}"
+            for path in "${EXTRA_PATHS[@]}"; do
+              trimmed="$(echo "$path" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+              if [[ -n "$trimmed" ]]; then
+                ARGS+=(--path "$trimmed")
+              fi
+            done
+          fi
+
+          if [[ "${{ inputs.initial_release }}" == "true" ]]; then
+            ARGS+=(--initial-release)
+          fi
+
+          if [[ "${{ inputs.push_tag }}" == "true" ]]; then
+            ARGS+=(--push)
+          fi
+
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            ARGS+=(--dry-run)
+          fi
+
+          scripts/release/create-release.sh "${ARGS[@]}"
