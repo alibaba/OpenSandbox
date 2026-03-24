@@ -72,7 +72,7 @@ logging.getLogger().setLevel(
 
 from src.api.lifecycle import router  # noqa: E402
 from src.api.pool import router as pool_router  # noqa: E402
-from src.api.lifecycle import router, sandbox_service  # noqa: E402
+from src.api.lifecycle import sandbox_service  # noqa: E402
 from src.api.proxy import router as proxy_router  # noqa: E402
 from src.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator  # noqa: E402
 from src.middleware.auth import AuthMiddleware  # noqa: E402

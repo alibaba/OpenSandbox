@@ -132,7 +132,7 @@ def test_list_sandboxes_keeps_blank_metadata_values(
     assert captured_requests[0].filter.metadata == {"team": "infra", "note": ""}
 
 
-def test_list_sandboxes_preserves_only_nullable_expires_at(
+def test_list_sandboxes_omits_null_optional_fields(
     client: TestClient,
     auth_headers: dict,
     monkeypatch,
@@ -169,11 +169,11 @@ def test_list_sandboxes_preserves_only_nullable_expires_at(
 
     assert response.status_code == 200
     item = response.json()["items"][0]
-    assert item["expiresAt"] is None
-    assert item["metadata"] is None
-    assert item["status"]["reason"] is None
-    assert item["status"]["message"] is None
-    assert item["status"]["lastTransitionAt"] is None
+    assert "expiresAt" not in item
+    assert "metadata" not in item
+    assert "reason" not in item["status"]
+    assert "message" not in item["status"]
+    assert "lastTransitionAt" not in item["status"]
 
 
 def test_list_sandboxes_validates_page_bounds(

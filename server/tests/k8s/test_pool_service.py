@@ -19,7 +19,7 @@ All tests mock the Kubernetes CustomObjectsApi so no cluster connection is neede
 """
 
 import pytest
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 from kubernetes.client import ApiException
 
 from src.api.schema import (
