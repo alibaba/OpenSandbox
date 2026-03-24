@@ -25,9 +25,8 @@ on:
           - docker/egress
           - k8s/controller
           - k8s/task-executor
-          - helm/opensandbox-controller
-          - helm/opensandbox-server
           - helm/opensandbox
+          - helm
       version:
         description: "Version to release (e.g. 1.0.5 or v0.3.0)"
         required: true

@@ -29,9 +29,8 @@ Script path:
 - `docker/egress`
 - `k8s/controller`
 - `k8s/task-executor`
-- `helm/opensandbox-controller`
-- `helm/opensandbox-server`
 - `helm/opensandbox`
+- `helm` (alias of `helm/opensandbox`)
 
 ## Tag Rules
 

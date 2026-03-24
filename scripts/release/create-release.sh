@@ -25,9 +25,8 @@ Required:
                         docker/egress
                         k8s/controller
                         k8s/task-executor
-                        helm/opensandbox-controller
-                        helm/opensandbox-server
                         helm/opensandbox
+                        helm
   --version <version>   Release version string. For v-prefixed targets, script normalizes
                         to tags like <target>/v<version> automatically.
 
@@ -272,17 +271,8 @@ case "$TARGET" in
     WORKFLOW_HINT=".github/workflows/publish-components.yml"
     TARGET_PATH_FILTERS=("kubernetes")
     ;;
-  helm/opensandbox-controller)
-    DISPLAY_NAME="Helm opensandbox-controller"
-    WORKFLOW_HINT=".github/workflows/publish-helm-chart.yml"
-    TARGET_PATH_FILTERS=("kubernetes/charts/opensandbox-controller")
-    ;;
-  helm/opensandbox-server)
-    DISPLAY_NAME="Helm opensandbox-server"
-    WORKFLOW_HINT=".github/workflows/publish-helm-chart.yml"
-    TARGET_PATH_FILTERS=("kubernetes/charts/opensandbox-server")
-    ;;
-  helm/opensandbox)
+  helm|helm/opensandbox)
+    TARGET="helm/opensandbox"
     DISPLAY_NAME="Helm opensandbox"
     WORKFLOW_HINT=".github/workflows/publish-helm-chart.yml"
     TARGET_PATH_FILTERS=("kubernetes/charts/opensandbox")
