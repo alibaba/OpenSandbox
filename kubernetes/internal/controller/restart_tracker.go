@@ -16,6 +16,8 @@ package controller
 
 import (
 	"context"
+	"io"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -103,32 +105,67 @@ func (t *restartTracker) killPodContainers(ctx context.Context, pod *corev1.Pod)
 		go func(cName string, ctx context.Context) {
 			killCtx, cancel := context.WithTimeout(ctx, killTimeout)
 			defer cancel()
-			cmd := []string{"sh", "-c", "kill -TERM 1 2>/dev/null || true"}
-			req := t.kubeClient.CoreV1().RESTClient().
-				Post().
-				Namespace(pod.Namespace).
-				Resource("pods").
-				Name(pod.Name).
-				SubResource("exec").
-				VersionedParams(&corev1.PodExecOptions{
-					Container: cName,
-					Command:   cmd,
-					Stdin:     false,
-					Stdout:    false,
-					Stderr:    false,
-				}, scheme.ParameterCodec)
 
-			executor, err := remotecommand.NewSPDYExecutor(t.restConfig, "POST", req.URL())
-			if err != nil {
-				log.Error(err, "Failed to create executor", "pod", pod.Name, "container", cName)
-				return
-			}
-			if err = executor.StreamWithContext(killCtx, remotecommand.StreamOptions{}); err != nil {
-				log.Info("Kill exec finished with error (may be expected)",
+			if err := t.execGracefulKill(killCtx, pod, cName); err != nil {
+				log.Info("Graceful kill exec finished with error (may be expected)",
 					"pod", pod.Name, "container", cName, "err", err)
+			} else {
+				log.V(1).Info("Successfully triggered graceful kill", "pod", pod.Name, "container", cName)
 			}
 		}(container.Name, ctx)
 	}
+}
+
+// execGracefulKill attempts to trigger a SIGTERM (15) signal to the container's PID 1.
+func (t *restartTracker) execGracefulKill(ctx context.Context, pod *corev1.Pod, containerName string) error {
+	// Common shell entry points in various container images.
+	shellEntries := []string{"/bin/sh", "/usr/bin/sh", "sh"}
+
+	var lastErr error
+	for _, entry := range shellEntries {
+		cmd := []string{
+			entry, "-c",
+			"if [ -x /bin/kill ]; then /bin/kill -15 1; " +
+				"elif [ -x /usr/bin/kill ]; then /usr/bin/kill -15 1; " +
+				"else kill -15 1; fi",
+		}
+		err := t.executeExec(ctx, pod, containerName, cmd)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !strings.Contains(err.Error(), "executable file not found") &&
+			!strings.Contains(err.Error(), "no such file or directory") {
+			break
+		}
+	}
+	return lastErr
+}
+
+// executeExec performs a low-level Pod exec operation.
+func (t *restartTracker) executeExec(ctx context.Context, pod *corev1.Pod, containerName string, cmd []string) error {
+	req := t.kubeClient.CoreV1().RESTClient().
+		Post().
+		Namespace(pod.Namespace).
+		Resource("pods").
+		Name(pod.Name).
+		SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: containerName,
+			Command:   cmd,
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+		}, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(t.restConfig, "POST", req.URL())
+	if err != nil {
+		return err
+	}
+	return executor.StreamWithContext(ctx, remotecommand.StreamOptions{
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	})
 }
 
 // checkRestartStatus checks if the Pod has completed restart and is ready to be reused.

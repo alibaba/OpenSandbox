@@ -189,13 +189,12 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 			if !isNewRelease && !restarting {
 				continue
 			}
+			needReconcile = true
+			delay = defaultRetryTime
 			if err = r.handlePodRecycle(ctx, latestPool, pod); err != nil {
 				log.Error(err, "Failed to handle pod recycle", "pod", pod.Name)
-				needReconcile = true
-				delay = defaultRetryTime
 			}
 		}
-
 		if int32(len(scheRes.idlePods)) >= scheRes.supplySandbox {
 			scheRes.supplySandbox = 0
 		} else {
@@ -226,11 +225,20 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 		}
 		latestIdlePods, deleteOld, supplyNew := r.updatePool(ctx, latestRevision, pods, scheRes.idlePods)
 
+		// Calculate restarting count for scaling decisions
+		restartingCnt := int32(0)
+		for _, pod := range pods {
+			if _, ok := scheRes.podAllocation[pod.Name]; !ok && isRestarting(pod) {
+				restartingCnt++
+			}
+		}
+
 		args := &scaleArgs{
 			latestRevision: latestRevision,
 			pool:           latestPool,
 			pods:           pods,
 			allocatedCnt:   int32(len(scheRes.podAllocation)),
+			restartingCnt:  restartingCnt,
 			idlePods:       latestIdlePods,
 			redundantPods:  deleteOld,
 			supplyCnt:      scheRes.supplySandbox + supplyNew,
@@ -405,6 +413,7 @@ type scaleArgs struct {
 	pool           *sandboxv1alpha1.Pool
 	pods           []*corev1.Pod
 	allocatedCnt   int32
+	restartingCnt  int32 // pods that are restarting and not available
 	supplyCnt      int32 // to create
 	idlePods       []string
 	redundantPods  []string
@@ -421,9 +430,11 @@ func (r *PoolReconciler) scalePool(ctx context.Context, args *scaleArgs) error {
 	}
 	totalCnt := int32(len(args.pods))
 	allocatedCnt := args.allocatedCnt
+	restartingCnt := args.restartingCnt
 	supplyCnt := args.supplyCnt
 	redundantPods := args.redundantPods
-	bufferCnt := totalCnt - allocatedCnt
+	// Buffer count excludes allocated and restarting pods
+	bufferCnt := totalCnt - allocatedCnt - restartingCnt
 
 	// Calculate desired buffer cnt.
 	desiredBufferCnt := bufferCnt
@@ -440,7 +451,7 @@ func (r *PoolReconciler) scalePool(ctx context.Context, args *scaleArgs) error {
 	}
 
 	log.Info("Scale pool decision", "pool", pool.Name,
-		"totalCnt", totalCnt, "allocatedCnt", allocatedCnt, "bufferCnt", bufferCnt,
+		"totalCnt", totalCnt, "allocatedCnt", allocatedCnt, "restartingCnt", restartingCnt, "bufferCnt", bufferCnt,
 		"desiredBufferCnt", desiredBufferCnt, "supplyCnt", supplyCnt,
 		"desiredTotalCnt", desiredTotalCnt, "redundantPods", len(redundantPods),
 		"idlePods", len(args.idlePods))
@@ -480,15 +491,16 @@ func (r *PoolReconciler) updatePoolStatus(ctx context.Context, latestRevision st
 		if _, ok := podAllocation[pod.Name]; ok {
 			continue
 		}
-		if pod.Status.Phase != corev1.PodRunning {
-			continue
-		}
-		// Exclude restarting Pods from available count
+		// Count restarting pods regardless of phase
 		if isRestarting(pod) {
 			restartingCnt++
 			continue
 		}
-		availableCnt++
+		// Only count as available if Running and ready
+		if pod.Status.Phase == corev1.PodRunning {
+			availableCnt++
+		}
+		// Non-running, non-restarting pods are implicitly counted in Total - Allocated - Available - Restarting
 	}
 
 	pool.Status.ObservedGeneration = pool.Generation
