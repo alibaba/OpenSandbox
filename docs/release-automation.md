@@ -108,6 +108,24 @@ Dry-run JavaScript SDK release:
 scripts/release/create-release.sh --target js/sandbox --version 1.0.5 --dry-run
 ```
 
+Dry-run server release:
+
+```bash
+scripts/release/create-release.sh --target server --version 0.2.0 --dry-run
+```
+
+Dry-run JavaScript SDK release with additional docs scope:
+
+```bash
+scripts/release/create-release.sh --target js/sandbox --version 1.0.5 --dry-run --path docs/
+```
+
+Dry-run JavaScript SDK release without path filtering (full range):
+
+```bash
+scripts/release/create-release.sh --target js/sandbox --version 1.0.5 --dry-run --no-path-filter
+```
+
 Server release with tag push:
 
 ```bash
@@ -125,6 +143,42 @@ Helm chart release:
 ```bash
 scripts/release/create-release.sh --target helm/opensandbox --version 0.1.0 --push
 ```
+
+## Dry-Run Output Example
+
+Example output format for `--dry-run`:
+
+```text
+[release] Target: js/sandbox
+[release] Workflow: .github/workflows/publish-js-sdks.yml
+[release] New tag: js/sandbox/v1.0.5
+[release] Previous tag: js/sandbox/v0.1.4
+[release] Path filters: sdks/sandbox/javascript specs/sandbox-lifecycle.yml
+[release] Dry run enabled. No tag/release side effects will be performed.
+[release] Computed range: js/sandbox/v0.1.4..HEAD
+
+[release] Generated release notes preview:
+------------------------------------------------------------
+# JavaScript Sandbox SDK v1.0.5
+## What's New
+Changes included since `js/sandbox/v0.1.4`.
+Scoped paths: `sdks/sandbox/javascript specs/sandbox-lifecycle.yml`.
+
+### ✨ Features
+- feat(sdks/js): support run_in_session
+
+### 🐛 Bug Fixes
+- fix(lifecycle): harden sdk compatibility and e2e stability
+
+### ⚠️ Breaking Changes
+- None
+
+### 📦 Misc
+- chore(sdks): rebuild source code
+------------------------------------------------------------
+```
+
+If `--dry-run` is enabled, the script never creates/pushes tags and never creates/updates GitHub Releases.
 
 ## Safety Defaults
 
@@ -146,6 +200,15 @@ Inputs exposed in the workflow dispatch form:
 - `initial_release` (boolean)
 - `push_tag` (boolean)
 - `dry_run` (boolean, default `true`)
+
+Dry-run in GitHub Actions:
+
+- set `dry_run=true`
+- set `push_tag=false`
+- check logs for:
+  - computed tag (`New tag`)
+  - range (`Computed range`)
+  - preview body (`Generated release notes preview`)
 
 Recommended first run in UI:
 
