@@ -29,7 +29,7 @@ T = TypeVar("T", bound="RunInSessionRequest")
 
 @_attrs_define
 class RunInSessionRequest:
-    """Request to run code in an existing bash session
+    """Request to run a command in an existing bash session
 
     Attributes:
         command (str): Shell command to execute in the session Example: echo "Hello".

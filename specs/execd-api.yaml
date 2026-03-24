@@ -291,7 +291,7 @@ paths:
         code executions. Request body is optional; an empty body uses default options (no cwd override).
       operationId: createSession
       tags:
-        - CodeInterpreting
+        - Command
       requestBody:
         required: false
         content:
@@ -327,7 +327,7 @@ paths:
         optional working directory override and timeout (milliseconds).
       operationId: runInSession
       tags:
-        - CodeInterpreting
+        - Command
       parameters:
         - name: sessionId
           in: path
@@ -373,7 +373,7 @@ paths:
         and releases resources. The session ID must have been returned by create_session.
       operationId: deleteSession
       tags:
-        - CodeInterpreting
+        - Command
       parameters:
         - name: sessionId
           in: path

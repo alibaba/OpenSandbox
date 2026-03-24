@@ -85,19 +85,19 @@ interface Commands {
     /**
      * Creates a new bash session with optional working directory.
      *
-     * The session maintains shell state (e.g. cwd, environment) across multiple
+     * The session maintains shell state (e.g. working directory, environment) across multiple
      * [runInSession] calls. Use [deleteSession] when done to release resources.
      *
-     * @param cwd Optional working directory for the session
+     * @param workingDirectory Optional working directory for the session
      * @return Session ID for use with [runInSession] and [deleteSession]
      */
-    fun createSession(cwd: String? = null): String
+    fun createSession(workingDirectory: String? = null): String
 
     /**
      * Runs a shell command in an existing bash session and streams output via SSE.
      *
      * @param sessionId Session ID from [createSession]
-     * @param request Code to execute and optional cwd/timeout/handlers
+     * @param request Code to execute and optional workingDirectory/timeout/handlers
      * @return Execution result with stdout/stderr and completion status
      */
     fun runInSession(
@@ -111,14 +111,14 @@ interface Commands {
     fun runInSession(
         sessionId: String,
         command: String,
-        cwd: String? = null,
+        workingDirectory: String? = null,
         timeout: Long? = null,
     ): Execution {
         return runInSession(
             sessionId,
             RunInSessionRequest.builder()
                 .command(command)
-                .cwd(cwd)
+                .workingDirectory(workingDirectory)
                 .timeout(timeout)
                 .build(),
         )

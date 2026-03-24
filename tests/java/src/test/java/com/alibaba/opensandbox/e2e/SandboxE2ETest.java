@@ -864,7 +864,7 @@ public class SandboxE2ETest extends BaseE2ETest {
 
     @Test
     @Order(3)
-    @DisplayName("Command execution: success, cwd, background, failure")
+    @DisplayName("Command execution: success, working directory, background, failure")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
     void testBasicCommandExecution() {
         assertNotNull(sandbox);
@@ -1051,9 +1051,9 @@ public class SandboxE2ETest extends BaseE2ETest {
 
     @Test
     @Order(4)
-    @DisplayName("Bash session API: cwd and env persistence")
+    @DisplayName("Bash session API: working directory and env persistence")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
-    void testBashSessionApiCwdAndEnvPersistence() {
+    void testBashSessionApiWorkingDirectoryAndEnvPersistence() {
         assertNotNull(sandbox);
 
         String sid = sandbox.commands().createSession("/tmp");
@@ -1061,12 +1061,10 @@ public class SandboxE2ETest extends BaseE2ETest {
         assertFalse(sid.isBlank());
 
         Execution run =
-                sandbox
-                        .commands()
-                        .runInSession(
-                                sid,
-                                RunInSessionRequest.builder().code("pwd").build());
+                sandbox.commands()
+                        .runInSession(sid, RunInSessionRequest.builder().command("pwd").build());
         assertNull(run.getError());
+        assertEquals(0, run.getExitCode());
         String stdout =
                 run.getLogs().getStdout().stream()
                         .map(OutputMessage::getText)
@@ -1075,15 +1073,15 @@ public class SandboxE2ETest extends BaseE2ETest {
         assertEquals("/tmp", stdout);
 
         run =
-                sandbox
-                        .commands()
+                sandbox.commands()
                         .runInSession(
                                 sid,
                                 RunInSessionRequest.builder()
-                                        .code("pwd")
-                                        .cwd("/var")
+                                        .command("pwd")
+                                        .workingDirectory("/var")
                                         .build());
         assertNull(run.getError());
+        assertEquals(0, run.getExitCode());
         stdout =
                 run.getLogs().getStdout().stream()
                         .map(OutputMessage::getText)
@@ -1092,15 +1090,15 @@ public class SandboxE2ETest extends BaseE2ETest {
         assertEquals("/var", stdout);
 
         run =
-                sandbox
-                        .commands()
+                sandbox.commands()
                         .runInSession(
                                 sid,
                                 RunInSessionRequest.builder()
-                                        .code("pwd")
-                                        .cwd("/tmp")
+                                        .command("pwd")
+                                        .workingDirectory("/tmp")
                                         .build());
         assertNull(run.getError());
+        assertEquals(0, run.getExitCode());
         stdout =
                 run.getLogs().getStdout().stream()
                         .map(OutputMessage::getText)
@@ -1109,24 +1107,23 @@ public class SandboxE2ETest extends BaseE2ETest {
         assertEquals("/tmp", stdout);
 
         run =
-                sandbox
-                        .commands()
+                sandbox.commands()
                         .runInSession(
                                 sid,
                                 RunInSessionRequest.builder()
-                                        .code("export E2E_SESSION_ENV=session-env-ok")
+                                        .command("export E2E_SESSION_ENV=session-env-ok")
                                         .build());
         assertNull(run.getError());
 
         run =
-                sandbox
-                        .commands()
+                sandbox.commands()
                         .runInSession(
                                 sid,
                                 RunInSessionRequest.builder()
-                                        .code("echo $E2E_SESSION_ENV")
+                                        .command("echo $E2E_SESSION_ENV")
                                         .build());
         assertNull(run.getError());
+        assertEquals(0, run.getExitCode());
         stdout =
                 run.getLogs().getStdout().stream()
                         .map(OutputMessage::getText)
@@ -1134,15 +1131,26 @@ public class SandboxE2ETest extends BaseE2ETest {
                         .trim();
         assertEquals("session-env-ok", stdout);
 
+        run =
+                sandbox.commands()
+                        .runInSession(
+                                sid,
+                                RunInSessionRequest.builder()
+                                        .command("sh -c 'echo session-fail >&2; exit 7'")
+                                        .build());
+        assertNotNull(run.getError());
+        assertEquals("CommandExecError", run.getError().getName());
+        assertEquals("7", run.getError().getValue());
+        assertEquals(Integer.valueOf(7), run.getExitCode());
+        assertNull(run.getComplete());
+
         String sid2 = sandbox.commands().createSession("/var");
         assertNotNull(sid2);
         run =
-                sandbox
-                        .commands()
-                        .runInSession(
-                                sid2,
-                                RunInSessionRequest.builder().code("pwd").build());
+                sandbox.commands()
+                        .runInSession(sid2, RunInSessionRequest.builder().command("pwd").build());
         assertNull(run.getError());
+        assertEquals(0, run.getExitCode());
         stdout =
                 run.getLogs().getStdout().stream()
                         .map(OutputMessage::getText)

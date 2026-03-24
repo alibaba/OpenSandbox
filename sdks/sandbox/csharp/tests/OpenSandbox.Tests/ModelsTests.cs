@@ -327,6 +327,30 @@ public class ModelsTests
     }
 
     [Fact]
+    public void CreateSessionOptions_ShouldStoreWorkingDirectory()
+    {
+        var options = new CreateSessionOptions
+        {
+            WorkingDirectory = "/workspace"
+        };
+
+        options.WorkingDirectory.Should().Be("/workspace");
+    }
+
+    [Fact]
+    public void RunInSessionOptions_ShouldStoreProperties()
+    {
+        var options = new RunInSessionOptions
+        {
+            WorkingDirectory = "/workspace",
+            Timeout = 5000
+        };
+
+        options.WorkingDirectory.Should().Be("/workspace");
+        options.Timeout.Should().Be(5000);
+    }
+
+    [Fact]
     public void ServerStreamEvent_ShouldStoreProperties()
     {
         // Arrange & Act

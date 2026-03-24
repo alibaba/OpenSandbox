@@ -18,9 +18,11 @@ package com.alibaba.opensandbox.sandbox.infrastructure.adapters.service
 
 import com.alibaba.opensandbox.sandbox.HttpClientProvider
 import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
+import com.alibaba.opensandbox.sandbox.domain.exceptions.InvalidArgumentException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.ExecutionHandlers
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommandRequest
+import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunInSessionRequest
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
@@ -62,8 +64,7 @@ class CommandsAdapterTest {
                 .build()
 
         httpClientProvider = HttpClientProvider(config)
-        val sessionAdapter = SessionAdapter(httpClientProvider, endpoint)
-        commandsAdapter = CommandsAdapter(httpClientProvider, endpoint, sessionAdapter)
+        commandsAdapter = CommandsAdapter(httpClientProvider, endpoint)
     }
 
     @AfterEach
@@ -135,7 +136,8 @@ class CommandsAdapterTest {
     fun `run should infer non-zero exit code from command error event`() {
         val initEvent = """{"type":"init","text":"cmd-123","timestamp":1672531200000}"""
         val errorEvent =
-            """{"type":"error","error":{"ename":"CommandExecError","evalue":"7","traceback":["exit status 7"]},"timestamp":1672531201000}"""
+            """{"type":"error","error":{"ename":"CommandExecError",""" +
+                """"evalue":"7","traceback":["exit status 7"]},"timestamp":1672531201000}"""
 
         mockWebServer.enqueue(
             MockResponse()
@@ -162,7 +164,8 @@ class CommandsAdapterTest {
         val initEvent = """{"type":"init","text":"cmd-123","timestamp":1672531200000}"""
         val completeEvent = """{"type":"execution_complete","execution_time":100,"timestamp":1672531201000}"""
         val errorEvent =
-            """{"type":"error","error":{"ename":"CommandExecError","evalue":"7","traceback":["exit status 7"]},"timestamp":1672531202000}"""
+            """{"type":"error","error":{"ename":"CommandExecError","evalue":"7",""" +
+                """"traceback":["exit status 7"]},"timestamp":1672531202000}"""
 
         mockWebServer.enqueue(
             MockResponse()
@@ -187,7 +190,8 @@ class CommandsAdapterTest {
         val initEvent = """{"type":"init","text":"cmd-123","timestamp":1672531200000}"""
         val completeEvent = """{"type":"execution_complete","execution_time":100,"timestamp":1672531201000}"""
         val errorEvent =
-            """{"type":"error","error":{"ename":"CommandExecError","evalue":"","traceback":["failed"]},"timestamp":1672531202000}"""
+            """{"type":"error","error":{"ename":"CommandExecError",""" +
+                """"evalue":"","traceback":["failed"]},"timestamp":1672531202000}"""
 
         mockWebServer.enqueue(
             MockResponse()
@@ -231,5 +235,126 @@ class CommandsAdapterTest {
 
         assertEquals(500, ex.statusCode)
         assertEquals("req-kotlin-123", ex.requestId)
+    }
+
+    @Test
+    fun `createSession should use generated api and return session id`() {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("""{"session_id":"sess-123"}"""),
+        )
+
+        val sessionId = commandsAdapter.createSession("/workspace")
+
+        assertEquals("sess-123", sessionId)
+        val recordedRequest = mockWebServer.takeRequest()
+        assertEquals("/session", recordedRequest.path)
+        assertEquals("POST", recordedRequest.method)
+        val requestBodyJson = Json.parseToJsonElement(recordedRequest.body.readUtf8()).jsonObject
+        assertEquals("/workspace", requestBodyJson["cwd"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `runInSession should stream events and send session request payload`() {
+        val stdoutEvent = """event: stdout
+data: {"type":"stdout","text":"Hello","timestamp":1672531200000}"""
+        val completeEvent = """event: execution_complete
+data: {"type":"execution_complete","execution_time":100,"timestamp":1672531201000}"""
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("$stdoutEvent\n\n$completeEvent\n\n"),
+        )
+
+        val receivedOutput = StringBuilder()
+        val latch = CountDownLatch(1)
+        var executionTime = -1L
+        val handlers =
+            ExecutionHandlers.builder()
+                .onStdout { msg -> receivedOutput.append(msg.text) }
+                .onExecutionComplete { complete ->
+                    executionTime = complete.executionTimeInMillis
+                    latch.countDown()
+                }
+                .build()
+
+        val execution =
+            commandsAdapter.runInSession(
+                "sess-123",
+                RunInSessionRequest.builder()
+                    .command("echo Hello")
+                    .workingDirectory("/workspace")
+                    .timeout(5000)
+                    .handlers(handlers)
+                    .build(),
+            )
+
+        assertTrue(latch.await(2, TimeUnit.SECONDS), "Timed out waiting for session completion event")
+        assertEquals("Hello", receivedOutput.toString())
+        assertEquals(100L, executionTime)
+        assertEquals(0, execution.exitCode)
+        assertEquals(100L, execution.complete?.executionTimeInMillis)
+        val recordedRequest = mockWebServer.takeRequest()
+        assertEquals("/session/sess-123/run", recordedRequest.path)
+        assertEquals("POST", recordedRequest.method)
+        val requestBodyJson = Json.parseToJsonElement(recordedRequest.body.readUtf8()).jsonObject
+        assertEquals("echo Hello", requestBodyJson["command"]?.jsonPrimitive?.content)
+        assertEquals("/workspace", requestBodyJson["cwd"]?.jsonPrimitive?.content)
+        assertEquals(5000L, requestBodyJson["timeout"]?.jsonPrimitive?.content?.toLong())
+    }
+
+    @Test
+    fun `runInSession should infer non-zero exit code from command error event`() {
+        val initEvent = """data: {"type":"init","text":"cmd-123","timestamp":1672531200000}"""
+        val errorEvent =
+            """data: {"type":"error","error":{"ename":"CommandExecError","evalue":"7",""" +
+                """"traceback":["exit status 7"]},"timestamp":1672531201000}"""
+
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("$initEvent\n\n$errorEvent\n\n"),
+        )
+
+        val execution =
+            commandsAdapter.runInSession(
+                "sess-123",
+                RunInSessionRequest.builder()
+                    .command("exit 7")
+                    .build(),
+            )
+
+        assertEquals("cmd-123", execution.id)
+        assertEquals(7, execution.exitCode)
+        assertEquals("CommandExecError", execution.error?.name)
+        assertEquals("7", execution.error?.value)
+        assertEquals(null, execution.complete)
+    }
+
+    @Test
+    fun `deleteSession should use generated api`() {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(204),
+        )
+
+        commandsAdapter.deleteSession("sess-123")
+
+        val recordedRequest = mockWebServer.takeRequest()
+        assertEquals("/session/sess-123", recordedRequest.path)
+        assertEquals("DELETE", recordedRequest.method)
+    }
+
+    @Test
+    fun `createSession should reject blank workingDirectory`() {
+        val ex = assertThrows(InvalidArgumentException::class.java) { commandsAdapter.createSession("   ") }
+        assertEquals("workingDirectory cannot be blank when provided", ex.message)
+    }
+
+    @Test
+    fun `deleteSession should reject blank session id`() {
+        val ex = assertThrows(InvalidArgumentException::class.java) { commandsAdapter.deleteSession(" ") }
+        assertEquals("session_id cannot be empty", ex.message)
     }
 }

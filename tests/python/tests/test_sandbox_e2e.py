@@ -1013,63 +1013,79 @@ class TestSandboxE2E:
     @pytest.mark.timeout(120)
     @pytest.mark.order(2)
     async def test_02c_bash_session_api(self):
-        """Test create_session / run_in_session / delete_session: verify cwd is passed and applied.
-        Current execd session API supports cwd only (no env); this test asserts cwd for both
-        create_session and run_in_session.
+        """Test create_session / run_in_session / delete_session.
+
+        Verifies working directory passing, session env persistence, and run_in_session exit_code behavior.
         """
         await self._ensure_sandbox_created()
         sandbox = TestSandboxE2E.sandbox
 
         logger.info("=" * 80)
-        logger.info("TEST 2c: Bash session API — verify cwd is passed and applied")
+        logger.info("TEST 2c: Bash session API — verify working directory is passed and applied")
         logger.info("=" * 80)
 
-        logger.info("Step 1: Create session with cwd=/tmp and verify session starts in that directory")
-        sid = await sandbox.commands.create_session(cwd="/tmp")
+        logger.info("Step 1: Create session with working_directory=/tmp and verify session starts in that directory")
+        sid = await sandbox.commands.create_session(working_directory="/tmp")
         assert sid is not None and isinstance(sid, str) and len(sid) > 0
         out_pwd = await sandbox.commands.run_in_session(sid, "pwd")
         assert out_pwd.error is None, f"pwd failed: {out_pwd.error}"
+        assert out_pwd.exit_code == 0
         pwd_line = "".join(m.text for m in out_pwd.logs.stdout).strip()
-        assert pwd_line == "/tmp", f"create_session(cwd=/tmp) should run in /tmp, got: {pwd_line!r}"
-        logger.info("✓ create_session(cwd=/tmp) applied: pwd => %s", pwd_line)
+        assert pwd_line == "/tmp", f"create_session(working_directory=/tmp) should run in /tmp, got: {pwd_line!r}"
+        logger.info("✓ create_session(working_directory=/tmp) applied: pwd => %s", pwd_line)
 
-        logger.info("Step 2: run_in_session with cwd override — run in /var and verify")
-        out_var = await sandbox.commands.run_in_session(sid, "pwd", cwd="/var")
+        logger.info("Step 2: run_in_session with working_directory override — run in /var and verify")
+        out_var = await sandbox.commands.run_in_session(sid, "pwd", working_directory="/var")
         assert out_var.error is None
+        assert out_var.exit_code == 0
         var_line = "".join(m.text for m in out_var.logs.stdout).strip()
-        assert var_line == "/var", f"run_in_session(..., cwd=/var) should run in /var, got: {var_line!r}"
-        logger.info("✓ run_in_session(..., cwd=/var) applied: pwd => %s", var_line)
+        assert var_line == "/var", f"run_in_session(..., working_directory=/var) should run in /var, got: {var_line!r}"
+        logger.info("✓ run_in_session(..., working_directory=/var) applied: pwd => %s", var_line)
 
-        logger.info("Step 3: run_in_session with cwd=/tmp — verify override per run")
-        out_tmp = await sandbox.commands.run_in_session(sid, "pwd", cwd="/tmp")
+        logger.info("Step 3: run_in_session with working_directory=/tmp — verify override per run")
+        out_tmp = await sandbox.commands.run_in_session(sid, "pwd", working_directory="/tmp")
         assert out_tmp.error is None
+        assert out_tmp.exit_code == 0
         tmp_line = "".join(m.text for m in out_tmp.logs.stdout).strip()
-        assert tmp_line == "/tmp", f"run_in_session(..., cwd=/tmp) should run in /tmp, got: {tmp_line!r}"
-        logger.info("✓ run_in_session(..., cwd=/tmp) applied: pwd => %s", tmp_line)
+        assert tmp_line == "/tmp", f"run_in_session(..., working_directory=/tmp) should run in /tmp, got: {tmp_line!r}"
+        logger.info("✓ run_in_session(..., working_directory=/tmp) applied: pwd => %s", tmp_line)
 
         logger.info("Step 3b: Export env in one run, read in next run — verify session state (env) persists")
         await sandbox.commands.run_in_session(sid, "export E2E_SESSION_ENV=session-env-ok")
         out_env = await sandbox.commands.run_in_session(sid, "echo $E2E_SESSION_ENV")
         assert out_env.error is None
+        assert out_env.exit_code == 0
         env_line = "".join(m.text for m in out_env.logs.stdout).strip()
         assert env_line == "session-env-ok", f"env set in previous run should be visible, got: {env_line!r}"
         logger.info("✓ session env persists across run_in_session: echo $E2E_SESSION_ENV => %s", env_line)
 
-        logger.info("Step 4: New session with cwd=/var — verify create_session cwd again")
-        sid2 = await sandbox.commands.create_session(cwd="/var")
+        logger.info("Step 3c: Failing subprocess in session should propagate non-zero exit_code")
+        fail = await sandbox.commands.run_in_session(
+            sid, "sh -c 'echo session-fail >&2; exit 7'"
+        )
+        assert fail.error is not None
+        assert fail.error.name == "CommandExecError"
+        assert fail.error.value == "7"
+        assert fail.exit_code == 7
+        assert fail.complete is None
+        logger.info("✓ run_in_session failure propagated exit_code=7")
+
+        logger.info("Step 4: New session with working_directory=/var — verify create_session working directory again")
+        sid2 = await sandbox.commands.create_session(working_directory="/var")
         assert sid2 is not None
         out_var2 = await sandbox.commands.run_in_session(sid2, "pwd")
         assert out_var2.error is None
+        assert out_var2.exit_code == 0
         var2_line = "".join(m.text for m in out_var2.logs.stdout).strip()
-        assert var2_line == "/var", f"create_session(cwd=/var) should run in /var, got: {var2_line!r}"
-        logger.info("✓ create_session(cwd=/var) applied: pwd => %s", var2_line)
+        assert var2_line == "/var", f"create_session(working_directory=/var) should run in /var, got: {var2_line!r}"
+        logger.info("✓ create_session(working_directory=/var) applied: pwd => %s", var2_line)
 
         logger.info("Step 5: Delete both sessions")
         await sandbox.commands.delete_session(sid)
         await sandbox.commands.delete_session(sid2)
         logger.info("✓ Sessions deleted")
 
-        logger.info("TEST 2c PASSED: cwd passing verified for create_session and run_in_session")
+        logger.info("TEST 2c PASSED: working directory passing verified for create_session and run_in_session")
 
     @pytest.mark.timeout(120)
     @pytest.mark.order(3)

@@ -377,7 +377,7 @@ public class CreateSessionOptions
     /// <summary>
     /// Gets or sets the optional working directory for the session.
     /// </summary>
-    public string? Cwd { get; set; }
+    public string? WorkingDirectory { get; set; }
 }
 
 /// <summary>
@@ -400,7 +400,7 @@ public class RunInSessionOptions
     /// <summary>
     /// Gets or sets the optional working directory override for this run.
     /// </summary>
-    public string? Cwd { get; set; }
+    public string? WorkingDirectory { get; set; }
 
     /// <summary>
     /// Gets or sets the maximum execution time in milliseconds.

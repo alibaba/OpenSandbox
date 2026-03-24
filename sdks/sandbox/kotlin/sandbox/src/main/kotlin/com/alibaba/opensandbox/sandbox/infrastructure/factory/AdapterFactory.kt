@@ -30,7 +30,6 @@ import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.Filesyste
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.HealthAdapter
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.MetricsAdapter
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.SandboxesAdapter
-import com.alibaba.opensandbox.sandbox.infrastructure.adapters.service.SessionAdapter
 
 /**
  * Factory responsible for creating adapter instances.
@@ -50,8 +49,7 @@ internal class AdapterFactory(
     }
 
     fun createCommands(endpoint: SandboxEndpoint): Commands {
-        val sessionAdapter = SessionAdapter(httpClientProvider, endpoint)
-        return CommandsAdapter(httpClientProvider, endpoint, sessionAdapter)
+        return CommandsAdapter(httpClientProvider, endpoint)
     }
 
     fun createEgress(endpoint: SandboxEndpoint): Egress {

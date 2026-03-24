@@ -113,12 +113,12 @@ class Commands(Protocol):
         """
         ...
 
-    async def create_session(self, *, cwd: str | None = None) -> str:
+    async def create_session(self, *, working_directory: str | None = None) -> str:
         """
         Create a bash session. Returns session_id for run_in_session and delete_session.
 
         Args:
-            cwd: Optional working directory for the session.
+            working_directory: Optional working directory for the session.
 
         Returns:
             Session ID string.
@@ -133,7 +133,7 @@ class Commands(Protocol):
         session_id: str,
         command: str,
         *,
-        cwd: str | None = None,
+        working_directory: str | None = None,
         timeout: int | None = None,
         handlers: ExecutionHandlers | None = None,
     ) -> Execution:
@@ -143,8 +143,8 @@ class Commands(Protocol):
         Args:
             session_id: Session ID from create_session.
             command: Shell command to execute.
-            cwd: Optional working directory override for this run.
-            timeout: Optional max execution time in milliseconds.
+            working_directory: Optional working directory override for this run.
+            timeout: Optional max execution time in milliseconds for this session run.
             handlers: Optional async handlers for streaming events.
 
         Returns:

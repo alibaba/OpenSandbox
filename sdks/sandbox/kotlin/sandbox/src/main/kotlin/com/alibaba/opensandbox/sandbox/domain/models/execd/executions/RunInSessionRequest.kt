@@ -20,13 +20,13 @@ package com.alibaba.opensandbox.sandbox.domain.models.execd.executions
  * Request to run a command in an existing bash session.
  *
  * @property command Shell command to execute
- * @property cwd Optional working directory override for this run
+ * @property workingDirectory Optional working directory override for this run
  * @property timeout Optional max execution time in milliseconds
  * @property handlers Optional execution handlers for streaming events
  */
 class RunInSessionRequest private constructor(
     val command: String,
-    val cwd: String?,
+    val workingDirectory: String?,
     val timeout: Long?,
     val handlers: ExecutionHandlers?,
 ) {
@@ -37,7 +37,7 @@ class RunInSessionRequest private constructor(
 
     class Builder {
         private var command: String? = null
-        private var cwd: String? = null
+        private var workingDirectory: String? = null
         private var timeout: Long? = null
         private var handlers: ExecutionHandlers? = null
 
@@ -47,8 +47,8 @@ class RunInSessionRequest private constructor(
             return this
         }
 
-        fun cwd(cwd: String?): Builder {
-            this.cwd = cwd
+        fun workingDirectory(workingDirectory: String?): Builder {
+            this.workingDirectory = workingDirectory
             return this
         }
 
@@ -66,7 +66,7 @@ class RunInSessionRequest private constructor(
             val commandValue = command ?: throw IllegalArgumentException("Command must be specified")
             return RunInSessionRequest(
                 command = commandValue,
-                cwd = cwd,
+                workingDirectory = workingDirectory,
                 timeout = timeout,
                 handlers = handlers,
             )

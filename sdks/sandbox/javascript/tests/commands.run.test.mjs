@@ -100,7 +100,7 @@ test("CommandsAdapter.runInSession sends command and timeout fields", async () =
   );
 
   const execution = await adapter.runInSession("sess-1", "pwd", {
-    cwd: "/var",
+    workingDirectory: "/var",
     timeout: 5000,
   });
 
@@ -110,4 +110,22 @@ test("CommandsAdapter.runInSession sends command and timeout fields", async () =
     timeout: 5000,
   });
   assert.equal(execution.logs.stdout[0].text, "ok");
+  assert.equal(execution.exitCode, 0);
+});
+
+test("CommandsAdapter.runInSession infers non-zero exitCode from final error state", async () => {
+  const adapter = createAdapter(
+    [
+      'data: {"type":"init","text":"sess-cmd-2","timestamp":1}',
+      'data: {"type":"error","error":{"ename":"CommandExecError","evalue":"7","traceback":["exit status 7"]},"timestamp":2}',
+      "",
+    ].join("\n"),
+  );
+
+  const execution = await adapter.runInSession("sess-2", "exit 7");
+
+  assert.equal(execution.id, "sess-cmd-2");
+  assert.equal(execution.error?.value, "7");
+  assert.equal(execution.complete, undefined);
+  assert.equal(execution.exitCode, 7);
 });

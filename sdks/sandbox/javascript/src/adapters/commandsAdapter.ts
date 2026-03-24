@@ -40,10 +40,18 @@ type ApiCommandStatusOk =
   ExecdPaths["/command/status/{id}"]["get"]["responses"][200]["content"]["application/json"];
 type ApiCommandLogsOk =
   ExecdPaths["/command/{id}/logs"]["get"]["responses"][200]["content"]["text/plain"];
+type ApiCreateSessionRequest =
+  NonNullable<ExecdPaths["/session"]["post"]["requestBody"]>["content"]["application/json"];
 type ApiCreateSessionOk =
   ExecdPaths["/session"]["post"]["responses"][200]["content"]["application/json"];
 type ApiRunInSessionRequest =
   ExecdPaths["/session/{sessionId}/run"]["post"]["requestBody"]["content"]["application/json"];
+
+interface StreamingExecutionSpec<TBody> {
+  pathname: string;
+  body: TBody;
+  fallbackErrorMessage: string;
+}
 
 function toRunCommandRequest(command: string, opts?: RunCommandOpts): ApiRunCommandRequest {
   if (opts?.gid != null && opts.uid == null) {
@@ -72,18 +80,35 @@ function toRunCommandRequest(command: string, opts?: RunCommandOpts): ApiRunComm
 
 function toRunInSessionRequest(
   command: string,
-  opts?: { cwd?: string; timeout?: number },
+  opts?: { workingDirectory?: string; timeout?: number },
 ): ApiRunInSessionRequest {
   const body: ApiRunInSessionRequest = {
     command,
   };
-  if (opts?.cwd != null) {
-    body.cwd = opts.cwd;
+  if (opts?.workingDirectory != null) {
+    body.cwd = opts.workingDirectory;
   }
   if (opts?.timeout != null) {
     body.timeout = opts.timeout;
   }
   return body;
+}
+
+function inferForegroundExitCode(execution: CommandExecution): number | null {
+  const errorValue = execution.error?.value?.trim();
+  const parsedExitCode =
+    errorValue && /^-?\d+$/.test(errorValue) ? Number(errorValue) : Number.NaN;
+  return execution.error != null
+    ? (Number.isFinite(parsedExitCode) ? parsedExitCode : null)
+    : execution.complete
+      ? 0
+      : null;
+}
+
+function assertNonBlank(value: string, field: string): void {
+  if (!value.trim()) {
+    throw new Error(`${field} cannot be empty`);
+  }
 }
 
 function parseOptionalDate(value: unknown, field: string): Date | undefined {
@@ -116,6 +141,79 @@ export class CommandsAdapter implements ExecdCommands {
     private readonly opts: CommandsAdapterOptions,
   ) {
     this.fetch = opts.fetch ?? fetch;
+  }
+
+  private buildRunStreamSpec(
+    command: string,
+    opts?: RunCommandOpts,
+  ): StreamingExecutionSpec<ApiRunCommandRequest> {
+    assertNonBlank(command, "command");
+    return {
+      pathname: "/command",
+      body: toRunCommandRequest(command, opts),
+      fallbackErrorMessage: "Run command failed",
+    };
+  }
+
+  private buildRunInSessionStreamSpec(
+    sessionId: string,
+    command: string,
+    opts?: { workingDirectory?: string; timeout?: number },
+  ): StreamingExecutionSpec<ApiRunInSessionRequest> {
+    assertNonBlank(sessionId, "sessionId");
+    assertNonBlank(command, "command");
+    return {
+      pathname: `/session/${encodeURIComponent(sessionId)}/run`,
+      body: toRunInSessionRequest(command, opts),
+      fallbackErrorMessage: "Run in session failed",
+    };
+  }
+
+  private async *streamExecution<TBody>(
+    spec: StreamingExecutionSpec<TBody>,
+    signal?: AbortSignal,
+  ): AsyncIterable<ServerStreamEvent> {
+    const url = joinUrl(this.opts.baseUrl, spec.pathname);
+    const res = await this.fetch(url, {
+      method: "POST",
+      headers: {
+        accept: "text/event-stream",
+        "content-type": "application/json",
+        ...(this.opts.headers ?? {}),
+      },
+      body: JSON.stringify(spec.body),
+      signal,
+    });
+
+    for await (const ev of parseJsonEventStream<ServerStreamEvent>(res, {
+      fallbackErrorMessage: spec.fallbackErrorMessage,
+    })) {
+      yield ev;
+    }
+  }
+
+  private async consumeExecutionStream(
+    stream: AsyncIterable<ServerStreamEvent>,
+    handlers?: ExecutionHandlers,
+    inferExitCode = false,
+  ): Promise<CommandExecution> {
+    const execution: CommandExecution = {
+      logs: { stdout: [], stderr: [] },
+      result: [],
+    };
+    const dispatcher = new ExecutionEventDispatcher(execution, handlers);
+    for await (const ev of stream) {
+      if (ev.type === "init" && (ev.text ?? "") === "" && execution.id) {
+        (ev as { text?: string }).text = execution.id;
+      }
+      await dispatcher.dispatch(ev as any);
+    }
+
+    if (inferExitCode) {
+      execution.exitCode = inferForegroundExitCode(execution);
+    }
+
+    return execution;
   }
 
   async interrupt(sessionId: string): Promise<void> {
@@ -168,21 +266,10 @@ export class CommandsAdapter implements ExecdCommands {
     opts?: RunCommandOpts,
     signal?: AbortSignal,
   ): AsyncIterable<ServerStreamEvent> {
-    const url = joinUrl(this.opts.baseUrl, "/command");
-    const body = JSON.stringify(toRunCommandRequest(command, opts));
-
-    const res = await this.fetch(url, {
-      method: "POST",
-      headers: {
-        "accept": "text/event-stream",
-        "content-type": "application/json",
-        ...(this.opts.headers ?? {}),
-      },
-      body,
+    for await (const ev of this.streamExecution(
+      this.buildRunStreamSpec(command, opts),
       signal,
-    });
-
-    for await (const ev of parseJsonEventStream<ServerStreamEvent>(res, { fallbackErrorMessage: "Run command failed" })) {
+    )) {
       yield ev;
     }
   }
@@ -193,36 +280,16 @@ export class CommandsAdapter implements ExecdCommands {
     handlers?: ExecutionHandlers,
     signal?: AbortSignal,
   ): Promise<CommandExecution> {
-    const execution: CommandExecution = {
-      logs: { stdout: [], stderr: [] },
-      result: [],
-    };
-    const dispatcher = new ExecutionEventDispatcher(execution, handlers);
-    for await (const ev of this.runStream(command, opts, signal)) {
-      // Keep legacy behavior: if server sends "init" with empty id, preserve previous id.
-      if (ev.type === "init" && (ev.text ?? "") === "" && execution.id) {
-        (ev as any).text = execution.id;
-      }
-      await dispatcher.dispatch(ev as any);
-    }
-
-    if (!opts?.background) {
-      const errorValue = execution.error?.value?.trim();
-      const parsedExitCode =
-        errorValue && /^-?\d+$/.test(errorValue) ? Number(errorValue) : Number.NaN;
-      execution.exitCode =
-        execution.error != null
-          ? (Number.isFinite(parsedExitCode) ? parsedExitCode : null)
-          : execution.complete
-            ? 0
-            : null;
-    }
-
-    return execution;
+    return this.consumeExecutionStream(
+      this.runStream(command, opts, signal),
+      handlers,
+      !opts?.background,
+    );
   }
 
-  async createSession(options?: { cwd?: string }): Promise<string> {
-    const body = options?.cwd != null ? { cwd: options.cwd } : {};
+  async createSession(options?: { workingDirectory?: string }): Promise<string> {
+    const body: ApiCreateSessionRequest =
+      options?.workingDirectory != null ? { cwd: options.workingDirectory } : {};
     const { data, error, response } = await this.client.POST("/session", {
       body,
     });
@@ -237,29 +304,13 @@ export class CommandsAdapter implements ExecdCommands {
   async *runInSessionStream(
     sessionId: string,
     command: string,
-    opts?: { cwd?: string; timeout?: number },
+    opts?: { workingDirectory?: string; timeout?: number },
     signal?: AbortSignal,
   ): AsyncIterable<ServerStreamEvent> {
-    const url = joinUrl(
-      this.opts.baseUrl,
-      `/session/${encodeURIComponent(sessionId)}/run`,
-    );
-    const body = toRunInSessionRequest(command, opts);
-
-    const res = await this.fetch(url, {
-      method: "POST",
-      headers: {
-        accept: "text/event-stream",
-        "content-type": "application/json",
-        ...(this.opts.headers ?? {}),
-      },
-      body: JSON.stringify(body),
+    for await (const ev of this.streamExecution(
+      this.buildRunInSessionStreamSpec(sessionId, command, opts),
       signal,
-    });
-
-    for await (const ev of parseJsonEventStream<ServerStreamEvent>(res, {
-      fallbackErrorMessage: "Run in session failed",
-    })) {
+    )) {
       yield ev;
     }
   }
@@ -267,27 +318,15 @@ export class CommandsAdapter implements ExecdCommands {
   async runInSession(
     sessionId: string,
     command: string,
-    options?: { cwd?: string; timeout?: number },
+    options?: { workingDirectory?: string; timeout?: number },
     handlers?: ExecutionHandlers,
     signal?: AbortSignal,
   ): Promise<CommandExecution> {
-    const execution: CommandExecution = {
-      logs: { stdout: [], stderr: [] },
-      result: [],
-    };
-    const dispatcher = new ExecutionEventDispatcher(execution, handlers);
-    for await (const ev of this.runInSessionStream(
-      sessionId,
-      command,
-      options,
-      signal,
-    )) {
-      if (ev.type === "init" && (ev.text ?? "") === "" && execution.id) {
-        (ev as any).text = execution.id;
-      }
-      await dispatcher.dispatch(ev as any);
-    }
-    return execution;
+    return this.consumeExecutionStream(
+      this.runInSessionStream(sessionId, command, options, signal),
+      handlers,
+      true,
+    );
   }
 
   async deleteSession(sessionId: string): Promise<void> {

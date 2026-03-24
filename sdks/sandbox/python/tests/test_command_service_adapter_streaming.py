@@ -51,6 +51,32 @@ class _SseTransport(httpx.AsyncBaseTransport):
                 request=request,
             )
 
+        if request.url.path == "/session/sess-1/run" and payload.get("command") == "pwd":
+            sse = (
+                b'event: stdout\n'
+                b'data: {"type":"stdout","text":"/var","timestamp":1}\n\n'
+                b'event: execution_complete\n'
+                b'data: {"type":"execution_complete","timestamp":2,"execution_time":3}\n\n'
+            )
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                content=sse,
+                request=request,
+            )
+
+        if request.url.path == "/session/sess-2/run" and payload.get("command") == "exit 7":
+            sse = (
+                b'data: {"type":"init","text":"sess-exec-2","timestamp":1}\n\n'
+                b'data: {"type":"error","error":{"ename":"CommandExecError","evalue":"7","traceback":["exit status 7"]},"timestamp":2}\n\n'
+            )
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                content=sse,
+                request=request,
+            )
+
         return httpx.Response(500, content=b"boom", request=request)
 
 
@@ -119,3 +145,47 @@ async def test_run_command_non_200_raises_api_exception() -> None:
 
     with pytest.raises(SandboxApiException):
         await adapter.run("other")
+
+
+@pytest.mark.asyncio
+async def test_run_in_session_streaming_uses_generated_fields_and_exit_code() -> None:
+    transport = _SseTransport()
+    cfg = ConnectionConfig(protocol="http", transport=transport)
+    endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
+    adapter = CommandsAdapter(cfg, endpoint)
+
+    execution = await adapter.run_in_session(
+        "sess-1",
+        "pwd",
+        working_directory="/var",
+        timeout=5000,
+    )
+
+    assert execution.logs.stdout[0].text == "/var"
+    assert execution.complete is not None
+    assert execution.complete.execution_time_in_millis == 3
+    assert execution.exit_code == 0
+
+    assert transport.last_request is not None
+    assert transport.last_request.url.path == "/session/sess-1/run"
+    request_body = json.loads(transport.last_request.content.decode("utf-8"))
+    assert request_body == {
+        "command": "pwd",
+        "cwd": "/var",
+        "timeout": 5000,
+    }
+
+
+@pytest.mark.asyncio
+async def test_run_in_session_non_zero_exit_updates_exit_code() -> None:
+    cfg = ConnectionConfig(protocol="http", transport=_SseTransport())
+    endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
+    adapter = CommandsAdapter(cfg, endpoint)
+
+    execution = await adapter.run_in_session("sess-2", "exit 7")
+
+    assert execution.id == "sess-exec-2"
+    assert execution.error is not None
+    assert execution.error.value == "7"
+    assert execution.complete is None
+    assert execution.exit_code == 7

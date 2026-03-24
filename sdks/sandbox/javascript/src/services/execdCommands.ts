@@ -53,16 +53,16 @@ export interface ExecdCommands {
    * Create a bash session with optional working directory.
    * Returns session ID for use with runInSession and deleteSession.
    */
-  createSession(options?: { cwd?: string }): Promise<string>;
+  createSession(options?: { workingDirectory?: string }): Promise<string>;
 
   /**
    * Run a shell command in an existing bash session (SSE stream, same event shape as run).
-   * Optional cwd and timeout apply to this run only; session state (e.g. env) persists.
+   * Optional workingDirectory and timeout apply to this run only; session state (e.g. env) persists.
    */
   runInSession(
     sessionId: string,
     command: string,
-    options?: { cwd?: string; timeout?: number },
+    options?: { workingDirectory?: string; timeout?: number },
     handlers?: ExecutionHandlers,
     signal?: AbortSignal,
   ): Promise<CommandExecution>;

@@ -269,7 +269,7 @@ data: {"type":"error","error":{"ename":"CommandExecError","evalue":"","traceback
     // --- Bash session API integration tests ---
 
     [Fact]
-    public async Task CreateSessionAsync_ShouldReturnSessionId_WhenCwdProvided()
+    public async Task CreateSessionAsync_ShouldReturnSessionId_WhenWorkingDirectoryProvided()
     {
         var handler = new StubHttpMessageHandler(async (request, _) =>
         {
@@ -287,7 +287,7 @@ data: {"type":"error","error":{"ename":"CommandExecError","evalue":"","traceback
         });
         var adapter = CreateAdapter(handler);
 
-        var sessionId = await adapter.CreateSessionAsync(new CreateSessionOptions { Cwd = "/tmp" });
+        var sessionId = await adapter.CreateSessionAsync(new CreateSessionOptions { WorkingDirectory = "/tmp" });
 
         sessionId.Should().Be("sess-abc123");
         handler.RequestUris.Should().Contain(uri => uri.EndsWith("/session"));
@@ -356,11 +356,39 @@ data: {"type":"error","error":{"ename":"CommandExecError","evalue":"","traceback
         var run = await adapter.RunInSessionAsync(
             "sess-1",
             "pwd",
-            new RunInSessionOptions { Cwd = "/var", Timeout = 5000 });
+            new RunInSessionOptions { WorkingDirectory = "/var", Timeout = 5000 });
 
         run.Should().NotBeNull();
         run.Logs.Stdout.Should().ContainSingle(m => m.Text == "/var");
+        run.ExitCode.Should().Be(0);
         handler.RequestUris.Should().Contain(uri => uri.Contains("/session/sess-1/run"));
+    }
+
+    [Fact]
+    public async Task RunInSessionAsync_ShouldInferNonZeroExitCodeFromFinalErrorState()
+    {
+        var handler = new StubHttpMessageHandler((_, _) =>
+        {
+            const string sse = """
+data: {"type":"init","text":"sess-cmd-2","timestamp":1}
+
+data: {"type":"error","error":{"ename":"CommandExecError","evalue":"7","traceback":["exit status 7"]},"timestamp":2}
+
+""";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(sse, Encoding.UTF8, "text/event-stream")
+            });
+        });
+        var adapter = CreateAdapter(handler);
+
+        var execution = await adapter.RunInSessionAsync("sess-2", "exit 7");
+
+        execution.Id.Should().Be("sess-cmd-2");
+        execution.Error.Should().NotBeNull();
+        execution.Error!.Value.Should().Be("7");
+        execution.Complete.Should().BeNull();
+        execution.ExitCode.Should().Be(7);
     }
 
     [Fact]
