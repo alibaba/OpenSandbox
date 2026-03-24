@@ -1,0 +1,25 @@
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: {{.PoolName}}
+  namespace: {{.Namespace}}
+spec:
+  podRecyclePolicy: {{.PodRecyclePolicy}}
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: {{.TaskExecutorImage}}
+        {{- if .TimeoutTest }}
+        # For timeout testing: sleep infinity won't respond to SIGTERM
+        # Container won't restart, triggering timeout after 90s
+        command: ["/bin/sh", "-c", "sleep infinity"]
+        {{- else }}
+        # Use a signal-handling process that can respond to SIGTERM for restart testing
+        command: ["/bin/sh", "-c", "trap 'exit 0' TERM; while true; do sleep 1; done"]
+        {{- end }}
+  capacitySpec:
+    bufferMax: {{.BufferMax}}
+    bufferMin: {{.BufferMin}}
+    poolMax: {{.PoolMax}}
+    poolMin: {{.PoolMin}}
