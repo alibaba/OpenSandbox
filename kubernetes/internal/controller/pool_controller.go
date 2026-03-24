@@ -193,6 +193,7 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 			delay = defaultRetryTime
 			if err = r.handlePodRecycle(ctx, latestPool, pod); err != nil {
 				log.Error(err, "Failed to handle pod recycle", "pod", pod.Name)
+				return err
 			}
 		}
 		if int32(len(scheRes.idlePods)) >= scheRes.supplySandbox {

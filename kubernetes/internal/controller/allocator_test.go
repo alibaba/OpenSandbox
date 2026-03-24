@@ -274,19 +274,25 @@ func TestAllocatorSchedule(t *testing.T) {
 					},
 				},
 			},
+			// Pod1 is allocated to sbx1 in pool level
 			poolAlloc: &PoolAllocation{
-				PodAllocation: map[string]string{},
+				PodAllocation: map[string]string{
+					"pod1": "sbx1",
+				},
 			},
+			// Sandbox has pod1 allocated
 			sandboxAlloc: &SandboxAllocation{
 				Pods: []string{
 					"pod1",
 				},
 			},
+			// Sandbox releases pod1
 			release: &AllocationRelease{
 				Pods: []string{
 					"pod1",
 				},
 			},
+			// Pod1 should be removed from allocation and added to recycle
 			wantStatus: &AllocStatus{
 				PodAllocation: map[string]string{},
 				PodSupplement: 0,

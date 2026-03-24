@@ -412,9 +412,11 @@ func (allocator *defaultAllocator) doDeallocate(ctx context.Context, status *All
 		return false, err
 	}
 	for _, pod := range toRelease.Pods {
-		delete(status.PodAllocation, pod)
-		deallocate = true
-		status.PodsToRecycle = append(status.PodsToRecycle, pod)
+		if _, ok := status.PodAllocation[pod]; ok {
+			delete(status.PodAllocation, pod)
+			deallocate = true
+			status.PodsToRecycle = append(status.PodsToRecycle, pod)
+		}
 	}
 	pods := make([]string, 0)
 	for _, pod := range allocatedPods {
