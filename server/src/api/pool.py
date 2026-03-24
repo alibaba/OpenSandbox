@@ -75,7 +75,7 @@ def _get_pool_service():
 # ============================================================================
 
 @router.post(
-    "/pools",
+    "/warmpools",
     response_model=PoolResponse,
     response_model_exclude_none=True,
     status_code=status.HTTP_201_CREATED,
@@ -111,7 +111,7 @@ async def create_pool(
 
 
 @router.get(
-    "/pools",
+    "/warmpools",
     response_model=ListPoolsResponse,
     response_model_exclude_none=True,
     responses={
@@ -140,7 +140,7 @@ async def list_pools(
 
 
 @router.get(
-    "/pools/{pool_name}",
+    "/warmpools/{pool_name}",
     response_model=PoolResponse,
     response_model_exclude_none=True,
     responses={
@@ -170,7 +170,7 @@ async def get_pool(
 
 
 @router.put(
-    "/pools/{pool_name}",
+    "/warmpools/{pool_name}",
     response_model=PoolResponse,
     response_model_exclude_none=True,
     responses={
@@ -207,7 +207,7 @@ async def update_pool(
 
 
 @router.delete(
-    "/pools/{pool_name}",
+    "/warmpools/{pool_name}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         204: {"description": "Pool deleted successfully"},
