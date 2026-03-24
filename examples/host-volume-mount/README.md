@@ -17,8 +17,8 @@ This example demonstrates how to mount host directories into sandbox containers 
 ```shell
 git clone git@github.com:alibaba/OpenSandbox.git
 cd OpenSandbox/server
-cp example.config.toml ~/.sandbox.toml
-uv sync && uv run python -m src.main
+cp opensandbox_server/examples/example.config.toml ~/.sandbox.toml
+uv sync && uv run python -m opensandbox_server.main
 ```
 
 ### 2. Configure Allowed Host Paths

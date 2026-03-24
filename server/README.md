@@ -475,10 +475,10 @@ curl -X DELETE \
 
 ### Component responsibilities
 
-- **API Layer** (`src/api/`): HTTP request handling, validation, and response formatting
-- **Service Layer** (`src/services/`): Business logic for sandbox lifecycle operations
-- **Middleware** (`src/middleware/`): Cross-cutting concerns (authentication, logging)
-- **Configuration** (`src/config.py`): Centralized configuration management
+- **API Layer** (`opensandbox_server/api/`): HTTP request handling, validation, and response formatting
+- **Service Layer** (`opensandbox_server/services/`): Business logic for sandbox lifecycle operations
+- **Middleware** (`opensandbox_server/middleware/`): Cross-cutting concerns (authentication, logging)
+- **Configuration** (`opensandbox_server/config.py`): Centralized configuration management
 - **Runtime Implementations**: Platform-specific sandbox orchestration
 
 ### Sandbox lifecycle states
@@ -623,7 +623,7 @@ uv run pytest
 
 **Run with coverage**:
 ```bash
-uv run pytest --cov=src --cov-report=html
+uv run pytest --cov=opensandbox_server --cov-report=html
 ```
 
 **Run specific test**:

@@ -73,8 +73,8 @@ opensandbox-server init-config ~/.sandbox.toml --example docker-zh
 > git clone https://github.com/alibaba/OpenSandbox.git
 > cd OpenSandbox/server
 > uv sync
-> cp example.config.toml ~/.sandbox.toml # Copy configuration file
-> uv run python -m src.main # Start the service
+> cp opensandbox_server/examples/example.config.zh.toml ~/.sandbox.toml # 从源码目录复制配置文件
+> uv run python -m opensandbox_server.main # Start the service
 > ```
 
 #### 2. 启动沙箱 Server

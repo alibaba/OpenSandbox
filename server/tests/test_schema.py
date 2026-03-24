@@ -17,7 +17,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.api.schema import (
+from opensandbox_server.api.schema import (
     CreateSandboxRequest,
     Host,
     ImageSpec,

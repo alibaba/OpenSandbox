@@ -85,7 +85,7 @@ TTL is currently mandatory.
 
 Relevant files:
 
-- `server/src/api/schema.py`
+- `server/opensandbox_server/api/schema.py`
 - `specs/sandbox-lifecycle.yml`
 
 Current constraints:
@@ -99,7 +99,7 @@ Current constraints:
 
 Relevant file:
 
-- `server/src/services/docker.py`
+- `server/opensandbox_server/services/docker.py`
 
 Current behavior:
 
@@ -113,9 +113,9 @@ Current behavior:
 
 Relevant files:
 
-- `server/src/services/k8s/kubernetes_service.py`
-- `server/src/services/k8s/batchsandbox_provider.py`
-- `server/src/services/k8s/agent_sandbox_provider.py`
+- `server/opensandbox_server/services/k8s/kubernetes_service.py`
+- `server/opensandbox_server/services/k8s/batchsandbox_provider.py`
+- `server/opensandbox_server/services/k8s/agent_sandbox_provider.py`
 
 Current behavior:
 
@@ -197,7 +197,7 @@ Recommended error message:
 
 Files to update:
 
-- `server/src/api/schema.py`
+- `server/opensandbox_server/api/schema.py`
 - `specs/sandbox-lifecycle.yml`
 
 Required changes:
@@ -217,7 +217,7 @@ Recommended validation rule:
 
 File to update:
 
-- `server/src/services/docker.py`
+- `server/opensandbox_server/services/docker.py`
 
 ### Target behavior
 
@@ -302,10 +302,10 @@ Target logic:
 
 Files to update:
 
-- `server/src/services/k8s/kubernetes_service.py`
-- `server/src/services/k8s/workload_provider.py`
-- `server/src/services/k8s/batchsandbox_provider.py`
-- `server/src/services/k8s/agent_sandbox_provider.py`
+- `server/opensandbox_server/services/k8s/kubernetes_service.py`
+- `server/opensandbox_server/services/k8s/workload_provider.py`
+- `server/opensandbox_server/services/k8s/batchsandbox_provider.py`
+- `server/opensandbox_server/services/k8s/agent_sandbox_provider.py`
 
 ### Key risk
 
@@ -378,8 +378,8 @@ If not supported by the CRD:
 
 Files likely affected:
 
-- `server/src/services/sandbox_service.py`
-- `server/src/services/k8s/workload_provider.py`
+- `server/opensandbox_server/services/sandbox_service.py`
+- `server/opensandbox_server/services/k8s/workload_provider.py`
 
 Required updates:
 
@@ -500,7 +500,7 @@ Follow-up checks:
 
 ## Suggested Implementation Order
 
-1. Update schema models in `server/src/api/schema.py`
+1. Update schema models in `server/opensandbox_server/api/schema.py`
 2. Update OpenAPI spec in `specs/sandbox-lifecycle.yml`
 3. Refactor Docker runtime to support `expires_at: Optional[datetime]`
 4. Add Kubernetes provider capability plumbing

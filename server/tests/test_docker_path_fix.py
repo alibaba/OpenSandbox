@@ -14,8 +14,8 @@
 
 import posixpath
 from unittest.mock import MagicMock, patch
-from src.services.docker import DockerSandboxService, EXECED_INSTALL_PATH, BOOTSTRAP_PATH
-from src.config import AppConfig, RuntimeConfig, ServerConfig
+from opensandbox_server.services.docker import DockerSandboxService, EXECED_INSTALL_PATH, BOOTSTRAP_PATH
+from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig
 
 def _app_config() -> AppConfig:
     return AppConfig(
@@ -32,7 +32,7 @@ def test_container_internal_paths_use_posix_style():
     assert EXECED_INSTALL_PATH == "/opt/opensandbox/execd"
     assert BOOTSTRAP_PATH == "/opt/opensandbox/bootstrap.sh"
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_copy_execd_to_container_uses_posix_dirname(mock_docker):
     """Verify _copy_execd_to_container uses posixpath for target directory."""
     service = DockerSandboxService(config=_app_config())
@@ -49,7 +49,7 @@ def test_copy_execd_to_container_uses_posix_dirname(mock_docker):
         expected_parent = posixpath.dirname(EXECED_INSTALL_PATH.rstrip("/")) or "/"
         mock_ensure_dir.assert_called_once_with(mock_container, expected_parent, "test-sandbox")
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_install_bootstrap_script_uses_posix_dirname(mock_docker):
     """Verify _install_bootstrap_script uses posixpath for script directory."""
     service = DockerSandboxService(config=_app_config())

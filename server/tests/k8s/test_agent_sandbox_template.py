@@ -19,7 +19,7 @@ Unit tests for AgentSandboxTemplateManager.
 import pytest
 import yaml
 
-from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
+from opensandbox_server.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 
 
 class TestAgentSandboxTemplateManager:

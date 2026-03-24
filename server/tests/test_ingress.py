@@ -13,15 +13,15 @@
 # limitations under the License.
 
 
-from src.config import (
+from opensandbox_server.config import (
     GatewayConfig,
     GatewayRouteModeConfig,
     IngressConfig,
     INGRESS_MODE_DIRECT,
     INGRESS_MODE_GATEWAY,
 )
-from src.services.constants import OPEN_SANDBOX_INGRESS_HEADER
-from src.services.helpers import format_ingress_endpoint
+from opensandbox_server.services.constants import OPEN_SANDBOX_INGRESS_HEADER
+from opensandbox_server.services.helpers import format_ingress_endpoint
 
 
 def test_format_ingress_endpoint_returns_none_when_not_gateway():

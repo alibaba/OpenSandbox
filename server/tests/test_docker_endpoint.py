@@ -15,13 +15,13 @@
 import pytest
 from unittest.mock import MagicMock, patch
 
-from src.services.constants import (
+from opensandbox_server.services.constants import (
     OPEN_SANDBOX_EGRESS_AUTH_HEADER,
     SANDBOX_EMBEDDING_PROXY_PORT_LABEL,
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
 )
-from src.services.docker import DockerSandboxService
-from src.config import AppConfig, RuntimeConfig, DockerConfig, ServerConfig
+from opensandbox_server.services.docker import DockerSandboxService
+from opensandbox_server.config import AppConfig, RuntimeConfig, DockerConfig, ServerConfig
 
 @pytest.fixture
 def mock_docker_service():
@@ -54,7 +54,7 @@ def test_get_endpoint_host_mode(mock_docker_service):
     mock_container.attrs = {"State": {"Running": True}}
     mock_client.containers.list.return_value = [mock_container]
 
-    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="10.0.0.1"):
+    with patch("opensandbox_server.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="10.0.0.1"):
         endpoint = service.get_endpoint("sbx-123", 8080, resolve_internal=False)
         assert endpoint.endpoint == "10.0.0.1:8080"
 
@@ -79,7 +79,7 @@ def test_get_endpoint_bridge_http_port(mock_docker_service):
     }
     mock_client.containers.list.return_value = [mock_container]
 
-    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
+    with patch("opensandbox_server.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
         endpoint = service.get_endpoint("sbx-123", 8080, resolve_internal=False)
 
     assert endpoint.endpoint == "192.168.1.100:50001"
@@ -102,7 +102,7 @@ def test_get_endpoint_bridge_other_port_via_execd(mock_docker_service):
     }
     mock_client.containers.list.return_value = [mock_container]
 
-    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
+    with patch("opensandbox_server.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
         endpoint = service.get_endpoint("sbx-123", 6000, resolve_internal=False)
 
     assert endpoint.endpoint == "192.168.1.100:50002/proxy/6000"
@@ -126,7 +126,7 @@ def test_get_endpoint_bridge_egress_port_includes_auth_header(mock_docker_servic
     }
     mock_client.containers.list.return_value = [mock_container]
 
-    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
+    with patch("opensandbox_server.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
         endpoint = service.get_endpoint("sbx-123", 18080, resolve_internal=False)
 
     assert endpoint.endpoint == "192.168.1.100:50002/proxy/18080"
@@ -152,7 +152,7 @@ def test_get_endpoint_bridge_non_egress_port_still_includes_instance_auth_header
     }
     mock_client.containers.list.return_value = [mock_container]
 
-    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
+    with patch("opensandbox_server.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="192.168.1.100"):
         endpoint = service.get_endpoint("sbx-123", 44772, resolve_internal=False)
 
     assert endpoint.endpoint == "192.168.1.100:50002/proxy/44772"
@@ -277,7 +277,7 @@ def test_get_endpoint_bridge_uses_docker_host_ip_when_server_in_container():
     }
     mock_client.containers.list.return_value = [mock_container]
 
-    with patch("src.services.docker._running_inside_docker_container", return_value=True):
+    with patch("opensandbox_server.services.docker._running_inside_docker_container", return_value=True):
         endpoint = service.get_endpoint("sbx-123", 44772, resolve_internal=False)
 
     assert endpoint.endpoint == "10.57.1.91:40109/proxy/44772"
@@ -308,7 +308,7 @@ def test_get_endpoint_user_defined_network_external(mock_docker_service):
     }
     mock_client.containers.list.return_value = [mock_container]
 
-    with patch("src.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="10.0.1.1"):
+    with patch("opensandbox_server.services.sandbox_service.SandboxService._resolve_bind_ip", return_value="10.0.1.1"):
         ep_http = service.get_endpoint("sbx-123", 8080, resolve_internal=False)
         ep_proxy = service.get_endpoint("sbx-123", 5000, resolve_internal=False)
 

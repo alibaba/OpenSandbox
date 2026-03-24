@@ -450,10 +450,10 @@ curl -X DELETE \
 
 ### 组件职责
 
-- **API 层**（`src/api/`）：HTTP 请求处理、验证和响应格式化
-- **服务层**（`src/services/`）：沙箱生命周期操作的业务逻辑
-- **中间件**（`src/middleware/`）：横切关注点（认证、日志）
-- **配置**（`src/config.py`）：集中式配置管理
+- **API 层**（`opensandbox_server/api/`）：HTTP 请求处理、验证和响应格式化
+- **服务层**（`opensandbox_server/services/`）：沙箱生命周期操作的业务逻辑
+- **中间件**（`opensandbox_server/middleware/`）：横切关注点（认证、日志）
+- **配置**（`opensandbox_server/config.py`）：集中式配置管理
 - **运行时实现**：平台特定的沙箱编排
 
 ### 沙箱生命周期状态
@@ -598,7 +598,7 @@ uv run pytest
 
 **带覆盖率运行**：
 ```bash
-uv run pytest --cov=src --cov-report=html
+uv run pytest --cov=opensandbox_server --cov-report=html
 ```
 
 **运行特定测试**：

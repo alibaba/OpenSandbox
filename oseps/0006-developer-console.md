@@ -49,8 +49,8 @@ OIDC JWT validation, PostgreSQL RBAC bindings, and durable audit logs.
 
 Today OpenSandbox exposes lifecycle APIs and Swagger docs, but developers/operators still need to manage sandbox resources via APIs. This creates friction for common workflows (search/create/renew/delete), weakens governance in multi-user environments, and raises onboarding cost for teams that are not API-first.
 
-- Server auth today is global API key only (`server/src/middleware/auth.py` with `OPEN-SANDBOX-API-KEY`).
-- Lifecycle operations already exist and are stable (`server/src/api/lifecycle.py`, `specs/sandbox-lifecycle.yml`).
+- Server auth today is global API key only (`server/opensandbox_server/middleware/auth.py` with `OPEN-SANDBOX-API-KEY`).
+- Lifecycle operations already exist and are stable (`server/opensandbox_server/api/lifecycle.py`, `specs/sandbox-lifecycle.yml`).
 - Filtering by state/metadata already exists (`GET /sandboxes` and `matches_filter`).
 - Sandbox metadata already maps to labels in Docker/Kubernetes services and is returned in list/get responses.
 
@@ -152,9 +152,9 @@ flowchart LR
 
 Quick summary of the relevant server code as it stands today:
 
-- Auth middleware: API key only (`server/src/middleware/auth.py`, header `OPEN-SANDBOX-API-KEY`).
-- Lifecycle routes: `server/src/api/lifecycle.py`.
-- Service implementations: `server/src/services/docker.py` (Docker), `server/src/services/k8s/kubernetes_service.py` (Kubernetes).
+- Auth middleware: API key only (`server/opensandbox_server/middleware/auth.py`, header `OPEN-SANDBOX-API-KEY`).
+- Lifecycle routes: `server/opensandbox_server/api/lifecycle.py`.
+- Service implementations: `server/opensandbox_server/services/docker.py` (Docker), `server/opensandbox_server/services/k8s/kubernetes_service.py` (Kubernetes).
 - Filtering: `state` and `metadata` filters in route parsing, `matches_filter` helper.
 - Metadata: already stored as Docker/Kubernetes labels.
 
@@ -219,7 +219,7 @@ Canonicalization:
 
 #### 1. Configuration
 
-Extend `server/src/config.py` with auth/authz sections.
+Extend `server/opensandbox_server/config.py` with auth/authz sections.
 
 `auth.mode` controls high-level authentication behavior:
 
@@ -274,7 +274,7 @@ jwks_url = "https://www.googleapis.com/oauth2/v3/certs"
 
 #### 2. Authentication Middleware
 
-Changes to `server/src/middleware/auth.py`:
+Changes to `server/opensandbox_server/middleware/auth.py`:
 
 1. Preserve current API key path exactly.
 2. Add user principal extraction path (phase-gated by config).
@@ -284,12 +284,12 @@ Changes to `server/src/middleware/auth.py`:
 
 #### 3. Authorization Enforcement
 
-New module `server/src/middleware/authorization.py` with a single entry point:
+New module `server/opensandbox_server/middleware/authorization.py` with a single entry point:
 
 - `authorize_action(principal, action, sandbox=None)`.
 - Scope checks for owner/team.
 
-Integrate into `server/src/api/lifecycle.py` per route before invoking mutating service operations.
+Integrate into `server/opensandbox_server/api/lifecycle.py` per route before invoking mutating service operations.
 
 For list operations:
 Apply server-side scope filter in addition to client-provided filters.

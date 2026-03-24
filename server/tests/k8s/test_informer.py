@@ -17,7 +17,7 @@
 import time
 from unittest.mock import MagicMock
 
-from src.services.k8s.informer import WorkloadInformer
+from opensandbox_server.services.k8s.informer import WorkloadInformer
 
 
 def _make_informer(**kwargs) -> WorkloadInformer:

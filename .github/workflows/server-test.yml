@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'server/src/**'
+      - 'server/opensandbox_server/**'
       - 'server/tests/**'
 
 permissions:
@@ -91,7 +91,7 @@ jobs:
           EOF
 
           # Start server in background
-          uv run python -m src.main > app.log 2>&1 &
+          uv run python -m opensandbox_server.main > app.log 2>&1 &
 
           # Wait for server to start
           sleep 10

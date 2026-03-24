@@ -16,8 +16,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-from src.api import lifecycle
-from src.api.schema import (
+from opensandbox_server.api import lifecycle
+from opensandbox_server.api.schema import (
     ImageSpec,
     ListSandboxesResponse,
     PaginationInfo,

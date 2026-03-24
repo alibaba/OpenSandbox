@@ -48,5 +48,5 @@ def stub_workload_informer(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        "src.services.k8s.client.WorkloadInformer", _FakeInformer
+        "opensandbox_server.services.k8s.client.WorkloadInformer", _FakeInformer
     )

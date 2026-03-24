@@ -21,10 +21,10 @@ from typing import Dict, Any
 
 import pytest
 
-from src.api.schema import CreateSandboxRequest, ImageSpec, ResourceLimits
-from src.config import KubernetesRuntimeConfig
-from src.services.k8s.client import K8sClient
-from src.services.k8s.provider_factory import PROVIDER_TYPE_BATCHSANDBOX
+from opensandbox_server.api.schema import CreateSandboxRequest, ImageSpec, ResourceLimits
+from opensandbox_server.config import KubernetesRuntimeConfig
+from opensandbox_server.services.k8s.client import K8sClient
+from opensandbox_server.services.k8s.provider_factory import PROVIDER_TYPE_BATCHSANDBOX
 
 
 @pytest.fixture
@@ -205,7 +205,7 @@ def fixed_datetime():
 @pytest.fixture
 def k8s_app_config(k8s_runtime_config):
     """Provide complete app configuration (Kubernetes type)"""
-    from src.config import AppConfig, RuntimeConfig, ServerConfig
+    from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig
     
     return AppConfig(
         server=ServerConfig(
@@ -225,7 +225,7 @@ def k8s_app_config(k8s_runtime_config):
 @pytest.fixture
 def agent_sandbox_app_config(agent_sandbox_runtime_config):
     """Provide complete app configuration (kubernetes + agent-sandbox provider)"""
-    from src.config import AppConfig, RuntimeConfig, ServerConfig, AgentSandboxRuntimeConfig
+    from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig, AgentSandboxRuntimeConfig
 
     return AppConfig(
         server=ServerConfig(
@@ -250,7 +250,7 @@ def agent_sandbox_app_config(agent_sandbox_runtime_config):
 @pytest.fixture
 def app_config_no_k8s():
     """Provide app configuration without Kubernetes config"""
-    from src.config import AppConfig, RuntimeConfig, ServerConfig
+    from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig
     
     return AppConfig(
         server=ServerConfig(
@@ -270,7 +270,7 @@ def app_config_no_k8s():
 @pytest.fixture
 def app_config_docker():
     """Provide Docker type app configuration"""
-    from src.config import AppConfig, RuntimeConfig, ServerConfig
+    from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig
     
     return AppConfig(
         server=ServerConfig(
@@ -292,8 +292,8 @@ def k8s_service(k8s_app_config):
     """Provide mocked KubernetesSandboxService"""
     from unittest.mock import patch, MagicMock
     
-    with patch('src.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client_cls, \
-         patch('src.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
+    with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client_cls, \
+         patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
         
         # Mock K8sClient instance
         mock_k8s_client = MagicMock()
@@ -303,7 +303,7 @@ def k8s_service(k8s_app_config):
         mock_provider = MagicMock()
         mock_create_provider.return_value = mock_provider
         
-        from src.services.k8s.kubernetes_service import KubernetesSandboxService
+        from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
         service = KubernetesSandboxService(k8s_app_config)
         
         # Save mock objects for access in tests
@@ -316,7 +316,7 @@ def k8s_service(k8s_app_config):
 @pytest.fixture
 def create_sandbox_request():
     """Provide standard sandbox creation request"""
-    from src.api.schema import ResourceLimits
+    from opensandbox_server.api.schema import ResourceLimits
     
     return CreateSandboxRequest(
         image=ImageSpec(uri="python:3.9"),
@@ -361,7 +361,7 @@ def isolated_registry():
     Saves the original registry before test and restores it after,
     preventing global state pollution.
     """
-    from src.services.k8s import provider_factory
+    from opensandbox_server.services.k8s import provider_factory
 
     # Save original registry
     original_registry = provider_factory._PROVIDER_REGISTRY.copy()

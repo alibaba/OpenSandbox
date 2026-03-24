@@ -22,7 +22,7 @@ import pytest
 from fastapi import HTTPException, status
 from pydantic import ValidationError
 
-from src.config import (
+from opensandbox_server.config import (
     AppConfig,
     EGRESS_MODE_DNS,
     EgressConfig,
@@ -31,9 +31,9 @@ from src.config import (
     StorageConfig,
     IngressConfig,
 )
-from src.extensions import ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY
-from src.services.constants import EGRESS_MODE_ENV, OPENSANDBOX_EGRESS_TOKEN
-from src.services.constants import (
+from opensandbox_server.extensions import ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY
+from opensandbox_server.services.constants import EGRESS_MODE_ENV, OPENSANDBOX_EGRESS_TOKEN
+from opensandbox_server.services.constants import (
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_EXPIRES_AT_LABEL,
     SANDBOX_ID_LABEL,
@@ -41,9 +41,9 @@ from src.services.constants import (
     SANDBOX_OSSFS_MOUNTS_LABEL,
     SandboxErrorCodes,
 )
-from src.services.docker import DockerSandboxService, PendingSandbox
-from src.services.helpers import parse_memory_limit, parse_nano_cpus, parse_timestamp
-from src.api.schema import (
+from opensandbox_server.services.docker import DockerSandboxService, PendingSandbox
+from opensandbox_server.services.helpers import parse_memory_limit, parse_nano_cpus, parse_timestamp
+from opensandbox_server.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
     Host,
@@ -115,7 +115,7 @@ def test_env_allows_empty_string_and_skips_none():
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_applies_security_defaults(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -141,6 +141,7 @@ async def test_create_sandbox_applies_security_defaults(mock_docker):
     with (
         patch.object(service, "_ensure_image_available"),
         patch.object(service, "_prepare_sandbox_runtime"),
+        patch.object(service, "_allocate_distinct_host_ports", return_value=(40001, 40002)),
     ):
         await service.create_sandbox(request)
 
@@ -169,7 +170,7 @@ async def test_create_sandbox_applies_security_defaults(mock_docker):
     ],
 )
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_prepare_runtime_failure_triggers_cleanup(
     mock_docker, runtime_exc, expected_status, expect_wrapped_error
 ):
@@ -208,7 +209,7 @@ async def test_prepare_runtime_failure_triggers_cleanup(
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_rejects_invalid_metadata(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -234,7 +235,7 @@ async def test_create_sandbox_rejects_invalid_metadata(mock_docker):
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_rejects_timeout_above_configured_maximum(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -262,7 +263,7 @@ async def test_create_sandbox_rejects_timeout_above_configured_maximum(mock_dock
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_requires_entrypoint(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -289,7 +290,7 @@ async def test_create_sandbox_requires_entrypoint(mock_docker):
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_network_policy_rejected_on_host_mode(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -318,7 +319,7 @@ async def test_network_policy_rejected_on_host_mode(mock_docker):
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_network_policy_requires_egress_image(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -347,7 +348,7 @@ async def test_network_policy_requires_egress_image(mock_docker):
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_egress_sidecar_injection_and_capabilities(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -379,7 +380,7 @@ async def test_egress_sidecar_injection_and_capabilities(mock_docker):
     )
 
     with (
-        patch("src.services.docker.generate_egress_token", return_value="egress-token"),
+        patch("opensandbox_server.services.docker.generate_egress_token", return_value="egress-token"),
         patch.object(service, "_allocate_distinct_host_ports", return_value=(44772, 8080)),
         patch.object(service, "_ensure_image_available"),
         patch.object(service, "_prepare_sandbox_runtime"),
@@ -419,7 +420,7 @@ async def test_egress_sidecar_injection_and_capabilities(mock_docker):
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_network_policy_rejected_on_user_defined_network(mock_docker):
     """networkPolicy must be rejected when network_mode is a user-defined named network."""
     mock_client = MagicMock()
@@ -450,7 +451,7 @@ async def test_network_policy_rejected_on_user_defined_network(mock_docker):
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_fails_when_user_defined_network_not_found(mock_docker):
     """create_sandbox raises 400 with a clear message when the named network does not exist."""
     from docker.errors import NotFound as DockerNotFound
@@ -483,7 +484,7 @@ async def test_create_sandbox_fails_when_user_defined_network_not_found(mock_doc
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_user_defined_network_uses_correct_network_mode(mock_docker):
     """Containers created on a user-defined network use the network name as network_mode."""
 
@@ -514,6 +515,7 @@ async def test_create_sandbox_user_defined_network_uses_correct_network_mode(moc
     with (
         patch.object(service, "_ensure_image_available"),
         patch.object(service, "_prepare_sandbox_runtime"),
+        patch.object(service, "_allocate_distinct_host_ports", return_value=(40001, 40002)),
     ):
         await service.create_sandbox(request)
 
@@ -521,7 +523,7 @@ async def test_create_sandbox_user_defined_network_uses_correct_network_mode(moc
     assert call_kwargs["host_config"]["network_mode"] == "my-app-net"
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_validate_network_skipped_for_builtin_modes(mock_docker):
     """_validate_network_exists does NOT call the Docker API for host or bridge modes."""
     mock_client = MagicMock()
@@ -537,7 +539,7 @@ def test_validate_network_skipped_for_builtin_modes(mock_docker):
         mock_client.networks.get.assert_not_called()
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_egress_sidecar_cleanup_uses_api_remove_when_lookup_fails(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -579,7 +581,7 @@ def test_egress_sidecar_cleanup_uses_api_remove_when_lookup_fails(mock_docker):
     mock_client.api.remove_container.assert_called_once_with("sidecar-id", force=True)
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_egress_sidecar_missing_id_preserves_specific_error(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -621,7 +623,7 @@ def test_egress_sidecar_missing_id_preserves_specific_error(mock_docker):
     mock_client.api.remove_container.assert_not_called()
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_egress_sidecar_cleanup_wraps_unexpected_lookup_error(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -753,7 +755,7 @@ def test_build_labels_stores_extensions_json():
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_with_manual_cleanup_completes_full_create_path(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -795,7 +797,7 @@ def test_restore_existing_sandboxes_ignores_manual_cleanup_without_warning():
 
     with (
         patch.object(service.docker_client.containers, "list", return_value=[manual_container]),
-        patch("src.services.docker.logger.warning") as mock_warning,
+        patch("opensandbox_server.services.docker.logger.warning") as mock_warning,
         patch.object(service, "_schedule_expiration") as mock_schedule,
     ):
         service._restore_existing_sandboxes()
@@ -826,7 +828,7 @@ def test_renew_expiration_rejects_manual_cleanup_sandbox():
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_async_returns_provisioning(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -865,7 +867,7 @@ async def test_create_sandbox_async_returns_provisioning(mock_docker):
 
 
 @pytest.mark.asyncio
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 async def test_get_sandbox_returns_pending_state(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -902,7 +904,7 @@ async def test_get_sandbox_returns_pending_state(mock_docker):
     assert response.entrypoint == ["python", "app.py"]
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_list_sandboxes_deduplicates_container_and_pending(mock_docker):
     # Build a realistic container mock to avoid parse_timestamp errors.
     container = MagicMock()
@@ -950,7 +952,7 @@ def test_list_sandboxes_deduplicates_container_and_pending(mock_docker):
     assert response.items[0].metadata == {"team": "c"}
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_get_sandbox_prefers_container_over_pending(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -995,7 +997,7 @@ def test_get_sandbox_prefers_container_over_pending(mock_docker):
     assert sandbox.entrypoint == ["/bin/sh"]
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 def test_async_worker_cleans_up_leftover_container_on_failure(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -1043,7 +1045,7 @@ def test_async_worker_cleans_up_leftover_container_on_failure(mock_docker):
 # ============================================================================
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 class TestBuildVolumeBinds:
     """Tests for DockerSandboxService._build_volume_binds instance method."""
 
@@ -1234,7 +1236,7 @@ class TestBuildVolumeBinds:
         assert binds == ["/mnt/ossfs/bucket-test-3/task-001:/mnt/data:rw"]
 
 
-@patch("src.services.docker.docker")
+@patch("opensandbox_server.services.docker.docker")
 class TestDockerVolumeValidation:
     """Tests for volume validation in DockerSandboxService.create_sandbox."""
 
@@ -1314,10 +1316,10 @@ class TestDockerVolumeValidation:
             ],
         )
 
-        with patch("src.services.ossfs_mixin.os.name", "posix"):
-            with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
-                with patch("src.services.ossfs_mixin.os.makedirs"):
-                    with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+        with patch("opensandbox_server.services.ossfs_mixin.os.name", "posix"):
+            with patch("opensandbox_server.services.ossfs_mixin.os.path.ismount", return_value=False):
+                with patch("opensandbox_server.services.ossfs_mixin.os.makedirs"):
+                    with patch("opensandbox_server.services.ossfs_mixin.subprocess.run") as mock_run:
                         mock_run.return_value = MagicMock(returncode=1, stderr="mount failed")
                         with pytest.raises(HTTPException) as exc_info:
                             await service.create_sandbox(request)
@@ -1342,7 +1344,7 @@ class TestDockerVolumeValidation:
             mount_path="/mnt/data",
         )
 
-        with patch("src.services.ossfs_mixin.os.name", "nt"):
+        with patch("opensandbox_server.services.ossfs_mixin.os.name", "nt"):
             with pytest.raises(HTTPException) as exc_info:
                 service._validate_ossfs_volume(volume)
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
@@ -1369,8 +1371,8 @@ class TestDockerVolumeValidation:
         )
         backend_path = "/mnt/ossfs/bucket-test-3/task-001"
 
-        with patch("src.services.ossfs_mixin.os.makedirs"):
-            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+        with patch("opensandbox_server.services.ossfs_mixin.os.makedirs"):
+            with patch("opensandbox_server.services.ossfs_mixin.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stderr="")
                 service._mount_ossfs_backend_path(volume, backend_path)
 
@@ -1404,8 +1406,8 @@ class TestDockerVolumeValidation:
         )
         backend_path = "/mnt/ossfs/bucket-test-3/task-001"
 
-        with patch("src.services.ossfs_mixin.os.makedirs"):
-            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+        with patch("opensandbox_server.services.ossfs_mixin.os.makedirs"):
+            with patch("opensandbox_server.services.ossfs_mixin.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stderr="")
                 service._mount_ossfs_backend_path(volume, backend_path)
 
@@ -1483,10 +1485,10 @@ class TestDockerVolumeValidation:
             ],
         )
 
-        with patch("src.services.ossfs_mixin.os.name", "posix"):
-            with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
-                with patch("src.services.ossfs_mixin.os.makedirs"):
-                    with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+        with patch("opensandbox_server.services.ossfs_mixin.os.name", "posix"):
+            with patch("opensandbox_server.services.ossfs_mixin.os.path.ismount", return_value=False):
+                with patch("opensandbox_server.services.ossfs_mixin.os.makedirs"):
+                    with patch("opensandbox_server.services.ossfs_mixin.subprocess.run") as mock_run:
                         mock_run.return_value = MagicMock(returncode=0, stderr="")
                         with patch.object(service, "_ensure_image_available"), patch.object(
                             service, "_prepare_sandbox_runtime"
@@ -1532,9 +1534,9 @@ class TestDockerVolumeValidation:
             ),
         ]
 
-        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=False):
-            with patch("src.services.ossfs_mixin.os.makedirs"):
-                with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+        with patch("opensandbox_server.services.ossfs_mixin.os.path.ismount", return_value=False):
+            with patch("opensandbox_server.services.ossfs_mixin.os.makedirs"):
+                with patch("opensandbox_server.services.ossfs_mixin.subprocess.run") as mock_run:
                     mock_run.return_value = MagicMock(returncode=0, stderr="")
                     mount_keys = service._prepare_ossfs_mounts(volumes)
 
@@ -1606,8 +1608,8 @@ class TestDockerVolumeValidation:
         service = DockerSandboxService(config=_app_config())
         service._ossfs_mount_ref_counts[mount_key] = 1
 
-        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=True):
-            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+        with patch("opensandbox_server.services.ossfs_mixin.os.path.ismount", return_value=True):
+            with patch("opensandbox_server.services.ossfs_mixin.subprocess.run") as mock_run:
                 mock_run.return_value = MagicMock(returncode=0, stderr="")
                 service.delete_sandbox("sandbox-1")
 
@@ -1620,8 +1622,8 @@ class TestDockerVolumeValidation:
         mock_docker.from_env.return_value = MagicMock()
         service = DockerSandboxService(config=_app_config())
 
-        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=True):
-            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+        with patch("opensandbox_server.services.ossfs_mixin.os.path.ismount", return_value=True):
+            with patch("opensandbox_server.services.ossfs_mixin.subprocess.run") as mock_run:
                 service._release_ossfs_mount(mount_key)
 
         mock_run.assert_not_called()
@@ -1683,8 +1685,8 @@ class TestDockerVolumeValidation:
         service = DockerSandboxService(config=_app_config())
         assert service._ossfs_mount_ref_counts[mount_key] == 2
 
-        with patch("src.services.ossfs_mixin.os.path.ismount", return_value=True):
-            with patch("src.services.ossfs_mixin.subprocess.run") as mock_run:
+        with patch("opensandbox_server.services.ossfs_mixin.os.path.ismount", return_value=True):
+            with patch("opensandbox_server.services.ossfs_mixin.subprocess.run") as mock_run:
                 service.delete_sandbox("sandbox-a")
 
         assert service._ossfs_mount_ref_counts[mount_key] == 1
@@ -1899,7 +1901,7 @@ class TestDockerVolumeValidation:
 
         # Simulate: realpath resolves a symlink that escapes the mountpoint.
         # datasets -> / inside the volume, so realpath(…/_data/datasets) = /
-        with patch("src.services.docker.os.path.realpath") as mock_realpath:
+        with patch("opensandbox_server.services.docker.os.path.realpath") as mock_realpath:
             mock_realpath.side_effect = lambda p, **kwargs: ("/" if p.endswith("datasets") else p)
             with pytest.raises(HTTPException) as exc_info:
                 await service.create_sandbox(request)
@@ -1980,7 +1982,7 @@ class TestDockerVolumeValidation:
             ],
         )
 
-        with patch("src.services.docker.os.makedirs", side_effect=PermissionError("denied")):
+        with patch("opensandbox_server.services.docker.os.makedirs", side_effect=PermissionError("denied")):
             with pytest.raises(HTTPException) as exc_info:
                 await service.create_sandbox(request)
 

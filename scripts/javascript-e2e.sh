@@ -45,7 +45,7 @@ echo "-------- JAVASCRIPT E2E test logs for execd --------" > /tmp/opensandbox-e
 
 # setup server
 cd server
-uv sync && uv run python -m src.main > server.log 2>&1 &
+uv sync && uv run python -m opensandbox_server.main > server.log 2>&1 &
 cd ..
 
 # wait for server
@@ -69,4 +69,3 @@ export OPENSANDBOX_TEST_API_KEY=""
 export OPENSANDBOX_SANDBOX_DEFAULT_IMAGE="opensandbox/code-interpreter:${TAG}"
 
 pnpm test:ci
-

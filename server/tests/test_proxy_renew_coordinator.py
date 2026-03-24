@@ -17,10 +17,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.config import AppConfig, RenewIntentConfig, RuntimeConfig, ServerConfig
-from src.integrations.renew_intent.consumer import RenewIntentConsumer, RenewWorkItem
-from src.integrations.renew_intent.logutil import RENEW_SOURCE_SERVER_PROXY
-from src.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator
+from opensandbox_server.config import AppConfig, RenewIntentConfig, RuntimeConfig, ServerConfig
+from opensandbox_server.integrations.renew_intent.consumer import RenewIntentConsumer, RenewWorkItem
+from opensandbox_server.integrations.renew_intent.logutil import RENEW_SOURCE_SERVER_PROXY
+from opensandbox_server.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator
 
 
 def _app_config(*, renew_enabled: bool = True, min_interval: int = 60) -> AppConfig:
@@ -80,7 +80,7 @@ async def test_proxy_min_interval_skips_second_attempt(monkeypatch):
         return next(seq, 999.0)
 
     monkeypatch.setattr(
-        "src.integrations.renew_intent.consumer.time.monotonic",
+        "opensandbox_server.integrations.renew_intent.consumer.time.monotonic",
         mono,
     )
 
@@ -112,7 +112,7 @@ async def test_proxy_second_attempt_after_cooldown_window(monkeypatch):
         return next(seq, 999.0)
 
     monkeypatch.setattr(
-        "src.integrations.renew_intent.consumer.time.monotonic",
+        "opensandbox_server.integrations.renew_intent.consumer.time.monotonic",
         mono,
     )
 

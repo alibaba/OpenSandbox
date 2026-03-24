@@ -559,7 +559,7 @@ def validate_secure_runtime_on_startup(config: AppConfig, docker_client=None, k8
 
 ### Docker Mode Implementation
 
-Changes to `server/src/services/docker.py`. The runtime is read from server config, not from the request:
+Changes to `server/opensandbox_server/services/docker.py`. The runtime is read from server config, not from the request:
 
 ```python
 class DockerSandboxService(SandboxService):
@@ -585,7 +585,7 @@ Both Kubernetes workload providers inject `runtimeClassName` from server config.
 
 #### BatchSandboxProvider
 
-Changes to `server/src/services/k8s/batchsandbox_provider.py`:
+Changes to `server/opensandbox_server/services/k8s/batchsandbox_provider.py`:
 
 - **CRD**: `sandbox.opensandbox.io/v1alpha1` BatchSandbox
 - **Pod spec path**: `spec.template.spec`
@@ -608,7 +608,7 @@ class BatchSandboxProvider:
 
 #### AgentSandboxProvider
 
-Changes to `server/src/services/k8s/agent_sandbox_provider.py`:
+Changes to `server/opensandbox_server/services/k8s/agent_sandbox_provider.py`:
 
 - **CRD**: `agents.x-k8s.io/v1alpha1` Sandbox
 - **Pod spec path**: `spec.podTemplate.spec`

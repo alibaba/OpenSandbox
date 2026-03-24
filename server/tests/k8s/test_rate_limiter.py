@@ -20,7 +20,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.services.k8s.rate_limiter import TokenBucketRateLimiter
+from opensandbox_server.services.k8s.rate_limiter import TokenBucketRateLimiter
 
 
 class TestTokenBucketRateLimiter:
@@ -113,7 +113,7 @@ class TestTokenBucketRateLimiter:
         with limiter._lock:
             limiter._tokens = 1.0 - 1e-10
 
-        with patch("src.services.k8s.rate_limiter.time.sleep") as mock_sleep:
+        with patch("opensandbox_server.services.k8s.rate_limiter.time.sleep") as mock_sleep:
             # _try_acquire will succeed on first or second call; we only care
             # that if sleep is called, the argument is >= 0.001.
             limiter.acquire()
@@ -160,7 +160,7 @@ class TestTokenBucketRateLimiter:
         fixed_time = limiter._last_refill
 
         def worker():
-            with patch("src.services.k8s.rate_limiter.time.monotonic", return_value=fixed_time):
+            with patch("opensandbox_server.services.k8s.rate_limiter.time.monotonic", return_value=fixed_time):
                 if limiter.try_acquire():
                     with lock:
                         successes.append(1)

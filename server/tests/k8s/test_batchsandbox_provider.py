@@ -21,8 +21,8 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 from kubernetes.client import ApiException
 
-from src.api.schema import ImageSpec, ImageAuth, NetworkPolicy, NetworkRule
-from src.config import (
+from opensandbox_server.api.schema import ImageSpec, ImageAuth, NetworkPolicy, NetworkRule
+from opensandbox_server.config import (
     AppConfig,
     EGRESS_MODE_DNS,
     EGRESS_MODE_DNS_NFT,
@@ -30,11 +30,11 @@ from src.config import (
     KubernetesRuntimeConfig,
     RuntimeConfig,
 )
-from src.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
-from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
-from src.services.constants import OPENSANDBOX_EGRESS_TOKEN
-from src.services.k8s.image_pull_secret_helper import IMAGE_AUTH_SECRET_PREFIX
-from src.services.k8s.volume_helper import apply_volumes_to_pod_spec
+from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
+from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
+from opensandbox_server.services.constants import OPENSANDBOX_EGRESS_TOKEN
+from opensandbox_server.services.k8s.image_pull_secret_helper import IMAGE_AUTH_SECRET_PREFIX
+from opensandbox_server.services.k8s.volume_helper import apply_volumes_to_pod_spec
 
 
 def _app_config_with_template(template_file_path: str) -> AppConfig:
@@ -1720,7 +1720,7 @@ spec:
         - Volume mount is added to main container
         - claimName is correctly set
         """
-        from src.api.schema import Volume, PVC
+        from opensandbox_server.api.schema import Volume, PVC
 
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
@@ -1775,7 +1775,7 @@ spec:
         """
         Test creating workload with read-only PVC volume mount.
         """
-        from src.api.schema import Volume, PVC
+        from opensandbox_server.api.schema import Volume, PVC
 
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
@@ -1817,7 +1817,7 @@ spec:
         """
         Test creating workload with PVC volume mount with subPath.
         """
-        from src.api.schema import Volume, PVC
+        from opensandbox_server.api.schema import Volume, PVC
 
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
@@ -1860,7 +1860,7 @@ spec:
         """
         Test creating workload with hostPath volume mount.
         """
-        from src.api.schema import Volume, Host
+        from opensandbox_server.api.schema import Volume, Host
 
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
@@ -1911,7 +1911,7 @@ spec:
         """
         Test creating workload with multiple volumes (PVC and hostPath).
         """
-        from src.api.schema import Volume, PVC, Host
+        from opensandbox_server.api.schema import Volume, PVC, Host
 
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
@@ -1964,7 +1964,7 @@ spec:
         """
         Test that pool mode rejects volumes with clear error message.
         """
-        from src.api.schema import Volume, PVC
+        from opensandbox_server.api.schema import Volume, PVC
 
         provider = BatchSandboxProvider(mock_k8s_client)
 
@@ -2010,7 +2010,7 @@ spec:
         """
         Test apply_volumes_to_pod_spec with no containers returns early without error.
         """
-        from src.api.schema import Volume, PVC
+        from opensandbox_server.api.schema import Volume, PVC
 
         pod_spec = {"volumes": []}
         volumes = [Volume(name="test", pvc=PVC(claim_name="pvc"), mount_path="/mnt")]
@@ -2025,7 +2025,7 @@ spec:
         """
         Test apply_volumes_to_pod_spec rejects volume names that collide with internal volumes.
         """
-        from src.api.schema import Volume, PVC
+        from opensandbox_server.api.schema import Volume, PVC
 
         pod_spec = {
             "containers": [{"name": "sandbox", "volumeMounts": []}],
@@ -2045,7 +2045,7 @@ spec:
         Kubernetes volume is created; multiple volumeMounts reference it (avoids
         CSI driver issues from duplicate PVC volume definitions).
         """
-        from src.api.schema import Volume, PVC
+        from opensandbox_server.api.schema import Volume, PVC
 
         pod_spec = {
             "containers": [{"name": "main", "volumeMounts": []}],

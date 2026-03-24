@@ -19,8 +19,8 @@ Unit tests for image_pull_secret_helper.
 import base64
 import json
 
-from src.api.schema import ImageAuth
-from src.services.k8s.image_pull_secret_helper import (
+from opensandbox_server.api.schema import ImageAuth
+from opensandbox_server.services.k8s.image_pull_secret_helper import (
     IMAGE_AUTH_SECRET_PREFIX,
     build_image_pull_secret,
     build_image_pull_secret_name,

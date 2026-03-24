@@ -7,7 +7,7 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'server/src/**'
+      - 'server/opensandbox_server/**'
       - 'components/execd/**'
       - 'components/egress/**'
       - 'sdks/code-interpreter/**'
@@ -92,7 +92,7 @@ jobs:
         run: |
           docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
-          pkill -f "python -m src.main" || true
+          pkill -f "python -m opensandbox_server.main" || true
 
   java-e2e:
     name: Java E2E (docker bridge)
@@ -184,7 +184,7 @@ jobs:
         run: |
           docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
-          pkill -f "python -m src.main" || true
+          pkill -f "python -m opensandbox_server.main" || true
 
   javascript-e2e:
     name: JavaScript E2E (docker bridge)
@@ -277,7 +277,7 @@ jobs:
         run: |
           docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
-          pkill -f "python -m src.main" || true
+          pkill -f "python -m opensandbox_server.main" || true
 
   csharp-e2e:
     name: C# E2E (docker bridge)
@@ -359,4 +359,4 @@ jobs:
         run: |
           docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e || true
-          pkill -f "python -m src.main" || true
+          pkill -f "python -m opensandbox_server.main" || true

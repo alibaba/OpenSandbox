@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from src.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER
-from src.services.endpoint_auth import (
+from opensandbox_server.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER
+from opensandbox_server.services.endpoint_auth import (
     build_egress_auth_headers,
     generate_egress_token,
     merge_endpoint_headers,

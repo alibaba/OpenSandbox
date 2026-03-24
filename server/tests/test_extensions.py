@@ -15,7 +15,7 @@
 import pytest
 from fastapi import HTTPException
 
-from src.extensions import (
+from opensandbox_server.extensions import (
     ACCESS_RENEW_EXTEND_SECONDS_KEY,
     ACCESS_RENEW_EXTEND_SECONDS_MAX,
     ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY,

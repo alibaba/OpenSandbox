@@ -79,8 +79,8 @@ opensandbox-server init-config ~/.sandbox.toml --example docker
 > git clone https://github.com/alibaba/OpenSandbox.git
 > cd OpenSandbox/server
 > uv sync
-> cp example.config.toml ~/.sandbox.toml # Copy configuration file
-> uv run python -m src.main # Start the service
+> cp opensandbox_server/examples/example.config.toml ~/.sandbox.toml # Copy configuration file from the source tree
+> uv run python -m opensandbox_server.main # Start the service
 > ```
 
 #### 2. Start the Sandbox Server

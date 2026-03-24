@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from src.services.helpers import normalize_external_endpoint_url
+from opensandbox_server.services.helpers import normalize_external_endpoint_url
 
 
 def test_normalize_external_endpoint_url_defaults_to_https() -> None:

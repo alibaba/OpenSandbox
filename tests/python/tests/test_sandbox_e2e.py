@@ -67,7 +67,7 @@ from tests.base_e2e_test import (
 
 logger = logging.getLogger(__name__)
 
-# Keep in sync with server ``src/extensions/keys.py``
+# Keep in sync with server ``opensandbox_server/extensions/keys.py``
 ACCESS_RENEW_EXTEND_SECONDS_KEY = "access.renew.extend.seconds"
 
 

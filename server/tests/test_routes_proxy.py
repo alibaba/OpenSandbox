@@ -19,11 +19,11 @@ import httpx
 from fastapi.testclient import TestClient
 from websockets.typing import Origin
 
-import src.api.proxy as proxy_api
-from src.api import lifecycle
-from src.api.schema import Endpoint
-from src.middleware.auth import SANDBOX_API_KEY_HEADER
-from src.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER, OPEN_SANDBOX_INGRESS_HEADER
+import opensandbox_server.api.proxy as proxy_api
+from opensandbox_server.api import lifecycle
+from opensandbox_server.api.schema import Endpoint
+from opensandbox_server.middleware.auth import SANDBOX_API_KEY_HEADER
+from opensandbox_server.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER, OPEN_SANDBOX_INGRESS_HEADER
 
 
 class _FakeStreamingResponse:

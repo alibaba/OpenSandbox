@@ -21,16 +21,16 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
 
-from src.services.k8s.kubernetes_service import KubernetesSandboxService
-from src.services.constants import (
+from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
+from opensandbox_server.services.constants import (
     OPEN_SANDBOX_EGRESS_AUTH_HEADER,
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SandboxErrorCodes,
 )
-from src.api.schema import ImageAuth, ListSandboxesRequest, NetworkPolicy
-from src.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT, EgressConfig
-from src.api.schema import Endpoint
+from opensandbox_server.api.schema import ImageAuth, ListSandboxesRequest, NetworkPolicy
+from opensandbox_server.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT, EgressConfig
+from opensandbox_server.api.schema import Endpoint
 
 
 class TestKubernetesSandboxServiceInit:
@@ -42,8 +42,8 @@ class TestKubernetesSandboxServiceInit:
         
         Purpose: Verify that service can be successfully initialized with valid Kubernetes config
         """
-        with patch('src.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client, \
-             patch('src.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
+        with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client, \
+             patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
             
             mock_provider = MagicMock()
             mock_create_provider.return_value = mock_provider
@@ -84,7 +84,7 @@ class TestKubernetesSandboxServiceInit:
         
         Purpose: Verify that correct HTTPException is raised when K8sClient initialization fails
         """
-        with patch('src.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client:
+        with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client:
             mock_k8s_client.side_effect = Exception("Failed to load kubeconfig")
             
             with pytest.raises(HTTPException) as exc_info:
@@ -243,7 +243,7 @@ class TestKubernetesSandboxServiceCreate:
         }
 
         with patch(
-            "src.services.k8s.kubernetes_service.generate_egress_token",
+            "opensandbox_server.services.k8s.kubernetes_service.generate_egress_token",
             return_value="egress-token",
         ):
             await k8s_service.create_sandbox(create_sandbox_request)
@@ -272,7 +272,7 @@ class TestKubernetesSandboxServiceCreate:
         }
 
         with patch(
-            "src.services.k8s.kubernetes_service.generate_egress_token",
+            "opensandbox_server.services.k8s.kubernetes_service.generate_egress_token",
             return_value="egress-token",
         ):
             await k8s_service.create_sandbox(create_sandbox_request)
@@ -515,7 +515,7 @@ class TestListSandboxes:
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.0.0.1:8080"
         k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
         
-        from src.api.schema import PaginationRequest
+        from opensandbox_server.api.schema import PaginationRequest
         request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=20))
         response = k8s_service.list_sandboxes(request)
         
@@ -558,7 +558,7 @@ class TestListSandboxes:
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.0.0.1:8080"
         k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
         
-        from src.api.schema import PaginationRequest
+        from opensandbox_server.api.schema import PaginationRequest
         request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=5))
         response = k8s_service.list_sandboxes(request)
         
@@ -614,7 +614,7 @@ class TestListSandboxes:
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.0.0.1:8080"
         k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
         
-        from src.api.schema import PaginationRequest
+        from opensandbox_server.api.schema import PaginationRequest
         request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=10))
         response = k8s_service.list_sandboxes(request)
         
@@ -649,7 +649,7 @@ class TestRenewExpiration:
         k8s_service.workload_provider.update_expiration.return_value = None
         k8s_service.workload_provider.get_expiration.return_value = new_expiration
         
-        from src.api.schema import RenewSandboxExpirationRequest
+        from opensandbox_server.api.schema import RenewSandboxExpirationRequest
         request = RenewSandboxExpirationRequest(expires_at=new_expiration)
         
         response = k8s_service.renew_expiration("test-sandbox-id", request)
@@ -671,7 +671,7 @@ class TestRenewExpiration:
         
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         
-        from src.api.schema import RenewSandboxExpirationRequest
+        from opensandbox_server.api.schema import RenewSandboxExpirationRequest
         request = RenewSandboxExpirationRequest(expires_at=past_time)
         
         with pytest.raises(HTTPException) as exc_info:
@@ -683,7 +683,7 @@ class TestRenewExpiration:
         """Renew is rejected with 409 when sandbox has no TTL (manual cleanup)."""
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
         k8s_service.workload_provider.get_expiration.return_value = None
-        from src.api.schema import RenewSandboxExpirationRequest
+        from opensandbox_server.api.schema import RenewSandboxExpirationRequest
         request = RenewSandboxExpirationRequest(
             expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
         )

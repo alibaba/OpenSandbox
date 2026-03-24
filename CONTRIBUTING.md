@@ -73,15 +73,15 @@ cd server
 # Install dependencies
 uv sync
 
-# Copy example configuration
-cp example.config.toml ~/.sandbox.toml
+# Copy example configuration from the source tree
+cp server/opensandbox_server/examples/example.config.toml ~/.sandbox.toml
 
 # Edit configuration for development
 # Set log_level = "DEBUG" and api_key
 nano ~/.sandbox.toml
 
 # Run server
-uv run python -m src.main
+uv run python -m opensandbox_server.main
 ```
 
 See [server/DEVELOPMENT.md](server/DEVELOPMENT.md) for detailed server development guide.

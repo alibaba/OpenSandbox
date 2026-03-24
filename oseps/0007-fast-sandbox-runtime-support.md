@@ -572,7 +572,7 @@ To handle these cases, fast-sandbox provides a **Node Janitor DaemonSet** that r
 
 ### Configuration Extension
 
-Add `FastSandboxRuntimeConfig` to `server/src/config.py`:
+Add `FastSandboxRuntimeConfig` to `server/opensandbox_server/config.py`:
 
 ```python
 class FastSandboxRuntimeConfig(BaseModel):
@@ -627,7 +627,7 @@ execd_port = 44772
 ### New Code Structure
 
 ```
-server/src/services/k8s/
+server/opensandbox_server/services/k8s/
 ├── fastsandbox_provider.py      # New: FastSandboxProvider WorkloadProvider implementation
 ├── fastsandbox_client.py        # New: gRPC client wrapper for fast-sandbox Controller
 ├── provider_factory.py          # Modified: Register "fast-sandbox" provider

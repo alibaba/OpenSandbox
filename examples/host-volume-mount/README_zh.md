@@ -17,8 +17,8 @@
 ```shell
 git clone git@github.com:alibaba/OpenSandbox.git
 cd OpenSandbox/server
-cp example.config.zh.toml ~/.sandbox.toml
-uv sync && uv run python -m src.main
+cp opensandbox_server/examples/example.config.zh.toml ~/.sandbox.toml
+uv sync && uv run python -m opensandbox_server.main
 ```
 
 ### 2. 配置允许的宿主机路径

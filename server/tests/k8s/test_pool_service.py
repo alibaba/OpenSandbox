@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Unit tests for PoolService (server/src/services/k8s/pool_service.py).
+Unit tests for PoolService (server/opensandbox_server/services/k8s/pool_service.py).
 
 All tests mock the Kubernetes CustomObjectsApi so no cluster connection is needed.
 """
@@ -22,13 +22,13 @@ import pytest
 from unittest.mock import MagicMock
 from kubernetes.client import ApiException
 
-from src.api.schema import (
+from opensandbox_server.api.schema import (
     CreatePoolRequest,
     PoolCapacitySpec,
     UpdatePoolRequest,
 )
-from src.services.constants import SandboxErrorCodes
-from src.services.k8s.pool_service import PoolService
+from opensandbox_server.services.constants import SandboxErrorCodes
+from opensandbox_server.services.k8s.pool_service import PoolService
 from fastapi import HTTPException
 
 

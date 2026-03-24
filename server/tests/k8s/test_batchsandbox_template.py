@@ -19,7 +19,7 @@ Unit tests for BatchSandboxTemplateManager.
 import pytest
 import yaml
 
-from src.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
+from opensandbox_server.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 
 
 class TestBatchSandboxTemplateManager:

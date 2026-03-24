@@ -18,8 +18,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from src.integrations.renew_intent.intent import parse_renew_intent_json
-from src.integrations.renew_intent.consumer import RenewIntentConsumer
+from opensandbox_server.integrations.renew_intent.intent import parse_renew_intent_json
+from opensandbox_server.integrations.renew_intent.consumer import RenewIntentConsumer
 
 
 def test_parse_matches_ingress_intent_shape():

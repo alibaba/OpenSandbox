@@ -13,7 +13,7 @@
 # limitations under the License.
 
 """
-Integration-style tests for Pool API routes (src/api/pool.py).
+Integration-style tests for Pool API routes (opensandbox_server/api/pool.py).
 
 Routes are exercised via FastAPI TestClient.  The K8s PoolService is patched
 so no real cluster connection is needed.
@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from fastapi import HTTPException, status as http_status
 
-from src.api.schema import (
+from opensandbox_server.api.schema import (
     CreatePoolRequest,
     ListPoolsResponse,
     PoolCapacitySpec,
@@ -31,14 +31,14 @@ from src.api.schema import (
     PoolStatus,
     UpdatePoolRequest,
 )
-from src.services.constants import SandboxErrorCodes
+from opensandbox_server.services.constants import SandboxErrorCodes
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-_POOL_SERVICE_PATCH = "src.api.pool._get_pool_service"
+_POOL_SERVICE_PATCH = "opensandbox_server.api.pool._get_pool_service"
 
 
 def _cap(buffer_max=3, buffer_min=1, pool_max=10, pool_min=0) -> PoolCapacitySpec:

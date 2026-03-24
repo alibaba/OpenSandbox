@@ -45,7 +45,7 @@ echo "-------- CSHARP E2E test logs for execd --------" > /tmp/opensandbox-e2e/l
 # setup server
 cd server
 : > server.log
-(uv sync && uv run python -m src.main) > server.log 2>&1 &
+(uv sync && uv run python -m opensandbox_server.main) > server.log 2>&1 &
 cd ..
 
 # wait for server

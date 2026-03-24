@@ -14,8 +14,8 @@
 
 from fastapi.testclient import TestClient
 
-from src.api import lifecycle
-from src.api.schema import Endpoint
+from opensandbox_server.api import lifecycle
+from opensandbox_server.api.schema import Endpoint
 
 
 def test_get_endpoint_returns_service_result(

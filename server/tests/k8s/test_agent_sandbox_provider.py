@@ -23,8 +23,8 @@ from unittest.mock import MagicMock
 import pytest
 from kubernetes.client import ApiException
 
-from src.api.schema import ImageSpec, NetworkPolicy, NetworkRule
-from src.config import (
+from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
+from opensandbox_server.config import (
     AppConfig,
     AgentSandboxRuntimeConfig,
     EGRESS_MODE_DNS,
@@ -33,9 +33,9 @@ from src.config import (
     KubernetesRuntimeConfig,
     RuntimeConfig,
 )
-from src.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
-from src.services.k8s.agent_sandbox_provider import AgentSandboxProvider
-from src.services.constants import OPENSANDBOX_EGRESS_TOKEN
+from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
+from opensandbox_server.services.k8s.agent_sandbox_provider import AgentSandboxProvider
+from opensandbox_server.services.constants import OPENSANDBOX_EGRESS_TOKEN
 
 
 def _app_config(shutdown_policy: str = "Delete", service_account: str | None = None, execd_init_resources: ExecdInitResources | None = None) -> AppConfig:

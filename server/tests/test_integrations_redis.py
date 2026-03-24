@@ -16,8 +16,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.config import AppConfig, RenewIntentConfig, RenewIntentRedisConfig, RuntimeConfig, ServerConfig
-from src.integrations.renew_intent.redis_client import (
+from opensandbox_server.config import AppConfig, RenewIntentConfig, RenewIntentRedisConfig, RuntimeConfig, ServerConfig
+from opensandbox_server.integrations.renew_intent.redis_client import (
     close_renew_intent_redis_client,
     connect_renew_intent_redis_from_config,
 )
@@ -52,7 +52,7 @@ async def test_connect_returns_none_when_redis_disabled():
 
 
 @pytest.mark.asyncio
-@patch("src.integrations.renew_intent.redis_client.redis_async")
+@patch("opensandbox_server.integrations.renew_intent.redis_client.redis_async")
 async def test_connect_pings_when_enabled(mock_redis_mod):
     mock_client = AsyncMock()
     mock_redis_mod.from_url.return_value = mock_client

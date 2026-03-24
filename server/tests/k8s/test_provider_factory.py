@@ -19,17 +19,17 @@ Unit tests for provider_factory.
 import pytest
 from unittest.mock import patch
 
-from src.config import AgentSandboxRuntimeConfig
-from src.services.k8s.provider_factory import (
+from opensandbox_server.config import AgentSandboxRuntimeConfig
+from opensandbox_server.services.k8s.provider_factory import (
     register_provider,
     create_workload_provider,
     list_available_providers,
     PROVIDER_TYPE_BATCHSANDBOX,
     PROVIDER_TYPE_AGENT_SANDBOX,
 )
-from src.services.k8s.workload_provider import WorkloadProvider
-from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
-from src.services.k8s.agent_sandbox_provider import AgentSandboxProvider
+from opensandbox_server.services.k8s.workload_provider import WorkloadProvider
+from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
+from opensandbox_server.services.k8s.agent_sandbox_provider import AgentSandboxProvider
 
 
 
@@ -225,7 +225,7 @@ spec:
         
         Purpose: Verify that ValueError is raised when no provider is registered and type is None
         """
-        from src.services.k8s import provider_factory
+        from opensandbox_server.services.k8s import provider_factory
         
         # Clear the registry to test empty registry scenario
         provider_factory._PROVIDER_REGISTRY.clear()

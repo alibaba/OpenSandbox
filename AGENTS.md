@@ -13,8 +13,8 @@
 ## Build, Test, and Development Commands
 - Server (Python):
   - `cd server && uv sync` installs deps.
-  - `cp server/example.config.toml ~/.sandbox.toml` sets local config.
-  - `cd server && uv run python -m src.main` runs the API server.
+  - `cp server/opensandbox_server/examples/example.config.toml ~/.sandbox.toml` sets local config.
+  - `cd server && uv run python -m opensandbox_server.main` runs the API server.
 - execd (Go):
   - `cd components/execd && go build -o bin/execd .` builds the daemon.
   - `cd components/execd && make fmt` formats Go sources.

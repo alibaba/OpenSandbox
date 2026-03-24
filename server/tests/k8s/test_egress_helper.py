@@ -19,10 +19,10 @@ Unit tests for egress helper functions.
 import json
 from typing import Optional
 
-from src.api.schema import NetworkPolicy, NetworkRule
-from src.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT
-from src.services.constants import EGRESS_MODE_ENV, EGRESS_RULES_ENV, OPENSANDBOX_EGRESS_TOKEN
-from src.services.k8s.egress_helper import (
+from opensandbox_server.api.schema import NetworkPolicy, NetworkRule
+from opensandbox_server.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT
+from opensandbox_server.services.constants import EGRESS_MODE_ENV, EGRESS_RULES_ENV, OPENSANDBOX_EGRESS_TOKEN
+from opensandbox_server.services.k8s.egress_helper import (
     apply_egress_to_spec,
     build_security_context_for_sandbox_container,
     prep_execd_init_for_egress,

@@ -15,9 +15,9 @@
 import pytest
 from fastapi import HTTPException
 
-from src.api.schema import Host, OSSFS, PVC, Volume
-from src.services.constants import SandboxErrorCodes
-from src.services.validators import (
+from opensandbox_server.api.schema import Host, OSSFS, PVC, Volume
+from opensandbox_server.services.constants import SandboxErrorCodes
+from opensandbox_server.services.validators import (
     ensure_metadata_labels,
     ensure_timeout_within_limit,
     ensure_valid_host_path,

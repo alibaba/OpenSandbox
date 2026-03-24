@@ -23,16 +23,16 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from src.api.schema import SandboxStatus
-from src.config import (
+from opensandbox_server.api.schema import SandboxStatus
+from opensandbox_server.config import (
     AppConfig,
     RuntimeConfig,
     ServerConfig,
     KubernetesRuntimeConfig,
     AgentSandboxRuntimeConfig,
 )
-from src.services.k8s.kubernetes_service import KubernetesSandboxService
-from src.services.constants import SandboxErrorCodes
+from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
+from opensandbox_server.services.constants import SandboxErrorCodes
 
 
 @pytest.fixture
@@ -113,8 +113,8 @@ class TestAgentSandboxServiceInit:
             ),
         )
 
-        with patch("src.services.k8s.kubernetes_service.K8sClient") as mock_k8s_client, patch(
-            "src.services.k8s.kubernetes_service.create_workload_provider"
+        with patch("opensandbox_server.services.k8s.kubernetes_service.K8sClient") as mock_k8s_client, patch(
+            "opensandbox_server.services.k8s.kubernetes_service.create_workload_provider"
         ) as mock_provider_factory:
             mock_provider_factory.return_value = MagicMock()
 
@@ -162,7 +162,7 @@ class TestAgentSandboxServiceInit:
         """
         Test case: Raises HTTPException when K8sClient initialization fails
         """
-        with patch("src.services.k8s.kubernetes_service.K8sClient") as mock_k8s_client:
+        with patch("opensandbox_server.services.k8s.kubernetes_service.K8sClient") as mock_k8s_client:
             mock_k8s_client.side_effect = Exception("Failed to load kubeconfig")
 
             with pytest.raises(HTTPException) as exc_info:

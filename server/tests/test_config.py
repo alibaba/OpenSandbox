@@ -17,8 +17,8 @@ import textwrap
 import pytest
 from pydantic import ValidationError
 
-from src import config as config_module
-from src.config import (
+from opensandbox_server import config as config_module
+from opensandbox_server.config import (
     AppConfig,
     RenewIntentRedisConfig,
     EGRESS_MODE_DNS,

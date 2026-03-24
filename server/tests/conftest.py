@@ -35,7 +35,7 @@ _mock_docker_client = MagicMock()
 _mock_docker_client.containers.list.return_value = []
 docker.from_env = lambda: _mock_docker_client  # type: ignore
 
-from src.main import app  # noqa: E402
+from opensandbox_server.main import app  # noqa: E402
 
 
 @pytest.fixture(scope="session")

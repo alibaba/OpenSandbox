@@ -21,8 +21,8 @@ from unittest.mock import MagicMock, patch
 
 from kubernetes.client import ApiException
 
-from src.config import KubernetesRuntimeConfig
-from src.services.k8s.client import K8sClient
+from opensandbox_server.config import KubernetesRuntimeConfig
+from opensandbox_server.services.k8s.client import K8sClient
 
 
 class TestK8sClient:

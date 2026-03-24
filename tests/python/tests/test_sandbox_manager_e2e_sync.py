@@ -23,11 +23,10 @@ Focus: Validate `list_sandbox_infos` filter semantics precisely:
 We create 3 dedicated sandboxes per run to keep assertions deterministic.
 """
 
+import logging
 import time
 from datetime import timedelta
 from uuid import uuid4
-
-import logging
 
 import pytest
 from opensandbox import SandboxManagerSync, SandboxSync
