@@ -56,42 +56,38 @@ def test_sandbox_image_spec_rejects_blank_image() -> None:
         SandboxImageSpec("   ")
 
 
-def test_api_image_spec_tolerates_null_auth() -> None:
-    spec = ApiImageSpec.from_dict({"uri": "python:3.11", "auth": None})
+def test_api_image_spec_tolerates_omitted_auth() -> None:
+    spec = ApiImageSpec.from_dict({"uri": "python:3.11"})
     assert spec.uri == "python:3.11"
     assert spec.auth is UNSET
 
 
-def test_api_create_sandbox_response_tolerates_null_metadata() -> None:
+def test_api_create_sandbox_response_tolerates_omitted_optional_fields() -> None:
     response = ApiCreateSandboxResponse.from_dict(
         {
             "id": "sandbox-1",
-            "status": {"state": "Running", "lastTransitionAt": None},
+            "status": {"state": "Running"},
             "createdAt": "2025-01-01T00:00:00Z",
             "entrypoint": ["/bin/sh"],
-            "metadata": None,
-            "expiresAt": None,
         }
     )
     assert response.metadata is UNSET
-    assert response.expires_at is None
+    assert response.expires_at is UNSET
     assert response.status.last_transition_at is UNSET
 
 
-def test_api_sandbox_tolerates_null_metadata() -> None:
+def test_api_sandbox_tolerates_omitted_optional_fields() -> None:
     sandbox = ApiSandbox.from_dict(
         {
             "id": "sandbox-1",
-            "image": {"uri": "python:3.11", "auth": None},
-            "status": {"state": "Running", "lastTransitionAt": None},
+            "image": {"uri": "python:3.11"},
+            "status": {"state": "Running"},
             "entrypoint": ["/bin/sh"],
             "createdAt": "2025-01-01T00:00:00Z",
-            "metadata": None,
-            "expiresAt": None,
         }
     )
     assert sandbox.metadata is UNSET
-    assert sandbox.expires_at is None
+    assert sandbox.expires_at is UNSET
     assert sandbox.status.last_transition_at is UNSET
 
 

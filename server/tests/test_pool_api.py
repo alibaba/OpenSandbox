@@ -19,7 +19,6 @@ Routes are exercised via FastAPI TestClient.  The K8s PoolService is patched
 so no real cluster connection is needed.
 """
 
-import pytest
 from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from fastapi import HTTPException, status as http_status

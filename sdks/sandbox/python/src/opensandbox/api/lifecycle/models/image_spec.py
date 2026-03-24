@@ -78,7 +78,7 @@ class ImageSpec:
 
         _auth = d.pop("auth", UNSET)
         auth: ImageSpecAuth | Unset
-        if isinstance(_auth, Unset) or _auth is None:
+        if isinstance(_auth, Unset):
             auth = UNSET
         else:
             auth = ImageSpecAuth.from_dict(_auth)

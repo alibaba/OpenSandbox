@@ -70,7 +70,6 @@ logging.getLogger().setLevel(
     getattr(logging, app_config.server.log_level.upper(), logging.INFO)
 )
 
-from src.api.lifecycle import router  # noqa: E402
 from src.api.pool import router as pool_router  # noqa: E402
 from src.api.lifecycle import router, sandbox_service  # noqa: E402
 from src.api.proxy import router as proxy_router  # noqa: E402

@@ -80,6 +80,39 @@ def test_get_sandbox_propagates_not_found(
     }
 
 
+def test_get_sandbox_omits_none_fields(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    now = datetime.now(timezone.utc)
+
+    class StubService:
+        @staticmethod
+        def get_sandbox(sandbox_id: str) -> Sandbox:
+            return Sandbox(
+                id=sandbox_id,
+                image=ImageSpec(uri="python:3.11"),
+                status=SandboxStatus(state="Running"),
+                metadata=None,
+                entrypoint=["python", "-V"],
+                expiresAt=None,
+                createdAt=now,
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.get("/v1/sandboxes/sbx-manual", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "expiresAt" not in payload
+    assert "metadata" not in payload
+    assert "reason" not in payload["status"]
+    assert "message" not in payload["status"]
+    assert "lastTransitionAt" not in payload["status"]
+
+
 def test_get_sandbox_requires_api_key(client: TestClient) -> None:
     response = client.get("/v1/sandboxes/sbx-001")
 

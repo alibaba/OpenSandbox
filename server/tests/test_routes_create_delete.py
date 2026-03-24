@@ -60,7 +60,7 @@ def test_create_sandbox_returns_202_and_service_payload(
     assert calls[0].image.uri == "python:3.11"
 
 
-def test_create_sandbox_manual_cleanup_returns_null_expiration(
+def test_create_sandbox_manual_cleanup_omits_none_fields(
     client: TestClient,
     auth_headers: dict,
     sample_sandbox_request: dict,
@@ -91,11 +91,11 @@ def test_create_sandbox_manual_cleanup_returns_null_expiration(
 
     assert response.status_code == 202
     payload = response.json()
-    assert payload["expiresAt"] is None
-    assert payload["metadata"] is None
-    assert payload["status"]["reason"] is None
-    assert payload["status"]["message"] is None
-    assert payload["status"]["lastTransitionAt"] is None
+    assert "expiresAt" not in payload
+    assert "metadata" not in payload
+    assert "reason" not in payload["status"]
+    assert "message" not in payload["status"]
+    assert "lastTransitionAt" not in payload["status"]
 
 
 def test_create_sandbox_rejects_invalid_request(

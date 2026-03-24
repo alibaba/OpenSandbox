@@ -49,8 +49,8 @@ class Sandbox:
             Always present in responses since entrypoint is required in creation requests.
         created_at (datetime.datetime): Sandbox creation timestamp
         metadata (SandboxMetadata | Unset): Custom metadata from creation request
-        expires_at (datetime.datetime | None | Unset): Timestamp when sandbox will auto-terminate. Null when manual
-            cleanup is enabled.
+        expires_at (datetime.datetime | Unset): Timestamp when sandbox will auto-terminate. Omitted when manual cleanup
+            is enabled.
     """
 
     id: str
@@ -59,7 +59,7 @@ class Sandbox:
     entrypoint: list[str]
     created_at: datetime.datetime
     metadata: SandboxMetadata | Unset = UNSET
-    expires_at: datetime.datetime | None | Unset = UNSET
+    expires_at: datetime.datetime | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -77,13 +77,9 @@ class Sandbox:
         if not isinstance(self.metadata, Unset):
             metadata = self.metadata.to_dict()
 
-        expires_at: None | str | Unset
-        if isinstance(self.expires_at, Unset):
-            expires_at = UNSET
-        elif isinstance(self.expires_at, datetime.datetime):
+        expires_at: str | Unset = UNSET
+        if not isinstance(self.expires_at, Unset):
             expires_at = self.expires_at.isoformat()
-        else:
-            expires_at = self.expires_at
 
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
@@ -122,27 +118,17 @@ class Sandbox:
 
         _metadata = d.pop("metadata", UNSET)
         metadata: SandboxMetadata | Unset
-        if isinstance(_metadata, Unset) or _metadata is None:
+        if isinstance(_metadata, Unset):
             metadata = UNSET
         else:
             metadata = SandboxMetadata.from_dict(_metadata)
 
-        def _parse_expires_at(data: object) -> datetime.datetime | None | Unset:
-            if data is None:
-                return data
-            if isinstance(data, Unset):
-                return data
-            try:
-                if not isinstance(data, str):
-                    raise TypeError()
-                expires_at_type_0 = isoparse(data)
-
-                return expires_at_type_0
-            except (TypeError, ValueError, AttributeError, KeyError):
-                pass
-            return cast(datetime.datetime | None | Unset, data)
-
-        expires_at = _parse_expires_at(d.pop("expiresAt", UNSET))
+        _expires_at = d.pop("expiresAt", UNSET)
+        expires_at: datetime.datetime | Unset
+        if isinstance(_expires_at, Unset):
+            expires_at = UNSET
+        else:
+            expires_at = isoparse(_expires_at)
 
         sandbox = cls(
             id=id,

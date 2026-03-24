@@ -155,19 +155,19 @@ For **experimental** lifecycle options (e.g. auto-renew on access), see [Experim
 
 - `timeout` requests must be at least 60 seconds.
 - The maximum allowed TTL is controlled by `server.max_sandbox_timeout_seconds`.
-- Omit `timeout` or set it to `null` in the create request to use manual cleanup mode instead of automatic expiration.
+- Omit `timeout` in the create request to use manual cleanup mode instead of automatic expiration.
 
 **Upgrade order for manual cleanup**
 
 - Existing TTL-only clients can continue to work without changes as long as they do not encounter manual-cleanup sandboxes.
-- Manual cleanup changes the lifecycle response contract: `expiresAt` may be `null`, and other nullable lifecycle fields may also be serialized explicitly as `null`.
+- Manual cleanup changes the lifecycle response contract: `expiresAt` may be omitted, and other optional lifecycle fields may also be omitted when unset.
 - In practice this can include fields such as `metadata`, `status.reason`, `status.message`, and `status.lastTransitionAt`, depending on the sandbox state and the server response model.
-- Before creating any manual-cleanup sandbox, upgrade every SDK/client that may call `create`, `get`, or `list` on the lifecycle API.
+- Before creating any manual-cleanup sandbox, ensure every SDK/client tolerates omitted optional lifecycle fields on `create`, `get`, and `list` responses.
 - Recommended rollout order:
   1. Upgrade SDKs/clients
   2. Upgrade the server
-  3. Start creating sandboxes with `timeout` omitted or `null`
-- Do not introduce manual-cleanup sandboxes into a shared environment while old SDKs are still actively reading lifecycle responses.
+  3. Start creating sandboxes with `timeout` omitted
+- Do not introduce manual-cleanup sandboxes into a shared environment while old SDKs are still actively assuming optional lifecycle fields are always present.
 
 **Security hardening (applies to all Docker modes)**
    ```toml

@@ -164,14 +164,14 @@ class TestGetSandbox:
         """
         pass
 
-    def test_get_sandbox_preserves_nullable_expires_at(
+    def test_get_sandbox_omits_optional_none_fields(
         self,
         client: TestClient,
         auth_headers: dict,
         monkeypatch,
     ):
         """
-        Ensure expiresAt is returned as null for manual-cleanup sandboxes.
+        Ensure optional fields with None values are omitted from responses.
         """
         now = datetime.now(timezone.utc)
         sandbox = Sandbox(
@@ -195,16 +195,15 @@ class TestGetSandbox:
         assert response.status_code == 200
 
         payload = response.json()
-        assert payload["metadata"] is None
         assert payload["id"] == "sandbox-123"
         assert payload["entrypoint"] == ["python"]
-        assert "expiresAt" in payload
-        assert payload["expiresAt"] is None
+        assert "metadata" not in payload
+        assert "expiresAt" not in payload
         assert "createdAt" in payload
         assert payload["status"]["state"] == "Running"
-        assert payload["status"]["reason"] is None
-        assert payload["status"]["message"] is None
-        assert payload["status"]["lastTransitionAt"] is None
+        assert "reason" not in payload["status"]
+        assert "message" not in payload["status"]
+        assert "lastTransitionAt" not in payload["status"]
 
     def test_get_sandbox_not_found(
         self,

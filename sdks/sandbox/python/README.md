@@ -117,16 +117,15 @@ sandbox = await Sandbox.resume(
 # Get current status
 info = await sandbox.get_info()
 print(f"State: {info.status.state}")
-print(f"Expires: {info.expires_at}")  # None when manual cleanup mode is used
+print(f"Expires: {info.expires_at}")  # None when no automatic expiration is configured
 ```
 
-Create a non-expiring sandbox by passing `timeout=None`:
+Create a non-expiring sandbox by omitting `timeout`:
 
 ```python
 manual = await Sandbox.create(
     "ubuntu",
     connection_config=config,
-    timeout=None,
 )
 ```
 

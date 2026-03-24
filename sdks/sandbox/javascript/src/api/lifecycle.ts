@@ -468,8 +468,11 @@ export interface components {
             metadata?: {
                 [key: string]: string;
             };
-            /** @description Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled. */
-            expiresAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when sandbox will auto-terminate. Omitted when manual cleanup is enabled.
+             */
+            expiresAt?: string;
             /**
              * Format: date-time
              * @description Sandbox creation timestamp
@@ -498,8 +501,11 @@ export interface components {
              *     Always present in responses since entrypoint is required in creation requests.
              */
             entrypoint: string[];
-            /** @description Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled. */
-            expiresAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when sandbox will auto-terminate. Omitted when manual cleanup is enabled.
+             */
+            expiresAt?: string;
             /**
              * Format: date-time
              * @description Sandbox creation timestamp
@@ -583,9 +589,9 @@ export interface components {
             /**
              * @description Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
              *     The maximum is controlled by the server configuration (`server.max_sandbox_timeout_seconds`).
-             *     Omit or set null to disable automatic expiration and require explicit cleanup.
+             *     Omit this field or set it to null to disable automatic expiration and require explicit cleanup.
              *     Note: manual cleanup support is runtime-dependent; Kubernetes providers may reject
-             *     null timeout when the underlying workload provider does not support non-expiring sandboxes.
+             *     omitted or null timeout when the underlying workload provider does not support non-expiring sandboxes.
              */
             timeout?: number | null;
             /**
@@ -656,6 +662,9 @@ export interface components {
              *     **Best Practices**:
              *     - **Namespacing**: Use prefixed keys (e.g., `storage.id`) to prevent collisions.
              *     - **Pass-through**: SDKs and middleware must treat this object as opaque and pass it through transparently.
+             *
+             *     **Well-known keys**:
+             *     - `access.renew.extend.seconds` (optional): Decimal integer string from **300** to **86400** (5 minutes to 24 hours inclusive). Opts the sandbox into OSEP-0009 renew-on-access and sets per-renewal extension seconds. Omit to disable. Invalid values are rejected at creation with HTTP 400 (validated on the lifecycle create endpoint via `validate_extensions` in server `src/extensions/validation.py`).
              */
             extensions?: {
                 [key: string]: string;

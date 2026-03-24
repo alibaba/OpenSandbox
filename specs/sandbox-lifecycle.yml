@@ -533,11 +533,9 @@ components:
           description: Custom metadata from creation request
 
         expiresAt:
-          oneOf:
-            - type: string
-              format: date-time
-            - type: 'null'
-          description: Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.
+          type: string
+          format: date-time
+          description: Timestamp when sandbox will auto-terminate. Omitted when manual cleanup is enabled.
 
         createdAt:
           type: string
@@ -589,11 +587,9 @@ components:
             Always present in responses since entrypoint is required in creation requests.
 
         expiresAt:
-          oneOf:
-            - type: string
-              format: date-time
-            - type: 'null'
-          description: Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.
+          type: string
+          format: date-time
+          description: Timestamp when sandbox will auto-terminate. Omitted when manual cleanup is enabled.
 
         createdAt:
           type: string
@@ -707,9 +703,9 @@ components:
           description: |
             Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
             The maximum is controlled by the server configuration (`server.max_sandbox_timeout_seconds`).
-            Omit or set null to disable automatic expiration and require explicit cleanup.
+            Omit this field or set it to null to disable automatic expiration and require explicit cleanup.
             Note: manual cleanup support is runtime-dependent; Kubernetes providers may reject
-            null timeout when the underlying workload provider does not support non-expiring sandboxes.
+            omitted or null timeout when the underlying workload provider does not support non-expiring sandboxes.
 
         resourceLimits:
           $ref: '#/components/schemas/ResourceLimits'

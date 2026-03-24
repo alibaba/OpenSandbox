@@ -106,7 +106,7 @@ class SandboxStatus:
 
         _last_transition_at = d.pop("lastTransitionAt", UNSET)
         last_transition_at: datetime.datetime | Unset
-        if isinstance(_last_transition_at, Unset) or _last_transition_at is None:
+        if isinstance(_last_transition_at, Unset):
             last_transition_at = UNSET
         else:
             last_transition_at = isoparse(_last_transition_at)
