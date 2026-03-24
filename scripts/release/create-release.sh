@@ -66,19 +66,129 @@ require_cmd() {
 
 is_semver_like() {
   local version="${1#v}"
-  [[ "$version" =~ ^[0-9]+(\.[0-9]+){2}([-+][0-9A-Za-z.-]+)?$ ]]
+  [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
+}
+
+is_numeric_id() {
+  [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+semver_compare() {
+  local left="${1#v}"
+  local right="${2#v}"
+
+  # Build metadata must not affect precedence.
+  left="${left%%+*}"
+  right="${right%%+*}"
+
+  local left_main="${left%%-*}"
+  local right_main="${right%%-*}"
+  local left_pre=""
+  local right_pre=""
+  if [[ "$left" == *-* ]]; then
+    left_pre="${left#*-}"
+  fi
+  if [[ "$right" == *-* ]]; then
+    right_pre="${right#*-}"
+  fi
+
+  local l1 l2 l3 r1 r2 r3
+  IFS='.' read -r l1 l2 l3 <<<"$left_main"
+  IFS='.' read -r r1 r2 r3 <<<"$right_main"
+
+  if ((10#$l1 > 10#$r1)); then
+    echo 1
+    return
+  elif ((10#$l1 < 10#$r1)); then
+    echo -1
+    return
+  fi
+  if ((10#$l2 > 10#$r2)); then
+    echo 1
+    return
+  elif ((10#$l2 < 10#$r2)); then
+    echo -1
+    return
+  fi
+  if ((10#$l3 > 10#$r3)); then
+    echo 1
+    return
+  elif ((10#$l3 < 10#$r3)); then
+    echo -1
+    return
+  fi
+
+  # A version without prerelease has higher precedence.
+  if [[ -z "$left_pre" && -z "$right_pre" ]]; then
+    echo 0
+    return
+  elif [[ -z "$left_pre" ]]; then
+    echo 1
+    return
+  elif [[ -z "$right_pre" ]]; then
+    echo -1
+    return
+  fi
+
+  local -a left_ids right_ids
+  local left_len right_len max_len i
+  IFS='.' read -r -a left_ids <<<"$left_pre"
+  IFS='.' read -r -a right_ids <<<"$right_pre"
+  left_len="${#left_ids[@]}"
+  right_len="${#right_ids[@]}"
+  if ((left_len > right_len)); then
+    max_len="$left_len"
+  else
+    max_len="$right_len"
+  fi
+
+  local li ri
+  for ((i = 0; i < max_len; i++)); do
+    li="${left_ids[$i]:-}"
+    ri="${right_ids[$i]:-}"
+
+    if [[ -z "$li" && -n "$ri" ]]; then
+      echo -1
+      return
+    elif [[ -n "$li" && -z "$ri" ]]; then
+      echo 1
+      return
+    fi
+
+    if is_numeric_id "$li" && is_numeric_id "$ri"; then
+      if ((10#$li > 10#$ri)); then
+        echo 1
+        return
+      elif ((10#$li < 10#$ri)); then
+        echo -1
+        return
+      fi
+    elif is_numeric_id "$li" && ! is_numeric_id "$ri"; then
+      echo -1
+      return
+    elif ! is_numeric_id "$li" && is_numeric_id "$ri"; then
+      echo 1
+      return
+    else
+      if [[ "$li" > "$ri" ]]; then
+        echo 1
+        return
+      elif [[ "$li" < "$ri" ]]; then
+        echo -1
+        return
+      fi
+    fi
+  done
+
+  echo 0
 }
 
 semver_lt() {
-  local left="${1#v}"
-  local right="${2#v}"
-  [[ "$(printf '%s\n%s\n' "$left" "$right" | sort -V | head -n1)" == "$left" && "$left" != "$right" ]]
+  [[ "$(semver_compare "$1" "$2")" == "-1" ]]
 }
 
 semver_gt() {
-  local left="${1#v}"
-  local right="${2#v}"
-  [[ "$(printf '%s\n%s\n' "$left" "$right" | sort -V | tail -n1)" == "$left" && "$left" != "$right" ]]
+  [[ "$(semver_compare "$1" "$2")" == "1" ]]
 }
 
 normalize_handle() {
@@ -312,21 +422,22 @@ resolve_previous_tag() {
   fi
 
   if is_semver_like "$VERSION_NO_V"; then
-    local semver_candidates=""
+    local semver_latest_version=""
+    local semver_latest_tag=""
     local tag suffix
     while IFS= read -r tag; do
       [[ -n "$tag" ]] || continue
       suffix="${tag#${TAG_PREFIX}}"
-      if is_semver_like "$suffix" && semver_lt "$suffix" "$VERSION_NO_V"; then
-        semver_candidates+="${suffix}|${tag}"$'\n'
+      if is_semver_like "$suffix"; then
+        if [[ -z "$semver_latest_version" ]] || semver_gt "$suffix" "$semver_latest_version"; then
+          semver_latest_version="$suffix"
+          semver_latest_tag="$tag"
+        fi
       fi
     done <<<"$tags_output"
 
-    if [[ -n "$semver_candidates" ]]; then
-      printf '%s' "$semver_candidates" \
-        | sort -t'|' -k1,1V \
-        | tail -n1 \
-        | awk -F'|' '{print $2}'
+    if [[ -n "$semver_latest_tag" ]]; then
+      printf '%s' "$semver_latest_tag"
       return 0
     fi
   fi
