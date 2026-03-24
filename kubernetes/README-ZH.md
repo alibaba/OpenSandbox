@@ -29,7 +29,7 @@ Pool 自定义资源维护一个预热的计算资源池，以实现快速沙箱
 - **池容量限制**：通过池范围的最小和最大限制来控制总体资源消耗。
 - **回收策略 (Recycle Policies)**：支持不同的 Pod 回收策略：
   - **Delete (默认)**：Pod 在返回池时会被删除并根据模板重新创建，确保环境绝对纯净。
-  - **Restart**：通过向所有容器的 PID 1 发送 SIGTERM 信号优雅终止进程，并依赖 Kubernetes 的 `restartPolicy` 触发重启。这种方式比 `Delete` 更快，但要求 `PodTemplateSpec` 中的 `restartPolicy` 设置为 `Always` 或 `OnFailure`。
+  - **Restart**：通过向所有容器的 PID 1 发送 SIGTERM 信号优雅终止进程，并依赖 Kubernetes 的 `restartPolicy` 触发重启。这种方式比 `Delete` 更快，但要求 `PodTemplateSpec` 中的 `restartPolicy` 设置为 `Always`。
 - **自动扩展**：基于当前需求和缓冲区设置进行动态资源分配和释放。
 - **实时状态监控**：显示总数、已分配、可用以及正在重启中的 Pod 数量。
 

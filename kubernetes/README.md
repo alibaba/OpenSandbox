@@ -29,7 +29,7 @@ The Pool custom resource maintains a pool of pre-warmed compute resources to ena
 - **Pool Capacity Limits**: Overall resource consumption control with pool-wide minimum and maximum limits.
 - **Recycle Policies**: Support for different pod recycling strategies:
   - **Delete (Default)**: Pods are deleted and recreated from the template when returned to the pool, ensuring a completely clean environment.
-  - **Restart**: PID 1 in all containers is gracefully terminated (SIGTERM), and the Kubernetes `restartPolicy` triggers a restart. This is faster than `Delete` but requires the `restartPolicy` in `PodTemplateSpec` to be set to `Always` or `OnFailure`.
+  - **Restart**: PID 1 in all containers is gracefully terminated (SIGTERM), and the Kubernetes `restartPolicy` triggers a restart. This is faster than `Delete` but requires the `restartPolicy` in `PodTemplateSpec` to be set to `Always`.
 - **Automatic Scaling**: Dynamic resource allocation and deallocation based on current demand and buffer settings.
 - **Real-time Status**: Monitoring of total, allocated, available, and restarting pods.
 
