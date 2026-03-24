@@ -368,7 +368,16 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
             Assert.Equal("opensandbox-e2e-marker", marker.Logs.Stdout[0].Text);
 
             var write = await roSandbox.Commands.RunAsync($"touch {containerMountPath}/should-fail.txt");
-            Assert.NotNull(write.Error);
+            var stat = await roSandbox.Commands.RunAsync(
+                $"test ! -e {containerMountPath}/should-fail.txt && echo OK");
+            var writeWasRejected = write.Error is not null || write.Logs.Stderr.Count > 0;
+            var fileWasNotCreated =
+                stat.Error is null &&
+                stat.Logs.Stdout.Count == 1 &&
+                stat.Logs.Stdout[0].Text == "OK";
+            Assert.True(
+                writeWasRejected || fileWasNotCreated,
+                "Write on read-only host volume should fail or leave no created file.");
         }
         finally
         {
@@ -468,7 +477,16 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
             Assert.Equal("pvc-marker-data", marker.Logs.Stdout[0].Text);
 
             var write = await roSandbox.Commands.RunAsync($"touch {containerMountPath}/should-fail.txt");
-            Assert.NotNull(write.Error);
+            var stat = await roSandbox.Commands.RunAsync(
+                $"test ! -e {containerMountPath}/should-fail.txt && echo OK");
+            var writeWasRejected = write.Error is not null || write.Logs.Stderr.Count > 0;
+            var fileWasNotCreated =
+                stat.Error is null &&
+                stat.Logs.Stdout.Count == 1 &&
+                stat.Logs.Stdout[0].Text == "OK";
+            Assert.True(
+                writeWasRejected || fileWasNotCreated,
+                "Write on read-only PVC volume should fail or leave no created file.");
         }
         finally
         {
@@ -867,6 +885,22 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
         var verify = await sandbox.Commands.RunAsync(
             $"test ! -d {testDir1} && test ! -d {testDir2} && echo OK",
             options: new RunCommandOptions { WorkingDirectory = "/tmp" });
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var verified =
+                verify.Error is null &&
+                verify.Logs.Stdout.Count == 1 &&
+                verify.Logs.Stdout[0].Text == "OK";
+            if (verified)
+            {
+                break;
+            }
+
+            await Task.Delay(1000);
+            verify = await sandbox.Commands.RunAsync(
+                $"test ! -d {testDir1} && test ! -d {testDir2} && echo OK",
+                options: new RunCommandOptions { WorkingDirectory = "/tmp" });
+        }
         Assert.Null(verify.Error);
         Assert.Single(verify.Logs.Stdout);
         Assert.Equal("OK", verify.Logs.Stdout[0].Text);

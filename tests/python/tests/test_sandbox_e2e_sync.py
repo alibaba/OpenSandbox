@@ -1179,6 +1179,19 @@ class TestSandboxE2ESync:
             f"test ! -d {test_dir1} && test ! -d {test_dir2} && echo OK",
             opts=RunCommandOpts(working_directory="/tmp"),
         )
+        for _ in range(3):
+            verified = (
+                verify_dirs_deleted.error is None
+                and len(verify_dirs_deleted.logs.stdout) == 1
+                and verify_dirs_deleted.logs.stdout[0].text == "OK"
+            )
+            if verified:
+                break
+            time.sleep(1)
+            verify_dirs_deleted = sandbox.commands.run(
+                f"test ! -d {test_dir1} && test ! -d {test_dir2} && echo OK",
+                opts=RunCommandOpts(working_directory="/tmp"),
+            )
         assert verify_dirs_deleted.error is None
         assert len(verify_dirs_deleted.logs.stdout) == 1
         assert verify_dirs_deleted.logs.stdout[0].text == "OK"

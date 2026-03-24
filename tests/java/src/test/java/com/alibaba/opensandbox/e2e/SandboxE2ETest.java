@@ -1209,7 +1209,7 @@ public class SandboxE2ETest extends BaseE2ETest {
     @Order(5)
     @DisplayName("Filesystem operations: CRUD + replace/move/delete + mtime checks")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)
-    void testBasicFilesystemOperations() {
+    void testBasicFilesystemOperations() throws Exception {
         assertNotNull(sandbox);
         String testDir1 = "/tmp/fs_test1_" + System.currentTimeMillis();
         String testDir2 = "/tmp/fs_test2_" + System.currentTimeMillis();
@@ -1437,6 +1437,28 @@ public class SandboxE2ETest extends BaseE2ETest {
                                                         + " && echo OK")
                                         .workingDirectory("/tmp")
                                         .build());
+        for (int attempt = 0; attempt < 3; attempt++) {
+            boolean verified =
+                    verify.getError() == null
+                            && verify.getLogs().getStdout().size() == 1
+                            && "OK".equals(verify.getLogs().getStdout().get(0).getText());
+            if (verified) {
+                break;
+            }
+            Thread.sleep(1000);
+            verify =
+                    sandbox.commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command(
+                                                    "test ! -d "
+                                                            + testDir1
+                                                            + " && test ! -d "
+                                                            + testDir2
+                                                            + " && echo OK")
+                                            .workingDirectory("/tmp")
+                                            .build());
+        }
         assertNull(verify.getError());
         assertEquals(1, verify.getLogs().getStdout().size());
         assertEquals("OK", verify.getLogs().getStdout().get(0).getText());

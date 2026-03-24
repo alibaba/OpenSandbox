@@ -121,11 +121,13 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
         borrowed.add(sandbox);
         assertTrue(sandbox.isHealthy(), "cross-node acquire should return healthy sandbox");
         Execution result =
-                sandbox.commands().run(RunCommandRequest.builder().command("echo dist-acquire-ok").build());
+                sandbox.commands()
+                        .run(RunCommandRequest.builder().command("echo dist-acquire-ok").build());
         assertNotNull(result);
         assertNull(result.getError());
 
-        // Resize from one node should propagate through shared store and be honored by leader reconcile.
+        // Resize from one node should propagate through shared store and be honored by leader
+        // reconcile.
         poolB.resize(0);
         int released = poolA.releaseAllIdle();
         assertTrue(released >= 0, "releaseAllIdle should be non-negative");
@@ -215,14 +217,16 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
         Thread.sleep(Duration.ofSeconds(3).toMillis());
 
         Map<String, Integer> putCounts = store.putCountsByOwner(poolName);
-        assertEquals(1, putCounts.size(), "idle writes in steady-state should come from one owner only");
+        assertEquals(
+                1, putCounts.size(), "idle writes in steady-state should come from one owner only");
         assertTrue(
                 putCounts.containsKey(store.currentOwner(poolName)),
                 "steady-state writer should match current primary owner");
     }
 
     @Test
-    @DisplayName("renew failure window drops extra create and orphan cleanup keeps remote count bounded")
+    @DisplayName(
+            "renew failure window drops extra create and orphan cleanup keeps remote count bounded")
     @Timeout(value = 6, unit = java.util.concurrent.TimeUnit.MINUTES)
     void testRenewFailureWindowAndOrphanCleanupBoundedResources() throws Exception {
         tag = "e2e-pool-renew-window-" + UUID.randomUUID().toString().substring(0, 8);
@@ -327,11 +331,14 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
             SandboxPool follower = currentOwner.equals(ownerA) ? poolB : poolA;
             String expectedNextOwner = currentOwner.equals(ownerA) ? ownerB : ownerA;
 
-            Sandbox sandbox =
-                    follower.acquire(Duration.ofMinutes(3), AcquirePolicy.DIRECT_CREATE);
+            Sandbox sandbox = follower.acquire(Duration.ofMinutes(3), AcquirePolicy.DIRECT_CREATE);
             borrowed.add(sandbox);
             Execution execution =
-                    sandbox.commands().run(RunCommandRequest.builder().command("echo follower-acquire-ok").build());
+                    sandbox.commands()
+                            .run(
+                                    RunCommandRequest.builder()
+                                            .command("echo follower-acquire-ok")
+                                            .build());
             assertNotNull(execution);
             assertNull(execution.getError());
 
@@ -387,8 +394,7 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
                 Duration.ofSeconds(1),
                 () -> poolA.snapshot().getIdleCount() <= 1);
         assertTrue(
-                countTaggedSandboxes(tag) <= 3,
-                "restart should not cause runaway idle pollution");
+                countTaggedSandboxes(tag) <= 3, "restart should not cause runaway idle pollution");
     }
 
     private SandboxPool createPool(
@@ -488,20 +494,20 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
     }
 
     /**
-     * A thread-safe in-process store that mimics distributed semantics:
-     * - shared idle membership by poolName
-     * - owner-based primary lock with TTL
-     * - shared maxIdle propagation
+     * A thread-safe in-process store that mimics distributed semantics: - shared idle membership by
+     * poolName - owner-based primary lock with TTL - shared maxIdle propagation
      */
     static class PseudoDistributedPoolStateStore implements PoolStateStore {
         private static final Duration IDLE_TTL = Duration.ofHours(24);
 
-        private final Map<String, LinkedHashMap<String, Instant>> idleByPool = new LinkedHashMap<>();
+        private final Map<String, LinkedHashMap<String, Instant>> idleByPool =
+                new LinkedHashMap<>();
         private final Map<String, LockEntry> locks = new LinkedHashMap<>();
         private final Map<String, Integer> maxIdleByPool = new LinkedHashMap<>();
         private final Map<String, Map<String, Integer>> putCountByOwnerByPool = new HashMap<>();
         private final Map<String, Map<String, Integer>> renewCountByOwnerByPool = new HashMap<>();
-        private final Map<String, Map<String, Integer>> failRenewAfterPutByOwnerByPool = new HashMap<>();
+        private final Map<String, Map<String, Integer>> failRenewAfterPutByOwnerByPool =
+                new HashMap<>();
 
         @Override
         public synchronized String tryTakeIdle(String poolName) {
@@ -555,7 +561,8 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
         }
 
         @Override
-        public synchronized boolean renewPrimaryLock(String poolName, String ownerId, Duration ttl) {
+        public synchronized boolean renewPrimaryLock(
+                String poolName, String ownerId, Duration ttl) {
             Instant now = Instant.now();
             LockEntry lock = locks.get(poolName);
             if (lock == null || !lock.ownerId.equals(ownerId) || !lock.expiresAt.isAfter(now)) {
@@ -643,9 +650,7 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
                 return false;
             }
             int putCount =
-                    putCountByOwnerByPool
-                            .getOrDefault(poolName, Map.of())
-                            .getOrDefault(ownerId, 0);
+                    putCountByOwnerByPool.getOrDefault(poolName, Map.of()).getOrDefault(ownerId, 0);
             return putCount >= threshold;
         }
 
