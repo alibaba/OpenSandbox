@@ -35,8 +35,8 @@ Thanks to these contributors ❤️
 - @csdbianhua
 
 ---
-- Docker Hub: opensandbox/execd:v1.0.9
-- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9
+- Docker Hub: opensandbox/execd:v1.0.8
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.8
 
 # components/execd 1.0.7
 
@@ -70,8 +70,8 @@ Thanks to these contributors ❤️
 - @dependabot
 
 ---
-- Docker Hub: opensandbox/execd:v1.0.9
-- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9
+- Docker Hub: opensandbox/execd:v1.0.7
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.7
 
 # components/execd 1.0.6
 
@@ -93,8 +93,8 @@ Thanks to these contributors ❤️
 - @dependabot
 
 ---
-- Docker Hub: opensandbox/execd:v1.0.9
-- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9
+- Docker Hub: opensandbox/execd:v1.0.6
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.6
 
 # components/execd 1.0.5
 
@@ -111,8 +111,8 @@ Thanks to these contributors ❤️
 - @Pangjiping
 
 ---
-- Docker Hub: opensandbox/execd:v1.0.9
-- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9
+- Docker Hub: opensandbox/execd:v1.0.5
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.5
 
 # components/execd 1.0.4
 
@@ -135,8 +135,8 @@ Thanks to these contributors ❤️
 - @ninan-nn
 
 ---
-- Docker Hub: opensandbox/execd:v1.0.9
-- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9
+- Docker Hub: opensandbox/execd:v1.0.4
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.4
 
 # components/execd 1.0.3
 
@@ -159,8 +159,8 @@ Thanks to these contributors ❤️
 - @jwx0925
 
 ---
-- Docker Hub: opensandbox/execd:v1.0.9
-- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9
+- Docker Hub: opensandbox/execd:v1.0.3
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.3
 
 # components/execd 1.0.2
 
@@ -188,8 +188,8 @@ Thanks to these contributors ❤️
 - @ninan-nn
 
 ---
-- Docker Hub: opensandbox/execd:v1.0.9
-- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9
+- Docker Hub: opensandbox/execd:v1.0.2
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.2
 
 # components/execd 1.0.1
 
@@ -221,8 +221,8 @@ Thanks to these contributors ❤️
 - @jwx0925
 
 ---
-- Docker Hub: opensandbox/execd:v1.0.9
-- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9
+- Docker Hub: opensandbox/execd:v1.0.1
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.1
 
 # components/execd 1.0.0
 
