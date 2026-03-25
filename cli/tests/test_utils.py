@@ -23,7 +23,6 @@ import pytest
 
 from opensandbox_cli.utils import DURATION, KEY_VALUE, parse_duration
 
-
 # ---------------------------------------------------------------------------
 # parse_duration
 # ---------------------------------------------------------------------------

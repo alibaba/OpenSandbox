@@ -20,7 +20,6 @@ import json
 from datetime import timedelta
 
 import click
-
 from opensandbox.models.sandboxes import NetworkPolicy, SandboxFilter
 
 from opensandbox_cli.client import ClientContext

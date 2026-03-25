@@ -23,7 +23,6 @@ from pydantic import BaseModel
 
 from opensandbox_cli.output import OutputFormatter
 
-
 # ---------------------------------------------------------------------------
 # Test models
 # ---------------------------------------------------------------------------

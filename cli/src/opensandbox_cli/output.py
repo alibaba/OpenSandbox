@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
-from typing import Any, Generator, Sequence
+from typing import Any
 
 import click
 

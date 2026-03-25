@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -27,7 +26,6 @@ from opensandbox_cli.config import (
     load_config_file,
     resolve_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # load_config_file

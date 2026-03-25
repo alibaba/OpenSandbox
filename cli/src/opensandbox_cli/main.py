@@ -20,7 +20,6 @@ from pathlib import Path
 
 import click
 from rich.console import Console
-from rich.text import Text
 
 from opensandbox_cli import __version__
 from opensandbox_cli.client import ClientContext

@@ -19,7 +19,6 @@ from __future__ import annotations
 import sys
 
 import click
-
 from opensandbox.models.execd import OutputMessage
 from opensandbox.models.execd_sync import ExecutionHandlersSync
 

@@ -21,7 +21,6 @@ import sys
 from datetime import timedelta
 
 import click
-
 from opensandbox.models.execd import OutputMessage, RunCommandOpts
 from opensandbox.models.execd_sync import ExecutionHandlersSync
 

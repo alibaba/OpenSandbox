@@ -22,7 +22,6 @@ from datetime import timedelta
 from typing import Any
 
 import click
-
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.models.sandboxes import SandboxFilter
 from opensandbox.sync.manager import SandboxManagerSync
