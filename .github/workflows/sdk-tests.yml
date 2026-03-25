@@ -82,9 +82,19 @@ jobs:
         run: |
           uv run pyright
 
-  python-sdk:
-    name: Python SDK Tests
+  python-sdk-tests:
+    name: Python SDK Tests (${{ matrix.package_name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_name: sandbox
+            package_dir: sdks/sandbox/python
+            coverage_target: src/opensandbox
+          - package_name: code-interpreter
+            package_dir: sdks/code-interpreter/python
+            coverage_target: src/code_interpreter
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -99,20 +109,108 @@ jobs:
         with:
           version: "latest"
 
-      - name: Generate API
-        working-directory: sdks/sandbox/python
+      - name: Install dependencies
+        working-directory: ${{ matrix.package_dir }}
         run: |
           uv sync
+
+      - name: Generate API
+        if: matrix.package_name == 'sandbox'
+        working-directory: sdks/sandbox/python
+        run: |
           uv run python scripts/generate_api.py
 
       - name: Run tests
-        working-directory: sdks/sandbox/python
+        working-directory: ${{ matrix.package_dir }}
         run: |
-          uv run pytest tests/ -v
+          mkdir -p reports
+          uv run pytest tests/ -v \
+            --junitxml=reports/junit.xml \
+            --cov=${{ matrix.coverage_target }} \
+            --cov-report=term-missing \
+            --cov-report=xml:reports/coverage.xml
 
-  kotlin-sdk:
-    name: Kotlin SDK Tests
+      - name: Upload Python reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-${{ matrix.package_name }}-reports
+          path: |
+            ${{ matrix.package_dir }}/reports/**
+
+  javascript-sdk-quality:
+    name: JavaScript SDK Quality And Tests (${{ matrix.package_name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_name: sandbox
+            package_dir: sdks/sandbox/javascript
+          - package_name: code-interpreter
+            package_dir: sdks/code-interpreter/javascript
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: sdks/pnpm-lock.yaml
+
+      - name: Set up pnpm
+        run: |
+          corepack enable
+
+      - name: Install dependencies
+        working-directory: sdks
+        run: |
+          pnpm install --frozen-lockfile
+
+      - name: Run eslint
+        working-directory: ${{ matrix.package_dir }}
+        run: |
+          pnpm run lint
+
+      - name: Run TypeScript typecheck
+        working-directory: ${{ matrix.package_dir }}
+        run: |
+          pnpm run typecheck
+
+      - name: Build JavaScript SDKs
+        working-directory: sdks
+        run: |
+          pnpm run build:js
+
+      - name: Run tests
+        working-directory: ${{ matrix.package_dir }}
+        run: |
+          mkdir -p reports
+          node --test tests/*.test.mjs > reports/test-output.txt
+
+      - name: Upload JavaScript reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: javascript-${{ matrix.package_name }}-reports
+          path: |
+            ${{ matrix.package_dir }}/reports/**
+
+  kotlin-sdk-quality:
+    name: Kotlin SDK Quality And Tests (${{ matrix.package_name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_name: sandbox
+            package_dir: sdks/sandbox/kotlin
+            test_task: :sandbox:test
+          - package_name: code-interpreter
+            package_dir: sdks/code-interpreter/kotlin
+            test_task: :code-interpreter:test
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -126,14 +224,35 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v5
 
-      - name: Run tests
-        working-directory: sdks/sandbox/kotlin
+      - name: Run quality checks and tests
+        working-directory: ${{ matrix.package_dir }}
         run: |
-          ./gradlew :sandbox:test
+          ./gradlew spotlessCheck ${{ matrix.test_task }}
 
-  csharp-sdk:
-    name: C# SDK Tests
+      - name: Upload Kotlin reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-${{ matrix.package_name }}-reports
+          path: |
+            ${{ matrix.package_dir }}/**/build/test-results/test/**
+            ${{ matrix.package_dir }}/**/build/reports/tests/test/**
+
+  csharp-sdk-quality:
+    name: C# SDK Quality And Tests (${{ matrix.package_name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package_name: sandbox
+            package_dir: sdks/sandbox/csharp
+            solution: OpenSandbox.sln
+            test_project: tests/OpenSandbox.Tests/OpenSandbox.Tests.csproj
+          - package_name: code-interpreter
+            package_dir: sdks/code-interpreter/csharp
+            solution: OpenSandbox.CodeInterpreter.sln
+            test_project: tests/OpenSandbox.CodeInterpreter.Tests/OpenSandbox.CodeInterpreter.Tests.csproj
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -143,12 +262,25 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Run sandbox tests
-        working-directory: sdks/sandbox/csharp
+      - name: Build with analyzers
+        working-directory: ${{ matrix.package_dir }}
         run: |
-          dotnet test tests/OpenSandbox.Tests/OpenSandbox.Tests.csproj --configuration Release
+          dotnet build ${{ matrix.solution }} --configuration Release /warnaserror
 
-      - name: Run code interpreter tests
-        working-directory: sdks/code-interpreter/csharp
+      - name: Run tests with reports
+        working-directory: ${{ matrix.package_dir }}
         run: |
-          dotnet test tests/OpenSandbox.CodeInterpreter.Tests/OpenSandbox.CodeInterpreter.Tests.csproj --configuration Release
+          dotnet test ${{ matrix.test_project }} \
+            --configuration Release \
+            --no-build \
+            --logger "trx;LogFileName=test-results.trx" \
+            --results-directory TestResults \
+            --collect:"XPlat Code Coverage"
+
+      - name: Upload C# reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: csharp-${{ matrix.package_name }}-reports
+          path: |
+            ${{ matrix.package_dir }}/TestResults/**

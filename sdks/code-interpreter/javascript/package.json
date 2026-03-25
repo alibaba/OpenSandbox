@@ -36,6 +36,7 @@
     "build": "tsup",
     "test": "pnpm run build && node --test tests/*.test.mjs",
     "lint": "eslint src --max-warnings 0",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist"
   },
   "dependencies": {
