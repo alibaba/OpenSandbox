@@ -22,7 +22,6 @@ import (
 )
 
 const CommandResumeAfterEidQuery = "after_eid"
-const SessionResumeAfterEidQuery = CommandResumeAfterEidQuery
 
 // RunCommandRequest represents a shell command execution request.
 type RunCommandRequest struct {

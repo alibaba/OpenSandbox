@@ -16,12 +16,14 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/flag"
+	"github.com/alibaba/opensandbox/execd/pkg/log"
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 )
@@ -50,6 +52,11 @@ func (c *CodeInterpretingController) RunCommand() {
 
 	ctx, cancel := context.WithCancel(c.ctx.Request.Context())
 	defer cancel()
+	c.resumeEnabled = true
+	defer func() {
+		deferResumeCleanup(c)
+		c.resumeEnabled = false
+	}()
 
 	runCodeRequest := c.buildExecuteCommandRequest(request)
 	eventsHandler := c.setServerEventsHandler(ctx)
@@ -125,19 +132,65 @@ func (c *CodeInterpretingController) GetBackgroundCommandOutput() {
 	c.ctx.String(http.StatusOK, "%s", output)
 }
 
+// ResumeCommandStream sends buffered events after after_eid, then if the command is still running
+// and no other client holds the live slot, streams further events until completion or client disconnect.
 func (c *CodeInterpretingController) ResumeCommandStream() {
 	commandID := c.ctx.Param("id")
 	if commandID == "" {
 		c.RespondError(http.StatusBadRequest, model.ErrorCodeInvalidRequest, "missing command execution id")
 		return
 	}
-	_ = c.QueryInt64(c.ctx.Query(model.CommandResumeAfterEidQuery), 0)
+	afterEid := c.QueryInt64(c.ctx.Query(model.CommandResumeAfterEidQuery), 0)
 
-	c.RespondError(
-		http.StatusNotImplemented,
-		model.ErrorCodeNotImplemented,
-		"command stream resume is not implemented yet",
-	)
+	hub := commandStreams.getHub(commandID)
+	st, errSt := codeRunner.GetCommandStatus(commandID)
+	if errSt != nil && hub == nil {
+		c.RespondError(http.StatusNotFound, model.ErrorCodeInvalidRequest, errSt.Error())
+		return
+	}
+
+	events, bufferOK := resumeBuffer.EventsAfter(commandID, afterEid)
+	if !bufferOK && hub == nil {
+		c.RespondError(http.StatusNotFound, model.ErrorCodeInvalidRequest, "command stream resume buffer not available")
+		return
+	}
+
+	if st != nil && st.Running && hub != nil && hub.isHolderAlive() {
+		c.RespondError(
+			http.StatusConflict,
+			model.ErrorCodeInvalidRequest,
+			"primary SSE stream is still active; disconnect it before resuming",
+		)
+		return
+	}
+
+	c.setupSSEResponse()
+	for _, ev := range events {
+		c.writeSingleEvent("ResumeBuffer", ev.Payload, false, fmt.Sprintf("buffer eid=%d", ev.EID), 0)
+	}
+
+	st2, _ := codeRunner.GetCommandStatus(commandID)
+	if st2 == nil || !st2.Running {
+		return
+	}
+
+	hub = commandStreams.getHub(commandID)
+	if hub == nil {
+		return
+	}
+
+	h, err := commandStreams.tryAttachResume(commandID, c.ctx.Writer, c.ctx.Request.Context())
+	if err != nil {
+		if errors.Is(err, errLiveStreamPrimaryActive) {
+			log.Error("ResumeCommandStream: attach conflict after buffered history (another client may have attached)")
+		}
+		return
+	}
+
+	select {
+	case <-h.waitDone():
+	case <-c.ctx.Request.Context().Done():
+	}
 }
 
 func (c *CodeInterpretingController) buildExecuteCommandRequest(request model.RunCommandRequest) *runtime.ExecuteCodeRequest {

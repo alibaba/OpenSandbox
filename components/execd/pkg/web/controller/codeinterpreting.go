@@ -42,6 +42,11 @@ type CodeInterpretingController struct {
 
 	// chunkWriter serializes SSE event writes to prevent interleaved output.
 	chunkWriter sync.Mutex
+
+	resumeStreamMu sync.Mutex
+	resumeStreamID string
+	// resumeEnabled opts into disconnect resume (event buffer + live hub) for RunCommand / RunCode.
+	resumeEnabled bool
 }
 
 func NewCodeInterpretingController(ctx *gin.Context) *CodeInterpretingController {
@@ -111,6 +116,11 @@ func (c *CodeInterpretingController) RunCode() {
 
 	ctx, cancel := context.WithCancel(c.ctx.Request.Context())
 	defer cancel()
+	c.resumeEnabled = true
+	defer func() {
+		deferResumeCleanup(c)
+		c.resumeEnabled = false
+	}()
 	runCodeRequest := c.buildExecuteCodeRequest(request)
 	eventsHandler := c.setServerEventsHandler(ctx)
 	runCodeRequest.Hooks = eventsHandler
@@ -305,6 +315,7 @@ func (c *CodeInterpretingController) RunInSession() {
 	}
 	ctx, cancel := context.WithCancel(c.ctx.Request.Context())
 	defer cancel()
+
 	runReq.Hooks = c.setServerEventsHandler(ctx)
 
 	c.setupSSEResponse()
@@ -319,25 +330,6 @@ func (c *CodeInterpretingController) RunInSession() {
 	}
 
 	time.Sleep(flag.ApiGracefulShutdownTimeout)
-}
-
-func (c *CodeInterpretingController) ResumeSessionStream() {
-	sessionID := c.ctx.Param("sessionId")
-	if sessionID == "" {
-		c.RespondError(
-			http.StatusBadRequest,
-			model.ErrorCodeMissingQuery,
-			"missing path parameter 'sessionId'",
-		)
-		return
-	}
-	_ = c.QueryInt64(c.ctx.Query(model.SessionResumeAfterEidQuery), 0)
-
-	c.RespondError(
-		http.StatusNotImplemented,
-		model.ErrorCodeNotImplemented,
-		"session stream resume is not implemented yet",
-	)
 }
 
 // DeleteSession deletes a bash session (delete_session API).

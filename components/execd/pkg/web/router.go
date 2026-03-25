@@ -66,7 +66,6 @@ func NewRouter(accessToken string) *gin.Engine {
 	{
 		session.POST("", withCode(func(c *controller.CodeInterpretingController) { c.CreateSession() }))
 		session.POST("/:sessionId/run", withCode(func(c *controller.CodeInterpretingController) { c.RunInSession() }))
-		session.GET("/:sessionId/resume", withCode(func(c *controller.CodeInterpretingController) { c.ResumeSessionStream() }))
 		session.DELETE("/:sessionId", withCode(func(c *controller.CodeInterpretingController) { c.DeleteSession() }))
 	}
 
