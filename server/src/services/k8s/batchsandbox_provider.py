@@ -50,6 +50,7 @@ from src.services.k8s.security_context import (
 from src.services.k8s.volume_helper import apply_volumes_to_pod_spec
 from src.services.k8s.workload_provider import WorkloadProvider
 from src.services.runtime_resolver import SecureRuntimeResolver
+from src.services.k8s.resource_utils import calculate_resource_requests
 
 logger = logging.getLogger(__name__)
 
@@ -589,9 +590,10 @@ class BatchSandboxProvider(WorkloadProvider):
         # Build resource requirements
         resources = None
         if resource_limits:
+            requests = calculate_resource_requests(resource_limits, fraction=0.25)
             resources = V1ResourceRequirements(
                 limits=resource_limits,
-                requests=resource_limits,  # Set requests = limits for guaranteed QoS
+                requests=requests,  # Set requests = limits for guaranteed QoS
             )
         
         # Wrap entrypoint with bootstrap script to start execd

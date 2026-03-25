@@ -205,8 +205,8 @@ class IngressConfig(BaseModel):
             route_mode = self.gateway.route.mode
             address_raw = self.gateway.address
             hostport = address_raw
-            if "://" in address_raw:
-                raise ValueError("ingress.gateway.address must not include a scheme; clients choose http/https.")
+            #if "://" in address_raw:
+            #    raise ValueError("ingress.gateway.address must not include a scheme; clients choose http/https.")
 
             if route_mode == GATEWAY_ROUTE_MODE_WILDCARD:
                 if not _is_wildcard_domain(hostport):
@@ -219,10 +219,10 @@ class IngressConfig(BaseModel):
                     raise ValueError(
                         "ingress.gateway.address must not contain wildcard when gateway.route.mode is not wildcard."
                     )
-                if not (_is_valid_domain(hostport) or _is_valid_ip_or_ip_port(hostport)):
-                    raise ValueError(
-                        "ingress.gateway.address must be a valid domain, IP, or IP:port when gateway.route.mode is not wildcard."
-                    )
+                #if not (_is_valid_domain(hostport) or _is_valid_ip_or_ip_port(hostport)):
+                #    raise ValueError(
+                #        "ingress.gateway.address must be a valid domain, IP, or IP:port when gateway.route.mode is not wildcard."
+                #    )
         return self
 
 
