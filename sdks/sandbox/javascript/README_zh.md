@@ -166,7 +166,32 @@ const { endpoint } = await sandbox.getEndpoint(44772);
 const url = await sandbox.getEndpointUrl(44772);
 ```
 
-### 6. 沙箱管理（Admin）
+### 6. Volume 挂载
+
+`volumes` 现在支持 `host`、`pvc` 和 `ossfs` 三种 backend。每个 volume 必须且只能指定其中一种。
+
+```ts
+const sandbox = await Sandbox.create({
+  connectionConfig: config,
+  image: "ubuntu",
+  volumes: [
+    {
+      name: "oss-data",
+      ossfs: {
+        bucket: "bucket-a",
+        endpoint: "oss-cn-hangzhou.aliyuncs.com",
+        accessKeyId: process.env.OSS_ACCESS_KEY_ID!,
+        accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET!,
+        version: "2.0",
+      },
+      mountPath: "/mnt/oss",
+      subPath: "prefix",
+    },
+  ],
+});
+```
+
+### 7. 沙箱管理（Admin）
 
 使用 `SandboxManager` 进行管理操作，如查询现有沙箱列表。
 

@@ -165,7 +165,32 @@ const { endpoint } = await sandbox.getEndpoint(44772);
 const url = await sandbox.getEndpointUrl(44772);
 ```
 
-### 6. Sandbox Management (Admin)
+### 6. Volume Mounts
+
+`volumes` supports `host`, `pvc`, and `ossfs` backends. Each volume must specify exactly one backend.
+
+```ts
+const sandbox = await Sandbox.create({
+  connectionConfig: config,
+  image: "ubuntu",
+  volumes: [
+    {
+      name: "oss-data",
+      ossfs: {
+        bucket: "bucket-a",
+        endpoint: "oss-cn-hangzhou.aliyuncs.com",
+        accessKeyId: process.env.OSS_ACCESS_KEY_ID!,
+        accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET!,
+        version: "2.0",
+      },
+      mountPath: "/mnt/oss",
+      subPath: "prefix",
+    },
+  ],
+});
+```
+
+### 7. Sandbox Management (Admin)
 
 Use `SandboxManager` for administrative tasks and finding existing sandboxes.
 

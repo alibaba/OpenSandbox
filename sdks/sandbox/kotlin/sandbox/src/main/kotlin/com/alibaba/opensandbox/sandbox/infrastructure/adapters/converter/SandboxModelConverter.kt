@@ -29,6 +29,7 @@ import com.alibaba.opensandbox.sandbox.api.models.execd.Metrics
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Host
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.OSSFS
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PVC
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PaginationInfo
@@ -45,6 +46,7 @@ import java.time.OffsetDateTime
 import com.alibaba.opensandbox.sandbox.api.models.Host as ApiHost
 import com.alibaba.opensandbox.sandbox.api.models.NetworkPolicy as ApiNetworkPolicy
 import com.alibaba.opensandbox.sandbox.api.models.NetworkRule as ApiNetworkRule
+import com.alibaba.opensandbox.sandbox.api.models.OSSFS as ApiOSSFS
 import com.alibaba.opensandbox.sandbox.api.models.PVC as ApiPVC
 import com.alibaba.opensandbox.sandbox.api.models.PaginationInfo as ApiPaginationInfo
 import com.alibaba.opensandbox.sandbox.api.models.Sandbox as ApiSandbox
@@ -193,6 +195,25 @@ internal object SandboxModelConverter {
     }
 
     /**
+     * Converts Domain OSSFS -> API OSSFS
+     */
+    fun OSSFS.toApiOSSFS(): ApiOSSFS {
+        return ApiOSSFS(
+            bucket = this.bucket,
+            endpoint = this.endpoint,
+            accessKeyId = this.accessKeyId,
+            accessKeySecret = this.accessKeySecret,
+            version =
+                when (this.version) {
+                    OSSFS.VERSION_1_0 -> ApiOSSFS.Version._1Period0
+                    OSSFS.VERSION_2_0 -> ApiOSSFS.Version._2Period0
+                    else -> throw IllegalArgumentException("Unsupported OSSFS version: ${this.version}")
+                },
+            options = this.options,
+        )
+    }
+
+    /**
      * Converts Domain Volume -> API Volume
      */
     fun Volume.toApiVolume(): ApiVolume {
@@ -202,6 +223,7 @@ internal object SandboxModelConverter {
             readOnly = this.readOnly,
             host = this.host?.toApiHost(),
             pvc = this.pvc?.toApiPVC(),
+            ossfs = this.ossfs?.toApiOSSFS(),
             subPath = this.subPath,
         )
     }

@@ -79,7 +79,7 @@ export interface SandboxCreateOptions {
   networkPolicy?: NetworkPolicy;
   /**
    * Optional list of volume mounts for persistent storage.
-   * Each volume specifies a backend (host path or PVC) and mount configuration.
+   * Each volume specifies a backend (host path, PVC, or OSSFS) and mount configuration.
    */
   volumes?: Volume[];
   /**

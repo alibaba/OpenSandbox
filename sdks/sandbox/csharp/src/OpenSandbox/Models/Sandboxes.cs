@@ -138,8 +138,50 @@ public class PVC
 }
 
 /// <summary>
+/// Alibaba Cloud OSS mount backend via ossfs.
+/// </summary>
+public class OSSFS
+{
+    /// <summary>
+    /// Gets or sets the OSS bucket name.
+    /// </summary>
+    [JsonPropertyName("bucket")]
+    public required string Bucket { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OSS endpoint.
+    /// </summary>
+    [JsonPropertyName("endpoint")]
+    public required string Endpoint { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OSS access key ID for inline credentials mode.
+    /// </summary>
+    [JsonPropertyName("accessKeyId")]
+    public required string AccessKeyId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OSS access key secret for inline credentials mode.
+    /// </summary>
+    [JsonPropertyName("accessKeySecret")]
+    public required string AccessKeySecret { get; set; }
+
+    /// <summary>
+    /// Gets or sets the ossfs major version used by runtime mount integration. Defaults to "2.0".
+    /// </summary>
+    [JsonPropertyName("version")]
+    public string Version { get; set; } = "2.0";
+
+    /// <summary>
+    /// Gets or sets additional ossfs mount options.
+    /// </summary>
+    [JsonPropertyName("options")]
+    public IReadOnlyList<string>? Options { get; set; }
+}
+
+/// <summary>
 /// Storage mount definition for sandbox creation.
-/// Exactly one backend (Host or PVC) should be provided per volume.
+/// Exactly one backend (Host, PVC, or OSSFS) should be provided per volume.
 /// </summary>
 public class Volume
 {
@@ -160,6 +202,12 @@ public class Volume
     /// </summary>
     [JsonPropertyName("pvc")]
     public PVC? Pvc { get; set; }
+
+    /// <summary>
+    /// Gets or sets the OSSFS backend configuration.
+    /// </summary>
+    [JsonPropertyName("ossfs")]
+    public OSSFS? Ossfs { get; set; }
 
     /// <summary>
     /// Gets or sets the absolute mount path inside the container.
