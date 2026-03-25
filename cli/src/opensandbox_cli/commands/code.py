@@ -53,10 +53,11 @@ def code_run(
     """Execute code in a sandbox."""
     from code_interpreter.sync.code_interpreter import CodeInterpreterSync
 
-    if code is None:
+    source_code = code
+    if source_code is None:
         if sys.stdin.isatty():
             click.echo("Reading code from stdin (Ctrl+D to finish):", err=True)
-        code = sys.stdin.read()
+        source_code = sys.stdin.read()
 
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
@@ -77,7 +78,7 @@ def code_run(
 
         handlers = ExecutionHandlersSync(on_stdout=on_stdout, on_stderr=on_stderr)
         execution = interpreter.codes.run(
-            code, language=language, handlers=handlers, **kwargs
+            source_code, language=language, handlers=handlers, **kwargs
         )
 
         if execution.error:

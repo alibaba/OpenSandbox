@@ -25,6 +25,16 @@ from opensandbox_cli.client import ClientContext
 from opensandbox_cli.utils import handle_errors
 
 
+def _parse_permission_mode(mode: str) -> int:
+    """Parse a permission mode string into a base-10 integer."""
+    try:
+        return int(mode)
+    except ValueError as exc:
+        raise click.BadParameter(
+            f"Invalid permission mode '{mode}'. Use a base-10 integer like 644 or 755."
+        ) from exc
+
+
 @click.group("file", invoke_without_command=True)
 @click.pass_context
 def file_group(ctx: click.Context) -> None:
@@ -74,21 +84,22 @@ def file_write(
     group: str | None,
 ) -> None:
     """Write content to a file in the sandbox."""
-    if content is None:
+    file_content = content
+    if file_content is None:
         if sys.stdin.isatty():
             click.echo("Reading from stdin (Ctrl+D to finish):", err=True)
-        content = sys.stdin.read()
+        file_content = sys.stdin.read()
 
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
         kwargs: dict = {"encoding": encoding}
         if mode is not None:
-            kwargs["mode"] = mode
+            kwargs["mode"] = _parse_permission_mode(mode)
         if owner is not None:
             kwargs["owner"] = owner
         if group is not None:
             kwargs["group"] = group
-        sandbox.files.write_file(path, content, **kwargs)
+        sandbox.files.write_file(path, file_content, **kwargs)
         obj.output.success(f"Written: {path}")
     finally:
         sandbox.close()
@@ -203,7 +214,7 @@ def file_mkdir(
         for p in paths:
             kwargs: dict = {"path": p}
             if mode is not None:
-                kwargs["mode"] = mode
+                kwargs["mode"] = _parse_permission_mode(mode)
             if owner is not None:
                 kwargs["owner"] = owner
             if group is not None:
@@ -310,7 +321,14 @@ def file_chmod(
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
         sandbox.files.set_permissions(
-            [SetPermissionEntry(path=path, mode=mode, owner=owner, group=group)]
+            [
+                SetPermissionEntry(
+                    path=path,
+                    mode=_parse_permission_mode(mode),
+                    owner=owner,
+                    group=group,
+                )
+            ]
         )
         obj.output.success(f"Permissions set: {path}")
     finally:

@@ -209,6 +209,18 @@ class TestFileWrite:
         assert "Written" in result.output
         mock_sb.files.write_file.assert_called_once()
 
+    def test_write_parses_octal_mode(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        result = _invoke(
+            runner,
+            ["file", "write", "sb-1", "/tmp/test.txt", "-c", "content here", "--mode", "644"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        mock_sb.files.write_file.assert_called_once_with(
+            "/tmp/test.txt", "content here", encoding="utf-8", mode=644
+        )
+
 
 class TestFileRm:
     def test_rm_deletes_files(self, runner: CliRunner) -> None:
@@ -240,6 +252,17 @@ class TestFileMkdir:
         assert "Created: /tmp/dir1" in result.output
         assert "Created: /tmp/dir2" in result.output
 
+    def test_mkdir_parses_octal_mode(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        result = _invoke(
+            runner,
+            ["file", "mkdir", "sb-1", "/tmp/dir1", "--mode", "755"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        entry = mock_sb.files.create_directories.call_args.args[0][0]
+        assert entry.mode == 755
+
 
 class TestFileRmdir:
     def test_rmdir_removes_dirs(self, runner: CliRunner) -> None:
@@ -249,6 +272,19 @@ class TestFileRmdir:
         )
         assert result.exit_code == 0
         assert "Removed: /workspace/old" in result.output
+
+
+class TestFileChmod:
+    def test_chmod_parses_octal_mode(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        result = _invoke(
+            runner,
+            ["file", "chmod", "sb-1", "/tmp/test.txt", "--mode", "755"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        entry = mock_sb.files.set_permissions.call_args.args[0][0]
+        assert entry.mode == 755
 
 
 # ---------------------------------------------------------------------------
