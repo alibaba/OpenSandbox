@@ -15,16 +15,79 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/alibaba/opensandbox/execd/pkg/flag"
+	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 	"github.com/stretchr/testify/require"
 )
+
+type fakeCodeRunner struct {
+	execute          func(request *runtime.ExecuteCodeRequest) error
+	runInBashSession func(_ context.Context, _ *runtime.ExecuteCodeRequest) error
+}
+
+func (f *fakeCodeRunner) CreateContext(_ *runtime.CreateContextRequest) (string, error) {
+	return "", nil
+}
+
+func (f *fakeCodeRunner) Execute(request *runtime.ExecuteCodeRequest) error {
+	if f.execute != nil {
+		return f.execute(request)
+	}
+	return nil
+}
+
+func (f *fakeCodeRunner) GetContext(_ string) (runtime.CodeContext, error) {
+	return runtime.CodeContext{}, nil
+}
+
+func (f *fakeCodeRunner) GetCommandStatus(_ string) (*runtime.CommandStatus, error) {
+	return nil, nil
+}
+
+func (f *fakeCodeRunner) ListContext(_ string) ([]runtime.CodeContext, error) {
+	return nil, nil
+}
+
+func (f *fakeCodeRunner) DeleteLanguageContext(_ runtime.Language) error {
+	return nil
+}
+
+func (f *fakeCodeRunner) DeleteContext(_ string) error {
+	return nil
+}
+
+func (f *fakeCodeRunner) CreateBashSession(_ *runtime.CreateContextRequest) (string, error) {
+	return "", nil
+}
+
+func (f *fakeCodeRunner) RunInBashSession(ctx context.Context, req *runtime.ExecuteCodeRequest) error {
+	if f.runInBashSession != nil {
+		return f.runInBashSession(ctx, req)
+	}
+	return nil
+}
+
+func (f *fakeCodeRunner) SeekBackgroundCommandOutput(_ string, _ int64) ([]byte, int64, error) {
+	return nil, 0, nil
+}
+
+func (f *fakeCodeRunner) DeleteBashSession(_ string) error {
+	return nil
+}
+
+func (f *fakeCodeRunner) Interrupt(_ string) error {
+	return nil
+}
 
 func TestBuildExecuteCodeRequestDefaultsToCommand(t *testing.T) {
 	ctrl := &CodeInterpretingController{}
@@ -91,4 +154,175 @@ func TestGetContext_MissingIDReturns400(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Equal(t, model.ErrorCodeMissingQuery, resp.Code)
 	require.Equal(t, "missing path parameter 'contextId'", resp.Message)
+}
+
+func TestRunCodeReturnsBeforeGracefulShutdownTimeoutAfterImmediateComplete(t *testing.T) {
+	previousRunner := codeRunner
+	previousTimeout := flag.ApiGracefulShutdownTimeout
+	codeRunner = &fakeCodeRunner{
+		execute: func(request *runtime.ExecuteCodeRequest) error {
+			request.Hooks.OnExecuteComplete(5 * time.Millisecond)
+			return nil
+		},
+	}
+	flag.ApiGracefulShutdownTimeout = 200 * time.Millisecond
+	t.Cleanup(func() {
+		codeRunner = previousRunner
+		flag.ApiGracefulShutdownTimeout = previousTimeout
+	})
+
+	body := []byte(`{"code":"print(1)","context":{"id":"ctx-1","language":"python"}}`)
+	ctx, w := newTestContext(http.MethodPost, "/code/run", body)
+	ctrl := NewCodeInterpretingController(ctx)
+
+	start := time.Now()
+	ctrl.RunCode()
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Less(t, elapsed, flag.ApiGracefulShutdownTimeout/2)
+}
+
+func TestRunInSessionReturnsBeforeGracefulShutdownTimeoutAfterImmediateComplete(t *testing.T) {
+	previousRunner := codeRunner
+	previousTimeout := flag.ApiGracefulShutdownTimeout
+	codeRunner = &fakeCodeRunner{
+		runInBashSession: func(_ context.Context, request *runtime.ExecuteCodeRequest) error {
+			request.Hooks.OnExecuteComplete(5 * time.Millisecond)
+			return nil
+		},
+	}
+	flag.ApiGracefulShutdownTimeout = 200 * time.Millisecond
+	t.Cleanup(func() {
+		codeRunner = previousRunner
+		flag.ApiGracefulShutdownTimeout = previousTimeout
+	})
+
+	body := []byte(`{"command":"echo hi","timeout":0}`)
+	ctx, w := newTestContext(http.MethodPost, "/sessions/session-1/run", body)
+	ctx.Params = append(ctx.Params, gin.Param{Key: "sessionId", Value: "session-1"})
+	ctrl := NewCodeInterpretingController(ctx)
+
+	start := time.Now()
+	ctrl.RunInSession()
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Less(t, elapsed, flag.ApiGracefulShutdownTimeout/2)
+}
+
+func TestRunCodeReturnsBeforeGracefulShutdownTimeoutWhenRequestContextCanceled(t *testing.T) {
+	previousRunner := codeRunner
+	previousTimeout := flag.ApiGracefulShutdownTimeout
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	codeRunner = &fakeCodeRunner{
+		execute: func(_ *runtime.ExecuteCodeRequest) error {
+			cancelReq()
+			return nil
+		},
+	}
+	flag.ApiGracefulShutdownTimeout = 200 * time.Millisecond
+	t.Cleanup(func() {
+		codeRunner = previousRunner
+		flag.ApiGracefulShutdownTimeout = previousTimeout
+		cancelReq()
+	})
+
+	body := []byte(`{"code":"print(1)","context":{"id":"ctx-1","language":"python"}}`)
+	ctx, w := newTestContext(http.MethodPost, "/code/run", body)
+	ctx.Request = ctx.Request.WithContext(reqCtx)
+	ctrl := NewCodeInterpretingController(ctx)
+
+	start := time.Now()
+	ctrl.RunCode()
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Less(t, elapsed, flag.ApiGracefulShutdownTimeout/2)
+}
+
+func TestRunInSessionReturnsBeforeGracefulShutdownTimeoutWhenRequestContextCanceled(t *testing.T) {
+	previousRunner := codeRunner
+	previousTimeout := flag.ApiGracefulShutdownTimeout
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	codeRunner = &fakeCodeRunner{
+		runInBashSession: func(_ context.Context, _ *runtime.ExecuteCodeRequest) error {
+			cancelReq()
+			return nil
+		},
+	}
+	flag.ApiGracefulShutdownTimeout = 200 * time.Millisecond
+	t.Cleanup(func() {
+		codeRunner = previousRunner
+		flag.ApiGracefulShutdownTimeout = previousTimeout
+		cancelReq()
+	})
+
+	body := []byte(`{"command":"echo hi","timeout":0}`)
+	ctx, w := newTestContext(http.MethodPost, "/sessions/session-1/run", body)
+	ctx.Request = ctx.Request.WithContext(reqCtx)
+	ctx.Params = append(ctx.Params, gin.Param{Key: "sessionId", Value: "session-1"})
+	ctrl := NewCodeInterpretingController(ctx)
+
+	start := time.Now()
+	ctrl.RunInSession()
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Less(t, elapsed, flag.ApiGracefulShutdownTimeout/2)
+}
+
+func TestRunCodeReturnsBeforeGracefulShutdownTimeoutAfterImmediateError(t *testing.T) {
+	previousRunner := codeRunner
+	previousTimeout := flag.ApiGracefulShutdownTimeout
+	codeRunner = &fakeCodeRunner{
+		execute: func(request *runtime.ExecuteCodeRequest) error {
+			request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "ExecError", EValue: "boom"})
+			return nil
+		},
+	}
+	flag.ApiGracefulShutdownTimeout = 200 * time.Millisecond
+	t.Cleanup(func() {
+		codeRunner = previousRunner
+		flag.ApiGracefulShutdownTimeout = previousTimeout
+	})
+
+	body := []byte(`{"code":"print(1)","context":{"id":"ctx-1","language":"python"}}`)
+	ctx, w := newTestContext(http.MethodPost, "/code/run", body)
+	ctrl := NewCodeInterpretingController(ctx)
+
+	start := time.Now()
+	ctrl.RunCode()
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Less(t, elapsed, flag.ApiGracefulShutdownTimeout/2)
+}
+
+func TestRunInSessionReturnsBeforeGracefulShutdownTimeoutAfterImmediateError(t *testing.T) {
+	previousRunner := codeRunner
+	previousTimeout := flag.ApiGracefulShutdownTimeout
+	codeRunner = &fakeCodeRunner{
+		runInBashSession: func(_ context.Context, request *runtime.ExecuteCodeRequest) error {
+			request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "ExecError", EValue: "boom"})
+			return nil
+		},
+	}
+	flag.ApiGracefulShutdownTimeout = 200 * time.Millisecond
+	t.Cleanup(func() {
+		codeRunner = previousRunner
+		flag.ApiGracefulShutdownTimeout = previousTimeout
+	})
+
+	body := []byte(`{"command":"echo hi","timeout":0}`)
+	ctx, w := newTestContext(http.MethodPost, "/sessions/session-1/run", body)
+	ctx.Params = append(ctx.Params, gin.Param{Key: "sessionId", Value: "session-1"})
+	ctrl := NewCodeInterpretingController(ctx)
+
+	start := time.Now()
+	ctrl.RunInSession()
+	elapsed := time.Since(start)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Less(t, elapsed, flag.ApiGracefulShutdownTimeout/2)
 }
