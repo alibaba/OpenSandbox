@@ -113,6 +113,16 @@ func (c *CodeInterpretingController) RunCode() {
 	defer cancel()
 	runCodeRequest := c.buildExecuteCodeRequest(request)
 	eventsHandler := c.setServerEventsHandler(ctx)
+
+	// completeCh is closed when OnExecuteComplete fires, meaning the final SSE
+	// event has been written and flushed. We only wait for this callback as a
+	// safety check and then return immediately to avoid fixed tail latency.
+	completeCh := make(chan struct{})
+	origComplete := eventsHandler.OnExecuteComplete
+	eventsHandler.OnExecuteComplete = func(executionTime time.Duration) {
+		origComplete(executionTime)
+		close(completeCh)
+	}
 	runCodeRequest.Hooks = eventsHandler
 
 	c.setupSSEResponse()
@@ -126,7 +136,10 @@ func (c *CodeInterpretingController) RunCode() {
 		return
 	}
 
-	time.Sleep(flag.ApiGracefulShutdownTimeout)
+	select {
+	case <-completeCh:
+	case <-time.After(flag.ApiGracefulShutdownTimeout):
+	}
 }
 
 // GetContext returns a specific code context by id.
@@ -305,7 +318,18 @@ func (c *CodeInterpretingController) RunInSession() {
 	}
 	ctx, cancel := context.WithCancel(c.ctx.Request.Context())
 	defer cancel()
-	runReq.Hooks = c.setServerEventsHandler(ctx)
+
+	// completeCh is closed when OnExecuteComplete fires, meaning the final SSE
+	// event has been written and flushed. We only wait for this callback as a
+	// safety check and then return immediately to avoid fixed tail latency.
+	completeCh := make(chan struct{})
+	hooks := c.setServerEventsHandler(ctx)
+	origComplete := hooks.OnExecuteComplete
+	hooks.OnExecuteComplete = func(executionTime time.Duration) {
+		origComplete(executionTime)
+		close(completeCh)
+	}
+	runReq.Hooks = hooks
 
 	c.setupSSEResponse()
 	err := codeRunner.RunInBashSession(ctx, runReq)
@@ -318,7 +342,10 @@ func (c *CodeInterpretingController) RunInSession() {
 		return
 	}
 
-	time.Sleep(flag.ApiGracefulShutdownTimeout)
+	select {
+	case <-completeCh:
+	case <-time.After(flag.ApiGracefulShutdownTimeout):
+	}
 }
 
 // DeleteSession deletes a bash session (delete_session API).

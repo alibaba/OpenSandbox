@@ -25,6 +25,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+
+	execdflag "github.com/alibaba/opensandbox/execd/pkg/flag"
 )
 
 // HTTPClient defines the HTTP client interface
@@ -268,8 +270,19 @@ func (c *Client) ExecuteCodeStream(code string, resultChan chan *ExecutionResult
 					resultChan <- notify
 					resultMutex.Unlock()
 
-					for result.ExecutionCount <= 0 && result.Error == nil {
-						time.Sleep(300 * time.Millisecond)
+					pollInterval := execdflag.JupyterIdlePollInterval
+					if pollInterval <= 0 {
+						pollInterval = 10 * time.Millisecond
+					}
+
+					for {
+						resultMutex.Lock()
+						done := result.ExecutionCount > 0 || result.Error != nil
+						resultMutex.Unlock()
+						if done {
+							break
+						}
+						time.Sleep(pollInterval)
 					}
 
 					// Close result channel
