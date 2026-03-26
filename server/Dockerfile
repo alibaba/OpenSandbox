@@ -29,8 +29,7 @@ RUN apt-get update \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:/root/.cargo/bin:${PATH}"
 
-# Build context must be the repository root (not server/) so paths use the server/ prefix.
-COPY server/pyproject.toml server/uv.lock ./
+COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY opensandbox_server ./opensandbox_server
