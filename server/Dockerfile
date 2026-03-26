@@ -29,12 +29,20 @@ RUN apt-get update \
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 ENV PATH="/root/.local/bin:/root/.cargo/bin:${PATH}"
 
-COPY pyproject.toml uv.lock ./
+# Build context must be the repository root (not server/) so paths use the server/ prefix.
+COPY server/pyproject.toml server/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY opensandbox_server ./opensandbox_server
-COPY LICENSE README.md README_zh.md example.config.toml example.config.zh.toml \
-     example.config.k8s.toml example.config.k8s.zh.toml example.batchsandbox-template.yaml ./
+COPY server/opensandbox_server ./opensandbox_server
+COPY server/LICENSE \
+     server/README.md \
+     server/opensandbox_server/examples/example.config.toml \
+     server/opensandbox_server/examples/example.config.zh.toml \
+     server/opensandbox_server/examples/example.config.k8s.toml \
+     server/opensandbox_server/examples/example.config.k8s.zh.toml \
+     server/opensandbox_server/examples/example.batchsandbox-template.yaml \
+     ./
+
 
 # Install the project itself into the venv (deps already synced)
 RUN uv pip install --no-deps --editable .
