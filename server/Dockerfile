@@ -33,6 +33,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY opensandbox_server ./opensandbox_server
+COPY LICENSE README.md ./
 
 # Install the project itself into the venv (deps already synced)
 RUN uv pip install --no-deps --editable .
