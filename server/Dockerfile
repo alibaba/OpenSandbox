@@ -34,15 +34,6 @@ COPY server/pyproject.toml server/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY server/opensandbox_server ./opensandbox_server
-COPY server/LICENSE \
-     server/README.md \
-     server/opensandbox_server/examples/example.config.toml \
-     server/opensandbox_server/examples/example.config.zh.toml \
-     server/opensandbox_server/examples/example.config.k8s.toml \
-     server/opensandbox_server/examples/example.config.k8s.zh.toml \
-     server/opensandbox_server/examples/example.batchsandbox-template.yaml \
-     ./
-
 
 # Install the project itself into the venv (deps already synced)
 RUN uv pip install --no-deps --editable .
@@ -60,9 +51,9 @@ WORKDIR /app
 
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/opensandbox_server /app/opensandbox_server
-COPY --from=builder /app/example.config.k8s.toml /etc/opensandbox/config.toml
-COPY --from=builder /app/example.config.k8s.zh.toml /etc/opensandbox/config.zh.toml
-COPY --from=builder /app/example.batchsandbox-template.yaml /etc/opensandbox/example.batchsandbox-template.yaml
+COPY --from=builder /app/opensandbox_server/examples/example.config.k8s.toml /etc/opensandbox/config.toml
+COPY --from=builder /app/opensandbox_server/examples/example.config.k8s.zh.toml /etc/opensandbox/config.zh.toml
+COPY --from=builder /app/opensandbox_server/examples/example.batchsandbox-template.yaml /etc/opensandbox/example.batchsandbox-template.yaml
 
 EXPOSE 8080
 
