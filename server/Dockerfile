@@ -33,7 +33,7 @@ ENV PATH="/root/.local/bin:/root/.cargo/bin:${PATH}"
 COPY server/pyproject.toml server/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-COPY server/opensandbox_server ./opensandbox_server
+COPY opensandbox_server ./opensandbox_server
 
 # Install the project itself into the venv (deps already synced)
 RUN uv pip install --no-deps --editable .
