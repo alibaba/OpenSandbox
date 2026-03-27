@@ -71,3 +71,4 @@ spec:
     bufferMin: 1
     poolMax: 5
     poolMin: 0
+  podRecyclePolicy: Delete

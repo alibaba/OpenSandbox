@@ -6,4 +6,6 @@ metadata:
 spec:
   replicas: {{.Replicas}}
   poolRef: {{.PoolName}}
+{{- if .ExpireTime }}
   expireTime: "{{.ExpireTime}}"
+{{- end }}

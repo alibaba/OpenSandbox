@@ -74,6 +74,12 @@ rules:
   - patch
   - update
 - apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
   - sandbox.opensandbox.io
   resources:
   - batchsandboxes

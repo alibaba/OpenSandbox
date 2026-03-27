@@ -21,6 +21,7 @@ spec:
         - -f
         - /dev/null
   expireTime: "2025-12-03T12:55:41Z"
+  taskResourcePolicyWhenCompleted: Release
   taskTemplate:
     spec:
       process:

@@ -84,6 +84,14 @@ spec:
                 - poolMax
                 - poolMin
                 type: object
+              podRecyclePolicy:
+                default: Delete
+                description: PodRecyclePolicy controls the recycle policy for Pods
+                  released from BatchSandbox.
+                enum:
+                - Delete
+                - Restart
+                type: string
               template:
                 description: Pod Template used to create pre-warmed nodes in the pool.
                 x-kubernetes-preserve-unknown-fields: true
@@ -108,6 +116,11 @@ spec:
                   ObservedGeneration is the most recent generation observed for this BatchSandbox. It corresponds to the
                   BatchSandbox's generation, which is updated on mutation by the API Server.
                 format: int64
+                type: integer
+              restarting:
+                description: Restarting is the number of Pods that are being restarted
+                  for recycle.
+                format: int32
                 type: integer
               revision:
                 description: Revision is the latest version of pool

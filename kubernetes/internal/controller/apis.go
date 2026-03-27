@@ -17,6 +17,7 @@ package controller
 import (
 	"encoding/json"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils"
@@ -31,8 +32,76 @@ const (
 	AnnoPoolAllocStatusKey     = "pool.opensandbox.io/alloc-status"
 	AnnoPoolAllocGenerationKey = "pool.opensandbox.io/alloc-generation"
 
+	// Pod Recycle 相关 Annotation
+	AnnoPodRecycleMeta = "pool.opensandbox.io/recycle-meta"
+
 	FinalizerTaskCleanup = "batch-sandbox.sandbox.opensandbox.io/task-cleanup"
+	FinalizerPoolRecycle = "batch-sandbox.sandbox.opensandbox.io/pool-recycle"
+
+	// Value is the BatchSandbox UID.
+	LabelPodDeallocatedFrom = "pool.opensandbox.io/deallocated-from"
+	// LabelPodRecycleConfirmed marks that Pool has confirmed recycling.
+	// Value is the BatchSandbox UID from deallocated-from label.
+	LabelPodRecycleConfirmed = "pool.opensandbox.io/recycle-confirmed"
+
+	AnnoPodRecycleTimeoutSec = "pool.opensandbox.io/recycle-timeout-sec"
 )
+
+// PodRecycleState defines the state of Pod recycle.
+type PodRecycleState string
+
+const (
+	// RecycleStateNone indicates the Pod is in normal state and can be allocated.
+	RecycleStateNone PodRecycleState = "None"
+	// RecycleStateRestarting indicates the Pod containers are restarting.
+	// This is the only active recycle state. The Pod transitions from None → Restarting
+	// when a restart is triggered, and back to None when all containers are restarted and ready.
+	RecycleStateRestarting PodRecycleState = "Restarting"
+)
+
+// PodRecycleMeta holds metadata for Pod recycle state machine.
+type PodRecycleMeta struct {
+	// State: None or Restarting
+	State PodRecycleState `json:"state"`
+
+	// TriggeredAt: Restart trigger timestamp (milliseconds)
+	TriggeredAt int64 `json:"triggeredAt"`
+
+	// ContainerRestartCounts stores the restart count of each container before triggering restart.
+	// Used to detect if container has restarted even when StartedAt timestamp has second-level precision.
+	ContainerRestartCounts map[string]int32 `json:"containerRestartCounts,omitempty"`
+
+	// ContainerStartedAt stores the StartedAt time of each container before triggering restart.
+	// Used to detect if container has restarted by comparing StartedAt timestamps.
+	ContainerStartedAt map[string]int64 `json:"containerStartedAt,omitempty"`
+}
+
+// parsePodRecycleMeta parses the recycle metadata from Pod annotations.
+func parsePodRecycleMeta(obj metav1.Object) (*PodRecycleMeta, error) {
+	meta := &PodRecycleMeta{}
+	if raw := obj.GetAnnotations()[AnnoPodRecycleMeta]; raw != "" {
+		if err := json.Unmarshal([]byte(raw), meta); err != nil {
+			return nil, err
+		}
+	}
+	return meta, nil
+}
+
+// setPodRecycleMeta sets the recycle metadata to Pod annotations.
+func setPodRecycleMeta(obj metav1.Object, meta *PodRecycleMeta) {
+	if obj.GetAnnotations() == nil {
+		obj.SetAnnotations(map[string]string{})
+	}
+	obj.GetAnnotations()[AnnoPodRecycleMeta] = utils.DumpJSON(meta)
+}
+
+func isRestarting(pod *corev1.Pod) bool {
+	return pod.Annotations[AnnoPodRecycleMeta] != ""
+}
+
+func isRecycling(pod *corev1.Pod) bool {
+	return pod.Labels[LabelPodDeallocatedFrom] != "" || pod.Annotations[AnnoPodRecycleMeta] != ""
+}
 
 // AnnotationSandboxEndpoints Use the exported constant from pkg/utils
 var AnnotationSandboxEndpoints = pkgutils.AnnotationEndpoints

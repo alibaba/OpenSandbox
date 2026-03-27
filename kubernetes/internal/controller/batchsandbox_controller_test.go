@@ -400,6 +400,16 @@ var _ = Describe("BatchSandbox Controller", func() {
 			Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 		})
 
+		It("should successfully add pool recycle finalizer for pool mode BatchSandbox", func() {
+			Eventually(func(g Gomega) {
+				bs := &sandboxv1alpha1.BatchSandbox{}
+				if err := k8sClient.Get(ctx, typeNamespacedName, bs); err != nil {
+					return
+				}
+				g.Expect(controllerutil.ContainsFinalizer(bs, FinalizerPoolRecycle)).To(BeTrue(), "FinalizerPoolRecycle should be present for pool mode BatchSandbox")
+			}, timeout, interval).Should(Succeed())
+		})
+
 		It("should successfully update batch sandbox status, sbx endpoints info when get pod from pool alloc", func() {
 			// mock pool allocation
 			mockPods := []string{}

@@ -186,6 +186,7 @@ spec:
     bufferMin: 2
     poolMax: 20
     poolMin: 5
+  podRecyclePolicy: Delete
 ```
 
 ### Create a Batch Sandbox

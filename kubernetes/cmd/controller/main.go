@@ -19,6 +19,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -26,6 +27,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
@@ -77,6 +79,9 @@ func main() {
 	var kubeClientQPS float64
 	var kubeClientBurst int
 
+	// Restart timeout configuration
+	var restartTimeout time.Duration
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -104,6 +109,7 @@ func main() {
 	flag.BoolVar(&logCompress, "log-compress", true, "Compress determines if the rotated log files should be compressed using gzip")
 	flag.Float64Var(&kubeClientQPS, "kube-client-qps", 100, "QPS for Kubernetes client rate limiter.")
 	flag.IntVar(&kubeClientBurst, "kube-client-burst", 200, "Burst for Kubernetes client rate limiter.")
+	flag.DurationVar(&restartTimeout, "restart-timeout", 90*time.Second, "Timeout for Pod restart operations. If a Pod fails to restart within this duration, it will be deleted.")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
@@ -259,11 +265,15 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "BatchSandbox")
 		os.Exit(1)
 	}
+	kubeClient := kubernetes.NewForConfigOrDie(mgr.GetConfig())
+	restartTracker := controller.NewRestartTracker(mgr.GetClient(), kubeClient, mgr.GetConfig())
 	if err := (&controller.PoolReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("pool-controller"),
-		Allocator: controller.NewDefaultAllocator(mgr.GetClient()),
+		Client:         mgr.GetClient(),
+		Scheme:         mgr.GetScheme(),
+		Recorder:       mgr.GetEventRecorderFor("pool-controller"),
+		Allocator:      controller.NewDefaultAllocator(mgr.GetClient()),
+		RestartTracker: restartTracker,
+		RestartTimeout: restartTimeout,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pool")
 		os.Exit(1)

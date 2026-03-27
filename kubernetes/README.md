@@ -25,22 +25,29 @@ The BatchSandbox custom resource allows you to create and manage multiple identi
 
 ### Resource Pooling
 The Pool custom resource maintains a pool of pre-warmed compute resources to enable rapid sandbox provisioning:
-- Configurable buffer sizes (minimum and maximum) to balance resource availability and cost
-- Pool capacity limits to control overall resource consumption
-- Automatic resource allocation and deallocation based on demand
-- Real-time status monitoring showing total, allocated, and available resources
+- **Configurable Buffer Sizes**: Minimum and maximum buffer settings to ensure resource availability while controlling costs.
+- **Pool Capacity Limits**: Overall resource consumption control with pool-wide minimum and maximum limits.
+- **Recycle Policies**: Support for different pod recycling strategies:
+  - **Delete (Default)**: Pods are deleted and recreated from the template when returned to the pool, ensuring a completely clean environment.
+  - **Restart**: PID 1 in all containers is gracefully terminated (SIGTERM), and the Kubernetes `restartPolicy` triggers a restart. This is faster than `Delete` but requires the `restartPolicy` in `PodTemplateSpec` to be set to `Always`. The restart timeout can be customized per-pool via the annotation `pool.opensandbox.io/recycle-timeout-sec` (default: 90s).
+- **Automatic Scaling**: Dynamic resource allocation and deallocation based on current demand and buffer settings.
+- **Real-time Status**: Monitoring of total, allocated, available, and restarting pods.
 
 ### Task Orchestration
 Integrated task management system that executes custom workloads within sandboxes:
-- **Optional Execution**: Task scheduling is completely optional - sandboxes can be created without tasks
-- **Process-Based Tasks**: Support for process-based tasks that execute within the sandbox environment
-- **Heterogeneous Task Distribution**: Customize individual tasks for each sandbox in a batch using shardTaskPatches
+- **Optional Execution**: Task scheduling is completely optional - sandboxes can be created without tasks.
+- **Process-Based Tasks**: Support for process-based tasks that execute within the sandbox environment.
+- **Heterogeneous Task Distribution**: Customize individual tasks for each sandbox in a batch using `shardTaskPatches`.
+- **Resource Release Policy**: Control when resources are returned to the pool after task completion via `taskResourcePolicyWhenCompleted`:
+  - **Retain (Default)**: Keeps the sandbox resources until the `BatchSandbox` is deleted or expires.
+  - **Release**: Automatically releases the sandbox back to the pool immediately after the task reaches a terminal state (SUCCEEDED or FAILED).
 
 ### Advanced Scheduling
 Intelligent resource management features:
-- Minimum and maximum buffer settings to ensure resource availability while controlling costs
-- Pool-wide capacity limits to prevent resource exhaustion
-- Automatic scaling based on demand
+- **Demand-based Scaling**: Automatically scales the number of pods in the pool based on real-time sandbox allocation requests.
+- **Buffer Management**: `bufferMin` and `bufferMax` settings to balance instant availability with resource overhead.
+- **Pool Constraints**: `poolMin` and `poolMax` to set hard boundaries on resource usage.
+- **Rolling Updates**: Automatic pool update and pod rotation when the `PodTemplateSpec` is modified.
 
 ## Runtime API Support Notes
 
@@ -389,6 +396,7 @@ spec:
     bufferMin: 2
     poolMax: 20
     poolMin: 5
+  podRecyclePolicy: Delete
 ```
 
 Apply the pool configuration:
@@ -441,6 +449,7 @@ spec:
     bufferMin: 2
     poolMax: 20
     poolMin: 5
+  podRecyclePolicy: Delete
 ```
 
 Create a batch of sandboxes with process-based heterogeneous tasks using the pool we just created:
@@ -453,6 +462,7 @@ metadata:
 spec:
   replicas: 2
   poolRef: task-example-pool
+  taskResourcePolicyWhenCompleted: Release
   taskTemplate:
     spec:
       process:

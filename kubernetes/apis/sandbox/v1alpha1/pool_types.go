@@ -32,7 +32,22 @@ type PoolSpec struct {
 	// CapacitySpec controls the size of the resource pool.
 	// +kubebuilder:validation:Required
 	CapacitySpec CapacitySpec `json:"capacitySpec"`
+	// PodRecyclePolicy controls the recycle policy for Pods released from BatchSandbox.
+	// +optional
+	// +kubebuilder:default=Delete
+	PodRecyclePolicy PodRecyclePolicy `json:"podRecyclePolicy,omitempty"`
 }
+
+// PodRecyclePolicy defines the recycle policy for Pods released from BatchSandbox.
+// +kubebuilder:validation:Enum=Delete;Restart
+type PodRecyclePolicy string
+
+const (
+	// PodRecyclePolicyDelete deletes the Pod directly when released from BatchSandbox.
+	PodRecyclePolicyDelete PodRecyclePolicy = "Delete"
+	// PodRecyclePolicyRestart restarts containers before reusing the Pod.
+	PodRecyclePolicyRestart PodRecyclePolicy = "Restart"
+)
 
 type CapacitySpec struct {
 	// BufferMax is the maximum number of nodes kept in the warm buffer.
@@ -66,6 +81,9 @@ type PoolStatus struct {
 	Allocated int32 `json:"allocated"`
 	// Available is the number of nodes currently available in the pool.
 	Available int32 `json:"available"`
+	// Restarting is the number of Pods that are being restarted for recycle.
+	// +optional
+	Restarting int32 `json:"restarting,omitempty"`
 }
 
 // +genclient

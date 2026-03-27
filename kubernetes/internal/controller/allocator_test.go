@@ -16,11 +16,13 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/golang/mock/gomock"
@@ -270,22 +272,95 @@ func TestAllocatorSchedule(t *testing.T) {
 					},
 				},
 			},
+			// Pod1 is allocated to sbx1 in pool level
 			poolAlloc: &PoolAllocation{
-				PodAllocation: map[string]string{},
+				PodAllocation: map[string]string{
+					"pod1": "sbx1",
+				},
 			},
+			// Sandbox has pod1 allocated
 			sandboxAlloc: &SandboxAllocation{
 				Pods: []string{
 					"pod1",
 				},
 			},
+			// Sandbox releases pod1
 			release: &AllocationRelease{
 				Pods: []string{
-					"pod1", "sbx1",
+					"pod1",
 				},
 			},
+			// Pod1 should be removed from allocation and added to recycle
 			wantStatus: &AllocStatus{
 				PodAllocation: map[string]string{},
 				PodSupplement: 0,
+			},
+		},
+		{
+			name: "pod with deallocated-from label is excluded",
+			spec: &AllocSpec{
+				Pods: []*corev1.Pod{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "pod-normal",
+						},
+						Status: corev1.PodStatus{
+							Phase: corev1.PodRunning,
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "pod-deallocated",
+							Labels: map[string]string{
+								"pool.opensandbox.io/deallocated-from": "bsx-uid-123",
+							},
+						},
+						Status: corev1.PodStatus{
+							Phase: corev1.PodRunning,
+						},
+					},
+				},
+				Pool: &sandboxv1alpha1.Pool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "pool1",
+					},
+				},
+				RecyclingPods: sets.New("pod-deallocated"),
+				Sandboxes: []*sandboxv1alpha1.BatchSandbox{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "sbx1",
+						},
+						Spec: sandboxv1alpha1.BatchSandboxSpec{
+							PoolRef:  "pool1",
+							Replicas: &replica1,
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "sbx2",
+						},
+						Spec: sandboxv1alpha1.BatchSandboxSpec{
+							PoolRef:  "pool1",
+							Replicas: &replica1,
+						},
+					},
+				},
+			},
+			poolAlloc: &PoolAllocation{
+				PodAllocation: map[string]string{},
+			},
+			sandboxAlloc: &SandboxAllocation{
+				Pods: []string{},
+			},
+			release: &AllocationRelease{
+				Pods: []string{},
+			},
+			wantStatus: &AllocStatus{
+				PodAllocation: map[string]string{
+					"pod-normal": "sbx1",
+				},
+				PodSupplement: 1, // sbx2 needs a pod but only normal pod available
 			},
 		},
 	}
@@ -489,4 +564,72 @@ func TestSyncSandboxAllocationError(t *testing.T) {
 
 	err := allocator.SyncSandboxAllocation(context.Background(), sandbox, pods)
 	assert.Error(t, err)
+}
+
+func TestScheduleExcludesRestartingPods(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	store := NewMockAllocationStore(ctrl)
+	syncer := NewMockAllocationSyncer(ctrl)
+	allocator := &defaultAllocator{
+		store:  store,
+		syncer: syncer,
+	}
+	replica1 := int32(1)
+
+	// Create pods: one normal, one restarting (should be excluded from allocation)
+	restartingMeta := PodRecycleMeta{
+		State:       RecycleStateRestarting,
+		TriggeredAt: 1234567890,
+	}
+	restartingMetaJSON, _ := json.Marshal(restartingMeta)
+
+	pods := []*corev1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "pod-normal",
+			},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "pod-restarting",
+				Annotations: map[string]string{
+					AnnoPodRecycleMeta: string(restartingMetaJSON),
+				},
+			},
+			Status: corev1.PodStatus{Phase: corev1.PodRunning},
+		},
+	}
+	sandboxes := []*sandboxv1alpha1.BatchSandbox{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "sbx1"},
+			Spec:       sandboxv1alpha1.BatchSandboxSpec{Replicas: &replica1},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "sbx2"},
+			Spec:       sandboxv1alpha1.BatchSandboxSpec{Replicas: &replica1},
+		},
+	}
+	spec := &AllocSpec{
+		Pods:          pods,
+		Sandboxes:     sandboxes,
+		Pool:          &sandboxv1alpha1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool1"}},
+		RecyclingPods: sets.New("pod-restarting"),
+	}
+
+	store.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(&PoolAllocation{PodAllocation: map[string]string{}}, nil).Times(1)
+	syncer.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(&SandboxAllocation{Pods: []string{}}, nil).Times(2)
+	syncer.EXPECT().GetRelease(gomock.Any(), gomock.Any()).Return(&AllocationRelease{Pods: []string{}}, nil).Times(2)
+
+	status, pendingSyncs, poolDirty, err := allocator.Schedule(context.Background(), spec)
+
+	assert.NoError(t, err)
+	assert.True(t, poolDirty)
+	// Only the normal pod should be allocated, sbx2 should have no pod
+	assert.Contains(t, status.PodAllocation, "pod-normal")
+	assert.NotContains(t, status.PodAllocation, "pod-restarting")
+	// sbx2 should need supplement since restarting pod is excluded
+	assert.Equal(t, int32(1), status.PodSupplement)
+	assert.Len(t, pendingSyncs, 1)
 }
