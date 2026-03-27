@@ -227,10 +227,6 @@ func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec
 		if spec.RecyclingPods.Has(pod.Name) {
 			continue
 		}
-		// Exclude pods that are restarting (have recycle-meta annotation)
-		if isRecycling(pod) {
-			continue
-		}
 		if pod.Status.Phase != corev1.PodRunning {
 			continue
 		}
@@ -240,11 +236,11 @@ func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec
 	for podName, sandboxName := range status.PodAllocation {
 		sandboxToPods[sandboxName] = append(sandboxToPods[sandboxName], podName)
 	}
-	sandboxAlloc, dirtySandboxes, poolAllocate, err := allocator.allocate(ctx, status, sandboxToPods, availablePods, spec.Sandboxes, spec.Pods)
+	sandboxAlloc, dirtySandboxes, poolAllocate, err := allocator.allocate(ctx, status, sandboxToPods, availablePods, spec.Sandboxes)
 	if err != nil {
 		log.Error(err, "allocate failed")
 	}
-	poolDeallocate, err := allocator.deallocate(ctx, status, sandboxToPods, spec.Sandboxes)
+	poolDeallocate, err := allocator.deallocate(ctx, status, sandboxToPods, spec.Sandboxes, spec.RecyclingPods)
 	if err != nil {
 		log.Error(err, "deallocate failed")
 	}
@@ -284,7 +280,7 @@ func (allocator *defaultAllocator) initAllocation(ctx context.Context, spec *All
 	return status, nil
 }
 
-func (allocator *defaultAllocator) allocate(ctx context.Context, status *AllocStatus, sandboxToPods map[string][]string, availablePods []string, sandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (map[string][]string, []string, bool, error) {
+func (allocator *defaultAllocator) allocate(ctx context.Context, status *AllocStatus, sandboxToPods map[string][]string, availablePods []string, sandboxes []*sandboxv1alpha1.BatchSandbox) (map[string][]string, []string, bool, error) {
 	errs := make([]error, 0)
 	sandboxAlloc := make(map[string][]string)
 	dirtySandboxes := make([]string, 0)
@@ -366,7 +362,7 @@ func (allocator *defaultAllocator) doAllocate(ctx context.Context, status *Alloc
 	return sandboxAlloc, remainAvailablePods, sandboxDirty, poolAllocate, nil
 }
 
-func (allocator *defaultAllocator) deallocate(ctx context.Context, status *AllocStatus, sandboxToPods map[string][]string, sandboxes []*sandboxv1alpha1.BatchSandbox) (bool, error) {
+func (allocator *defaultAllocator) deallocate(ctx context.Context, status *AllocStatus, sandboxToPods map[string][]string, sandboxes []*sandboxv1alpha1.BatchSandbox, recycling sets.Set[string]) (bool, error) {
 	log := logf.FromContext(ctx)
 	poolDeallocate := false
 	errs := make([]error, 0)
@@ -393,6 +389,9 @@ func (allocator *defaultAllocator) deallocate(ctx context.Context, status *Alloc
 		pods := sandboxToPods[name]
 		log.Info("GC deleted sandbox allocation", "sandbox", name, "podCount", len(pods))
 		for _, pod := range pods {
+			if recycling.Has(pod) {
+				continue
+			}
 			delete(status.PodAllocation, pod)
 			poolDeallocate = true
 		}

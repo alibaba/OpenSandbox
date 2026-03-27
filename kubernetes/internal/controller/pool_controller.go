@@ -158,7 +158,7 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	return r.reconcilePool(ctx, pool, batchSandboxes, pods)
 }
 
-func (r *PoolReconciler) collectRecyclingPods(batchSandboxes []*sandboxv1alpha1.BatchSandbox) (sets.Set[string], error) {
+func (r *PoolReconciler) collectRecyclingPods(batchSandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (sets.Set[string], error) {
 	recycling := make(sets.Set[string])
 	for _, batchSandbox := range batchSandboxes {
 		if batchSandbox.DeletionTimestamp != nil {
@@ -178,6 +178,11 @@ func (r *PoolReconciler) collectRecyclingPods(batchSandboxes []*sandboxv1alpha1.
 			}
 		}
 	}
+	for _, pod := range pods {
+		if isRecycling(pod) {
+			recycling.Insert(pod.Name)
+		}
+	}
 	return recycling, nil
 }
 
@@ -194,7 +199,7 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 		}
 
 		// 2. First, handle Pod Recycle to ensure pods are ready for scheduling
-		recyclingPods, err := r.collectRecyclingPods(batchSandboxes)
+		recyclingPods, err := r.collectRecyclingPods(batchSandboxes, pods)
 		if err != nil {
 			log.Error(err, "Failed to collect recycling pods")
 			return err
@@ -250,7 +255,7 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 			pool:           latestPool,
 			pods:           pods,
 			allocatedCnt:   int32(len(scheRes.podAllocation)),
-			recycling:      int32(len(recyclingPods)),
+			recycling:      recyclingPods,
 			idlePods:       latestIdlePods,
 			redundantPods:  deleteOld,
 			supplyCnt:      scheRes.supplySandbox + supplyNew,
@@ -308,6 +313,9 @@ func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				return true
 			}
 			if oldObj.Spec.Replicas != newObj.Spec.Replicas {
+				return true
+			}
+			if oldObj.DeletionTimestamp == nil && newObj.DeletionTimestamp != nil {
 				return true
 			}
 			return false
@@ -425,8 +433,8 @@ type scaleArgs struct {
 	pool           *sandboxv1alpha1.Pool
 	pods           []*corev1.Pod
 	allocatedCnt   int32
-	recycling      int32 // pods that are restarting and not available
-	supplyCnt      int32 // to create
+	recycling      sets.Set[string] // pods that are restarting and not available
+	supplyCnt      int32            // to create
 	idlePods       []string
 	redundantPods  []string
 }
@@ -446,7 +454,7 @@ func (r *PoolReconciler) scalePool(ctx context.Context, args *scaleArgs) error {
 	supplyCnt := args.supplyCnt
 	redundantPods := args.redundantPods
 	// Buffer count excludes allocated and restarting pods
-	bufferCnt := totalCnt - allocatedCnt - recycling
+	bufferCnt := totalCnt - allocatedCnt - int32(len(recycling))
 
 	// Calculate desired buffer cnt.
 	desiredBufferCnt := bufferCnt
@@ -482,7 +490,7 @@ func (r *PoolReconciler) scalePool(ctx context.Context, args *scaleArgs) error {
 		if desiredTotalCnt < totalCnt {
 			scaleIn = totalCnt - desiredTotalCnt
 		}
-		podsToDelete := r.pickPodsToDelete(pods, args.idlePods, args.redundantPods, scaleIn)
+		podsToDelete := r.pickPodsToDelete(pods, args.idlePods, args.redundantPods, scaleIn, args.recycling)
 		log.Info("Scaling down pool", "pool", pool.Name, "scaleIn", scaleIn, "redundantPods", len(redundantPods), "podsToDelete", len(podsToDelete))
 		for _, pod := range podsToDelete {
 			log.Info("Deleting pool pod", "pool", pool.Name, "pod", pod.Name)
@@ -532,7 +540,7 @@ func (r *PoolReconciler) updatePoolStatus(ctx context.Context, latestRevision st
 	return nil
 }
 
-func (r *PoolReconciler) pickPodsToDelete(pods []*corev1.Pod, idlePodNames []string, redundantPodNames []string, scaleIn int32) []*corev1.Pod {
+func (r *PoolReconciler) pickPodsToDelete(pods []*corev1.Pod, idlePodNames []string, redundantPodNames []string, scaleIn int32, recycling sets.Set[string]) []*corev1.Pod {
 	var idlePods []*corev1.Pod
 	podMap := make(map[string]*corev1.Pod)
 	for _, pod := range pods {
@@ -555,11 +563,17 @@ func (r *PoolReconciler) pickPodsToDelete(pods []*corev1.Pod, idlePodNames []str
 		if !ok {
 			continue
 		}
+		if recycling.Has(pod.Name) {
+			continue
+		}
 		podsToDelete = append(podsToDelete, pod)
 	}
 	for _, pod := range idlePods { // delete pod from pool scale
 		if scaleIn <= 0 {
 			break
+		}
+		if recycling.Has(pod.Name) {
+			continue
 		}
 		if pod.DeletionTimestamp == nil {
 			podsToDelete = append(podsToDelete, pod)

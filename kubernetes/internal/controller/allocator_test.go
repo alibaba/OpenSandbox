@@ -22,6 +22,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/golang/mock/gomock"
@@ -324,6 +325,7 @@ func TestAllocatorSchedule(t *testing.T) {
 						Name: "pool1",
 					},
 				},
+				RecyclingPods: sets.New("pod-deallocated"),
 				Sandboxes: []*sandboxv1alpha1.BatchSandbox{
 					{
 						ObjectMeta: metav1.ObjectMeta{
@@ -610,9 +612,10 @@ func TestScheduleExcludesRestartingPods(t *testing.T) {
 		},
 	}
 	spec := &AllocSpec{
-		Pods:      pods,
-		Sandboxes: sandboxes,
-		Pool:      &sandboxv1alpha1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool1"}},
+		Pods:          pods,
+		Sandboxes:     sandboxes,
+		Pool:          &sandboxv1alpha1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool1"}},
+		RecyclingPods: sets.New("pod-restarting"),
 	}
 
 	store.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(&PoolAllocation{PodAllocation: map[string]string{}}, nil).Times(1)

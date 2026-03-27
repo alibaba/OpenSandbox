@@ -57,7 +57,7 @@ var _ = Describe("Pod Recycle Policy", Ordered, func() {
 		By("patching controller deployment with restart-timeout for testing")
 		cmd = exec.Command("kubectl", "patch", "deployment", "opensandbox-controller-manager", "-n", namespace,
 			"--type", "json", "-p",
-			`[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--restart-timeout=20s"}]`)
+			`[{"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--restart-timeout=60s"}]`)
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to patch controller deployment")
 

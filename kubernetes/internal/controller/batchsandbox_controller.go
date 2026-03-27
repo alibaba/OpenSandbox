@@ -622,8 +622,14 @@ func (r *BatchSandboxReconciler) addDeallocatedFromLabel(ctx context.Context, bs
 	if err != nil {
 		return err
 	}
+	released, err := parseSandboxReleased(bsx)
+	if err != nil {
+		return err
+	}
+	pods := sets.NewString(released.Pods...)
+	pods.Insert(alloc.Pods...)
 
-	for _, podName := range alloc.Pods {
+	for podName := range pods {
 		pod := &corev1.Pod{}
 		err = r.Get(ctx, types.NamespacedName{Namespace: bsx.Namespace, Name: podName}, pod)
 		if errors.IsNotFound(err) {
