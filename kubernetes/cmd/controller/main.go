@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"golang.org/x/time/rate"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -54,6 +56,15 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+func newScaleLimiter(perMinute int) *rate.Limiter {
+	if perMinute <= 0 {
+		return nil
+	}
+	limiterRate := rate.Limit(perMinute) / 60.0
+	burst := perMinute
+	return rate.NewLimiter(limiterRate, burst)
+}
+
 // nolint:gocyclo
 func main() {
 	var metricsAddr string
@@ -76,6 +87,10 @@ func main() {
 	// Kubernetes client rate limiter options
 	var kubeClientQPS float64
 	var kubeClientBurst int
+
+	// Pool scaling rate limiter options
+	var scaleUpPerMinute int
+	var scaleDownPerMinute int
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -104,6 +119,8 @@ func main() {
 	flag.BoolVar(&logCompress, "log-compress", true, "Compress determines if the rotated log files should be compressed using gzip")
 	flag.Float64Var(&kubeClientQPS, "kube-client-qps", 100, "QPS for Kubernetes client rate limiter.")
 	flag.IntVar(&kubeClientBurst, "kube-client-burst", 200, "Burst for Kubernetes client rate limiter.")
+	flag.IntVar(&scaleUpPerMinute, "scale-up-per-minute", 0, "Max pods to create per minute for pool scaling (0 = no limit)")
+	flag.IntVar(&scaleDownPerMinute, "scale-down-per-minute", 0, "Max pods to delete per minute for pool scaling (0 = no limit)")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
@@ -260,10 +277,12 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.PoolReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("pool-controller"),
-		Allocator: controller.NewDefaultAllocator(mgr.GetClient()),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Recorder:         mgr.GetEventRecorderFor("pool-controller"),
+		Allocator:        controller.NewDefaultAllocator(mgr.GetClient()),
+		ScaleUpLimiter:   newScaleLimiter(scaleUpPerMinute),
+		ScaleDownLimiter: newScaleLimiter(scaleDownPerMinute),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pool")
 		os.Exit(1)

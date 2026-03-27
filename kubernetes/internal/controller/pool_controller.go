@@ -23,6 +23,7 @@ import (
 	"sort"
 	"time"
 
+	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -58,6 +59,15 @@ const (
 	LabelPoolRevision = "sandbox.opensandbox.io/pool-revision"
 )
 
+// RateLimitError is returned when scale operation is rate limited
+type RateLimitError struct {
+	RequeueAfter time.Duration
+}
+
+func (e *RateLimitError) Error() string {
+	return "scale operation rate limited"
+}
+
 var (
 	PoolScaleExpectations = expectations.NewScaleExpectations()
 )
@@ -65,9 +75,11 @@ var (
 // PoolReconciler reconciles a Pool object
 type PoolReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Recorder  record.EventRecorder
-	Allocator Allocator
+	Scheme           *runtime.Scheme
+	Recorder         record.EventRecorder
+	Allocator        Allocator
+	ScaleUpLimiter   *rate.Limiter
+	ScaleDownLimiter *rate.Limiter
 }
 
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=pools,verbs=get;list;watch;create;update;patch;delete
@@ -137,7 +149,12 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		batchSandboxes = append(batchSandboxes, &batchSandbox)
 	}
 	log.Info("Pool reconcile", "pool", pool.Name, "pods", len(pods), "batchSandboxes", len(batchSandboxes))
-	return r.reconcilePool(ctx, pool, batchSandboxes, pods)
+	result, err := r.reconcilePool(ctx, pool, batchSandboxes, pods)
+	if rateErr, ok := err.(*RateLimitError); ok {
+		log.Info("Pool reconcile rate limited, requeuing", "pool", pool.Name, "requeueAfter", rateErr.RequeueAfter)
+		return ctrl.Result{RequeueAfter: rateErr.RequeueAfter}, nil
+	}
+	return result, err
 }
 
 // reconcilePool contains the main reconciliation logic
@@ -407,6 +424,22 @@ func (r *PoolReconciler) scalePool(ctx context.Context, args *scaleArgs) error {
 	if desiredTotalCnt > totalCnt { // Need to create pod
 		createCnt := desiredTotalCnt - totalCnt
 		log.Info("Scaling up pool", "pool", pool.Name, "createCnt", createCnt)
+
+		// Rate limiting: only create as many pods as tokens available
+		if r.ScaleUpLimiter != nil {
+			availableTokens := int(r.ScaleUpLimiter.Tokens())
+			if availableTokens <= 0 {
+				log.Info("Scale up rate limited", "pool", pool.Name, "createCnt", createCnt)
+				return &RateLimitError{RequeueAfter: 10 * time.Second}
+			}
+			if int(createCnt) > availableTokens {
+				log.Info("Scale up partially rate limited", "pool", pool.Name, "requested", createCnt, "allowed", availableTokens)
+				createCnt = int32(availableTokens)
+			}
+			// Consume the tokens
+			r.ScaleUpLimiter.AllowN(time.Now(), int(createCnt))
+		}
+
 		for range createCnt {
 			if err := r.createPoolPod(ctx, pool, args.latestRevision); err != nil {
 				log.Error(err, "Failed to create pool pod")
@@ -420,6 +453,22 @@ func (r *PoolReconciler) scalePool(ctx context.Context, args *scaleArgs) error {
 		}
 		podsToDelete := r.pickPodsToDelete(pods, args.idlePods, args.redundantPods, scaleIn)
 		log.Info("Scaling down pool", "pool", pool.Name, "scaleIn", scaleIn, "redundantPods", len(redundantPods), "podsToDelete", len(podsToDelete))
+
+		// Rate limiting: only delete as many pods as tokens available
+		if r.ScaleDownLimiter != nil {
+			availableTokens := int(r.ScaleDownLimiter.Tokens())
+			if availableTokens <= 0 {
+				log.Info("Scale down rate limited", "pool", pool.Name, "deleteCnt", len(podsToDelete))
+				return &RateLimitError{RequeueAfter: 10 * time.Second}
+			}
+			if len(podsToDelete) > availableTokens {
+				log.Info("Scale down partially rate limited", "pool", pool.Name, "requested", len(podsToDelete), "allowed", availableTokens)
+				podsToDelete = podsToDelete[:availableTokens]
+			}
+			// Consume the tokens
+			r.ScaleDownLimiter.AllowN(time.Now(), len(podsToDelete))
+		}
+
 		for _, pod := range podsToDelete {
 			log.Info("Deleting pool pod", "pool", pool.Name, "pod", pod.Name)
 			if err := r.Delete(ctx, pod); err != nil {
