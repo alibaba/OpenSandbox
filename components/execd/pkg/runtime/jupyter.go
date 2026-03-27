@@ -82,34 +82,7 @@ func (c *Controller) runJupyterCode(ctx context.Context, kernel *jupyterKernel, 
 			if result == nil {
 				return nil
 			}
-
-			if result.ExecutionCount > 0 || len(result.ExecutionData) > 0 {
-				request.Hooks.OnExecuteResult(result.ExecutionData, result.ExecutionCount)
-			}
-
-			if result.Status != "" {
-				request.Hooks.OnExecuteStatus(result.Status)
-			}
-
-			if result.ExecutionTime > 0 {
-				request.Hooks.OnExecuteComplete(result.ExecutionTime)
-			}
-
-			if result.Error != nil {
-				request.Hooks.OnExecuteError(result.Error)
-			}
-
-			if len(result.Stream) > 0 {
-				for _, stream := range result.Stream {
-					switch stream.Name {
-					case execute.StreamStdout:
-						request.Hooks.OnExecuteStdout(stream.Text)
-					case execute.StreamStderr:
-						request.Hooks.OnExecuteStderr(stream.Text)
-					default:
-					}
-				}
-			}
+			dispatchExecutionResultHooks(request, result)
 
 		case <-ctx.Done():
 			log.Warning("context cancelled, try to interrupt kernel")
@@ -123,6 +96,35 @@ func (c *Controller) runJupyterCode(ctx context.Context, kernel *jupyterKernel, 
 				EValue: "Interrupt kernel",
 			})
 			return errors.New("context cancelled, interrupt kernel")
+		}
+	}
+}
+
+func dispatchExecutionResultHooks(request *ExecuteCodeRequest, result *execute.ExecutionResult) {
+	if result.ExecutionCount > 0 || len(result.ExecutionData) > 0 {
+		request.Hooks.OnExecuteResult(result.ExecutionData, result.ExecutionCount)
+	}
+
+	if result.Status != "" {
+		request.Hooks.OnExecuteStatus(result.Status)
+	}
+
+	if result.Error != nil {
+		request.Hooks.OnExecuteError(result.Error)
+	}
+
+	// Treat completion as success-only terminal signal. For failed executions,
+	// error should be the terminal event to avoid losing error delivery.
+	if result.ExecutionTime > 0 && result.Error == nil {
+		request.Hooks.OnExecuteComplete(result.ExecutionTime)
+	}
+
+	for _, stream := range result.Stream {
+		switch stream.Name {
+		case execute.StreamStdout:
+			request.Hooks.OnExecuteStdout(stream.Text)
+		case execute.StreamStderr:
+			request.Hooks.OnExecuteStderr(stream.Text)
 		}
 	}
 }
