@@ -285,47 +285,61 @@ func calPodIndex(poolStrategy strategy.PoolStrategy, batchSbx *sandboxv1alpha1.B
 }
 
 func (r *BatchSandboxReconciler) listPods(ctx context.Context, poolStrategy strategy.PoolStrategy, batchSbx *sandboxv1alpha1.BatchSandbox) ([]*corev1.Pod, error) {
-	var ret []*corev1.Pod
 	if poolStrategy.IsPooledMode() {
-		var (
-			allocSet    = make(sets.Set[string])
-			releasedSet = make(sets.Set[string])
-		)
-		alloc, err := parseSandboxAllocation(batchSbx)
+		ret, err := r.getCurrentPoolPods(ctx, batchSbx)
 		if err != nil {
 			return nil, err
 		}
-		allocSet.Insert(alloc.Pods...)
+		return ret, nil
+	}
+	var ret []*corev1.Pod
+	podList := &corev1.PodList{}
+	if err := r.Client.List(ctx, podList, &client.ListOptions{
+		Namespace:     batchSbx.Namespace,
+		FieldSelector: fields.SelectorFromSet(fields.Set{fieldindex.IndexNameForOwnerRefUID: string(batchSbx.UID)}),
+	}); err != nil {
+		return nil, err
+	}
+	for i := range podList.Items {
+		ret = append(ret, &podList.Items[i])
+	}
+	return ret, nil
+}
 
-		released, err := parseSandboxReleased(batchSbx)
-		if err != nil {
-			return nil, err
-		}
-		releasedSet.Insert(released.Pods...)
+func (r *BatchSandboxReconciler) getCurrentPoolPods(ctx context.Context, batchSbx *sandboxv1alpha1.BatchSandbox) ([]*corev1.Pod, error) {
 
-		activePods := allocSet.Difference(releasedSet)
-		for name := range activePods {
-			pod := &corev1.Pod{}
-			// TODO maybe performance is problem
-			if err := r.Client.Get(ctx, types.NamespacedName{Namespace: batchSbx.Namespace, Name: name}, pod); err != nil {
-				if errors.IsNotFound(err) {
-					continue
-				}
-				return nil, err
+	var (
+		allocSet    = make(sets.Set[string])
+		releasedSet = make(sets.Set[string])
+	)
+	alloc, err := parseSandboxAllocation(batchSbx)
+	if err != nil {
+		return nil, err
+	}
+	allocSet.Insert(alloc.Pods...)
+
+	released, err := parseSandboxReleased(batchSbx)
+	if err != nil {
+		return nil, err
+	}
+	releasedSet.Insert(released.Pods...)
+
+	activePods := allocSet.Difference(releasedSet)
+	return r.getPodsByNames(ctx, batchSbx, activePods)
+}
+
+func (r *BatchSandboxReconciler) getPodsByNames(ctx context.Context, batchSbx *sandboxv1alpha1.BatchSandbox, podNames sets.Set[string]) ([]*corev1.Pod, error) {
+	var ret []*corev1.Pod
+	for name := range podNames {
+		pod := &corev1.Pod{}
+		// TODO maybe performance is problem
+		if err := r.Client.Get(ctx, types.NamespacedName{Namespace: batchSbx.Namespace, Name: name}, pod); err != nil {
+			if errors.IsNotFound(err) {
+				continue
 			}
-			ret = append(ret, pod)
-		}
-	} else {
-		podList := &corev1.PodList{}
-		if err := r.Client.List(ctx, podList, &client.ListOptions{
-			Namespace:     batchSbx.Namespace,
-			FieldSelector: fields.SelectorFromSet(fields.Set{fieldindex.IndexNameForOwnerRefUID: string(batchSbx.UID)}),
-		}); err != nil {
 			return nil, err
 		}
-		for i := range podList.Items {
-			ret = append(ret, &podList.Items[i])
-		}
+		ret = append(ret, pod)
 	}
 	return ret, nil
 }
@@ -438,6 +452,13 @@ func (r *BatchSandboxReconciler) getTasksCleanupUnfinished(batchSbx *sandboxv1al
 }
 
 func (r *BatchSandboxReconciler) releasePods(ctx context.Context, batchSbx *sandboxv1alpha1.BatchSandbox, toReleasePods []string) error {
+	pods, err := r.getPodsByNames(ctx, batchSbx, sets.New(toReleasePods...))
+	if err != nil {
+		return err
+	}
+	if err = r.addDeallocatedFromLabel(ctx, batchSbx, pods); err != nil {
+		return err
+	}
 	releasedSet := make(sets.Set[string])
 	released, err := parseSandboxReleased(batchSbx)
 	if err != nil {
@@ -617,27 +638,8 @@ func (r *BatchSandboxReconciler) checkPoolRecycleFinalizer(ctx context.Context, 
 }
 
 // addDeallocatedFromLabel adds deallocated-from label to pods.
-func (r *BatchSandboxReconciler) addDeallocatedFromLabel(ctx context.Context, bsx *sandboxv1alpha1.BatchSandbox) error {
-	alloc, err := parseSandboxAllocation(bsx)
-	if err != nil {
-		return err
-	}
-	released, err := parseSandboxReleased(bsx)
-	if err != nil {
-		return err
-	}
-	pods := sets.NewString(released.Pods...)
-	pods.Insert(alloc.Pods...)
-
-	for podName := range pods {
-		pod := &corev1.Pod{}
-		err = r.Get(ctx, types.NamespacedName{Namespace: bsx.Namespace, Name: podName}, pod)
-		if errors.IsNotFound(err) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
+func (r *BatchSandboxReconciler) addDeallocatedFromLabel(ctx context.Context, bsx *sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) error {
+	for _, pod := range pods {
 		if pod.Labels[LabelPodRecycleConfirmed] == string(bsx.UID) {
 			continue
 		}
@@ -652,7 +654,7 @@ func (r *BatchSandboxReconciler) addDeallocatedFromLabel(ctx context.Context, bs
 		}
 		pod.Labels[LabelPodDeallocatedFrom] = string(bsx.UID)
 		patch := client.MergeFrom(old)
-		if err = r.Patch(ctx, pod, patch); err != nil {
+		if err := r.Patch(ctx, pod, patch); err != nil {
 			return err
 		}
 	}
@@ -664,7 +666,11 @@ func (r *BatchSandboxReconciler) handlePoolRecycle(ctx context.Context, batchSbx
 	if !controllerutil.ContainsFinalizer(batchSbx, FinalizerPoolRecycle) {
 		return false, nil
 	}
-	if err := r.addDeallocatedFromLabel(ctx, batchSbx); err != nil {
+	pods, err := r.getCurrentPoolPods(ctx, batchSbx)
+	if err != nil {
+		return false, err
+	}
+	if err = r.addDeallocatedFromLabel(ctx, batchSbx, pods); err != nil {
 		log.Error(err, "failed to add deallocated-from label")
 		return false, err
 	}

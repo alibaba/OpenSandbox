@@ -66,6 +66,14 @@ type PodRecycleMeta struct {
 
 	// TriggeredAt: Restart trigger timestamp (milliseconds)
 	TriggeredAt int64 `json:"triggeredAt"`
+
+	// ContainerRestartCounts stores the restart count of each container before triggering restart.
+	// Used to detect if container has restarted even when StartedAt timestamp has second-level precision.
+	ContainerRestartCounts map[string]int32 `json:"containerRestartCounts,omitempty"`
+
+	// ContainerStartedAt stores the StartedAt time of each container before triggering restart.
+	// Used to detect if container has restarted by comparing StartedAt timestamps.
+	ContainerStartedAt map[string]int64 `json:"containerStartedAt,omitempty"`
 }
 
 // parsePodRecycleMeta parses the recycle metadata from Pod annotations.

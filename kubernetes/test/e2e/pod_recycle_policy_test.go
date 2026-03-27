@@ -644,4 +644,236 @@ spec:
 			_, _ = utils.Run(cmd)
 		})
 	})
+
+	Context("Release Pod Allocation - Reallocating to Another BatchSandbox", func() {
+		It("should not affect pod already allocated to another BatchSandbox when original is deleted", func() {
+			poolName := "release-realloc-pool"
+			bsbxNameA := "release-realloc-bsbx-a"
+			bsbxNameB := "release-realloc-bsbx-b"
+
+			By("creating Pool with Restart policy")
+			poolYAML := fmt.Sprintf(`
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  podRecyclePolicy: Restart
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: task-executor:dev
+  capacitySpec:
+    bufferMax: 0
+    bufferMin: 0
+    poolMax: 2
+    poolMin: 2
+`, poolName, testNamespace)
+			cmd := exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(poolYAML)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create Pool")
+
+			By("waiting for Pool to have available pods")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pool", poolName, "-n", testNamespace,
+					"-o", "jsonpath={.status.available}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("2"))
+			}).Should(Succeed())
+
+			// Step 1: Create BatchSandbox A with a task that will release pod on completion
+			By("creating BatchSandbox A with task that releases pod on completion")
+			bsbxYAMLA := fmt.Sprintf(`
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: BatchSandbox
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 1
+  poolRef: %s
+  taskResourcePolicyWhenCompleted: Release
+  taskTemplate:
+    spec:
+      process:
+        command: ["/bin/sh", "-c"]
+        args: ["echo hello && sleep 1"]
+`, bsbxNameA, testNamespace, poolName)
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(bsbxYAMLA)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create BatchSandbox A")
+
+			By("waiting for BatchSandbox A to be allocated")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", bsbxNameA, "-n", testNamespace,
+					"-o", "jsonpath={.status.allocated}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("1"))
+			}).Should(Succeed())
+
+			By("getting the allocated pod name from BatchSandbox A")
+			cmd = exec.Command("kubectl", "get", "batchsandbox", bsbxNameA, "-n", testNamespace,
+				"-o", "jsonpath={.metadata.annotations.sandbox\\.opensandbox\\.io/alloc-status}")
+			output, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			var allocA controller.SandboxAllocation
+			Expect(json.Unmarshal([]byte(output), &allocA)).To(Succeed())
+			Expect(allocA.Pods).To(HaveLen(1))
+			podNameA := allocA.Pods[0]
+
+			// Step 2: Wait for task to complete and pod to be released
+			By("waiting for task to complete (succeed) and pod to be released")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", bsbxNameA, "-n", testNamespace,
+					"-o", "jsonpath={.status.taskSucceed}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("1"), "Task should succeed")
+			}).Should(Succeed())
+
+			By("verifying pod has deallocated-from label after release")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", podNameA, "-n", testNamespace,
+					"-o", "jsonpath={.metadata.labels.pool\\.opensandbox\\.io/deallocated-from}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).NotTo(BeEmpty(), "Pod should have deallocated-from label after release")
+			}).Should(Succeed())
+
+			By("verifying released pod is recorded in BatchSandbox A")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", bsbxNameA, "-n", testNamespace,
+					"-o", "jsonpath={.metadata.annotations.sandbox\\.opensandbox\\.io/alloc-release}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring(podNameA), "Released pod should be recorded")
+			}).Should(Succeed())
+
+			// Step 3: Wait for pod recycle to complete (restart finished)
+			By("waiting for pod recycle-meta annotation to be cleared (restart in progress)")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", podNameA, "-n", testNamespace,
+					"-o", "jsonpath={.metadata.annotations.sandbox\\.opensandbox\\.io/recycle-meta}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(BeEmpty(), "recycle-meta annotation should be cleared after restart completes")
+			}).Should(Succeed())
+
+			By("waiting for pod to be Ready again after restart")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", podNameA, "-n", testNamespace,
+					"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("True"), "Pod should be Ready after restart")
+			}).Should(Succeed())
+
+			By("waiting for deallocated-from label to be cleared (pod ready for reuse)")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", podNameA, "-n", testNamespace,
+					"-o", "jsonpath={.metadata.labels.pool\\.opensandbox\\.io/deallocated-from}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(BeEmpty(), "deallocated-from label should be cleared for reuse")
+			}).Should(Succeed())
+
+			By("waiting for Pool available count to be restored")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pool", poolName, "-n", testNamespace,
+					"-o", "jsonpath={.status.available}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("2"), "Pool should have 2 available pods after recycle")
+			}).Should(Succeed())
+
+			// Step 4: Create BatchSandbox B to allocate the recycled pod
+			By("creating BatchSandbox B to allocate the recycled pod")
+			bsbxYAMLB := fmt.Sprintf(`
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: BatchSandbox
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 1
+  poolRef: %s
+`, bsbxNameB, testNamespace, poolName)
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(bsbxYAMLB)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create BatchSandbox B")
+
+			By("waiting for BatchSandbox B to be allocated")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", bsbxNameB, "-n", testNamespace,
+					"-o", "jsonpath={.status.allocated}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("1"))
+			}).Should(Succeed())
+
+			By("verifying the same pod is allocated to BatchSandbox B")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", bsbxNameB, "-n", testNamespace,
+					"-o", "jsonpath={.metadata.annotations.sandbox\\.opensandbox\\.io/alloc-status}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				var allocB controller.SandboxAllocation
+				g.Expect(json.Unmarshal([]byte(output), &allocB)).To(Succeed())
+				g.Expect(allocB.Pods).To(ContainElement(podNameA), "The same pod should be allocated to BatchSandbox B")
+			}).Should(Succeed())
+
+			// Step 5: Delete BatchSandbox A (the one that released the pod)
+			By("deleting BatchSandbox A")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", bsbxNameA, "-n", testNamespace, "--timeout=60s")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete BatchSandbox A")
+
+			By("verifying BatchSandbox A is deleted")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", bsbxNameA, "-n", testNamespace, "--ignore-not-found")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(BeEmpty(), "BatchSandbox A should be deleted")
+			}).Should(Succeed())
+
+			// Step 6: Verify the pod is NOT affected (not deleted, not labeled with deallocated-from)
+			By("verifying the pod is NOT deleted after BatchSandbox A deletion")
+			Consistently(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pod", podNameA, "-n", testNamespace, "--ignore-not-found", "-o", "name")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(ContainSubstring(podNameA), "Pod should NOT be deleted when original BatchSandbox A is deleted")
+			}, 10*time.Second).Should(Succeed())
+
+			By("verifying the pod does NOT have deallocated-from label from BatchSandbox A")
+			cmd = exec.Command("kubectl", "get", "pod", podNameA, "-n", testNamespace,
+				"-o", "jsonpath={.metadata.labels.pool\\.opensandbox\\.io/deallocated-from}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(BeEmpty(), "Pod should NOT have deallocated-from label after BatchSandbox A deletion")
+
+			By("verifying BatchSandbox B still has the pod allocated")
+			cmd = exec.Command("kubectl", "get", "batchsandbox", bsbxNameB, "-n", testNamespace,
+				"-o", "jsonpath={.metadata.annotations.sandbox\\.opensandbox\\.io/alloc-status}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			var allocBCheck controller.SandboxAllocation
+			Expect(json.Unmarshal([]byte(output), &allocBCheck)).To(Succeed())
+			Expect(allocBCheck.Pods).To(ContainElement(podNameA), "BatchSandbox B should still have the pod allocated")
+
+			// Cleanup
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", bsbxNameB, "-n", testNamespace, "--timeout=60s")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolName, "-n", testNamespace, "--timeout=30s")
+			_, _ = utils.Run(cmd)
+		})
+	})
 })

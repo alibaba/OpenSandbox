@@ -85,6 +85,15 @@ func (t *restartTracker) HandleRestart(ctx context.Context, pod *corev1.Pod, tim
 
 	meta.TriggeredAt = time.Now().UnixMilli()
 	meta.State = RecycleStateRestarting
+	// Record current restart counts to detect restart even when StartedAt has second-level precision
+	meta.ContainerRestartCounts = make(map[string]int32)
+	meta.ContainerStartedAt = make(map[string]int64)
+	for _, container := range pod.Status.ContainerStatuses {
+		meta.ContainerRestartCounts[container.Name] = container.RestartCount
+		if container.State.Running != nil {
+			meta.ContainerStartedAt[container.Name] = container.State.Running.StartedAt.UnixMilli()
+		}
+	}
 	if err = t.updatePodRecycleMeta(ctx, pod, meta); err != nil {
 		log.Error(err, "Failed to update recycle meta", "pod", pod.Name)
 		return err
@@ -199,11 +208,29 @@ func (t *restartTracker) checkRestartStatus(ctx context.Context, pod *corev1.Pod
 	for _, container := range pod.Status.ContainerStatuses {
 		restarted := false
 		running := container.State.Running
+		// Check if container has restarted by either:
+		// 1. StartedAt time is after trigger time (original logic)
+		// 2. RestartCount has increased (handles same-second restarts)
+		// 3. StartedAt time is greater than recorded original StartedAt
 		if running != nil && running.StartedAt.Time.After(triggerAt) {
 			restarted = true
 			log.Info("Container restarted detected by start time after trigger",
 				"pod", pod.Name, "container", container.Name,
 				"trigger", triggerAt, "current", running.StartedAt.Time)
+		} else if originalCount, ok := meta.ContainerRestartCounts[container.Name]; ok && container.RestartCount > originalCount {
+			restarted = true
+			log.Info("Container restarted detected by restart count increased",
+				"pod", pod.Name, "container", container.Name,
+				"originalCount", originalCount, "currentCount", container.RestartCount)
+		} else if running != nil {
+			if originalStartedAt, ok := meta.ContainerStartedAt[container.Name]; ok {
+				if running.StartedAt.UnixMilli() > originalStartedAt {
+					restarted = true
+					log.Info("Container restarted detected by startedAt increased",
+						"pod", pod.Name, "container", container.Name,
+						"originalStartedAt", time.UnixMilli(originalStartedAt), "currentStartedAt", running.StartedAt.Time)
+				}
+			}
 		}
 		if !restarted || !container.Ready {
 			allRestarted = false
