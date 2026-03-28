@@ -1,4 +1,4 @@
-// Copyright 2025 Alibaba Group Holding Ltd.
+// Copyright 2026 Alibaba Group Holding Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -165,6 +165,37 @@ func (r *streamRegistry) writeSSE(id string, data []byte, bufEid int64, handler,
 		return
 	}
 	h.writeFrame(data, bufEid, handler, summary)
+}
+
+// flushResumeTail writes all buffered events with EID > afterEid to the current holder while holding h.mu.
+// Live writeFrame calls block on the same mutex, so chunks appended only to the ring during the initial
+// snapshot replay cannot be missed on this connection (see ResumeCommandStream).
+func (h *streamHub) flushResumeTail(commandID string, afterEid int64) {
+	if h == nil || h.holder == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	tail, ok := resumeBuffer.EventsAfter(commandID, afterEid)
+	if !ok || len(tail) == 0 {
+		return
+	}
+	writer := h.holder.writer
+	for _, ev := range tail {
+		payload := append(append([]byte(nil), ev.Payload...), '\n', '\n')
+		n, err := writer.Write(payload)
+		if err == nil && n != len(payload) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			log.Error("flushResumeTail: write eid=%d: %v", ev.EID, err)
+			return
+		}
+		if flusher, ok := writer.(http.Flusher); ok {
+			flusher.Flush()
+		}
+	}
 }
 
 func (h *streamHub) writeFrame(data []byte, bufEid int64, handler, summary string) {

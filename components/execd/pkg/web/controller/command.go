@@ -165,8 +165,12 @@ func (c *CodeInterpretingController) ResumeCommandStream() {
 	}
 
 	c.setupSSEResponse()
+	lastReplayMaxEid := afterEid
 	for _, ev := range events {
 		c.writeSingleEvent("ResumeBuffer", ev.Payload, false, fmt.Sprintf("buffer eid=%d", ev.EID), 0)
+		if ev.EID > lastReplayMaxEid {
+			lastReplayMaxEid = ev.EID
+		}
 	}
 
 	st2, _ := codeRunner.GetCommandStatus(commandID)
@@ -186,6 +190,9 @@ func (c *CodeInterpretingController) ResumeCommandStream() {
 		}
 		return
 	}
+
+	// Catch up events appended while the snapshot slice was replayed (holder still nil); same mutex as writeFrame.
+	h.flushResumeTail(commandID, lastReplayMaxEid)
 
 	select {
 	case <-h.waitDone():
