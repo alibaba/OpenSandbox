@@ -44,7 +44,7 @@ type enforcementReporter interface {
 
 // nftApplier applies static policy and optional dynamic DNS-learned IPs to nftables.
 type nftApplier interface {
-	ApplyStatic(context.Context, *policy.NetworkPolicy) error
+	ApplyStatic(ctx context.Context, p *policy.NetworkPolicy, normalizeIntervalSets bool) error
 	AddResolvedIPs(context.Context, []nftables.ResolvedIP) error
 }
 
@@ -253,7 +253,7 @@ func (s *policyServer) commitPolicy(ctx context.Context, w http.ResponseWriter, 
 		return false
 	}
 	if s.nft != nil {
-		if err := s.nft.ApplyStatic(ctx, pol.WithExtraAllowIPs(s.nameserverIPs)); err != nil {
+		if err := s.nft.ApplyStatic(ctx, pol.WithExtraAllowIPs(s.nameserverIPs), false); err != nil {
 			log.Errorf("policy API: nftables apply failed (%s): %v", op, err)
 			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)
 			return false

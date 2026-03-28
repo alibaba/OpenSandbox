@@ -48,7 +48,7 @@ type stubNft struct {
 	applied *policy.NetworkPolicy
 }
 
-func (s *stubNft) ApplyStatic(_ context.Context, p *policy.NetworkPolicy) error {
+func (s *stubNft) ApplyStatic(_ context.Context, p *policy.NetworkPolicy, _ bool) error {
 	s.calls++
 	s.applied = p
 	return s.err

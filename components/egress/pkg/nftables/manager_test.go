@@ -42,7 +42,7 @@ func TestApplyStatic_BuildsRuleset_DefaultDeny(t *testing.T) {
 	}`)
 	require.NoError(t, err, "unexpected parse error")
 
-	require.NoError(t, m.ApplyStatic(context.Background(), p), "ApplyStatic returned error")
+	require.NoError(t, m.ApplyStatic(context.Background(), p, false), "ApplyStatic returned error")
 
 	expectContains(t, rendered, "add chain inet opensandbox egress { type filter hook output priority 0; policy drop; }")
 	expectContains(t, rendered, "add rule inet opensandbox egress ct state established,related accept")
@@ -72,7 +72,7 @@ func TestApplyStatic_DefaultAllowUsesAcceptPolicy(t *testing.T) {
 	}`)
 	require.NoError(t, err, "unexpected parse error")
 
-	require.NoError(t, m.ApplyStatic(context.Background(), p), "ApplyStatic returned error")
+	require.NoError(t, m.ApplyStatic(context.Background(), p, false), "ApplyStatic returned error")
 
 	expectContains(t, rendered, "policy accept;")
 	expectContains(t, rendered, "add rule inet opensandbox egress tcp dport 853 drop")
@@ -98,7 +98,7 @@ func TestApplyStatic_RetryWhenTableMissing(t *testing.T) {
 	})
 
 	p, _ := policy.ParsePolicy(`{"egress":[]}`)
-	require.NoError(t, m.ApplyStatic(context.Background(), p), "expected retry to succeed")
+	require.NoError(t, m.ApplyStatic(context.Background(), p, false), "expected retry to succeed")
 	require.Equal(t, 2, calls, "expected 2 calls (fail then retry)")
 	require.GreaterOrEqual(t, len(scripts), 2, "expected second attempt script to be recorded")
 	require.NotContains(t, scripts[1], "delete table inet opensandbox", "expected second attempt to drop delete-table line")
@@ -118,7 +118,7 @@ func TestApplyStatic_DoHBlocklist(t *testing.T) {
 	}, opts)
 
 	p, _ := policy.ParsePolicy(`{"defaultAction":"allow","egress":[]}`)
-	require.NoError(t, m.ApplyStatic(context.Background(), p), "ApplyStatic returned error")
+	require.NoError(t, m.ApplyStatic(context.Background(), p, false), "ApplyStatic returned error")
 
 	expectContains(t, rendered, "add set inet opensandbox doh_block_v4 { type ipv4_addr; flags interval; }")
 	expectContains(t, rendered, "add element inet opensandbox doh_block_v4 { 9.9.9.9 }")
@@ -163,4 +163,32 @@ func TestAddResolvedIPs_EmptyNoOp(t *testing.T) {
 	})
 	require.NoError(t, m.AddResolvedIPs(context.Background(), nil), "AddResolvedIPs returned error")
 	require.NoError(t, m.AddResolvedIPs(context.Background(), []ResolvedIP{}), "AddResolvedIPs returned error")
+}
+
+func TestApplyStatic_NormalizeIntervalSetsOnlyWhenTrue(t *testing.T) {
+	overlap := `{
+		"defaultAction":"deny",
+		"egress":[
+			{"action":"allow","target":"100.64.0.0/10"},
+			{"action":"allow","target":"100.100.2.136"}
+		]
+	}`
+	p, err := policy.ParsePolicy(overlap)
+	require.NoError(t, err)
+
+	var withNorm, withoutNorm string
+	m1 := NewManagerWithRunner(func(_ context.Context, script string) ([]byte, error) {
+		withNorm = script
+		return nil, nil
+	})
+	require.NoError(t, m1.ApplyStatic(context.Background(), p, true))
+	expectContains(t, withNorm, "add element inet opensandbox allow_v4 { 100.64.0.0/10 }")
+
+	m2 := NewManagerWithRunner(func(_ context.Context, script string) ([]byte, error) {
+		withoutNorm = script
+		return nil, nil
+	})
+	require.NoError(t, m2.ApplyStatic(context.Background(), p, false))
+	require.Contains(t, withoutNorm, "100.100.2.136", "without normalization both entries should appear in script")
+	require.Contains(t, withoutNorm, "100.64.0.0/10", withoutNorm)
 }

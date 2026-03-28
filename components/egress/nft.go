@@ -44,7 +44,7 @@ func setupNft(ctx context.Context, nftMgr nftApplier, initialPolicy *policy.Netw
 	}
 	log.Infof("applying nftables static policy (dns+nft mode) with %d nameserver IP(s) merged into allow set", len(nameserverIPs))
 	policyWithNS := initialPolicy.WithExtraAllowIPs(nameserverIPs)
-	if err := nftMgr.ApplyStatic(ctx, policyWithNS); err != nil {
+	if err := nftMgr.ApplyStatic(ctx, policyWithNS, true); err != nil {
 		log.Fatalf("nftables static apply failed: %v", err)
 	}
 	log.Infof("nftables static policy applied (table inet opensandbox); DNS-resolved IPs will be added to dynamic allow sets")
