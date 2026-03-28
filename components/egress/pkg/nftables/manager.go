@@ -116,7 +116,8 @@ func (m *Manager) ApplyStatic(ctx context.Context, p *policy.NetworkPolicy, norm
 }
 
 // AddResolvedIPs adds DNS-learned IPs to dynamic allow sets with TTL-based timeout.
-// TTL is clamped to minTTLSec–maxTTLSec. Call only when table exists (dns+nft mode).
+// Each element timeout is DNS TTL + 60s, then clamped to minTTLSec–maxTTLSec.
+// Call only when table exists (dns+nft mode).
 func (m *Manager) AddResolvedIPs(ctx context.Context, ips []ResolvedIP) error {
 	if len(ips) == 0 {
 		return nil
