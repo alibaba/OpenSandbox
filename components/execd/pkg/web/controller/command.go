@@ -175,6 +175,10 @@ func (c *CodeInterpretingController) ResumeCommandStream() {
 
 	st2, _ := codeRunner.GetCommandStatus(commandID)
 	if st2 == nil || !st2.Running {
+		if len(events) > 0 {
+			log.Info("resume stream: command_id=%s after_eid=%d snapshot_events=%d (replay only)",
+				commandID, afterEid, len(events))
+		}
 		return
 	}
 
@@ -192,7 +196,9 @@ func (c *CodeInterpretingController) ResumeCommandStream() {
 	}
 
 	// Catch up events appended while the snapshot slice was replayed (holder still nil); same mutex as writeFrame.
-	h.flushResumeTail(commandID, lastReplayMaxEid)
+	tailN := h.flushResumeTail(commandID, lastReplayMaxEid)
+	log.Info("resume stream: command_id=%s after_eid=%d snapshot_events=%d post_attach_tail=%d (live)",
+		commandID, afterEid, len(events), tailN)
 
 	select {
 	case <-h.waitDone():

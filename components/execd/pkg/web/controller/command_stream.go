@@ -50,6 +50,7 @@ func deferResumeCleanup(c *CodeInterpretingController) {
 	}
 	commandStreams.closeAndRemove(id)
 	resumeBuffer.Delete(id)
+	log.Info("command stream: hub and resume buffer cleaned up id=%s", id)
 }
 
 // --- live SSE routing (mutually exclusive main vs resume) ---
@@ -79,21 +80,26 @@ func (r *streamRegistry) registerPrimary(id string, w http.ResponseWriter, ctx c
 		streamID: id,
 		done:     make(chan struct{}),
 	}
-	h.holder = &streamHolder{writer: w, ctx: ctx}
 	r.m[id] = h
+	h.mu.Lock()
+	h.holder = &streamHolder{writer: w, ctx: ctx}
+	h.mu.Unlock()
 	r.mu.Unlock()
 
-	r.watchHolderRelease(id, h, ctx)
+	log.Info("command stream: primary hub registered id=%s", id)
+	watchHolderRelease(h, ctx)
 }
 
-func (r *streamRegistry) watchHolderRelease(id string, h *streamHub, ctx context.Context) {
+// watchHolderRelease clears h.holder when ctx is cancelled. All holder mutations use h.mu only
+// (see tryAttachResume, registerPrimary, writeFrame) so r.mu and h.mu are not split across h.holder.
+func watchHolderRelease(h *streamHub, ctx context.Context) {
 	go func() {
 		<-ctx.Done()
-		r.mu.Lock()
-		if cur, ok := r.m[id]; ok && cur == h && h.holder != nil && h.holder.ctx == ctx {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		if h.holder != nil && h.holder.ctx == ctx {
 			h.holder = nil
 		}
-		r.mu.Unlock()
 	}()
 }
 
@@ -143,14 +149,17 @@ func (r *streamRegistry) tryAttachResume(id string, w http.ResponseWriter, ctx c
 		r.mu.Unlock()
 		return nil, errLiveHubNotFound
 	}
+	h.mu.Lock()
 	if h.holder != nil && h.holder.ctx.Err() == nil {
+		h.mu.Unlock()
 		r.mu.Unlock()
 		return nil, errLiveStreamPrimaryActive
 	}
 	h.holder = &streamHolder{writer: w, ctx: ctx}
+	h.mu.Unlock()
 	r.mu.Unlock()
 
-	r.watchHolderRelease(id, h, ctx)
+	watchHolderRelease(h, ctx)
 	return h, nil
 }
 
@@ -170,32 +179,39 @@ func (r *streamRegistry) writeSSE(id string, data []byte, bufEid int64, handler,
 // flushResumeTail writes all buffered events with EID > afterEid to the current holder while holding h.mu.
 // Live writeFrame calls block on the same mutex, so chunks appended only to the ring during the initial
 // snapshot replay cannot be missed on this connection (see ResumeCommandStream).
-func (h *streamHub) flushResumeTail(commandID string, afterEid int64) {
-	if h == nil || h.holder == nil {
-		return
+// Returns how many extra events were written after the initial snapshot replay.
+func (h *streamHub) flushResumeTail(commandID string, afterEid int64) int {
+	if h == nil {
+		return 0
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.holder == nil {
+		return 0
+	}
 
 	tail, ok := resumeBuffer.EventsAfter(commandID, afterEid)
 	if !ok || len(tail) == 0 {
-		return
+		return 0
 	}
 	writer := h.holder.writer
+	written := 0
 	for _, ev := range tail {
 		payload := append(append([]byte(nil), ev.Payload...), '\n', '\n')
-		n, err := writer.Write(payload)
-		if err == nil && n != len(payload) {
+		nw, err := writer.Write(payload)
+		if err == nil && nw != len(payload) {
 			err = io.ErrShortWrite
 		}
 		if err != nil {
 			log.Error("flushResumeTail: write eid=%d: %v", ev.EID, err)
-			return
+			return written
 		}
 		if flusher, ok := writer.(http.Flusher); ok {
 			flusher.Flush()
 		}
+		written++
 	}
+	return written
 }
 
 func (h *streamHub) writeFrame(data []byte, bufEid int64, handler, summary string) {
