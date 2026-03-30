@@ -112,12 +112,20 @@ func (c *ConnectionConfig) clientOpts(includeAuthHeader bool) []Option {
 	if c.HTTPClient != nil {
 		opts = append(opts, WithHTTPClient(c.HTTPClient))
 	}
+	if t := c.GetRequestTimeout(); t > 0 {
+		opts = append(opts, WithTimeout(t))
+	}
+	if len(c.Headers) > 0 {
+		opts = append(opts, WithHeaders(c.Headers))
+	}
 	return opts
 }
 
 // lifecycleClient creates a LifecycleClient from this config.
+// Appends the API version prefix (/v1) to the base URL, as required by
+// NewLifecycleClient and the OpenSandbox lifecycle API spec.
 func (c *ConnectionConfig) lifecycleClient() *LifecycleClient {
-	return NewLifecycleClient(c.GetBaseURL(), c.GetAPIKey(), c.clientOpts(true)...)
+	return NewLifecycleClient(c.GetBaseURL()+"/"+APIVersion, c.GetAPIKey(), c.clientOpts(true)...)
 }
 
 // execdClient creates an ExecdClient for a resolved endpoint.

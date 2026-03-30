@@ -14,8 +14,11 @@ type OutputMessage struct {
 
 // ExecutionResult represents a result output from code execution.
 type ExecutionResult struct {
-	Text      string `json:"text"`
-	Timestamp int64  `json:"timestamp"`
+	// Text is the plain-text result (convenience field, extracted from Data["text/plain"] when available).
+	Text string `json:"text"`
+	// Data holds MIME-type keyed outputs (e.g. "text/plain", "text/html").
+	Data      map[string]string `json:"data,omitempty"`
+	Timestamp int64             `json:"timestamp"`
 }
 
 // ExecutionError represents an error during code/command execution.
@@ -85,6 +88,13 @@ type ExecutionHandlers struct {
 	OnError    func(ExecutionError) error
 }
 
+// sseErrorPayload is the nested error object in a ServerStreamEvent.
+type sseErrorPayload struct {
+	EName     string   `json:"ename,omitempty"`
+	EValue    string   `json:"evalue,omitempty"`
+	Traceback []string `json:"traceback,omitempty"`
+}
+
 // sseEvent is the raw JSON structure from execd SSE/NDJSON events.
 type sseEvent struct {
 	Type          string `json:"type"`
@@ -92,7 +102,13 @@ type sseEvent struct {
 	Timestamp     int64  `json:"timestamp"`
 	ExitCode      *int   `json:"exit_code,omitempty"`
 	ExecutionTime int64  `json:"execution_time,omitempty"`
-	// Error fields (for code interpreter errors)
+
+	// Nested error object (spec: {"type":"error","error":{...}})
+	Error *sseErrorPayload `json:"error,omitempty"`
+	// Nested results object (spec: {"type":"result","results":{"text/plain":"..."}})
+	Results map[string]string `json:"results,omitempty"`
+
+	// Flat error fields kept for backward compatibility with older servers
 	EName     string   `json:"ename,omitempty"`
 	EValue    string   `json:"evalue,omitempty"`
 	Traceback []string `json:"traceback,omitempty"`
@@ -140,22 +156,44 @@ func processStreamEvent(exec *Execution, event StreamEvent, handlers *ExecutionH
 		}
 
 	case "result":
-		res := ExecutionResult{Text: ev.Text, Timestamp: ev.Timestamp}
+		res := ExecutionResult{Timestamp: ev.Timestamp}
+		if ev.Results != nil {
+			res.Data = ev.Results
+			// Extract plain text convenience field from MIME map
+			if txt, ok := ev.Results["text/plain"]; ok {
+				res.Text = txt
+			}
+		} else {
+			// Backward compat: older servers may send text at top level
+			res.Text = ev.Text
+		}
 		exec.Results = append(exec.Results, res)
 		if handlers != nil && handlers.OnResult != nil {
 			return handlers.OnResult(res)
 		}
 
 	case "error":
+		var ename, evalue string
+		var traceback []string
+		// Prefer nested error object per spec; fall back to flat fields
+		if ev.Error != nil {
+			ename = ev.Error.EName
+			evalue = ev.Error.EValue
+			traceback = ev.Error.Traceback
+		} else {
+			ename = ev.EName
+			evalue = ev.EValue
+			traceback = ev.Traceback
+		}
 		execErr := ExecutionError{
-			Name:      ev.EName,
-			Value:     ev.EValue,
+			Name:      ename,
+			Value:     evalue,
 			Timestamp: ev.Timestamp,
-			Traceback: ev.Traceback,
+			Traceback: traceback,
 		}
 		exec.Error = &execErr
 		// Try to parse exit code from error value
-		if code, err := strconv.Atoi(ev.EValue); err == nil {
+		if code, err := strconv.Atoi(evalue); err == nil {
 			exec.ExitCode = &code
 		}
 		if handlers != nil && handlers.OnError != nil {

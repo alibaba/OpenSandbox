@@ -87,6 +87,12 @@ func streamSSE(ctx context.Context, resp *http.Response, handler EventHandler) e
 		// lines instead of standard SSE "data:" prefixed lines.
 		if strings.HasPrefix(line, "{") {
 			dataLines = append(dataLines, line)
+			// Extract "type" field to populate Event so downstream handlers
+			// that switch on event.Event work consistently for NDJSON streams.
+			var probe struct{ Type string }
+			if json.Unmarshal([]byte(line), &probe) == nil && probe.Type != "" {
+				current.Event = probe.Type
+			}
 			continue
 		}
 

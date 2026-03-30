@@ -21,7 +21,7 @@ type SandboxCreateOptions struct {
 	// Defaults to DefaultResourceLimits.
 	ResourceLimits ResourceLimits
 
-	// TimeoutSeconds is the sandbox TTL. Nil means use server default.
+	// TimeoutSeconds is the sandbox TTL. Nil means use DefaultTimeoutSeconds.
 	TimeoutSeconds *int
 
 	// Env variables injected into the sandbox.

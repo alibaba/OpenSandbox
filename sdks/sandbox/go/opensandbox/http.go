@@ -22,6 +22,7 @@ type Client struct {
 	authHeader string
 	httpClient *http.Client
 	timeout    *time.Duration // stored separately, applied after all options
+	headers    map[string]string
 }
 
 // Option configures a Client.
@@ -39,6 +40,19 @@ func WithHTTPClient(c *http.Client) Option {
 func WithTimeout(d time.Duration) Option {
 	return func(cl *Client) {
 		cl.timeout = &d
+	}
+}
+
+// WithHeaders adds custom HTTP headers to all requests. These are applied
+// before the auth and content-type headers, so they cannot override those.
+func WithHeaders(headers map[string]string) Option {
+	return func(cl *Client) {
+		if cl.headers == nil {
+			cl.headers = make(map[string]string, len(headers))
+		}
+		for k, v := range headers {
+			cl.headers[k] = v
+		}
 	}
 }
 
@@ -93,6 +107,9 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body any, r
 		return fmt.Errorf("opensandbox: create request: %w", err)
 	}
 
+	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
 	if c.apiKey != "" {
 		req.Header.Set(c.authHeader, c.apiKey)
 	}

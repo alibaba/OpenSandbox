@@ -154,7 +154,13 @@ func TestScenario_SimpleAgentLoop(t *testing.T) {
 
 	// Step 3: Write code to file and execute in sandbox
 	writeCmd := fmt.Sprintf("cat > /tmp/agent_task.py << 'PYEOF'\n%s\nPYEOF", code)
-	sb.RunCommand(ctx, writeCmd, nil)
+	writeResult, writeErr := sb.RunCommand(ctx, writeCmd, nil)
+	if writeErr != nil {
+		t.Fatalf("Write code to sandbox: %v", writeErr)
+	}
+	if writeResult.ExitCode != nil && *writeResult.ExitCode != 0 {
+		t.Fatalf("Write code to sandbox failed with exit code %d: %s", *writeResult.ExitCode, writeResult.Text())
+	}
 	exec, err := sb.RunCommand(ctx, "python3 /tmp/agent_task.py", nil)
 	if err != nil {
 		t.Fatalf("Execute code: %v", err)

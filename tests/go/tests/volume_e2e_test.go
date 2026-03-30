@@ -95,12 +95,16 @@ func TestVolume_HostMountReadOnly(t *testing.T) {
 	defer sb.Kill(context.Background())
 
 	// Writing to read-only mount should fail
-	exec, err := sb.RunCommand(ctx, `echo "should-fail" > /mnt/host-ro/fail.txt 2>&1 || echo "READONLY"`, nil)
+	exec, err := sb.RunCommand(ctx, `echo "should-fail" > /mnt/host-ro/fail.txt 2>&1; echo "EXIT_CODE=$?"`, nil)
 	if err != nil {
 		t.Fatalf("Write to ro mount: %v", err)
 	}
-	if !strings.Contains(exec.Text(), "READONLY") && !strings.Contains(exec.Text(), "Read-only") {
-		t.Logf("Write to read-only mount output: %q", exec.Text())
+	output := exec.Text()
+	if strings.Contains(output, "EXIT_CODE=0") {
+		t.Fatal("Write to read-only mount unexpectedly succeeded (exit code 0)")
+	}
+	if !strings.Contains(output, "Read-only") && !strings.Contains(output, "read-only") && !strings.Contains(output, "Permission denied") && !strings.Contains(output, "permission denied") {
+		t.Fatalf("Expected read-only or permission denied error, got: %q", output)
 	}
 	t.Log("Host volume read-only mount verified")
 }
