@@ -13,12 +13,16 @@ type OutputMessage struct {
 }
 
 // ExecutionResult represents a result output from code execution.
+// Results maps MIME types to their string representations (e.g. "text/plain" → "4").
 type ExecutionResult struct {
-	// Text is the plain-text result (convenience field, extracted from Data["text/plain"] when available).
-	Text string `json:"text"`
-	// Data holds MIME-type keyed outputs (e.g. "text/plain", "text/html").
-	Data      map[string]string `json:"data,omitempty"`
+	// Results holds MIME-type keyed outputs (e.g. "text/plain", "text/html").
+	Results   map[string]string `json:"results,omitempty"`
 	Timestamp int64             `json:"timestamp"`
+}
+
+// Text returns the text/plain result, or empty string if not present.
+func (r ExecutionResult) Text() string {
+	return r.Results["text/plain"]
 }
 
 // ExecutionError represents an error during code/command execution.
@@ -96,6 +100,8 @@ type sseErrorPayload struct {
 }
 
 // sseEvent is the raw JSON structure from execd SSE/NDJSON events.
+// Supports both the spec format (nested error/results objects) and the
+// legacy flat format (top-level ename/evalue/traceback) for backward compat.
 type sseEvent struct {
 	Type          string `json:"type"`
 	Text          string `json:"text"`
@@ -158,14 +164,11 @@ func processStreamEvent(exec *Execution, event StreamEvent, handlers *ExecutionH
 	case "result":
 		res := ExecutionResult{Timestamp: ev.Timestamp}
 		if ev.Results != nil {
-			res.Data = ev.Results
-			// Extract plain text convenience field from MIME map
-			if txt, ok := ev.Results["text/plain"]; ok {
-				res.Text = txt
-			}
-		} else {
-			// Backward compat: older servers may send text at top level
-			res.Text = ev.Text
+			// Spec format: MIME-keyed map under "results"
+			res.Results = ev.Results
+		} else if ev.Text != "" {
+			// Legacy flat format: bare "text" field
+			res.Results = map[string]string{"text/plain": ev.Text}
 		}
 		exec.Results = append(exec.Results, res)
 		if handlers != nil && handlers.OnResult != nil {
