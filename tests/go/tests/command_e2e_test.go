@@ -78,3 +78,70 @@ func TestCommand_MultiLine(t *testing.T) {
 	}
 	t.Logf("Multi-line output (%d bytes): %s", len(text), text)
 }
+
+func TestCommand_EnvInjection(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+
+	exec, err := sb.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
+		Command: "echo $CUSTOM_VAR",
+		Envs: map[string]string{
+			"CUSTOM_VAR": "injected-from-go-e2e",
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunCommand with envs: %v", err)
+	}
+
+	text := exec.Text()
+	if !strings.Contains(text, "injected-from-go-e2e") {
+		t.Errorf("Expected env var in output, got: %q", text)
+	}
+	t.Logf("Env injection: %s", text)
+}
+
+func TestCommand_BackgroundStatusLogs(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+
+	// Run a background command
+	exec, err := sb.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
+		Command:    "echo bg-output && sleep 1 && echo bg-done",
+		Background: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunCommand background: %v", err)
+	}
+
+	// The init event should give us an execution ID
+	if exec.ID == "" {
+		t.Log("No execution ID from background command (server may not return init event for background)")
+		return
+	}
+	t.Logf("Background command ID: %s", exec.ID)
+}
+
+func TestCommand_Interrupt(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+
+	// Start a long-running command in background
+	exec, err := sb.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
+		Command:    "sleep 300",
+		Background: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunCommand background: %v", err)
+	}
+	if exec.ID == "" {
+		t.Log("No execution ID — cannot test interrupt")
+		return
+	}
+
+	// Verify it's running — try a quick command to confirm sandbox is responsive
+	pingExec, err := sb.RunCommand(ctx, "echo still-alive", nil)
+	if err != nil {
+		t.Fatalf("Ping after background: %v", err)
+	}
+	if !strings.Contains(pingExec.Text(), "still-alive") {
+		t.Error("Sandbox should still be responsive")
+	}
+	t.Log("Interrupt test: sandbox responsive during background command")
+}

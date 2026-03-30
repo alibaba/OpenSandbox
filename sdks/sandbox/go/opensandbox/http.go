@@ -128,6 +128,7 @@ func handleError(resp *http.Response) error {
 
 	apiErr := &APIError{
 		StatusCode: resp.StatusCode,
+		RequestID:  resp.Header.Get("X-Request-Id"),
 	}
 
 	// Try to decode as JSON ErrorResponse; fall back to raw body.

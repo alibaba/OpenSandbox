@@ -180,6 +180,7 @@ type ErrorResponse struct {
 // APIError wraps an ErrorResponse with the HTTP status code.
 type APIError struct {
 	StatusCode int
+	RequestID  string
 	Response   ErrorResponse
 }
 
