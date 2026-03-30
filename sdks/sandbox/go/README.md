@@ -82,23 +82,14 @@ err := exec.RunCommand(ctx, opensandbox.RunCommandRequest{
     Command: "echo 'Hello from sandbox!'",
     Timeout: 30000,
 }, func(event opensandbox.StreamEvent) error {
-    // The execd server emits NDJSON (raw JSON blobs separated by blank
-    // lines), so event.Event is always empty. Parse the "type" field
-    // from the JSON payload in event.Data instead.
-    var msg struct {
-        Type string `json:"type"`
-        Data string `json:"data"`
-    }
-    if err := json.Unmarshal([]byte(event.Data), &msg); err != nil {
-        return fmt.Errorf("parse stream event: %w", err)
-    }
-    switch msg.Type {
+    // event.Event is populated from the NDJSON "type" field automatically.
+    switch event.Event {
     case "stdout":
-        fmt.Print(msg.Data)
+        fmt.Print(event.Data)
     case "stderr":
-        fmt.Fprintf(os.Stderr, "%s", msg.Data)
-    case "result":
-        fmt.Printf("\n[done] %s\n", msg.Data)
+        fmt.Fprintf(os.Stderr, "%s", event.Data)
+    case "execution_complete":
+        fmt.Println("\n[done]")
     }
     return nil
 })
@@ -133,8 +124,8 @@ Created with `NewLifecycleClient(baseURL, apiKey string, opts ...Option)`.
 | `DeleteSandbox(ctx, id)` | Delete a sandbox |
 | `PauseSandbox(ctx, id)` | Pause a running sandbox |
 | `ResumeSandbox(ctx, id)` | Resume a paused sandbox |
-| `RenewExpiration(ctx, id, duration)` | Extend sandbox expiration time |
-| `GetEndpoint(ctx, sandboxID, port)` | Get public endpoint for a sandbox port |
+| `RenewExpiration(ctx, id, expiresAt)` | Extend sandbox expiration time |
+| `GetEndpoint(ctx, sandboxID, port, useServerProxy)` | Get public endpoint for a sandbox port |
 
 ### ExecdClient
 
@@ -183,7 +174,7 @@ Created with `NewExecdClient(baseURL, accessToken string, opts ...Option)`.
 | Method | Description |
 |--------|-------------|
 | `CreateDirectory(ctx, path, mode)` | Create a directory (mkdir -p) |
-| `DeleteDirectory(ctx, path, recursive)` | Delete a directory |
+| `DeleteDirectory(ctx, path)` | Delete a directory recursively |
 
 **Metrics:**
 | Method | Description |
@@ -209,11 +200,9 @@ type EventHandler func(event StreamEvent) error
 ```
 
 Each `StreamEvent` contains:
-- `Event` — the SSE event type, if provided. **Note:** the execd server emits NDJSON (raw JSON blobs separated by blank lines) rather than standard SSE `event:` fields, so `Event` will be empty for execd streams.
-- `Data` — the event payload. For execd streams, this is a JSON object with a `type` field (`"stdout"`, `"stderr"`, `"result"`) and a `data` field containing the actual content.
+- `Event` — the event type (e.g. `"stdout"`, `"stderr"`, `"result"`, `"execution_complete"`). For NDJSON streams, this is extracted from the JSON `type` field automatically.
+- `Data` — the raw event payload (JSON string for NDJSON streams).
 - `ID` — optional event identifier
-
-For execd streams, parse `event.Data` as JSON and switch on the `type` field (see the [quick start example](#run-a-command-with-streaming-output) above).
 
 Return a non-nil error from the handler to stop processing the stream early.
 
