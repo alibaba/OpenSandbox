@@ -3,25 +3,11 @@
 package tests
 
 import (
-	"context"
 	"testing"
-	"time"
-
-	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
 )
 
 func TestFilesystem_GetFileInfo(t *testing.T) {
-	config := getConnectionConfig(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image: getSandboxImage(),
-	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
-	defer sb.Kill(context.Background())
+	ctx, sb := createTestSandbox(t)
 
 	info, err := sb.GetFileInfo(ctx, "/etc/os-release")
 	if err != nil {
@@ -39,17 +25,7 @@ func TestFilesystem_GetFileInfo(t *testing.T) {
 }
 
 func TestFilesystem_WriteAndReadViaCommand(t *testing.T) {
-	config := getConnectionConfig(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image: getSandboxImage(),
-	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
-	defer sb.Kill(context.Background())
+	ctx, sb := createTestSandbox(t)
 
 	// Write via command
 	exec, err := sb.RunCommand(ctx, `echo "hello from go e2e" > /tmp/test-go-e2e.txt`, nil)

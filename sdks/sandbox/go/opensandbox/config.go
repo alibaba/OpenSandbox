@@ -100,36 +100,29 @@ func (c *ConnectionConfig) GetRequestTimeout() time.Duration {
 	return DefaultRequestTimeout
 }
 
-// lifecycleClient creates a LifecycleClient from this config.
-func (c *ConnectionConfig) lifecycleClient() *LifecycleClient {
-	opts := []Option{}
-	if c.AuthHeader != "" {
+// clientOpts builds the common Option slice from config fields.
+func (c *ConnectionConfig) clientOpts(includeAuthHeader bool) []Option {
+	var opts []Option
+	if includeAuthHeader && c.AuthHeader != "" {
 		opts = append(opts, WithAuthHeader(c.AuthHeader))
 	}
 	if c.HTTPClient != nil {
 		opts = append(opts, WithHTTPClient(c.HTTPClient))
 	}
-	baseURL := c.GetBaseURL()
-	return NewLifecycleClient(baseURL, c.GetAPIKey(), opts...)
+	return opts
+}
+
+// lifecycleClient creates a LifecycleClient from this config.
+func (c *ConnectionConfig) lifecycleClient() *LifecycleClient {
+	return NewLifecycleClient(c.GetBaseURL(), c.GetAPIKey(), c.clientOpts(true)...)
 }
 
 // execdClient creates an ExecdClient for a resolved endpoint.
 func (c *ConnectionConfig) execdClient(endpointURL, token string) *ExecdClient {
-	opts := []Option{}
-	if c.AuthHeader != "" {
-		opts = append(opts, WithAuthHeader(c.AuthHeader))
-	}
-	if c.HTTPClient != nil {
-		opts = append(opts, WithHTTPClient(c.HTTPClient))
-	}
-	return NewExecdClient(endpointURL, token, opts...)
+	return NewExecdClient(endpointURL, token, c.clientOpts(true)...)
 }
 
 // egressClient creates an EgressClient for a resolved endpoint.
 func (c *ConnectionConfig) egressClient(endpointURL, token string) *EgressClient {
-	opts := []Option{}
-	if c.HTTPClient != nil {
-		opts = append(opts, WithHTTPClient(c.HTTPClient))
-	}
-	return NewEgressClient(endpointURL, token, opts...)
+	return NewEgressClient(endpointURL, token, c.clientOpts(false)...)
 }

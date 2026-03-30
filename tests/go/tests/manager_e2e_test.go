@@ -18,7 +18,7 @@ func TestManager_ListSandboxes(t *testing.T) {
 	mgr := opensandbox.NewSandboxManager(config)
 	defer mgr.Close()
 
-	result, err := mgr.ListSandboxInfos(ctx, opensandbox.SandboxFilter{
+	result, err := mgr.ListSandboxInfos(ctx, opensandbox.ListOptions{
 		Page:     1,
 		PageSize: 10,
 	})
@@ -51,7 +51,7 @@ func TestManager_ListByState(t *testing.T) {
 	defer mgr.Close()
 
 	// Filter by Running state
-	result, err := mgr.ListSandboxInfos(ctx, opensandbox.SandboxFilter{
+	result, err := mgr.ListSandboxInfos(ctx, opensandbox.ListOptions{
 		States: []opensandbox.SandboxState{opensandbox.StateRunning},
 	})
 	if err != nil {
@@ -64,7 +64,7 @@ func TestManager_ListByState(t *testing.T) {
 
 	// Verify all returned sandboxes are Running
 	for _, item := range result.Items {
-		if string(item.Status.State) != "Running" {
+		if item.Status.State != opensandbox.StateRunning {
 			t.Errorf("Expected Running state, got %s for sandbox %s", item.Status.State, item.ID)
 		}
 	}

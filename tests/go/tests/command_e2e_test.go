@@ -3,26 +3,14 @@
 package tests
 
 import (
-	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
 )
 
 func TestCommand_RunSimple(t *testing.T) {
-	config := getConnectionConfig(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image: getSandboxImage(),
-	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
-	defer sb.Kill(context.Background())
+	ctx, sb := createTestSandbox(t)
 
 	exec, err := sb.RunCommand(ctx, "echo hello-from-go-e2e", nil)
 	if err != nil {
@@ -41,17 +29,7 @@ func TestCommand_RunSimple(t *testing.T) {
 }
 
 func TestCommand_RunWithHandlers(t *testing.T) {
-	config := getConnectionConfig(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image: getSandboxImage(),
-	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
-	defer sb.Kill(context.Background())
+	ctx, sb := createTestSandbox(t)
 
 	var stdoutLines []string
 	handlers := &opensandbox.ExecutionHandlers{
@@ -74,19 +52,8 @@ func TestCommand_RunWithHandlers(t *testing.T) {
 }
 
 func TestCommand_ExitCode(t *testing.T) {
-	config := getConnectionConfig(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
+	ctx, sb := createTestSandbox(t)
 
-	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image: getSandboxImage(),
-	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
-	defer sb.Kill(context.Background())
-
-	// Successful command
 	exec, err := sb.RunCommand(ctx, "true", nil)
 	if err != nil {
 		t.Fatalf("RunCommand(true): %v", err)
@@ -94,22 +61,11 @@ func TestCommand_ExitCode(t *testing.T) {
 	if exec.ExitCode == nil || *exec.ExitCode != 0 {
 		t.Errorf("Expected exit code 0 for 'true', got %v", exec.ExitCode)
 	}
-
 	t.Log("Exit code tests passed")
 }
 
 func TestCommand_MultiLine(t *testing.T) {
-	config := getConnectionConfig(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image: getSandboxImage(),
-	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
-	defer sb.Kill(context.Background())
+	ctx, sb := createTestSandbox(t)
 
 	exec, err := sb.RunCommand(ctx, "echo hello && echo world && uname -a", nil)
 	if err != nil {

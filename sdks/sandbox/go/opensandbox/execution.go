@@ -3,6 +3,7 @@ package opensandbox
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 )
 
 // OutputMessage represents a single stdout or stderr line from command execution.
@@ -63,14 +64,14 @@ type Execution struct {
 
 // Text returns the combined stdout text.
 func (e *Execution) Text() string {
-	var s string
+	var b strings.Builder
 	for i, m := range e.Stdout {
 		if i > 0 {
-			s += "\n"
+			b.WriteByte('\n')
 		}
-		s += m.Text
+		b.WriteString(m.Text)
 	}
-	return s
+	return b.String()
 }
 
 // ExecutionHandlers provides optional callbacks invoked during streaming execution.

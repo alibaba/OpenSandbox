@@ -50,7 +50,7 @@ func TestSandbox_CreateAndKill(t *testing.T) {
 	if info.ID != sb.ID() {
 		t.Errorf("ID mismatch: got %s, want %s", info.ID, sb.ID())
 	}
-	if string(info.Status.State) != "Running" {
+	if info.Status.State != opensandbox.StateRunning {
 		t.Errorf("Expected Running state, got %s", info.Status.State)
 	}
 	t.Logf("Info: state=%s, created=%s", info.Status.State, info.CreatedAt)

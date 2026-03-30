@@ -324,22 +324,23 @@ func (s *Sandbox) WaitUntilReady(ctx context.Context, opts ReadyOptions) error {
 
 // waitForRunning polls the lifecycle API until the sandbox reaches Running state.
 func (s *Sandbox) waitForRunning(ctx context.Context) error {
-	for i := 0; i < 120; i++ {
+	for {
+		if ctx.Err() != nil {
+			return fmt.Errorf("opensandbox: sandbox %s did not reach Running state: %w", s.id, ctx.Err())
+		}
 		info, err := s.lifecycle.GetSandbox(ctx, s.id)
 		if err != nil {
 			return fmt.Errorf("opensandbox: get sandbox status: %w", err)
 		}
-		state := string(info.Status.State)
-		if state == string(StateRunning) {
+		if info.Status.State == StateRunning {
 			return nil
 		}
-		if state == string(StateFailed) || state == string(StateTerminated) {
+		if info.Status.State == StateFailed || info.Status.State == StateTerminated {
 			return fmt.Errorf("opensandbox: sandbox %s entered terminal state: %s (%s)",
-				s.id, state, info.Status.Reason)
+				s.id, info.Status.State, info.Status.Reason)
 		}
 		time.Sleep(2 * time.Second)
 	}
-	return fmt.Errorf("opensandbox: sandbox %s did not reach Running state", s.id)
 }
 
 // resolveExecd resolves the execd endpoint and creates the ExecdClient.

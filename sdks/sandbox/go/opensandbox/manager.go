@@ -5,18 +5,6 @@ import (
 	"time"
 )
 
-// SandboxFilter configures filtering and pagination for listing sandboxes.
-type SandboxFilter struct {
-	// States filters by lifecycle state. Multiple values use OR logic.
-	States []SandboxState
-	// Metadata filters by key-value metadata (AND logic).
-	Metadata map[string]string
-	// Page number (1-based).
-	Page int
-	// PageSize is the number of items per page.
-	PageSize int
-}
-
 // SandboxManager provides administrative operations on sandboxes
 // without connecting to a specific sandbox.
 type SandboxManager struct {
@@ -31,13 +19,8 @@ func NewSandboxManager(config ConnectionConfig) *SandboxManager {
 }
 
 // ListSandboxInfos returns a paginated list of sandboxes with optional filtering.
-func (m *SandboxManager) ListSandboxInfos(ctx context.Context, filter SandboxFilter) (*ListSandboxesResponse, error) {
-	return m.lifecycle.ListSandboxes(ctx, ListOptions{
-		States:   filter.States,
-		Metadata: filter.Metadata,
-		Page:     filter.Page,
-		PageSize: filter.PageSize,
-	})
+func (m *SandboxManager) ListSandboxInfos(ctx context.Context, filter ListOptions) (*ListSandboxesResponse, error) {
+	return m.lifecycle.ListSandboxes(ctx, filter)
 }
 
 // GetSandboxInfo retrieves info for a single sandbox by ID.
