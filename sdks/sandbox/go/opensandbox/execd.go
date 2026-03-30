@@ -345,11 +345,22 @@ func (e *ExecdClient) DownloadFile(ctx context.Context, remotePath string, range
 
 // CreateDirectory creates a directory at the given path with the specified mode.
 // Parent directories are created as needed (like mkdir -p).
-func (e *ExecdClient) CreateDirectory(ctx context.Context, path string, mode os.FileMode) error {
-	body := map[string]map[string]string{
-		path: {"mode": fmt.Sprintf("%o", mode)},
+// CreateDirectory creates a directory at the given path with the specified mode.
+// Mode is specified as octal digits in decimal form (e.g. 755 for rwxr-xr-x).
+// Use OctalMode() to convert Go os.FileMode to the expected format.
+func (e *ExecdClient) CreateDirectory(ctx context.Context, path string, mode int) error {
+	body := map[string]map[string]int{
+		path: {"mode": mode},
 	}
 	return e.client.doRequest(ctx, http.MethodPost, "/directories", body, nil)
+}
+
+// OctalMode converts a Go os.FileMode to the octal-digits-as-int format
+// expected by the OpenSandbox server (e.g. os.FileMode(0755) → 755).
+func OctalMode(m os.FileMode) int {
+	s := fmt.Sprintf("%o", m)
+	v, _ := strconv.Atoi(s)
+	return v
 }
 
 // DeleteDirectory deletes a directory and all its contents recursively.

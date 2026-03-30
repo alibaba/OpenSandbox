@@ -3,6 +3,7 @@ package opensandbox
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 )
@@ -265,6 +266,143 @@ func (s *Sandbox) GetFileInfo(ctx context.Context, path string) (map[string]File
 		return nil, fmt.Errorf("opensandbox: execd client not initialized")
 	}
 	return s.execd.GetFileInfo(ctx, path)
+}
+
+// DeleteFiles deletes one or more files from the sandbox.
+func (s *Sandbox) DeleteFiles(ctx context.Context, paths []string) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.DeleteFiles(ctx, paths)
+}
+
+// MoveFiles renames or moves files.
+func (s *Sandbox) MoveFiles(ctx context.Context, req MoveRequest) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.MoveFiles(ctx, req)
+}
+
+// SearchFiles searches for files matching a pattern.
+func (s *Sandbox) SearchFiles(ctx context.Context, dir, pattern string) ([]FileInfo, error) {
+	if s.execd == nil {
+		return nil, fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.SearchFiles(ctx, dir, pattern)
+}
+
+// SetPermissions changes file permissions.
+func (s *Sandbox) SetPermissions(ctx context.Context, req PermissionsRequest) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.SetPermissions(ctx, req)
+}
+
+// UploadFile uploads a local file to the sandbox.
+func (s *Sandbox) UploadFile(ctx context.Context, localPath, remotePath string) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.UploadFile(ctx, localPath, remotePath)
+}
+
+// DownloadFile downloads a file from the sandbox.
+func (s *Sandbox) DownloadFile(ctx context.Context, remotePath, rangeHeader string) (io.ReadCloser, error) {
+	if s.execd == nil {
+		return nil, fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.DownloadFile(ctx, remotePath, rangeHeader)
+}
+
+// CreateDirectory creates a directory in the sandbox.
+// Mode is octal digits as int (e.g. 755 for rwxr-xr-x).
+func (s *Sandbox) CreateDirectory(ctx context.Context, path string, mode int) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.CreateDirectory(ctx, path, mode)
+}
+
+// DeleteDirectory deletes a directory and its contents.
+func (s *Sandbox) DeleteDirectory(ctx context.Context, path string) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.DeleteDirectory(ctx, path)
+}
+
+// ReplaceInFiles performs text replacement in files.
+func (s *Sandbox) ReplaceInFiles(ctx context.Context, req ReplaceRequest) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.ReplaceInFiles(ctx, req)
+}
+
+// ExecuteCode executes code in a context and streams output via SSE.
+func (s *Sandbox) ExecuteCode(ctx context.Context, req RunCodeRequest, handlers *ExecutionHandlers) (*Execution, error) {
+	if s.execd == nil {
+		return nil, fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	exec := &Execution{}
+	err := s.execd.ExecuteCode(ctx, req, func(event StreamEvent) error {
+		return processStreamEvent(exec, event, handlers)
+	})
+	return exec, err
+}
+
+// CreateContext creates a code execution context.
+func (s *Sandbox) CreateContext(ctx context.Context, req CreateContextRequest) (*CodeContext, error) {
+	if s.execd == nil {
+		return nil, fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.CreateContext(ctx, req)
+}
+
+// ListContexts lists active code execution contexts for a language.
+func (s *Sandbox) ListContexts(ctx context.Context, language string) ([]CodeContext, error) {
+	if s.execd == nil {
+		return nil, fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.ListContexts(ctx, language)
+}
+
+// DeleteContext deletes a code execution context.
+func (s *Sandbox) DeleteContext(ctx context.Context, contextID string) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.DeleteContext(ctx, contextID)
+}
+
+// CreateSession creates a new bash session.
+func (s *Sandbox) CreateSession(ctx context.Context) (*Session, error) {
+	if s.execd == nil {
+		return nil, fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.CreateSession(ctx)
+}
+
+// RunInSession executes a command in an existing session with structured output.
+func (s *Sandbox) RunInSession(ctx context.Context, sessionID string, req RunInSessionRequest, handlers *ExecutionHandlers) (*Execution, error) {
+	if s.execd == nil {
+		return nil, fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	exec := &Execution{}
+	err := s.execd.RunInSession(ctx, sessionID, req, func(event StreamEvent) error {
+		return processStreamEvent(exec, event, handlers)
+	})
+	return exec, err
+}
+
+// DeleteSession deletes a bash session.
+func (s *Sandbox) DeleteSession(ctx context.Context, sessionID string) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.DeleteSession(ctx, sessionID)
 }
 
 // ReadyOptions configures WaitUntilReady behavior.
