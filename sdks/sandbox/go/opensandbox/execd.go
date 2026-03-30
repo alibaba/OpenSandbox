@@ -389,4 +389,3 @@ func (e *ExecdClient) GetMetrics(ctx context.Context) (*Metrics, error) {
 func (e *ExecdClient) WatchMetrics(ctx context.Context, handler EventHandler) error {
 	return e.client.doStreamRequest(ctx, http.MethodGet, "/metrics/watch", nil, handler)
 }
-

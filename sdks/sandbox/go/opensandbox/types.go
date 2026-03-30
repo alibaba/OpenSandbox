@@ -208,7 +208,7 @@ type CreateContextRequest struct {
 // RunCodeRequest is the request body for executing code in a context.
 type RunCodeRequest struct {
 	Context *CodeContext `json:"context,omitempty"`
-	Code    string      `json:"code"`
+	Code    string       `json:"code"`
 }
 
 // Session represents a bash session with a unique identifier.
