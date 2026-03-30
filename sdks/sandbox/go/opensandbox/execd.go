@@ -345,7 +345,6 @@ func (e *ExecdClient) DownloadFile(ctx context.Context, remotePath string, range
 
 // CreateDirectory creates a directory at the given path with the specified mode.
 // Parent directories are created as needed (like mkdir -p).
-// CreateDirectory creates a directory at the given path with the specified mode.
 // Mode is specified as octal digits in decimal form (e.g. 755 for rwxr-xr-x).
 // Use OctalMode() to convert Go os.FileMode to the expected format.
 func (e *ExecdClient) CreateDirectory(ctx context.Context, path string, mode int) error {
@@ -357,9 +356,12 @@ func (e *ExecdClient) CreateDirectory(ctx context.Context, path string, mode int
 
 // OctalMode converts a Go os.FileMode to the octal-digits-as-int format
 // expected by the OpenSandbox server (e.g. os.FileMode(0755) → 755).
+// Panics if the conversion fails (should never happen for valid FileMode values).
 func OctalMode(m os.FileMode) int {
-	s := fmt.Sprintf("%o", m)
-	v, _ := strconv.Atoi(s)
+	v, err := strconv.Atoi(fmt.Sprintf("%o", m))
+	if err != nil {
+		panic(fmt.Sprintf("opensandbox: invalid FileMode %v: %v", m, err))
+	}
 	return v
 }
 

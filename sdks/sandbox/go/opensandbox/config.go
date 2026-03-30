@@ -71,7 +71,10 @@ func (c *ConnectionConfig) GetAPIKey() string {
 	return os.Getenv("OPEN_SANDBOX_API_KEY")
 }
 
-// GetBaseURL returns the full lifecycle API base URL (e.g. "http://localhost:8080/v1").
+// GetBaseURL returns the lifecycle API base URL (e.g. "http://localhost:8080").
+// Note: this does NOT append /v1. The lifecycle client's baseURL should be
+// set by the caller if a version prefix is needed (e.g. for local OpenSandbox
+// servers that require /v1). Staging/proxy deployments typically don't use /v1.
 func (c *ConnectionConfig) GetBaseURL() string {
 	domain := c.GetDomain()
 	protocol := c.GetProtocol()

@@ -60,7 +60,7 @@ func CreateCodeInterpreter(ctx context.Context, config ConnectionConfig, opts Co
 	}
 	timeout := opts.TimeoutSeconds
 	if timeout == nil {
-		t := 900 // 15 minutes default for code interpreter
+		t := DefaultCodeInterpreterTimeoutSeconds
 		timeout = &t
 	}
 

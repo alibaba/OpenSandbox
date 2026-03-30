@@ -21,6 +21,9 @@ const (
 	// DefaultRequestTimeout is the default HTTP request timeout.
 	DefaultRequestTimeout = 30 * time.Second
 
+	// DefaultCodeInterpreterTimeoutSeconds is the default TTL for code interpreter sandboxes.
+	DefaultCodeInterpreterTimeoutSeconds = 900
+
 	// APIVersion is the lifecycle API version prefix.
 	APIVersion = "v1"
 

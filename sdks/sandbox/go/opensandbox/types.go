@@ -109,8 +109,8 @@ type CreateSandboxRequest struct {
 	Extensions     map[string]string `json:"extensions,omitempty"`
 }
 
-// Sandbox represents a runtime execution environment provisioned from a
-// container image.
+// SandboxInfo represents a runtime execution environment provisioned from a
+// container image, as returned by the lifecycle API.
 type SandboxInfo struct {
 	ID         string            `json:"id"`
 	Image      *ImageSpec        `json:"image,omitempty"`

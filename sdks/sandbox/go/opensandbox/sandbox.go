@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,6 +61,11 @@ type Sandbox struct {
 	lifecycle *LifecycleClient
 	execd     *ExecdClient
 	egress    *EgressClient
+
+	execdOnce  sync.Once
+	egressOnce sync.Once
+	execdErr   error
+	egressErr  error
 }
 
 // ID returns the sandbox identifier.
@@ -482,57 +488,56 @@ func (s *Sandbox) waitForRunning(ctx context.Context) error {
 }
 
 // resolveExecd resolves the execd endpoint and creates the ExecdClient.
+// Safe for concurrent use via sync.Once.
 func (s *Sandbox) resolveExecd(ctx context.Context) error {
-	if s.execd != nil {
-		return nil
-	}
+	s.execdOnce.Do(func() {
+		useProxy := s.config.UseServerProxy
+		endpoint, err := s.lifecycle.GetEndpoint(ctx, s.id, DefaultExecdPort, &useProxy)
+		if err != nil {
+			s.execdErr = err
+			return
+		}
 
-	useProxy := s.config.UseServerProxy
-	endpoint, err := s.lifecycle.GetEndpoint(ctx, s.id, DefaultExecdPort, &useProxy)
-	if err != nil {
-		return err
-	}
+		execdURL := endpoint.Endpoint
+		if !strings.HasPrefix(execdURL, "http") {
+			execdURL = s.config.GetProtocol() + "://" + execdURL
+		}
 
-	execdURL := endpoint.Endpoint
-	if !strings.HasPrefix(execdURL, "http") {
-		execdURL = s.config.GetProtocol() + "://" + execdURL
-	}
+		token := ""
+		if endpoint.Headers != nil {
+			token = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
+		}
+		if s.config.UseServerProxy && token == "" {
+			token = s.config.GetAPIKey()
+		}
 
-	token := ""
-	if endpoint.Headers != nil {
-		token = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
-	}
-	// If server proxy mode, use the API key for auth
-	if s.config.UseServerProxy && token == "" {
-		token = s.config.GetAPIKey()
-	}
-
-	s.execd = s.config.execdClient(execdURL, token)
-	return nil
+		s.execd = s.config.execdClient(execdURL, token)
+	})
+	return s.execdErr
 }
 
 // resolveEgress resolves the egress endpoint and creates the EgressClient.
+// Safe for concurrent use via sync.Once.
 func (s *Sandbox) resolveEgress(ctx context.Context) error {
-	if s.egress != nil {
-		return nil
-	}
+	s.egressOnce.Do(func() {
+		useProxy := s.config.UseServerProxy
+		endpoint, err := s.lifecycle.GetEndpoint(ctx, s.id, DefaultEgressPort, &useProxy)
+		if err != nil {
+			s.egressErr = err
+			return
+		}
 
-	useProxy := s.config.UseServerProxy
-	endpoint, err := s.lifecycle.GetEndpoint(ctx, s.id, DefaultEgressPort, &useProxy)
-	if err != nil {
-		return err
-	}
+		egressURL := endpoint.Endpoint
+		if !strings.HasPrefix(egressURL, "http") {
+			egressURL = s.config.GetProtocol() + "://" + egressURL
+		}
 
-	egressURL := endpoint.Endpoint
-	if !strings.HasPrefix(egressURL, "http") {
-		egressURL = s.config.GetProtocol() + "://" + egressURL
-	}
+		token := ""
+		if endpoint.Headers != nil {
+			token = endpoint.Headers["OPENSANDBOX-EGRESS-AUTH"]
+		}
 
-	token := ""
-	if endpoint.Headers != nil {
-		token = endpoint.Headers["OPENSANDBOX-EGRESS-AUTH"]
-	}
-
-	s.egress = s.config.egressClient(egressURL, token)
-	return nil
+		s.egress = s.config.egressClient(egressURL, token)
+	})
+	return s.egressErr
 }

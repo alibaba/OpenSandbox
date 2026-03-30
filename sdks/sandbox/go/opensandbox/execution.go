@@ -119,10 +119,10 @@ func processStreamEvent(exec *Execution, event StreamEvent, handlers *ExecutionH
 
 	switch ev.Type {
 	case "init":
-		init := ExecutionInit{ID: ev.Text, Timestamp: ev.Timestamp}
+		initEvent := ExecutionInit{ID: ev.Text, Timestamp: ev.Timestamp}
 		exec.ID = ev.Text
 		if handlers != nil && handlers.OnInit != nil {
-			return handlers.OnInit(init)
+			return handlers.OnInit(initEvent)
 		}
 
 	case "stdout":
