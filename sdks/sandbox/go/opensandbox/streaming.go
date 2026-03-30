@@ -129,6 +129,9 @@ func (c *Client) doStreamRequest(ctx context.Context, method, path string, body 
 		return fmt.Errorf("opensandbox: create request: %w", err)
 	}
 
+	for k, v := range c.headers {
+		req.Header.Set(k, v)
+	}
 	if c.apiKey != "" {
 		req.Header.Set(c.authHeader, c.apiKey)
 	}

@@ -129,11 +129,21 @@ func (c *ConnectionConfig) lifecycleClient() *LifecycleClient {
 }
 
 // execdClient creates an ExecdClient for a resolved endpoint.
-func (c *ConnectionConfig) execdClient(endpointURL, token string) *ExecdClient {
-	return NewExecdClient(endpointURL, token, c.clientOpts(true)...)
+// endpointHeaders are additional headers from the endpoint resolution (e.g. routing headers).
+func (c *ConnectionConfig) execdClient(endpointURL, token string, endpointHeaders map[string]string) *ExecdClient {
+	opts := c.clientOpts(true)
+	if len(endpointHeaders) > 0 {
+		opts = append(opts, WithHeaders(endpointHeaders))
+	}
+	return NewExecdClient(endpointURL, token, opts...)
 }
 
 // egressClient creates an EgressClient for a resolved endpoint.
-func (c *ConnectionConfig) egressClient(endpointURL, token string) *EgressClient {
-	return NewEgressClient(endpointURL, token, c.clientOpts(false)...)
+// endpointHeaders are additional headers from the endpoint resolution (e.g. routing headers).
+func (c *ConnectionConfig) egressClient(endpointURL, token string, endpointHeaders map[string]string) *EgressClient {
+	opts := c.clientOpts(false)
+	if len(endpointHeaders) > 0 {
+		opts = append(opts, WithHeaders(endpointHeaders))
+	}
+	return NewEgressClient(endpointURL, token, opts...)
 }

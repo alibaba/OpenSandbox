@@ -504,14 +504,22 @@ func (s *Sandbox) resolveExecd(ctx context.Context) error {
 	}
 
 	token := ""
+	var extraHeaders map[string]string
 	if endpoint.Headers != nil {
 		token = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
+		// Preserve all endpoint headers (e.g. routing headers) except the auth token
+		extraHeaders = make(map[string]string, len(endpoint.Headers))
+		for k, v := range endpoint.Headers {
+			if k != "X-EXECD-ACCESS-TOKEN" {
+				extraHeaders[k] = v
+			}
+		}
 	}
 	if s.config.UseServerProxy && token == "" {
 		token = s.config.GetAPIKey()
 	}
 
-	s.execd = s.config.execdClient(execdURL, token)
+	s.execd = s.config.execdClient(execdURL, token, extraHeaders)
 	return nil
 }
 
@@ -536,10 +544,17 @@ func (s *Sandbox) resolveEgress(ctx context.Context) error {
 	}
 
 	token := ""
+	var extraHeaders map[string]string
 	if endpoint.Headers != nil {
 		token = endpoint.Headers["OPENSANDBOX-EGRESS-AUTH"]
+		extraHeaders = make(map[string]string, len(endpoint.Headers))
+		for k, v := range endpoint.Headers {
+			if k != "OPENSANDBOX-EGRESS-AUTH" {
+				extraHeaders[k] = v
+			}
+		}
 	}
 
-	s.egress = s.config.egressClient(egressURL, token)
+	s.egress = s.config.egressClient(egressURL, token, extraHeaders)
 	return nil
 }
