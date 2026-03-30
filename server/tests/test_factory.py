@@ -3,20 +3,20 @@
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 
-"""Tests for src.services.factory (sandbox + pool service creation)."""
+"""Tests for opensandbox_server.services.factory (sandbox + pool service creation)."""
 
 from unittest.mock import MagicMock, patch
 
-from src.config import (
+from opensandbox_server.config import (
     AgentSandboxRuntimeConfig,
     AppConfig,
     KubernetesRuntimeConfig,
     RuntimeConfig,
     ServerConfig,
 )
-from src.services.factory import create_pool_service
-from src.services.k8s.pool_service import PoolService
-from src.services.k8s.provider_factory import PROVIDER_TYPE_BATCHSANDBOX
+from opensandbox_server.services.factory import create_pool_service
+from opensandbox_server.services.k8s.pool_service import PoolService
+from opensandbox_server.services.k8s.provider_factory import PROVIDER_TYPE_BATCHSANDBOX
 
 
 def _server() -> ServerConfig:
@@ -61,7 +61,7 @@ def test_create_pool_service_returns_pool_for_batchsandbox():
         runtime=RuntimeConfig(type="kubernetes", execd_image="img:test"),
         kubernetes=k8s,
     )
-    with patch("src.services.factory.K8sClient") as mock_cls:
+    with patch("opensandbox_server.services.factory.K8sClient") as mock_cls:
         mock_cls.return_value = MagicMock()
         svc = create_pool_service(app)
     assert isinstance(svc, PoolService)
@@ -76,7 +76,7 @@ def test_create_pool_service_default_workload_provider_is_batchsandbox():
         runtime=RuntimeConfig(type="kubernetes", execd_image="img:test"),
         kubernetes=k8s,
     )
-    with patch("src.services.factory.K8sClient") as mock_cls:
+    with patch("opensandbox_server.services.factory.K8sClient") as mock_cls:
         mock_cls.return_value = MagicMock()
         svc = create_pool_service(app)
     assert isinstance(svc, PoolService)
