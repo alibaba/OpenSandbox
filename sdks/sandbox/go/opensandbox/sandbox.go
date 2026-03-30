@@ -61,11 +61,7 @@ type Sandbox struct {
 	lifecycle *LifecycleClient
 	execd     *ExecdClient
 	egress    *EgressClient
-
-	execdOnce  sync.Once
-	egressOnce sync.Once
-	execdErr   error
-	egressErr  error
+	mu        sync.Mutex
 }
 
 // ID returns the sandbox identifier.
@@ -488,56 +484,62 @@ func (s *Sandbox) waitForRunning(ctx context.Context) error {
 }
 
 // resolveExecd resolves the execd endpoint and creates the ExecdClient.
-// Safe for concurrent use via sync.Once.
+// Safe for concurrent use — uses mutex with retry on failure.
 func (s *Sandbox) resolveExecd(ctx context.Context) error {
-	s.execdOnce.Do(func() {
-		useProxy := s.config.UseServerProxy
-		endpoint, err := s.lifecycle.GetEndpoint(ctx, s.id, DefaultExecdPort, &useProxy)
-		if err != nil {
-			s.execdErr = err
-			return
-		}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.execd != nil {
+		return nil
+	}
 
-		execdURL := endpoint.Endpoint
-		if !strings.HasPrefix(execdURL, "http") {
-			execdURL = s.config.GetProtocol() + "://" + execdURL
-		}
+	useProxy := s.config.UseServerProxy
+	endpoint, err := s.lifecycle.GetEndpoint(ctx, s.id, DefaultExecdPort, &useProxy)
+	if err != nil {
+		return err
+	}
 
-		token := ""
-		if endpoint.Headers != nil {
-			token = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
-		}
-		if s.config.UseServerProxy && token == "" {
-			token = s.config.GetAPIKey()
-		}
+	execdURL := endpoint.Endpoint
+	if !strings.HasPrefix(execdURL, "http") {
+		execdURL = s.config.GetProtocol() + "://" + execdURL
+	}
 
-		s.execd = s.config.execdClient(execdURL, token)
-	})
-	return s.execdErr
+	token := ""
+	if endpoint.Headers != nil {
+		token = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
+	}
+	if s.config.UseServerProxy && token == "" {
+		token = s.config.GetAPIKey()
+	}
+
+	s.execd = s.config.execdClient(execdURL, token)
+	return nil
 }
 
 // resolveEgress resolves the egress endpoint and creates the EgressClient.
-// Safe for concurrent use via sync.Once.
+// Safe for concurrent use — uses mutex with retry on failure.
 func (s *Sandbox) resolveEgress(ctx context.Context) error {
-	s.egressOnce.Do(func() {
-		useProxy := s.config.UseServerProxy
-		endpoint, err := s.lifecycle.GetEndpoint(ctx, s.id, DefaultEgressPort, &useProxy)
-		if err != nil {
-			s.egressErr = err
-			return
-		}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.egress != nil {
+		return nil
+	}
 
-		egressURL := endpoint.Endpoint
-		if !strings.HasPrefix(egressURL, "http") {
-			egressURL = s.config.GetProtocol() + "://" + egressURL
-		}
+	useProxy := s.config.UseServerProxy
+	endpoint, err := s.lifecycle.GetEndpoint(ctx, s.id, DefaultEgressPort, &useProxy)
+	if err != nil {
+		return err
+	}
 
-		token := ""
-		if endpoint.Headers != nil {
-			token = endpoint.Headers["OPENSANDBOX-EGRESS-AUTH"]
-		}
+	egressURL := endpoint.Endpoint
+	if !strings.HasPrefix(egressURL, "http") {
+		egressURL = s.config.GetProtocol() + "://" + egressURL
+	}
 
-		s.egress = s.config.egressClient(egressURL, token)
-	})
-	return s.egressErr
+	token := ""
+	if endpoint.Headers != nil {
+		token = endpoint.Headers["OPENSANDBOX-EGRESS-AUTH"]
+	}
+
+	s.egress = s.config.egressClient(egressURL, token)
+	return nil
 }
