@@ -62,7 +62,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	}()
 
 	// 3. Wait for Running state
-	var running *opensandbox.Sandbox
+	var running *opensandbox.SandboxInfo
 	for i := 0; i < 30; i++ {
 		running, err = client.GetSandbox(ctx, sb.ID)
 		if err != nil {

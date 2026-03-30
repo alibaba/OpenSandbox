@@ -66,8 +66,8 @@ func (c *LifecycleClient) ListSandboxes(ctx context.Context, opts ListOptions) (
 }
 
 // CreateSandbox creates a new sandbox from a container image.
-func (c *LifecycleClient) CreateSandbox(ctx context.Context, req CreateSandboxRequest) (*Sandbox, error) {
-	var resp Sandbox
+func (c *LifecycleClient) CreateSandbox(ctx context.Context, req CreateSandboxRequest) (*SandboxInfo, error) {
+	var resp SandboxInfo
 	if err := c.doRequest(ctx, "POST", "/sandboxes", req, &resp); err != nil {
 		return nil, err
 	}
@@ -75,8 +75,8 @@ func (c *LifecycleClient) CreateSandbox(ctx context.Context, req CreateSandboxRe
 }
 
 // GetSandbox retrieves the complete sandbox information by ID.
-func (c *LifecycleClient) GetSandbox(ctx context.Context, id string) (*Sandbox, error) {
-	var resp Sandbox
+func (c *LifecycleClient) GetSandbox(ctx context.Context, id string) (*SandboxInfo, error) {
+	var resp SandboxInfo
 	if err := c.doRequest(ctx, "GET", "/sandboxes/"+url.PathEscape(id), nil, &resp); err != nil {
 		return nil, err
 	}

@@ -1,0 +1,135 @@
+package opensandbox
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+)
+
+// ConnectionConfig holds the configuration for connecting to an OpenSandbox server.
+type ConnectionConfig struct {
+	// Domain is the server address (e.g. "localhost:8080").
+	// Falls back to OPEN_SANDBOX_DOMAIN env var, then DefaultDomain.
+	Domain string
+
+	// Protocol is "http" or "https".
+	// Falls back to OPEN_SANDBOX_PROTOCOL env var, then DefaultProtocol.
+	Protocol string
+
+	// APIKey is the authentication token.
+	// Falls back to OPEN_SANDBOX_API_KEY env var.
+	APIKey string
+
+	// UseServerProxy routes execd/egress requests through the sandbox server
+	// instead of connecting directly to the sandbox endpoint.
+	UseServerProxy bool
+
+	// RequestTimeout is the timeout for non-streaming HTTP requests.
+	// Zero means no timeout. Defaults to DefaultRequestTimeout.
+	RequestTimeout time.Duration
+
+	// Headers are custom HTTP headers added to all requests.
+	Headers map[string]string
+
+	// HTTPClient is an optional custom HTTP client. If nil, a default is created.
+	HTTPClient *http.Client
+
+	// AuthHeader overrides the default lifecycle auth header name.
+	// Default is "OPEN-SANDBOX-API-KEY". Use "X-API-Key" for proxied deployments.
+	AuthHeader string
+}
+
+// GetDomain returns the configured domain, falling back to env var and default.
+func (c *ConnectionConfig) GetDomain() string {
+	if c.Domain != "" {
+		return c.Domain
+	}
+	if v := os.Getenv("OPEN_SANDBOX_DOMAIN"); v != "" {
+		return v
+	}
+	return DefaultDomain
+}
+
+// GetProtocol returns the configured protocol, falling back to env var and default.
+func (c *ConnectionConfig) GetProtocol() string {
+	if c.Protocol != "" {
+		return c.Protocol
+	}
+	if v := os.Getenv("OPEN_SANDBOX_PROTOCOL"); v != "" {
+		return v
+	}
+	return DefaultProtocol
+}
+
+// GetAPIKey returns the configured API key, falling back to env var.
+func (c *ConnectionConfig) GetAPIKey() string {
+	if c.APIKey != "" {
+		return c.APIKey
+	}
+	return os.Getenv("OPEN_SANDBOX_API_KEY")
+}
+
+// GetBaseURL returns the full lifecycle API base URL (e.g. "http://localhost:8080/v1").
+func (c *ConnectionConfig) GetBaseURL() string {
+	domain := c.GetDomain()
+	protocol := c.GetProtocol()
+
+	// If domain already has a scheme, use it as-is.
+	if strings.HasPrefix(domain, "http://") || strings.HasPrefix(domain, "https://") {
+		return strings.TrimRight(domain, "/")
+	}
+
+	return fmt.Sprintf("%s://%s", protocol, domain)
+}
+
+// GetAuthHeader returns the auth header name for lifecycle requests.
+func (c *ConnectionConfig) GetAuthHeader() string {
+	if c.AuthHeader != "" {
+		return c.AuthHeader
+	}
+	return "OPEN-SANDBOX-API-KEY"
+}
+
+// GetRequestTimeout returns the request timeout, defaulting to DefaultRequestTimeout.
+func (c *ConnectionConfig) GetRequestTimeout() time.Duration {
+	if c.RequestTimeout > 0 {
+		return c.RequestTimeout
+	}
+	return DefaultRequestTimeout
+}
+
+// lifecycleClient creates a LifecycleClient from this config.
+func (c *ConnectionConfig) lifecycleClient() *LifecycleClient {
+	opts := []Option{}
+	if c.AuthHeader != "" {
+		opts = append(opts, WithAuthHeader(c.AuthHeader))
+	}
+	if c.HTTPClient != nil {
+		opts = append(opts, WithHTTPClient(c.HTTPClient))
+	}
+	baseURL := c.GetBaseURL()
+	return NewLifecycleClient(baseURL, c.GetAPIKey(), opts...)
+}
+
+// execdClient creates an ExecdClient for a resolved endpoint.
+func (c *ConnectionConfig) execdClient(endpointURL, token string) *ExecdClient {
+	opts := []Option{}
+	if c.AuthHeader != "" {
+		opts = append(opts, WithAuthHeader(c.AuthHeader))
+	}
+	if c.HTTPClient != nil {
+		opts = append(opts, WithHTTPClient(c.HTTPClient))
+	}
+	return NewExecdClient(endpointURL, token, opts...)
+}
+
+// egressClient creates an EgressClient for a resolved endpoint.
+func (c *ConnectionConfig) egressClient(endpointURL, token string) *EgressClient {
+	opts := []Option{}
+	if c.HTTPClient != nil {
+		opts = append(opts, WithHTTPClient(c.HTTPClient))
+	}
+	return NewEgressClient(endpointURL, token, opts...)
+}

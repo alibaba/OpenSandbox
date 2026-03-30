@@ -111,7 +111,7 @@ type CreateSandboxRequest struct {
 
 // Sandbox represents a runtime execution environment provisioned from a
 // container image.
-type Sandbox struct {
+type SandboxInfo struct {
 	ID         string            `json:"id"`
 	Image      *ImageSpec        `json:"image,omitempty"`
 	Status     SandboxStatus     `json:"status"`
@@ -132,7 +132,7 @@ type PaginationInfo struct {
 
 // ListSandboxesResponse is the paginated response from listing sandboxes.
 type ListSandboxesResponse struct {
-	Items      []Sandbox      `json:"items"`
+	Items      []SandboxInfo  `json:"items"`
 	Pagination PaginationInfo `json:"pagination"`
 }
 

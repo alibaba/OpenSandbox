@@ -57,7 +57,7 @@ func jsonResponse(w http.ResponseWriter, status int, v any) {
 
 func TestCreateSandbox(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	want := Sandbox{
+	want := SandboxInfo{
 		ID: "sbx-123",
 		Status: SandboxStatus{
 			State: StatePending,
@@ -102,7 +102,7 @@ func TestCreateSandbox(t *testing.T) {
 }
 
 func TestGetSandbox(t *testing.T) {
-	want := Sandbox{
+	want := SandboxInfo{
 		ID: "sbx-456",
 		Status: SandboxStatus{
 			State: StateRunning,
@@ -134,7 +134,7 @@ func TestGetSandbox(t *testing.T) {
 
 func TestListSandboxes(t *testing.T) {
 	want := ListSandboxesResponse{
-		Items: []Sandbox{
+		Items: []SandboxInfo{
 			{ID: "sbx-1", Status: SandboxStatus{State: StateRunning}, CreatedAt: time.Now().UTC().Truncate(time.Second)},
 			{ID: "sbx-2", Status: SandboxStatus{State: StatePaused}, CreatedAt: time.Now().UTC().Truncate(time.Second)},
 		},
@@ -640,7 +640,7 @@ func TestLifecycleAuthHeader(t *testing.T) {
 		if got != "my-lifecycle-key" {
 			t.Errorf("OPEN-SANDBOX-API-KEY = %q, want %q", got, "my-lifecycle-key")
 		}
-		jsonResponse(w, http.StatusOK, Sandbox{ID: "sbx-1", CreatedAt: time.Now()})
+		jsonResponse(w, http.StatusOK, SandboxInfo{ID: "sbx-1", CreatedAt: time.Now()})
 	}))
 	defer srv.Close()
 
