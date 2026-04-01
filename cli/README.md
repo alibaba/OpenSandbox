@@ -1,6 +1,6 @@
 # OpenSandbox CLI
 
-A command-line interface for managing OpenSandbox environments from your terminal. Built on top of the [OpenSandbox Python SDK](../sdks/sandbox/python/README.md), the CLI provides intuitive commands for sandbox lifecycle management, file operations, command execution, and code interpretation.
+A command-line interface for managing OpenSandbox environments from your terminal. Built on top of the [OpenSandbox Python SDK](../sdks/sandbox/python/README.md), the CLI provides intuitive commands for sandbox lifecycle management, file operations, command execution, and diagnostics.
 
 ## Installation
 
@@ -182,14 +182,6 @@ Shortcut for `osb command run`. Everything after `--` is passed as the command.
 | `chmod`    | Set file permissions                       |
 | `replace`  | Find and replace content in a file         |
 
-### `osb code` — Code Interpreter
-
-| Command     | Description                               |
-| ----------- | ----------------------------------------- |
-| `run`       | Execute code in a sandbox                 |
-| `context`   | Manage code execution contexts            |
-| `interrupt` | Interrupt a running code execution        |
-
 ### `osb devops` — DevOps Diagnostics
 
 | Command   | Description                                          |
@@ -276,7 +268,7 @@ The CLI resolves configuration from multiple sources with the following priority
 
 ## Development
 
-For local CLI development in this monorepo, prefer `uv sync` from the `cli/` directory. That workflow honors the local `[tool.uv.sources]` overrides for `opensandbox` and `opensandbox-code-interpreter`, so the CLI resolves against the checked-out SDKs instead of published packages.
+For local CLI development in this monorepo, prefer `uv sync` from the `cli/` directory. That workflow honors the local `[tool.uv.sources]` override for `opensandbox`, so the CLI resolves against the checked-out SDK instead of the published package.
 
 ```bash
 cd cli

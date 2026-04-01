@@ -335,3 +335,23 @@ class TestCommandInterrupt:
         assert result.exit_code == 0
         mock_sb.commands.interrupt.assert_called_once_with("exec-789")
         assert "Interrupted: exec-789" in result.output
+
+
+# ---------------------------------------------------------------------------
+# DevOps diagnostics
+# ---------------------------------------------------------------------------
+
+
+class TestDevopsCommands:
+    def test_logs_fetches_plain_text(self, runner: CliRunner) -> None:
+        with patch("opensandbox_cli.commands.devops.httpx.get") as mock_get:
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.text = "sandbox logs"
+            mock_get.return_value = mock_response
+
+            result = _invoke(runner, ["devops", "logs", "sb-1"])
+
+        assert result.exit_code == 0
+        assert "sandbox logs" in result.output
+        mock_get.assert_called_once()

@@ -43,7 +43,6 @@ classifiers = [
 ]
 dependencies = [
     "opensandbox>=0.1.4,<0.2.0",
-    "opensandbox-code-interpreter>=0.1.0,<0.2.0",
     "click>=8.1.0,<9.0",
     "rich>=13.0.0,<14.0",
     "pyyaml>=6.0,<7.0",
@@ -135,4 +134,3 @@ branch = true
 
 [tool.uv.sources]
 opensandbox = { path = "../sdks/sandbox/python", editable = true }
-opensandbox-code-interpreter = { path = "../sdks/code-interpreter/python", editable = true }

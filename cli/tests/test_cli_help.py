@@ -45,7 +45,7 @@ class TestRootCLI:
 
     def test_root_lists_commands(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["--help"])
-        for cmd in ("sandbox", "command", "exec", "file", "code", "config"):
+        for cmd in ("sandbox", "command", "exec", "file", "config", "devops", "skills"):
             assert cmd in result.output
 
 
@@ -123,25 +123,6 @@ class TestFileHelp:
 
 
 # ---------------------------------------------------------------------------
-# Code sub-commands
-# ---------------------------------------------------------------------------
-
-
-class TestCodeHelp:
-    def test_code_help(self, runner: CliRunner) -> None:
-        result = runner.invoke(cli, ["code", "--help"])
-        assert result.exit_code == 0
-        for subcmd in ("run", "context", "interrupt"):
-            assert subcmd in result.output
-
-    def test_code_context_help(self, runner: CliRunner) -> None:
-        result = runner.invoke(cli, ["code", "context", "--help"])
-        assert result.exit_code == 0
-        for subcmd in ("create", "list", "delete", "delete-all"):
-            assert subcmd in result.output
-
-
-# ---------------------------------------------------------------------------
 # Config sub-commands
 # ---------------------------------------------------------------------------
 
@@ -157,3 +138,29 @@ class TestConfigHelp:
     def test_config_subcommand_help(self, runner: CliRunner, subcmd: str) -> None:
         result = runner.invoke(cli, ["config", subcmd, "--help"])
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# DevOps sub-commands
+# ---------------------------------------------------------------------------
+
+
+class TestDevopsHelp:
+    def test_devops_help(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["devops", "--help"])
+        assert result.exit_code == 0
+        for subcmd in ("logs", "inspect", "events", "summary"):
+            assert subcmd in result.output
+
+
+# ---------------------------------------------------------------------------
+# Skills sub-commands
+# ---------------------------------------------------------------------------
+
+
+class TestSkillsHelp:
+    def test_skills_help(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["skills", "--help"])
+        assert result.exit_code == 0
+        for subcmd in ("install", "list", "uninstall"):
+            assert subcmd in result.output
