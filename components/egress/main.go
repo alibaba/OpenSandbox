@@ -16,7 +16,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -33,7 +32,6 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/telemetry"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
 	"github.com/alibaba/opensandbox/internal/version"
-	"go.uber.org/zap/zapcore"
 )
 
 func main() {
@@ -42,10 +40,13 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	otelShutdown, otelZapCore, err := telemetry.Init(ctx)
+	ctx = withLogger(ctx)
+	defer log.Logger.Sync()
+
+	otelShutdown, err := telemetry.Init(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "telemetry init failed: %v\n", err)
-		os.Exit(1)
+		log.Warnf("OpenTelemetry metrics disabled (continuing without OTLP): %v", err)
+		otelShutdown = nil
 	}
 	if otelShutdown != nil {
 		defer func() {
@@ -55,14 +56,11 @@ func main() {
 		}()
 	}
 
-	ctx = withLogger(ctx, otelZapCore)
-	defer log.Logger.Sync()
-
-	initialRules, policySrc, err := policy.LoadInitialPolicyDetailed(os.Getenv(constants.EnvEgressPolicyFile), constants.EnvEgressRules)
+	initialRules, _, err := policy.LoadInitialPolicyDetailed(os.Getenv(constants.EnvEgressPolicyFile), constants.EnvEgressRules)
 	if err != nil {
 		log.Fatalf("failed to load initial egress policy: %v", err)
 	}
-	logEgressLoaded(policySrc, initialRules)
+	logEgressLoaded(initialRules)
 
 	allowIPs := AllowIPsForNft("/etc/resolv.conf")
 	// Merge nameserver exempt IPs into nft allow set so proxy traffic to them (no SO_MARK) is allowed in dns+nft mode.
@@ -115,18 +113,13 @@ func main() {
 	_ = os.Stderr.Sync()
 }
 
-func withLogger(ctx context.Context, otelCore zapcore.Core) context.Context {
+func withLogger(ctx context.Context) context.Context {
 	level := envOrDefault(constants.EnvEgressLogLevel, "info")
 	cfg := slogger.Config{Level: level}
-	var base slogger.Logger
-	if otelCore != nil {
-		l, err := slogger.NewWithExtraCores(cfg, otelCore)
-		if err != nil {
-			panic(err)
-		}
-		base = l
-	} else {
-		base = slogger.MustNew(cfg)
+	base := slogger.MustNew(cfg)
+	// Fixed dimensions for every log line (sandbox_id, optional OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS).
+	if extra := telemetry.EgressLogFields(); len(extra) > 0 {
+		base = base.With(extra...)
 	}
 	logger := base.Named("opensandbox.egress")
 	return log.WithLogger(ctx, logger)

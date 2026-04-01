@@ -4,7 +4,7 @@ authors:
   - "@Pangjiping"
   - "@ninan-nn"
 creation-date: 2026-03-18
-last-updated: 2026-03-31
+last-updated: 2026-04-01
 status: draft
 ---
 
@@ -38,6 +38,8 @@ status: draft
 
 This proposal introduces unified **OpenTelemetry** instrumentation for OpenSandbox’s three Go components—**execd**, **egress**, and **ingress**—covering **Metrics** and **Logs** only (**no OpenTelemetry Tracing / distributed traces**). With OTLP export and environment-based configuration, operators and developers can observe request rates, latencies, resource usage, policy enforcement, **egress outbound hostname/IP access (via structured logs, not metrics)**, **egress policy load and allow/deny rule changes (structured logs)**, and ingress proxy traffic in production and integrate with existing observability stacks (e.g., Prometheus, Grafana Loki).
 
+**Egress (reference implementation):** OTLP **metrics** only (`components/internal/telemetry` + `components/egress/pkg/telemetry`); structured logs are **zap JSON to stdout** (and the same **metric dimensions** are merged onto the root logger—`sandbox_id` + `OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS`). **OTLP log export is not implemented** for egress in-tree; execd/ingress may still follow the broader “metrics + logs” story below where implemented.
+
 ## Motivation
 
 Today execd, egress, and ingress have partial observability (e.g., execd’s HTTP API and `GetMetrics`/`WatchMetrics`, zap/loggers in egress and ingress) but lack:
@@ -56,7 +58,7 @@ Adopting OpenTelemetry for **metrics and logs** allows the three components to g
 
 ### Non-Goals
 
-- **OpenTelemetry Tracing** (distributed traces, `TracerProvider`, Jaeger-style request graphs) for execd, egress, or ingress — **out of scope** for this OSEP; correlation relies on **metrics dimensions**, **structured log fields** (e.g. `osbx.id`), and time—not on `trace_id`/`span_id`.
+- **OpenTelemetry Tracing** (distributed traces, `TracerProvider`, Jaeger-style request graphs) for execd, egress, or ingress — **out of scope** for this OSEP; correlation relies on **metrics dimensions**, **structured log fields** (e.g. `sandbox_id` on egress), and time—not on `trace_id`/`span_id`.
 - Do not replace existing execd HTTP metric endpoints such as `GetMetrics`/`WatchMetrics`; they can coexist with OpenTelemetry metrics.
 - Do not implement OpenTelemetry on the server (Python) in this proposal; scope is limited to the three Go components (execd, egress, ingress).
 - Do not commit to vendor-specific backends (e.g., Datadog, New Relic); export is via the standard OTLP protocol only.
@@ -68,19 +70,19 @@ Adopting OpenTelemetry for **metrics and logs** allows the three components to g
 |----|-------------|-------------|
 | R1 | execd/egress/ingress support exporting **Metrics** and **Logs** via OTLP (**not** Traces) | Must Have   |
 | R2 | Metrics cover all execd, egress, and ingress metric items listed in this proposal | Must Have   |
-| R3 | Structured logs include a filterable **sandbox identifier** where applicable (`osbx.id` or equivalent) | Must Have   |
+| R3 | Structured logs include a filterable **sandbox identifier** where applicable (`sandbox_id` or equivalent) | Must Have   |
 | R4 | Configuration via environment variables (endpoint, toggles) without code changes | Must Have   |
 | R5 | Default or unset OTLP config results in no export to avoid impacting deployments without observability | Must Have   |
 | R6 | Compatible with existing zap Logger interface; no breaking changes to Logger abstraction | Should Have |
 | R7 | Egress can emit structured logs for per–sandbox outbound access (DNS question hostname and, when present, resolved IPs); **not** required as Prometheus-style metrics with hostname/IP as labels | Should Have |
-| R8 | Egress emits structured logs when **initial policy** is applied and when **policy rules are added or changed** at runtime; logs include `osbx.id` and a **summary** of the effective rules (see [§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes)) | Should Have |
+| R8 | Egress emits structured logs when **initial policy** is applied and when **policy rules are added or changed** at runtime; logs include `sandbox_id` and a **summary** of the effective rules (see [§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes)) | Should Have |
 
 ## Proposal
 
 Introduce an **OpenTelemetry initialization module** in the main startup of execd, egress, and ingress that:
 
 1. Creates and registers a **MeterProvider** and **MetricReader** (e.g., OTLP metric exporter).
-2. Optionally creates a **LoggerProvider** and registers an OTLP log exporter; otherwise rely on zap JSON logs and optional **Logs Bridge** to OTLP.
+2. Optionally creates a **LoggerProvider** and registers an OTLP log exporter; otherwise rely on zap JSON logs and optional **Logs Bridge** to OTLP (**egress:** metrics-only OTLP; logs stay on stdout unless collected by an agent).
 3. Reads OTLP endpoint, service name, etc., from environment variables (or config files).
 
 Application code records metrics on critical paths. **HTTP metrics** for execd/egress/ingress use **aggregated dimensions** (e.g. `http.route` as route template, `http.status_code`, `method`)—**without** OpenTelemetry spans: implement via **manual instrumentation** or thin middleware that only increments histograms/counters (no `TracerProvider`). Egress and ingress use `net/http`; execd uses Gin—same principle (metrics only, no trace spans).
@@ -128,18 +130,24 @@ All metrics are created via the OpenTelemetry Meter; units and attributes follow
 
 #### 1.2 egress metrics
 
-| Category | Metric name (suggested) | Type | Description |
-|----------|-------------------------|------|-------------|
-| **DNS** | `egress.dns.query.duration` | Histogram | Per-query latency |
-| **Policy** | `egress.policy.denied_total` | Counter | Denials; block rate derivable with evaluations |
-| **nftables** | `egress.nftables.rules.count` | Gauge | Current rule count |
-| | `egress.nftables.updates.count` | Counter | Rule update count (update frequency observable) |
-| **System** | `egress.system.cpu.usage` | Gauge | CPU usage |
-| | `egress.system.memory.usage_bytes` | Gauge | Memory usage |
+| Category | Metric name (implemented) | Type | Description |
+|----------|---------------------------|------|-------------|
+| **DNS** | `egress.dns.query.duration` | Histogram (`s`) | Upstream forward latency after policy **allow** (success and forward error); **deny** does not record |
+| **Policy** | `egress.policy.denied_total` | Counter | +1 per DNS query **denied** by policy |
+| **nftables** | `egress.nftables.rules.count` | Observable Gauge (`{element}`) | Approximate static policy size after last successful **`ApplyStatic`** (`dns+nft`); stays **0** in **dns-only** or before any apply |
+| **nftables** | `egress.nftables.updates.count` | Counter | +1 per successful **`ApplyStatic`** (incl. retry path) or **`AddResolvedIPs`** |
+| **System** | `egress.system.memory.usage_bytes` | Observable Gauge (`By`) | Host RAM in use (Linux: `/proc/meminfo`; non-Linux: **0**) |
+| **System** | `egress.system.cpu.utilization` | Observable Gauge (`1`) | CPU busy ratio **0–1** between scrapes (Linux: `/proc/stat`; first scrape **0**; non-Linux: **0**) |
+
+Meter name: **`opensandbox/egress`**.
 
 **Per–sandbox outbound hostname / IP (monitoring vs logs):** Operators often want a record of **which hostnames or IPs** a sandbox attempted to reach. **Do not** encode raw hostname or per-IP destination as **metric labels** or default metric dimensions: that creates extreme cardinality in Prometheus-style backends and conflicts with the cardinality controls elsewhere in this OSEP. Instead, treat **each DNS egress attempt** (and its outcome) as a **structured log event** (see [§2.1](#21-egress-sandbox-outbound-access-log-hostname--ip)). Aggregated **metrics** above remain suitable for rates, latency, and allow/deny counts without naming every destination.
 
-**Egress `osbx.id` on metrics (and Resource):** For **egress** OpenTelemetry **metrics**, include an **`osbx.id`** **dimension** on exported series, and the same value on the **Resource** when appropriate, using the value from **`OPENSANDBOX_EGRESS_SANDBOX_ID`** when that env var is set. The sidecar is typically **one process per sandbox**; this is the **only** supported mechanism in this OSEP for per-sandbox **metric** aggregation labels—**do not** use a separate `OPENSANDBOX_OTEL_METRICS_EXTRA_ATTRIBUTES`-style hook. When **`OPENSANDBOX_EGRESS_SANDBOX_ID`** is unset, document whether the dimension is omitted or empty.
+**Resource vs metric attributes (egress reference implementation):**
+
+- **Resource** (OTLP): `service.name` = **`opensandbox-egress-<version>`** (build/version from `internal/version`), and optional **`sandbox_id`** when **`OPENSANDBOX_EGRESS_SANDBOX_ID`** is set (`components/egress/pkg/telemetry/init.go`).
+- **Metric datapoint attributes** (every recorded measurement): optional **`sandbox_id`** (same env var value) and any extra **`key=value`** segments from **`OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS`** (comma-separated; first `=` splits key/value per segment). Low-cardinality only. The **same** attributes are also attached to the **zap** root logger so log lines align with metric series.
+- Structured log **event** fields for sandbox identity use the same key **`sandbox_id`** as Resource and metrics (see [§2](#2-logging)) so cross-signal filtering and dashboards use one dimension name.
 
 #### 1.3 ingress metrics
 
@@ -160,18 +168,19 @@ Metric namespaces are `execd.*`, `egress.*`, and `ingress.*` for easy filtering 
 
 ### 2. Logging
 
-**Egress structured log keys** use a short **`osbx.`** prefix (**OpenSandbox**). Shared across [§2.1](#21-egress-sandbox-outbound-access-log-hostname--ip) and [§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes); rule entries inside **`osbx.rules`** still use **`action`** and **`target`** per API shape.
+**Egress structured log keys:** event type is **`opensandbox.event`**; policy defaults use **`egress.default`**; **policy rule summaries** use the top-level key **`rules`** (array of `{action,target}`). Shared across [§2.1](#21-egress-sandbox-outbound-access-log-hostname--ip) and [§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes); each rule entry uses **`action`** and **`target`** per API shape.
 
-- **Structured fields**: Use existing `Logger.With(Field{...})` for stable keys (`osbx.id`, component-specific attributes).
+- **Structured fields**: Use existing `Logger.With(Field{...})` for stable keys (`sandbox_id` on egress for sandbox identity; component-specific attributes elsewhere as needed).
 - **Context-aware**: Handlers that receive `context.Context` may attach request-scoped fields to logs where useful; **no** requirement for `trace_id`/`span_id` from OpenTelemetry (tracing out of scope).
-- **Filter/query by `osbx.id`**: When a request or operation is associated with a sandbox (e.g. execd handling a request for that sandbox, ingress proxying to that sandbox), log records **should** include a filterable **`osbx.id`** so that log backends can filter and query by sandbox for per-sandbox debugging.
-- **OTLP Logs**: If OTLP log export is enabled, log records carry the same structured fields for downstream systems (e.g. Loki via Collector).
+- **Filter/query by sandbox id**: When a request or operation is associated with a sandbox (e.g. execd handling a request for that sandbox, ingress proxying to that sandbox), log records **should** include a filterable sandbox identifier (**`sandbox_id`** on egress; **`osbx.id`** or equivalent where other components standardize it) so that log backends can filter and query by sandbox for per-sandbox debugging.
+- **OTLP Logs:** Where a component implements OTLP log export, records carry the same structured fields. **Egress (reference):** no OTLP log pipeline—stdout JSON only; use Collector/file agents if centralization is required.
+- **Default logger fields (egress):** In addition to per-event `With` fields, the root logger includes **`sandbox_id`** and **`OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS`** key/values when set (aligned with metric dimensions).
 
 The existing `Logger` interface (`Infof`, `With`, `Named`) stays unchanged.
 
-**Egress log families (summary):** All egress structured logs use **zap** `With` fields plus a human-readable **`msg`**. **`osbx.id`** comes from **`OPENSANDBOX_EGRESS_SANDBOX_ID`** when set. Two event families:
+**Egress log families (summary):** All egress structured logs use **zap** `With` fields plus a human-readable **`msg`**. **`sandbox_id`** comes from **`OPENSANDBOX_EGRESS_SANDBOX_ID`** when set. Two event families:
 
-| Family | `osbx.event` | Typical level | One line per |
+| Family | `opensandbox.event` | Typical level | One line per |
 |--------|---------------------|---------------|--------------|
 | **Outbound access** | **`egress.outbound`** | `info` (default) | Each observed outbound attempt (DNS path and/or IP-only path per [§2.1](#21-egress-sandbox-outbound-access-log-hostname--ip)) |
 | **Policy lifecycle** | **`egress.loaded`**, **`egress.updated`**, **`egress.update_failed`** | `info` / `warn` / `error` | Policy load, successful update, or failed update ([§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes)) |
@@ -180,37 +189,38 @@ The existing `Logger` interface (`Infof`, `With`, `Named`) stays unchanged.
 
 **Purpose:** Support **monitoring and audit** use cases that need “what did this sandbox try to reach?” with **hostname** (DNS question name) and, when applicable, **resolved IP addresses**—without turning every destination into a metric time series.
 
-**Signal type:** **Logs** (structured fields on the existing zap logger, and optionally **OTLP Logs** when a log exporter is enabled). Identify records with **`osbx.event` = `egress.outbound`**; this is **not** a per-destination **Counter/Histogram metric** (per-destination “log metrics” in vendor UIs remain **log-derived**, e.g. Loki queries, not OpenTelemetry Metrics with hostname labels).
+**Signal type:** **Logs** (structured fields on the existing zap logger; **egress** ships **stdout** JSON only in-tree). Identify records with **`opensandbox.event` = `egress.outbound`**; this is **not** a per-destination **Counter/Histogram metric** (per-destination “log metrics” in vendor UIs remain **log-derived**, e.g. Loki queries, not OpenTelemetry Metrics with hostname labels).
 
-**Observation points:** (1) **DNS proxy** — each client DNS query is one “access attempt” to a name (after policy evaluation; after upstream resolution or on forward error). (2) **IP-only path** (e.g. direct connect to a literal IP, or enforcement observed without a DNS name) — log using **`osbx.peer`** instead of DNS-specific fields.
+**Observation points:** (1) **DNS proxy** — each client DNS query is one “access attempt” to a name (after policy evaluation; after upstream resolution or on forward error). (2) **IP-only path** (e.g. direct connect to a literal IP, or enforcement observed without a DNS name) — log using **`peer`** instead of DNS-specific fields.
 
-**Recommended fields** for **`osbx.event` = `egress.outbound`** (align with OpenTelemetry semantic conventions where possible):
+**Recommended fields** for **`opensandbox.event` = `egress.outbound`** (align with OpenTelemetry semantic conventions where possible):
 
 | Field | Description |
 |-------|-------------|
-| `osbx.event` | Constant **`egress.outbound`** |
-| `osbx.id` | Sandbox identifier from **`OPENSANDBOX_EGRESS_SANDBOX_ID`** when set |
-| `osbx.result` | `allow` \| `deny` \| `error` (policy denied, or upstream DNS forward failed) |
-| `osbx.host` | Normalized QNAME when the attempt is **name-based** (lowercase, trailing dot stripped). **Omit** when the attempt is **IP-only** (use `osbx.peer` instead). |
-| `osbx.ips` | When `osbx.result` is `allow` and the DNS response includes A/AAAA: list of resolved IPs as strings. **Omit or empty** when not applicable (deny path, non-address RR types, or **IP-only** path). |
-| `osbx.peer` | Destination **IP address** when the attempt is **IP-only** (no `osbx.host`), or when logging the peer IP is required without a DNS query name. **Omit** when only DNS name + `osbx.ips` describe the destination. |
-| `osbx.err` | When `osbx.result` is `error`: short message (e.g. DNS forward failure) |
+| `opensandbox.event` | Constant **`egress.outbound`** |
+| `sandbox_id` | Sandbox identifier from **`OPENSANDBOX_EGRESS_SANDBOX_ID`** when set |
+| `target.host` | Normalized QNAME when the attempt is **name-based** (lowercase, trailing dot stripped). **Omit** when the attempt is **IP-only** (use `peer` instead). |
+| `target.ips` | When the DNS response includes A/AAAA: list of resolved IPs as strings. **Omit or empty** when not applicable (non-address RR types, **IP-only** path, or forward **error** before resolution). |
+| `peer` | Destination **IP address** when the attempt is **IP-only** (no `target.host`), or when logging the peer IP is required without a DNS query name. **Omit** when only DNS name + `target.ips` describe the destination. |
+| `error` | On upstream DNS **forward failure**: short message (e.g. timeout). **Omit** on success. |
+
+Policy **deny** is not represented in this log (use **`egress.policy.denied_total`** and optional webhooks); implementations may omit a dedicated `result` field.
 
 **Examples (logical JSON shape; zap may add `level`, `ts`, `logger`, `msg`):**
 
 ```json
-{"osbx.event":"egress.outbound","osbx.id":"sb-abc","osbx.host":"pypi.org","osbx.result":"allow","osbx.ips":["151.101.0.223"]}
+{"opensandbox.event":"egress.outbound","sandbox_id":"sb-abc","target.host":"pypi.org","target.ips":["151.101.0.223"]}
 ```
 
 ```json
-{"osbx.event":"egress.outbound","osbx.id":"sb-abc","osbx.host":"blocked.example","osbx.result":"deny"}
+{"opensandbox.event":"egress.outbound","sandbox_id":"sb-abc","target.host":"example.com","error":"i/o timeout"}
 ```
 
 ```json
-{"osbx.event":"egress.outbound","osbx.id":"sb-abc","osbx.peer":"198.51.100.7","osbx.result":"allow"}
+{"opensandbox.event":"egress.outbound","sandbox_id":"sb-abc","peer":"198.51.100.7"}
 ```
 
-**Trace correlation:** **Not applicable** under this OSEP (no distributed traces). **Correlation** uses `osbx.id`, destination fields (`osbx.host` and/or `osbx.peer`), and timestamps.
+**Trace correlation:** **Not applicable** under this OSEP (no distributed traces). **Correlation** uses `sandbox_id`, destination fields (`target.host` and/or `target.ips` and/or `peer`), and timestamps.
 
 **Default behavior:** Emit one **info**-level structured record per handled DNS query on this path (**default on**). Under high DNS QPS this can produce **large log volume**; document clearly. Operators who need less verbosity may lower the component log level (e.g. `warn`) via existing egress log configuration—**no** separate env toggle for these events in this OSEP. This is separate from `OTEL_LOGS_EXPORTER`: local structured JSON logs may suffice without OTLP log export.
 
@@ -220,43 +230,44 @@ The existing `Logger` interface (`Infof`, `With`, `Named`) stays unchanged.
 
 **Purpose:** Provide an **audit trail** for **which egress policy** a sandbox sidecar is enforcing: first load at process start and every **successful** update when operators or the control plane add or change **allow/deny** rules. This is **low frequency** compared to per-DNS [§2.1](#21-egress-sandbox-outbound-access-log-hostname--ip) and uses default **info**-level structured logs (**default on**).
 
-**Signal type:** **Logs** (structured fields; optional OTLP Logs). **Not** metrics with one time series per rule target (same cardinality rationale as §1.2).
+**Signal type:** **Logs** (structured fields; egress: stdout JSON in-tree). **Not** metrics with one time series per rule target (same cardinality rationale as §1.2).
 
 **When to emit**
 
-| Event | `osbx.event` (suggested) | When |
+| Event | `opensandbox.event` (suggested) | When |
 |-------|----------------------------------|------|
 | **Initial policy load** | `egress.loaded` | Once the effective **initial** policy is known after startup: e.g. from **`OPENSANDBOX_EGRESS_POLICY_FILE`** (if valid), else **`OPENSANDBOX_EGRESS_RULES`**, else built-in default (e.g. deny-all). If the lifecycle server later **POSTs** policy after `/healthz`, emit **`egress.loaded`** when that first server-driven snapshot is applied, or **`egress.updated`** if implementation treats it strictly as an update—choose one convention and document it so operators do not see duplicate semantics. |
-| **Runtime rule change** | `egress.updated` | After a **successful** application of new policy via the egress HTTP API (e.g. POST/PATCH **`/policy`** with auth), including additions or modifications of allow/deny rules. On **failure** (4xx/5xx, validation error), log at **warn** or **error** with `osbx.event` e.g. `egress.update_failed` and **no** effective policy change. |
+| **Runtime rule change** | `egress.updated` | After a **successful** application of new policy via the egress HTTP API (e.g. POST/PATCH **`/policy`** with auth), including additions or modifications of allow/deny rules. On **failure** (4xx/5xx, validation error), log at **warn** or **error** with `opensandbox.event` e.g. `egress.update_failed` and **no** effective policy change. |
 
 **Recommended fields (common)**
 
 | Field | Description |
 |-------|-------------|
-| `osbx.event` | `egress.loaded` \| `egress.updated` \| `egress.update_failed` |
-| `osbx.id` | From `OPENSANDBOX_EGRESS_SANDBOX_ID` when set |
-| `osbx.src` | **loaded**: `policy_file` \| `env` \| `default` \| `server_bootstrap` (or equivalent). **updated**: `http` (API). |
-| `osbx.default` | Effective `defaultAction` after apply (e.g. `allow` / `deny`) |
-| `osbx.rule_count` | Number of rules in `egress[]` after apply |
-| `osbx.err` | On **`egress.update_failed`**: validation or transport message |
+| `opensandbox.event` | `egress.loaded` \| `egress.updated` \| `egress.update_failed` |
+| `sandbox_id` | From `OPENSANDBOX_EGRESS_SANDBOX_ID` when set |
+| `egress.default` | Effective `defaultAction` after apply (e.g. `allow` / `deny`) |
+| `rules` | **`egress.loaded`**: full effective `egress` list. **`egress.updated`**: **this request only** — **PATCH**: patch body rules; **POST/PUT**: body `egress` (replacement); **reset**: `[]`. Omit on **`egress.update_failed`** |
+| `error` | On **`egress.update_failed`**: validation or transport message |
 
 **Recommended fields (rule summary — not raw body)**
 
-- Include a compact representation of **allow/deny rules** sufficient for audit: e.g. **`osbx.rules`** as an array of objects `{ "action": "allow|deny", "target": "<string>" }` in **stable order** (e.g. as stored after parse), **or** a **digest** (hash) of the canonical JSON plus **`osbx.rule_count`** if full rule listing is too large for log pipelines.
+- Include a compact representation of **allow/deny rules** sufficient for audit: e.g. **`rules`** as an array of objects `{ "action": "allow|deny", "target": "<string>" }` in **stable order** (e.g. as stored after parse), **or** a **digest** (hash) of the canonical JSON if full rule listing is too large for log pipelines. For **`egress.updated`**, **`rules`** should reflect **only the current API request** (incremental PATCH or POST body egress), not the full merged policy after apply.
 - Avoid logging **secrets** (policy JSON may embed sensitive hostnames in some deployments); document that **targets** are part of policy and may need redaction in highly regulated environments.
 
 **Examples (logical JSON shape):**
 
 ```json
-{"osbx.event":"egress.loaded","osbx.id":"sb-abc","osbx.src":"env","osbx.default":"deny","osbx.rule_count":2,"osbx.rules":[{"action":"allow","target":"pypi.org"},{"action":"allow","target":"*.github.com"}]}
+{"opensandbox.event":"egress.loaded","sandbox_id":"sb-abc","egress.default":"deny","rules":[{"action":"allow","target":"pypi.org"},{"action":"allow","target":"*.github.com"}]}
 ```
 
 ```json
-{"osbx.event":"egress.updated","osbx.id":"sb-abc","osbx.src":"http","osbx.default":"deny","osbx.rule_count":1,"osbx.rules":[{"action":"allow","target":"api.openai.com"}]}
+{"opensandbox.event":"egress.updated","sandbox_id":"sb-abc","egress.default":"deny","rules":[{"action":"allow","target":"api.openai.com"}]}
 ```
 
+(Example shows a single-rule **PATCH**; **`egress.default`** is the effective policy after apply.)
+
 ```json
-{"osbx.event":"egress.update_failed","osbx.id":"sb-abc","osbx.err":"validation failed: rule limit exceeded"}
+{"opensandbox.event":"egress.update_failed","sandbox_id":"sb-abc","error":"validation failed: rule limit exceeded"}
 ```
 
 **Trace correlation:** **Not applicable** under this OSEP. For **`egress.updated`**, correlation with the HTTP request is via **HTTP access logs** (e.g. method, path, status) and **time**; for **`egress.loaded`** at startup, resource attributes (`service.name`, pod name) identify the instance.
@@ -268,7 +279,8 @@ The existing `Logger` interface (`Infof`, `With`, `Named`) stays unchanged.
 - **Initialization**  
   Implement `InitOpenTelemetry(ctx context.Context, opts InitOptions) (shutdown func(), err error)` in main for execd, egress, and ingress (or in a shared `pkg/telemetry`):
   - Create `MeterProvider` and register an OTLP metric exporter (e.g., `go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp` or gRPC).
-  - Optionally create `LoggerProvider` and register an OTLP log exporter; otherwise rely on zap and optional **Logs Bridge**.
+  - Optionally create `LoggerProvider` and register an OTLP log exporter; otherwise rely on zap and optional **Logs Bridge** (execd/ingress as applicable).
+  - **Egress (reference):** `components/internal/telemetry` initializes **MeterProvider + OTLP HTTP metrics** only; **no** `LoggerProvider`; zap remains the sole log sink.
   - Set global `otel.SetMeterProvider` (and logger provider if used), and return a `shutdown` function (Flush + ForceFlush) to call on process exit.
   - **Do not** set `TracerProvider` for production use; omit or use a no-op tracer provider.
 
@@ -283,7 +295,8 @@ The existing `Logger` interface (`Infof`, `With`, `Named`) stays unchanged.
   - `OTEL_EXPORTER_OTLP_ENDPOINT` (or per-signal endpoints for metrics/logs).
   - `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` (e.g., `none` to disable).
   - `OTEL_RESOURCE_ATTRIBUTES`: key-value pairs for resource attributes (e.g., deployment.env);
-  - **`OPENSANDBOX_EGRESS_SANDBOX_ID`** (egress): **source of truth** for the **`osbx.id`** value on **egress** OpenTelemetry **metric** dimensions and **Resource** attributes (see [§1.2](#12-egress-metrics)), and for **`osbx.id`** in structured logs ([§2.1](#21-egress-sandbox-outbound-access-log-hostname--ip), [§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes)). When unset, document omit-vs-empty behavior for metrics and logs.
+  - **`OPENSANDBOX_EGRESS_SANDBOX_ID`** (egress): sets **`sandbox_id`** on the OTLP **Resource**, on **every metric measurement**, and in structured log events (same key everywhere). When unset, omitted from all of the above.
+  - **`OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS`** (egress): optional comma-separated **`key=value`** pairs appended to **every metric measurement** and to the **root zap logger** (see [§1.2](#12-egress-metrics)).
 
 Egress structured logs for outbound access ([§2.1](#21-egress-sandbox-outbound-access-log-hostname--ip)) and policy audit ([§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes)) are **default on** at **info**; they are **not** controlled by separate `OPENSANDBOX_*` env vars in this OSEP.
 
@@ -292,21 +305,21 @@ Optionally read some of these from existing config or flags and allow environmen
 ## Test Plan
 
 - **Unit tests**
-  - Metrics: Create a MeterProvider with an in-memory or mock exporter, run business logic, assert exported metric count and key attributes; for **egress**, assert **`osbx.id`** matches **`OPENSANDBOX_EGRESS_SANDBOX_ID`** when set.
-  - Logging: Assert structured log records contain expected fields (e.g. `osbx.id` where applicable).
-  - Egress outbound access: Issue DNS queries (allow/deny/error paths); assert **info**-level log records contain `osbx.host`, `osbx.result`, and `osbx.ips` when applicable.
-  - Egress policy: Assert `egress.loaded` after startup with expected `osbx.src` and rule summary; POST/PATCH policy and assert `egress.updated` (or `egress.update_failed` on invalid body).
+  - Metrics: Create a MeterProvider with an in-memory or mock exporter, run business logic, assert exported metric count and key attributes; for **egress**, assert **`sandbox_id`** (and optional extras) on metric attributes and on Resource when **`OPENSANDBOX_EGRESS_SANDBOX_ID`** is set.
+  - Logging: Assert structured log records contain expected fields (e.g. `sandbox_id` on egress where applicable).
+  - Egress outbound access: Issue DNS queries (allow / forward-error paths); assert **info**-level log records contain `target.host`, `target.ips`, and/or `error` when applicable.
+  - Egress policy: Assert `egress.loaded` after startup with expected rule summary; POST/PATCH policy and assert `egress.updated` (or `egress.update_failed` on invalid body).
 - **Integration tests**
-  - Start execd/egress/ingress with OTLP endpoint pointing at a test Collector or mock; send HTTP requests and trigger execution/DNS/policy/proxy; verify OTLP payloads contain expected **metrics** and **logs** (no trace spans required).
+  - Start execd/egress/ingress with OTLP endpoint pointing at a test Collector or mock; send HTTP requests and trigger execution/DNS/policy/proxy; verify OTLP payloads contain expected **metrics** (and **logs** where OTLP logging is implemented; egress: validate **metrics** + stdout structured logs).
 - **Configuration**
   - When `OTEL_EXPORTER_OTLP_*` is unset, no connection is made and no error is raised.
   - Environment variables override config file where applicable.
 
-Acceptance: With OTLP enabled, Prometheus or the backend shows all execd, egress, and ingress **metrics** listed above; **logs** export or stdout contains structured fields; egress **default** outbound access logs include `osbx.host`, `osbx.result`, and `osbx.ips` when applicable, without adding hostname as a metric label. Egress emits `egress.loaded` for initial policy and `egress.updated` (or documented equivalent) after successful rule changes, with rule summary fields per [§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes). **No OpenTelemetry Tracing** is required for acceptance.
+Acceptance: With OTLP enabled, Prometheus or the backend shows all execd, egress, and ingress **metrics** listed above (per component); **egress** structured logs appear on **stdout** with fields per [§2](#2-logging) (OTLP log export not required for egress). Egress **default** outbound access logs include `target.host`, `target.ips`, and/or `error` when applicable, without adding hostname as a metric label. Egress emits `egress.loaded` for initial policy and `egress.updated` after successful rule changes, with **`rules`** semantics per [§2.2](#22-egress-policy-initialization-and-allowdeny-rule-changes). **No OpenTelemetry Tracing** is required for acceptance.
 
 ## Drawbacks
 
-- Additional dependencies and binary size (OpenTelemetry SDK and OTLP exporters for metrics/logs).
+- Additional dependencies and binary size (OpenTelemetry SDK and OTLP exporters for metrics; OTLP logs exporters only where implemented—egress is metrics-only OTLP).
 - Under high QPS, metrics and log export add some CPU/memory cost; per-query egress outbound logs at **info** can be **high volume**—operators may lower log level or tune pipelines; aggregation dimensions control metric cardinality.
 
 ## Infrastructure Needed

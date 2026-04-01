@@ -27,6 +27,7 @@ import (
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 )
 
 var (
@@ -63,14 +64,35 @@ func appendMetricAttrsFromKeyValuePairs(kvs []attribute.KeyValue, raw string) []
 	return kvs
 }
 
-var egressMetricOpt = sync.OnceValue(func() metric.MeasurementOption {
+// egressSharedAttrs is the single source of truth for OTLP metric dimensions and default log fields
+// (sandbox_id + OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS).
+var egressSharedAttrs = sync.OnceValue(func() []attribute.KeyValue {
 	var kvs []attribute.KeyValue
 	if id := strings.TrimSpace(os.Getenv(constants.ENVSandboxID)); id != "" {
 		kvs = append(kvs, attribute.String("sandbox_id", id))
 	}
 	kvs = appendMetricAttrsFromKeyValuePairs(kvs, os.Getenv(constants.EnvEgressMetricsExtraAttrs))
-	return metric.WithAttributes(kvs...)
+	return kvs
 })
+
+var egressMetricOpt = sync.OnceValue(func() metric.MeasurementOption {
+	return metric.WithAttributes(egressSharedAttrs()...)
+})
+
+func EgressLogFields() []slogger.Field {
+	kvs := egressSharedAttrs()
+	out := make([]slogger.Field, 0, len(kvs))
+	for _, kv := range kvs {
+		var v string
+		if kv.Value.Type() == attribute.STRING {
+			v = kv.Value.AsString()
+		} else {
+			v = kv.Value.Emit()
+		}
+		out = append(out, slogger.Field{Key: string(kv.Key), Value: v})
+	}
+	return out
+}
 
 func registerEgressMetrics() error {
 	meter = otel.Meter("opensandbox/egress")

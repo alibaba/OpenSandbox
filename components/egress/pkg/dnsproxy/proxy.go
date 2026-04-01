@@ -19,14 +19,12 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 
-	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/events"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
@@ -131,7 +129,7 @@ func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	elapsed := time.Since(start).Seconds()
 	if err != nil {
 		telemetry.RecordDNSForward(elapsed)
-		logOutboundDNS("error", host, nil, "", err.Error())
+		logOutboundDNS(host, nil, "", err.Error())
 		log.Warnf("[dns] forward error for %s: %v", domain, err)
 		fail := new(dns.Msg)
 		fail.SetRcode(r, dns.RcodeServerFailure)
@@ -139,7 +137,7 @@ func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 		return
 	}
 	telemetry.RecordDNSForward(elapsed)
-	logOutboundDNS("allow", host, resolvedIPStrings(resp), "", "")
+	logOutboundDNS(host, resolvedIPStrings(resp), "", "")
 	p.maybeNotifyResolved(domain, resp)
 	_ = w.WriteMsg(resp)
 }
@@ -315,25 +313,21 @@ func resolvedIPStrings(resp *dns.Msg) []string {
 	return out
 }
 
-func logOutboundDNS(result, host string, ips []string, peer string, errStr string) {
+func logOutboundDNS(host string, ips []string, peer string, errStr string) {
 	fields := []slogger.Field{
-		{Key: "osbx.event", Value: "egress.outbound"},
-		{Key: "osbx.result", Value: result},
-	}
-	if id := strings.TrimSpace(os.Getenv(constants.ENVSandboxID)); id != "" {
-		fields = append(fields, slogger.Field{Key: "osbx.id", Value: id})
+		{Key: "opensandbox.event", Value: "egress.outbound"},
 	}
 	if host != "" {
-		fields = append(fields, slogger.Field{Key: "osbx.host", Value: host})
+		fields = append(fields, slogger.Field{Key: "target.host", Value: host})
 	}
 	if peer != "" {
-		fields = append(fields, slogger.Field{Key: "osbx.peer", Value: peer})
+		fields = append(fields, slogger.Field{Key: "peer", Value: peer})
 	}
 	if len(ips) > 0 {
-		fields = append(fields, slogger.Field{Key: "osbx.ips", Value: ips})
+		fields = append(fields, slogger.Field{Key: "target.ips", Value: ips})
 	}
 	if errStr != "" {
-		fields = append(fields, slogger.Field{Key: "osbx.err", Value: errStr})
+		fields = append(fields, slogger.Field{Key: "error", Value: errStr})
 	}
 	log.Logger.With(fields...).Infof("egress outbound")
 }

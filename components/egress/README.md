@@ -105,9 +105,9 @@ Examples:
 
 ### Observability (OpenTelemetry)
 
-Egress can export **OTLP metrics** and **OTLP logs** (zap JSON logs are always emitted to stdout; when OTLP logs are enabled, the same records are also sent via the otelzap bridge). 
+Egress can export **OTLP metrics**; application logs use the **native zap** logger (JSON to stdout by default, configurable via `OPENSANDBOX_LOG_OUTPUT` / `OPENSANDBOX_EGRESS_LOG_LEVEL`). **OTLP log export is not used.**
 
-See **[Egress OpenTelemetry reference](docs/opentelemetry.md)** for all metric/log instrumentation fields and how to enable export (`OTEL_EXPORTER_OTLP_*`, `OPENSANDBOX_EGRESS_SANDBOX_ID`, etc.).
+See **[Egress OpenTelemetry reference](docs/opentelemetry.md)** for metrics, structured log fields, and how to enable OTLP metrics (`OTEL_EXPORTER_OTLP_*`, `OPENSANDBOX_EGRESS_SANDBOX_ID`, etc.).
 
 ## Build & Run
 

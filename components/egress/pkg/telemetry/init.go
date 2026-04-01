@@ -20,26 +20,21 @@ import (
 	"strings"
 
 	"go.opentelemetry.io/otel/attribute"
-	"go.uber.org/zap/zapcore"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	inttelemetry "github.com/alibaba/opensandbox/internal/telemetry"
 	"github.com/alibaba/opensandbox/internal/version"
 )
 
-const (
-	serviceName = "opensandbox-egress"
-	zapScope    = "opensandbox.egress"
-)
+const serviceName = "opensandbox-egress"
 
-func Init(ctx context.Context) (shutdown func(context.Context) error, otelZapCore zapcore.Core, err error) {
+func Init(ctx context.Context) (shutdown func(context.Context) error, err error) {
 	var attrs []attribute.KeyValue
 	if id := strings.TrimSpace(os.Getenv(constants.ENVSandboxID)); id != "" {
-		attrs = append(attrs, attribute.String("osbx.id", id))
+		attrs = append(attrs, attribute.String("sandbox_id", id))
 	}
 	return inttelemetry.Init(ctx, inttelemetry.Config{
 		ServiceName:        serviceName + "-" + version.Version,
-		ZapScope:           zapScope,
 		ResourceAttributes: attrs,
 		RegisterMetrics:    registerEgressMetrics,
 	})

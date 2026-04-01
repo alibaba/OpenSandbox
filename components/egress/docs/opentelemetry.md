@@ -1,124 +1,97 @@
-# Egress OpenTelemetry metrics and logging
+# Egress observability (OpenTelemetry metrics & structured logs)
 
-This document describes **OpenTelemetry Metrics** and **structured logs / OTLP Logs** implemented in the **OpenSandbox
-Egress** sidecar (aligned with [OSEP-0010](../../../oseps/0010-opentelemetry-instrumentation.md)). **Distributed tracing
-is not implemented** (no `trace_id` / `span_id`).
+Egress can send **metrics** to an OTLP HTTP endpoint. **Logs** are structured JSON written by zap (typically **stdout**); they are **not** sent over OTLP. **Distributed tracing** is not implemented.
 
-Entry points:
-
-- Shared OTLP bootstrap: `components/internal/telemetry`
-- Egress-specific metrics and wiring: `components/egress/pkg/telemetry`
+Design background: [OSEP-0010](../../../oseps/0010-opentelemetry-instrumentation.md).
 
 ---
 
-## Enabling OTLP export
+## Configuration
 
-Export is controlled by **`internal/telemetry.Init`** from environment variables. If **no OTLP endpoint is configured**,
-no OTLP connection is opened and runtime behavior matches a build without observability.
+### When metrics are exported
 
-### Enabling each signal
+Metrics export is **on** when either of these is non-empty (after trimming spaces):
 
-| Signal                | Condition                                                                                                           |
-|-----------------------|---------------------------------------------------------------------------------------------------------------------|
-| **Metrics**           | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` **or** `OTEL_EXPORTER_OTLP_ENDPOINT` is non-empty (after `strings.TrimSpace`) |
-| **Logs (zap → OTLP)** | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` **or** `OTEL_EXPORTER_OTLP_ENDPOINT` is non-empty                                |
+| Condition |
+|-----------|
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` (used if the metrics-specific variable is unset) |
 
-They can be enabled independently: metrics-only endpoint exports metrics only; logs-only endpoint attaches OTLP for logs
-and **tees** them with stdout JSON.
+If **neither** is set, no OTLP client is started; DNS/policy behavior is unchanged.
 
-### Common environment variables
+### Environment variables
 
-| Variable                              | Description                                                                                                             |
-|---------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT`         | Shared OTLP HTTP base URL (e.g. `http://otel-collector:4318`). Used when metrics/logs endpoints are not set separately. |
-| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Metrics only; if set, it **takes precedence** over the shared endpoint.                                                 |
-| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`    | Logs only; if set, it **takes precedence** over the shared endpoint.                                                    |
-| `OPENSANDBOX_EGRESS_SANDBOX_ID`       | Optional. When non-empty, sets the **`osbx.id`** field on the Resource and in structured logs.                          |
+| Variable | Role |
+|----------|------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP HTTP base URL for metrics when `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` is unset (e.g. `http://otel-collector:4318`). |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | If set, used for metrics instead of the shared endpoint. |
+| `OPENSANDBOX_EGRESS_SANDBOX_ID` | Optional. Adds **`sandbox_id`** to OTLP resource, **every metric** sample, and the default fields on **all** log lines (same value). |
+| `OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS` | Optional. Comma-separated **`key=value`** pairs appended to **every metric** and merged into the **root logger** (low-cardinality only). First `=` splits key and value per segment. |
+| `OPENSANDBOX_EGRESS_LOG_LEVEL` | Log level for zap (e.g. `info`, `warn`). |
+| `OPENSANDBOX_LOG_OUTPUT` | Where zap writes (see shared logger); default is stdout JSON. |
 
-Other OTLP HTTP exporter behavior (protocol, headers, timeout, compression, etc.) follows the **OpenTelemetry Go SDK**
-conventions for `OTEL_EXPORTER_OTLP_*`;
-see [SDK environment variables](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/).
+Other `OTEL_EXPORTER_OTLP_*` options (headers, timeout, compression, etc.) follow the [OpenTelemetry SDK environment variable](https://opentelemetry.io/docs/specs/otel/configuration/sdk-environment-variables/) conventions for the Go HTTP exporter.
 
-Variables **not read** by this implementation include: `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER`,
-`OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`. Egress uses a **fixed** `service.name` (see table below).
+**Not** used by this binary for resource naming: `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`. **`service.name`** on the OTLP resource is set to **`opensandbox-egress-<version>`**.
 
-### Local log level
+### OTLP misconfiguration
 
-Structured logs and OTLP share the same zap pipeline. **`OPENSANDBOX_EGRESS_LOG_LEVEL`** (e.g. `info` / `warn`) controls
-which levels are emitted; levels filtered out are not sent to OTLP either.
+If OTLP initialization fails (e.g. invalid endpoint), egress **continues** to run; metrics export is disabled and a warning is logged.
 
 ---
 
-## Resource attributes
+## Resource (OTLP metrics)
 
-When exporting metrics and logs, the Resource includes at least:
-
-| Attribute      | Value                                                                        |
-|----------------|------------------------------------------------------------------------------|
-| `service.name` | Fixed **`opensandbox-egress`**                                               |
-| `osbx.id`      | Set when **`OPENSANDBOX_EGRESS_SANDBOX_ID`** is non-empty; otherwise omitted |
+| Attribute | Meaning |
+|-----------|---------|
+| `service.name` | `opensandbox-egress-<version>` |
+| `sandbox_id` | Present when `OPENSANDBOX_EGRESS_SANDBOX_ID` is set |
 
 ---
 
-## Metrics reference
+## Metrics
 
-Meter name: `opensandbox/egress`. Instrument names and behavior:
+**Meter:** `opensandbox/egress`. All instruments below inherit **`sandbox_id`** and **`OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS`** when configured.
 
-| Name                               | Type             | Unit / notes | When it fires                                                                                                                                                                                                       |
-|------------------------------------|------------------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `egress.dns.query.duration`        | Histogram        | `s`          | After an upstream **forward** when the policy **allows** the query; records duration in seconds for both **success** and **forward error**. Policy **deny** does not perform a forward, so **no** histogram sample. |
-| `egress.policy.denied_total`       | Counter          | —            | Incremented by **1** when a DNS query is **denied** by policy.                                                                                                                                                      |
-| `egress.nftables.updates.count`    | Counter          | —            | Incremented by **1** after each successful **`nftables.Manager.ApplyStatic`** (including successful retry without delete-table) or successful **`AddResolvedIPs`**.                                                 |
-| `egress.nftables.rules.count`      | Observable Gauge | `{element}`  | **Approximate** policy size after the last successful static apply, updated via `NftRuleCountFromPolicy` (egress rule count + static allow/deny set element counts).                                                |
-| `egress.system.memory.usage_bytes` | Observable Gauge | `By`         | **System** RAM in use (Linux: **MemTotal − MemAvailable** from `/proc/meminfo`; fallback **MemTotal − MemFree**; non-Linux: **0**).                                                                                 |
-| `egress.system.cpu.utilization`    | Observable Gauge | `1`          | **CPU busy ratio** (0–1) since last scrape: non-idle jiffies / total jiffies on the aggregate `cpu` line in `/proc/stat` (Linux). **First** scrape after start is **0** (no prior sample). Non-Linux: **0**.          |
-
-If OTLP metrics are **not** enabled (no endpoint), these instruments are not registered and `Record*` calls are no-ops.
+| Name | Type | Unit | Meaning |
+|------|------|------|--------|
+| `egress.dns.query.duration` | Histogram | `s` | Time spent on **upstream DNS forward** after policy **allow**. Recorded for success and forward-error paths. **Not** recorded when policy **denies** (no forward). |
+| `egress.policy.denied_total` | Counter | — | +1 per DNS query **denied** by policy. |
+| `egress.nftables.updates.count` | Counter | — | +1 per successful **nftables** static apply (including retry path) or successful **dynamic resolved-IP** update. |
+| `egress.nftables.rules.count` | Observable gauge | `{element}` | **Approximate** rule/set size after the last successful static apply (policy rows + static allow/deny set members). **0** in dns-only mode or before any apply. |
+| `egress.system.memory.usage_bytes` | Observable gauge | `By` | Host RAM in use (Linux: from `/proc/meminfo`; **0** on non-Linux). |
+| `egress.system.cpu.utilization` | Observable gauge | `1` | CPU busy ratio **0–1** between scrapes (Linux `/proc/stat`). First scrape after start **0**; **0** on non-Linux. |
 
 ---
 
-## Structured logs reference
+## Structured logs (JSON)
 
-All logs below go through **zap**. When OTLP logs are enabled, the **same fields** are sent to OTLP via **otelzap**. The
-**`osbx.*`** prefix matches OSEP.
+Logs are **not** exported via OTLP. Use **`opensandbox.event`** to filter by event family.
 
-### Outbound access (DNS path)
+**Always on the root logger when set:** `sandbox_id` and any keys from **`OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS`** (aligned with metric dimensions).
 
-| Field         | Description                                                                            |
-|---------------|----------------------------------------------------------------------------------------|
-| `osbx.event`  | Always **`egress.outbound`**                                                           |
-| `osbx.result` | `allow` \| `error` (policy **deny** does not emit this log)                             |
-| `osbx.id`     | From `OPENSANDBOX_EGRESS_SANDBOX_ID` when set                                          |
-| `osbx.host`   | Normalized QNAME (lowercase, trailing dot stripped); name-based queries                |
-| `osbx.ips`    | Resolved IPv4/IPv6 strings when allowed and A/AAAA records exist                       |
-| `osbx.peer`   | Reserved for IP-only paths; the DNS proxy path primarily uses `osbx.host` / `osbx.ips` |
-| `osbx.err`    | Short error when `osbx.result` is `error`                                              |
+### Outbound DNS (`opensandbox.event` = `egress.outbound`)
 
-**Instrumentation:** `components/egress/pkg/dnsproxy/proxy.go` (`serveDNS`: allow / forward error only; deny uses metrics + optional webhook, no structured outbound log).
+Emitted on **allow** path (with resolution or forward error). Policy **deny** does not emit this event (see `egress.policy.denied_total`).
 
-**Level:** `info` (forward failures also emit the existing `Warnf` line).
+| Field | Meaning |
+|-------|---------|
+| `target.host` | Query name (normalized: lowercase, no trailing dot). |
+| `target.ips` | Resolved A/AAAA addresses when present. |
+| `peer` | Destination IP when the path is **IP-only** (no hostname). |
+| `error` | Short message if upstream DNS forward failed. |
 
 ### Policy lifecycle
 
-| `osbx.event`           | Level        | Description                                                                                       |
-|------------------------|--------------|---------------------------------------------------------------------------------------------------|
-| `egress.loaded`        | info         | After the **initial policy** is loaded at startup                                                 |
-| `egress.updated`       | info         | After a successful **`POST`/`PUT`/`PATCH` `/policy`** or **empty-body reset**                     |
-| `egress.update_failed` | warn / error | Validation failures, persist failures, nft apply failures, etc. (warn vs error reflects severity) |
+| `opensandbox.event` | Level | Meaning |
+|---------------------|-------|---------|
+| `egress.loaded` | info | Initial effective policy is loaded (startup). |
+| `egress.updated` | info | Policy API applied successfully; **`rules`** reflects **this request only** (PATCH body, POST/PUT body, or reset). |
+| `egress.update_failed` | warn / error | Validation, persistence, or apply failure; includes **`error`**. |
 
-**Common fields:** `osbx.src` (e.g. `policy_file` / `env` / `default` / `http`), `osbx.default`, `osbx.rule_count`,
-`osbx.rules` (rule summary array), `osbx.err` on failure.
+**Additional fields (policy events):**
 
-**Instrumentation:** `components/egress/policy_utils.go` (`logEgressLoaded`, etc.), `components/egress/main.go` (
-`logEgressLoaded` at startup), `components/egress/policy_server.go` (success and failure paths).
-
----
-
-## Source code quick reference
-
-| Topic                                    | Path                                                                                   |
-|------------------------------------------|----------------------------------------------------------------------------------------|
-| Shared `Init`                            | `components/internal/telemetry/init.go`                                                |
-| Egress bootstrap                         | `components/egress/pkg/telemetry/init.go`                                              |
-| Egress metric registration and `Record*` | `components/egress/pkg/telemetry/metrics.go`                                           |
-| Zap tee (stdout + OTLP core)             | `components/internal/logger/zap.go` (`NewWithExtraCores`), `components/egress/main.go` |
+| Field | Meaning |
+|-------|---------|
+| `egress.default` | Effective default action after apply (`allow` / `deny`). |
+| `rules` | For **`egress.loaded`**: full policy snapshot. For **`egress.updated`**: delta for this request only. |

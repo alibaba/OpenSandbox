@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package telemetry provides shared OpenTelemetry OTLP setup (metrics + logs via otelzap) for OpenSandbox binaries.
+// Package telemetry provides shared OpenTelemetry OTLP metrics setup for OpenSandbox binaries.
 package telemetry
 
 import (
@@ -21,57 +21,46 @@ import (
 	"os"
 	"strings"
 
-	"go.opentelemetry.io/contrib/bridges/otelzap"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
-	logsdk "go.opentelemetry.io/otel/sdk/log"
+	"go.opentelemetry.io/otel/metric/noop"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
-	"go.opentelemetry.io/otel/trace/noop"
-	"go.uber.org/zap/zapcore"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 )
 
-// Config controls OTLP export and the zap→OTLP log bridge. Endpoints follow standard OTEL env vars
-// (OTEL_EXPORTER_OTLP_*); see metricsEnabled/logsEnabled.
+// Config controls OTLP metrics export. Endpoints follow standard OTEL env vars; see metricsEnabled.
 type Config struct {
-	ServiceName string
-	// ZapScope names the otelzap core (e.g. opensandbox.egress). Empty uses ServiceName.
-	ZapScope           string
+	ServiceName        string
 	ResourceAttributes []attribute.KeyValue
 	RegisterMetrics    func() error
 }
 
-// Init sets a noop TracerProvider, optionally MeterProvider + LoggerProvider with OTLP HTTP exporters,
-// and returns a zapcore.Core for Tee when logs export is on. Shutdown must be called on exit.
-func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error, otelZapCore zapcore.Core, err error) {
+// Init sets a noop TracerProvider, optionally MeterProvider with OTLP HTTP exporter.
+// Shutdown must be called on exit.
+func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error, err error) {
 	if strings.TrimSpace(cfg.ServiceName) == "" {
-		return nil, nil, errors.New("telemetry: ServiceName is required")
-	}
-	zapScope := strings.TrimSpace(cfg.ZapScope)
-	if zapScope == "" {
-		zapScope = cfg.ServiceName
+		return nil, errors.New("telemetry: ServiceName is required")
 	}
 
-	otel.SetTracerProvider(noop.NewTracerProvider())
+	otel.SetTracerProvider(tracenoop.NewTracerProvider())
 
 	res, err := buildResource(ctx, cfg.ServiceName, cfg.ResourceAttributes)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var (
 		mp            *sdkmetric.MeterProvider
-		lp            *logsdk.LoggerProvider
 		shutdownFuncs []func(context.Context) error
 	)
 
 	if metricsEnabled() {
 		mexp, err := otlpmetrichttp.New(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		reader := sdkmetric.NewPeriodicReader(mexp)
 		mp = sdkmetric.NewMeterProvider(
@@ -83,29 +72,10 @@ func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error
 		if cfg.RegisterMetrics != nil {
 			if err := cfg.RegisterMetrics(); err != nil {
 				_ = mp.Shutdown(ctx)
-				return nil, nil, err
+				otel.SetMeterProvider(noop.NewMeterProvider())
+				return nil, err
 			}
 		}
-	}
-
-	if logsEnabled() {
-		lexp, err := otlploghttp.New(ctx)
-		if err != nil {
-			if mp != nil {
-				_ = mp.Shutdown(ctx)
-			}
-			return nil, nil, err
-		}
-		lp = logsdk.NewLoggerProvider(
-			logsdk.WithResource(res),
-			logsdk.WithProcessor(logsdk.NewBatchProcessor(lexp)),
-		)
-		shutdownFuncs = append(shutdownFuncs, lp.Shutdown)
-		otelZapCore = otelzap.NewCore(
-			zapScope,
-			otelzap.WithLoggerProvider(lp),
-			otelzap.WithVersion(otelzap.Version),
-		)
 	}
 
 	shutdown = func(ctx context.Context) error {
@@ -117,7 +87,7 @@ func Init(ctx context.Context, cfg Config) (shutdown func(context.Context) error
 		}
 		return errors.Join(errs...)
 	}
-	return shutdown, otelZapCore, nil
+	return shutdown, nil
 }
 
 func buildResource(ctx context.Context, serviceName string, extra []attribute.KeyValue) (*resource.Resource, error) {
@@ -132,10 +102,6 @@ func buildResource(ctx context.Context, serviceName string, extra []attribute.Ke
 
 func metricsEnabled() bool {
 	return firstEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT"), os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")) != ""
-}
-
-func logsEnabled() bool {
-	return firstEndpoint(os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"), os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")) != ""
 }
 
 func firstEndpoint(primary, fallback string) string {

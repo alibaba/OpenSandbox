@@ -175,7 +175,7 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 		if !s.commitPolicy(r.Context(), w, def, "reset") {
 			return
 		}
-		logEgressUpdated(s.proxy.CurrentPolicy())
+		logEgressUpdated(def.DefaultAction, nil)
 		log.Infof("policy API: proxy and nftables updated to deny_all")
 		writeJSON(w, http.StatusOK, policyStatusResponse{
 			Status: "ok",
@@ -200,7 +200,7 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	if !s.commitPolicy(r.Context(), w, pol, "post") {
 		return
 	}
-	logEgressUpdated(s.proxy.CurrentPolicy())
+	logEgressUpdated(pol.DefaultAction, pol.Egress)
 	log.Infof("policy API: proxy and nftables updated successfully")
 	writeJSON(w, http.StatusOK, policyStatusResponse{
 		Status:          "ok",
@@ -252,7 +252,7 @@ func (s *policyServer) handlePatch(w http.ResponseWriter, r *http.Request) {
 	if !s.commitPolicy(r.Context(), w, newPolicy, "patch") {
 		return
 	}
-	logEgressUpdated(s.proxy.CurrentPolicy())
+	logEgressUpdated(newPolicy.DefaultAction, patchRules)
 	log.Infof("policy API: patch applied successfully")
 	writeJSON(w, http.StatusOK, policyStatusResponse{
 		Status:          "ok",
