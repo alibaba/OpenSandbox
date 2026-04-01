@@ -23,7 +23,7 @@ import click
 from opensandbox.models.sandboxes import NetworkPolicy, SandboxFilter
 
 from opensandbox_cli.client import ClientContext
-from opensandbox_cli.utils import DURATION, KEY_VALUE, handle_errors
+from opensandbox_cli.utils import DURATION, KEY_VALUE, handle_errors, parse_duration
 
 
 @click.group("sandbox", invoke_without_command=True)
@@ -41,7 +41,7 @@ sandbox_group.name = "sandbox"
 # ---- create ---------------------------------------------------------------
 
 @sandbox_group.command("create")
-@click.option("--image", "-i", required=True, help="Container image (e.g. python:3.11).")
+@click.option("--image", "-i", required=False, help="Container image (e.g. python:3.11). Defaults to config value if set.")
 @click.option("--timeout", "-t", "timeout", type=DURATION, default=None, help="Sandbox lifetime (e.g. 10m, 1h).")
 @click.option("--env", "-e", "envs", multiple=True, type=KEY_VALUE, help="Environment variable (KEY=VALUE). Repeatable.")
 @click.option("--metadata", "-m", "metadata_kv", multiple=True, type=KEY_VALUE, help="Metadata (KEY=VALUE). Repeatable.")
@@ -54,7 +54,7 @@ sandbox_group.name = "sandbox"
 @handle_errors
 def sandbox_create(
     obj: ClientContext,
-    image: str,
+    image: str | None,
     timeout: timedelta | None,
     envs: tuple[tuple[str, str], ...],
     metadata_kv: tuple[tuple[str, str], ...],
@@ -66,6 +66,18 @@ def sandbox_create(
 ) -> None:
     """Create a new sandbox."""
     from opensandbox.sync.sandbox import SandboxSync
+
+    if image is None:
+        image = obj.resolved_config.get("default_image")
+    if not image:
+        raise click.ClickException(
+            "Sandbox image is required. Pass --image or set defaults.image in the CLI config."
+        )
+
+    if timeout is None:
+        default_timeout = obj.resolved_config.get("default_timeout")
+        if default_timeout:
+            timeout = parse_duration(default_timeout)
 
     kwargs: dict = {
         "connection_config": obj.connection_config,

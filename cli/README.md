@@ -68,6 +68,14 @@ osb config set connection.protocol http
 osb sandbox create --image python:3.12
 ```
 
+Or configure defaults once and omit repeated flags:
+
+```bash
+osb config set defaults.image python:3.12
+osb config set defaults.timeout 15m
+osb sandbox create
+```
+
 ![Create Sandbox](assets/cli_create_sandbox.png)
 
 ### Step 4: List Sandboxes

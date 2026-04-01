@@ -154,6 +154,32 @@ class TestSandboxList:
         mock_mgr.list_sandbox_infos.assert_called_once()
 
 
+class TestSandboxCreate:
+    def test_create_uses_config_defaults(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_sb.id = "sb-123"
+        mock_ctx = _build_mock_client_context(sandbox=mock_sb)
+        mock_ctx.resolved_config["default_image"] = "python:3.12"
+        mock_ctx.resolved_config["default_timeout"] = "15m"
+
+        with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
+             patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx), \
+             patch("opensandbox_cli.main.OutputFormatter", side_effect=lambda fmt, **kw: OutputFormatter(fmt, **kw)), \
+             patch("opensandbox.sync.sandbox.SandboxSync.create", return_value=mock_sb) as mock_create:
+            mock_resolve.return_value = mock_ctx.resolved_config
+            result = runner.invoke(cli, ["-o", "json", "sandbox", "create"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        mock_create.assert_called_once()
+        assert mock_create.call_args.args[0] == "python:3.12"
+        assert mock_create.call_args.kwargs["timeout"].total_seconds() == 900
+
+    def test_create_requires_image_when_no_default(self, runner: CliRunner) -> None:
+        result = _invoke(runner, ["sandbox", "create"])
+        assert result.exit_code != 0
+        assert "Sandbox image is required" in result.output
+
+
 class TestSandboxKill:
     def test_kill_multiple(self, runner: CliRunner) -> None:
         mock_mgr = MagicMock()
