@@ -10,8 +10,10 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'workflows/kubernetes-nightly-build.yml'
+      - '.github/workflows/kubernetes-nightly-build.yml'
       - 'scripts/python-k8s-e2e.sh'
+      - 'scripts/python-k8s-e2e-ingress.sh'
+      - 'scripts/common/kubernetes-e2e.sh'
       - 'kubernetes/charts/**'
 
 concurrency:
@@ -20,13 +22,29 @@ concurrency:
 
 jobs:
   k8s-mini-e2e:
-    name: Kubernetes mini E2E
+    name: Kubernetes mini E2E (${{ matrix.variant }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: direct
+            script: scripts/python-k8s-e2e.sh
+            e2e_gateway_route_mode: ""
+          - variant: ingress-header
+            script: scripts/python-k8s-e2e-ingress.sh
+            e2e_gateway_route_mode: ""
+          - variant: ingress-uri
+            script: scripts/python-k8s-e2e-ingress.sh
+            e2e_gateway_route_mode: uri
     env:
       KIND_CLUSTER: opensandbox-e2e
       KIND_K8S_VERSION: v1.30.4
       KUBECONFIG_PATH: /tmp/opensandbox-kind-kubeconfig
       KUBECONFIG: /tmp/opensandbox-kind-kubeconfig
+      # tests/base_e2e_test.get_e2e_sandbox_resource (scripts/common/kubernetes-e2e.sh)
+      OPENSANDBOX_E2E_SANDBOX_CPU: 250m
+      OPENSANDBOX_E2E_SANDBOX_MEMORY: 512Mi
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -56,8 +74,9 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Run Kubernetes runtime E2E
-        run: |
-          bash ./scripts/python-k8s-e2e.sh
+        env:
+          E2E_GATEWAY_ROUTE_MODE: ${{ matrix.e2e_gateway_route_mode }}
+        run: bash "./${{ matrix.script }}"
 
       - name: Dump kind diagnostics
         if: always()
@@ -79,9 +98,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: python-k8s-e2e-logs
+          name: python-k8s-e2e-logs-${{ matrix.variant }}
           path: |
             /tmp/opensandbox-server-port-forward.log
+            /tmp/opensandbox-ingress-gateway-port-forward.log
+          if-no-files-found: ignore
           retention-days: 5
 
       - name: Clean up Kind cluster

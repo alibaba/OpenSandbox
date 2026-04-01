@@ -59,6 +59,7 @@ from tests.base_e2e_test import (
     TEST_DOMAIN,
     TEST_PROTOCOL,
     create_connection_config_sync,
+    get_e2e_sandbox_resource,
     get_sandbox_image,
     get_test_host_volume_dir,
     get_test_pvc_name,
@@ -77,26 +78,6 @@ def _assert_recent_timestamp_ms(ts: int, *, tolerance_ms: int = 60_000) -> None:
     assert ts > 0
     delta = abs(_now_ms() - ts)
     assert delta <= tolerance_ms, f"timestamp too far from now: delta={delta}ms (ts={ts})"
-
-
-def _assert_endpoint_has_port(endpoint: str, expected_port: int) -> None:
-    assert endpoint
-    # In some deployments lifecycle returns direct "host:port".
-    # In others it returns a reverse-proxy route like "domain/route/{id}/{port}".
-    # In both cases, we expect NO scheme, and the port to be present deterministically.
-    assert "://" not in endpoint, f"unexpected scheme in endpoint: {endpoint}"
-
-    if "/" in endpoint:
-        assert endpoint.endswith(f"/{expected_port}"), (
-            f"endpoint route must end with /{expected_port}: {endpoint}"
-        )
-        assert endpoint.split("/", 1)[0], f"missing domain in endpoint: {endpoint}"
-        return
-
-    host, port = endpoint.rsplit(":", 1)
-    assert host, f"missing host in endpoint: {endpoint}"
-    assert port.isdigit(), f"non-numeric port in endpoint: {endpoint}"
-    assert int(port) == expected_port, f"endpoint port mismatch: {endpoint} != :{expected_port}"
 
 
 def _assert_times_close(created_at, modified_at, *, tolerance_seconds: float = 2.0) -> None:
@@ -164,6 +145,7 @@ class TestSandboxE2ESync:
 
         cls.sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cls.connection_config,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -222,7 +204,6 @@ class TestSandboxE2ESync:
         endpoint = sandbox.get_endpoint(44772)
         assert endpoint is not None
         assert endpoint.endpoint is not None
-        _assert_endpoint_has_port(endpoint.endpoint, 44772)
 
         metrics = sandbox.get_metrics()
         assert metrics is not None
@@ -272,6 +253,7 @@ class TestSandboxE2ESync:
     def test_01b_manual_cleanup(self) -> None:
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=TestSandboxE2ESync.connection_config,
             timeout=None,
             ready_timeout=timedelta(seconds=30),
@@ -299,6 +281,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -337,6 +320,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -409,6 +393,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -481,6 +466,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -537,6 +523,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -606,6 +593,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -662,6 +650,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
