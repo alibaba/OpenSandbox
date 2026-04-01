@@ -62,6 +62,11 @@ class BannerGroup(click.Group):
 @click.option("--domain", envvar="OPEN_SANDBOX_DOMAIN", default=None, help="API server domain (e.g. localhost:8080).")
 @click.option("--protocol", type=click.Choice(["http", "https"]), default=None, help="Protocol (http/https).")
 @click.option("--timeout", "request_timeout", type=int, default=None, help="Request timeout in seconds.")
+@click.option(
+    "--use-server-proxy/--no-use-server-proxy",
+    default=None,
+    help="Route execd and endpoint traffic through the sandbox server proxy.",
+)
 @click.option("-o", "--output", "output_format", type=click.Choice(["table", "json", "yaml"]), default=None, help="Output format.")
 @click.option("--config", "config_path", type=click.Path(exists=False, path_type=Path), default=None, help="Config file path.")
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose/debug output.")
@@ -74,6 +79,7 @@ def cli(
     domain: str | None,
     protocol: str | None,
     request_timeout: int | None,
+    use_server_proxy: bool | None,
     output_format: str | None,
     config_path: Path | None,
     verbose: bool,
@@ -90,6 +96,7 @@ def cli(
         cli_domain=domain,
         cli_protocol=protocol,
         cli_timeout=request_timeout,
+        cli_use_server_proxy=use_server_proxy,
         cli_output=output_format,
         config_path=config_path,
     )

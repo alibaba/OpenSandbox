@@ -74,6 +74,7 @@ class TestResolveConfig:
         assert result["domain"] is None
         assert result["protocol"] == "http"
         assert result["request_timeout"] == 30
+        assert result["use_server_proxy"] is False
         assert result["output_format"] == "table"
         assert result["color"] is True
 
@@ -81,7 +82,7 @@ class TestResolveConfig:
         cfg = tmp_path / "config.toml"
         cfg.write_text(
             '[connection]\napi_key = "file-key"\ndomain = "file.host"\n'
-            'protocol = "https"\nrequest_timeout = 60\n\n'
+            'protocol = "https"\nrequest_timeout = 60\nuse_server_proxy = true\n\n'
             '[output]\nformat = "json"\ncolor = false\n\n'
             '[defaults]\nimage = "node:20"\ntimeout = "15m"\n'
         )
@@ -90,6 +91,7 @@ class TestResolveConfig:
         assert result["domain"] == "file.host"
         assert result["protocol"] == "https"
         assert result["request_timeout"] == 60
+        assert result["use_server_proxy"] is True
         assert result["output_format"] == "json"
         assert result["color"] is False
         assert result["default_image"] == "node:20"
@@ -103,6 +105,7 @@ class TestResolveConfig:
         monkeypatch.setenv("OPEN_SANDBOX_DOMAIN", "env.host")
         monkeypatch.setenv("OPEN_SANDBOX_PROTOCOL", "https")
         monkeypatch.setenv("OPEN_SANDBOX_REQUEST_TIMEOUT", "120")
+        monkeypatch.setenv("OPEN_SANDBOX_USE_SERVER_PROXY", "true")
         monkeypatch.setenv("OPEN_SANDBOX_OUTPUT", "yaml")
 
         result = resolve_config(config_path=cfg)
@@ -110,6 +113,7 @@ class TestResolveConfig:
         assert result["domain"] == "env.host"
         assert result["protocol"] == "https"
         assert result["request_timeout"] == 120
+        assert result["use_server_proxy"] is True
         assert result["output_format"] == "yaml"
 
     def test_cli_overrides_everything(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -122,6 +126,7 @@ class TestResolveConfig:
             cli_domain="cli.host",
             cli_protocol="https",
             cli_timeout=999,
+            cli_use_server_proxy=True,
             cli_output="yaml",
             config_path=cfg,
         )
@@ -129,6 +134,7 @@ class TestResolveConfig:
         assert result["domain"] == "cli.host"
         assert result["protocol"] == "https"
         assert result["request_timeout"] == 999
+        assert result["use_server_proxy"] is True
         assert result["output_format"] == "yaml"
 
     def test_invalid_timeout_env_falls_through(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,6 +144,13 @@ class TestResolveConfig:
         result = resolve_config(config_path=cfg)
         # Falls through to default 30
         assert result["request_timeout"] == 30
+
+    def test_invalid_bool_env_falls_through(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "empty.toml"
+        cfg.write_text("")
+        monkeypatch.setenv("OPEN_SANDBOX_USE_SERVER_PROXY", "not-a-bool")
+        result = resolve_config(config_path=cfg)
+        assert result["use_server_proxy"] is False
 
 
 # ---------------------------------------------------------------------------

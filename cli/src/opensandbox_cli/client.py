@@ -71,6 +71,7 @@ class ClientContext:
                 domain=cfg.get("domain"),
                 protocol=cfg.get("protocol", "http"),
                 request_timeout=timedelta(seconds=cfg.get("request_timeout", 30)),
+                use_server_proxy=cfg.get("use_server_proxy", False),
                 transport=self._shared_transport,
             )
         return self._connection_config

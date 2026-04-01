@@ -48,6 +48,7 @@ def _build_mock_client_context(
         "domain": "localhost:8080",
         "protocol": "http",
         "request_timeout": 30,
+        "use_server_proxy": False,
         "output_format": output_format,
         "color": False,
         "default_image": None,
