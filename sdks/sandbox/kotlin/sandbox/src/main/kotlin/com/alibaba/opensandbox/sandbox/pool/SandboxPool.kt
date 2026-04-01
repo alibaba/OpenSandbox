@@ -23,6 +23,7 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolAcquireFailedExcept
 import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolEmptyException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolNotRunningException
 import com.alibaba.opensandbox.sandbox.domain.pool.AcquirePolicy
+import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolConfig
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolCreationSpec
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolLifecycleState
@@ -332,6 +333,13 @@ class SandboxPool internal constructor(
             lastError = reconcileState.lastError,
             inFlightOperations = inFlightOperations.get(),
         )
+    }
+
+    /**
+     * Returns a point-in-time snapshot of idle entries visible from the backing state store for this pool.
+     */
+    fun snapshotIdleEntries(): List<IdleEntry> {
+        return stateStore.snapshotIdleEntries(config.poolName)
     }
 
     /**

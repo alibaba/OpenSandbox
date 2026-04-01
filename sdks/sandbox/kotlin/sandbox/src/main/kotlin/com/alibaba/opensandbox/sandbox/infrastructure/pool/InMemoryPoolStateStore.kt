@@ -16,6 +16,7 @@
 
 package com.alibaba.opensandbox.sandbox.infrastructure.pool
 
+import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolStateStore
 import com.alibaba.opensandbox.sandbox.domain.pool.StoreCounters
 import java.time.Duration
@@ -115,6 +116,14 @@ class InMemoryPoolStateStore : PoolStateStore {
         return StoreCounters(idleCount = state.map.size)
     }
 
+    override fun snapshotIdleEntries(poolName: String): List<IdleEntry> {
+        val state = pools[poolName] ?: return emptyList()
+        val now = Instant.now()
+        state.map.entries.removeIf { it.value.expiresAt <= now }
+        state.queue.removeIf { sandboxId -> !state.map.containsKey(sandboxId) }
+        return state.queue.mapNotNull { sandboxId -> state.map[sandboxId] }
+    }
+
     override fun getMaxIdle(poolName: String): Int? = null
 
     override fun setMaxIdle(
@@ -123,8 +132,6 @@ class InMemoryPoolStateStore : PoolStateStore {
     ) {
         // Single-node: no shared state; pool uses local currentMaxIdle.
     }
-
-    private data class IdleEntry(val sandboxId: String, val expiresAt: Instant)
 
     private class PoolIdleState {
         val map = ConcurrentHashMap<String, IdleEntry>()

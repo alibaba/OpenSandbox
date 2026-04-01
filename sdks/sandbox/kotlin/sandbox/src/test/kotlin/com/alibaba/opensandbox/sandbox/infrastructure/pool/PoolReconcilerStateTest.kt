@@ -308,6 +308,8 @@ class PoolReconcilerStateTest {
 
         override fun snapshotCounters(poolName: String): StoreCounters = StoreCounters(idleCount = 0)
 
+        override fun snapshotIdleEntries(poolName: String) = emptyList<com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry>()
+
         override fun getMaxIdle(poolName: String): Int? = null
 
         override fun setMaxIdle(
@@ -358,6 +360,8 @@ class PoolReconcilerStateTest {
         }
 
         override fun snapshotCounters(poolName: String): StoreCounters = StoreCounters(idleCount = 0)
+
+        override fun snapshotIdleEntries(poolName: String) = emptyList<com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry>()
 
         override fun getMaxIdle(poolName: String): Int? = null
 
@@ -411,6 +415,8 @@ class PoolReconcilerStateTest {
         }
 
         override fun snapshotCounters(poolName: String): StoreCounters = StoreCounters(idleCount = 0)
+
+        override fun snapshotIdleEntries(poolName: String) = emptyList<com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry>()
 
         override fun getMaxIdle(poolName: String): Int? = null
 
@@ -478,6 +484,8 @@ class PoolReconcilerStateTest {
 
         override fun snapshotCounters(poolName: String): StoreCounters = StoreCounters(idleCount = putIdleIds.size)
 
+        override fun snapshotIdleEntries(poolName: String) = emptyList<com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry>()
+
         override fun getMaxIdle(poolName: String): Int? = null
 
         override fun setMaxIdle(
@@ -534,6 +542,8 @@ class PoolReconcilerStateTest {
         }
 
         override fun snapshotCounters(poolName: String): StoreCounters = StoreCounters(idleCount = 0)
+
+        override fun snapshotIdleEntries(poolName: String) = emptyList<com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry>()
 
         override fun getMaxIdle(poolName: String): Int? = null
 
