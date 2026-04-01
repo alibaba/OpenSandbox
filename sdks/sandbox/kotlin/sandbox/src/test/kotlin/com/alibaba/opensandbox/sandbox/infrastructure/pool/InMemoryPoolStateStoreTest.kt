@@ -17,7 +17,6 @@
 package com.alibaba.opensandbox.sandbox.infrastructure.pool
 
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolStateStore
-import com.alibaba.opensandbox.sandbox.domain.pool.StoreCounters
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
