@@ -180,6 +180,37 @@ class TestSandboxCreate:
         assert result.exit_code != 0
         assert "Sandbox image is required" in result.output
 
+    def test_create_loads_volumes_from_file(self, runner: CliRunner, tmp_path: Path) -> None:
+        mock_sb = MagicMock()
+        mock_sb.id = "sb-123"
+        volumes_path = tmp_path / "volumes.json"
+        volumes_path.write_text(json.dumps([
+            {
+                "name": "workdir",
+                "host": {"path": "/tmp/workdir"},
+                "mountPath": "/workspace",
+            }
+        ]))
+
+        mock_ctx = _build_mock_client_context(sandbox=mock_sb)
+        with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
+             patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx), \
+             patch("opensandbox_cli.main.OutputFormatter", side_effect=lambda fmt, **kw: OutputFormatter(fmt, **kw)), \
+             patch("opensandbox.sync.sandbox.SandboxSync.create", return_value=mock_sb) as mock_create:
+            mock_resolve.return_value = mock_ctx.resolved_config
+            result = runner.invoke(
+                cli,
+                ["-o", "json", "sandbox", "create", "--image", "python:3.12", "--volumes-file", str(volumes_path)],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0
+        mock_create.assert_called_once()
+        volumes = mock_create.call_args.kwargs["volumes"]
+        assert len(volumes) == 1
+        assert volumes[0].name == "workdir"
+        assert volumes[0].mount_path == "/workspace"
+
 
 class TestSandboxKill:
     def test_kill_multiple(self, runner: CliRunner) -> None:

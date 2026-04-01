@@ -76,6 +76,15 @@ osb config set defaults.timeout 15m
 osb sandbox create
 ```
 
+You can also load network policy and volume mounts from JSON files:
+
+```bash
+osb sandbox create \
+  --image python:3.12 \
+  --network-policy-file network-policy.json \
+  --volumes-file volumes.json
+```
+
 ![Create Sandbox](assets/cli_create_sandbox.png)
 
 ### Step 4: List Sandboxes

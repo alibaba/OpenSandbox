@@ -20,7 +20,7 @@ import json
 from datetime import timedelta
 
 import click
-from opensandbox.models.sandboxes import NetworkPolicy, SandboxFilter
+from opensandbox.models.sandboxes import NetworkPolicy, SandboxFilter, Volume
 
 from opensandbox_cli.client import ClientContext
 from opensandbox_cli.utils import DURATION, KEY_VALUE, handle_errors, parse_duration
@@ -48,6 +48,7 @@ sandbox_group.name = "sandbox"
 @click.option("--resource", "resources_kv", multiple=True, type=KEY_VALUE, help="Resource limit (e.g. cpu=1 memory=2Gi). Repeatable.")
 @click.option("--entrypoint", default=None, help="Entrypoint command (JSON array or shell string).")
 @click.option("--network-policy-file", type=click.Path(exists=True), default=None, help="Network policy JSON file.")
+@click.option("--volumes-file", type=click.Path(exists=True), default=None, help="Volumes JSON file (list of volume objects).")
 @click.option("--skip-health-check", is_flag=True, default=False, help="Skip waiting for sandbox readiness.")
 @click.option("--ready-timeout", type=DURATION, default=None, help="Max wait time for sandbox readiness (e.g. 30s).")
 @click.pass_obj
@@ -61,6 +62,7 @@ def sandbox_create(
     resources_kv: tuple[tuple[str, str], ...],
     entrypoint: str | None,
     network_policy_file: str | None,
+    volumes_file: str | None,
     skip_health_check: bool,
     ready_timeout: timedelta | None,
 ) -> None:
@@ -101,6 +103,14 @@ def sandbox_create(
     if network_policy_file:
         with open(network_policy_file) as f:
             kwargs["network_policy"] = NetworkPolicy(**json.load(f))
+    if volumes_file:
+        with open(volumes_file) as f:
+            raw_volumes = json.load(f)
+        if not isinstance(raw_volumes, list):
+            raise click.ClickException(
+                f"Volumes file must contain a JSON array, got {type(raw_volumes).__name__}."
+            )
+        kwargs["volumes"] = [Volume(**item) for item in raw_volumes]
 
     with obj.output.spinner("Creating sandbox..."):
         sandbox = SandboxSync.create(image, **kwargs)
