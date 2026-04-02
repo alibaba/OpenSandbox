@@ -438,3 +438,197 @@ func TestStaging_Manager(t *testing.T) {
 	}
 	t.Log("Manager staging test passed")
 }
+
+// TestStaging_VolumeMounts exercises volume mounts on the staging k8s cluster.
+// The PVC "go-sdk-e2e-pvc" must exist in the sandbox namespace.
+func TestStaging_VolumeMounts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	config := stagingConfig(t)
+
+	// PVC read-write
+	t.Run("PVCReadWrite", func(t *testing.T) {
+		sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+			Image:    "python:3.11-slim",
+			Metadata: map[string]string{"test": "staging-vol-pvc-rw"},
+			Volumes: []opensandbox.Volume{
+				{
+					Name:      "pvc-rw",
+					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-e2e-pvc"},
+					MountPath: "/mnt/pvc",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateSandbox with PVC: %v", err)
+		}
+		defer func() { _ = sb.Kill(context.Background()) }()
+
+		// Write and read back
+		exec, err := sb.RunCommand(ctx, "echo 'pvc-staging-test' > /mnt/pvc/go-sdk-test.txt && cat /mnt/pvc/go-sdk-test.txt", nil)
+		if err != nil {
+			t.Fatalf("RunCommand (pvc write/read): %v", err)
+		}
+		t.Logf("PVC rw output: %q", exec.Text())
+		if !strings.Contains(exec.Text(), "pvc-staging-test") {
+			t.Errorf("expected 'pvc-staging-test' in output, got %q", exec.Text())
+		}
+
+		// Cleanup written file
+		sb.RunCommand(ctx, "rm -f /mnt/pvc/go-sdk-test.txt", nil)
+		t.Log("PVC read-write staging test passed")
+	})
+
+	// PVC read-only
+	t.Run("PVCReadOnly", func(t *testing.T) {
+		sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+			Image:    "python:3.11-slim",
+			Metadata: map[string]string{"test": "staging-vol-pvc-ro"},
+			Volumes: []opensandbox.Volume{
+				{
+					Name:      "pvc-ro",
+					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-e2e-pvc"},
+					MountPath: "/mnt/pvc-ro",
+					ReadOnly:  true,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateSandbox with readonly PVC: %v", err)
+		}
+		defer func() { _ = sb.Kill(context.Background()) }()
+
+		// Read should work
+		exec, err := sb.RunCommand(ctx, "ls /mnt/pvc-ro 2>&1; echo exit=$?", nil)
+		if err != nil {
+			t.Fatalf("RunCommand (ls readonly): %v", err)
+		}
+		t.Logf("Readonly PVC ls: %q", exec.Text())
+
+		// Write should fail
+		execW, err := sb.RunCommand(ctx, "touch /mnt/pvc-ro/fail.txt 2>&1; echo exit=$?", nil)
+		if err != nil {
+			t.Fatalf("RunCommand (write readonly PVC): %v", err)
+		}
+		t.Logf("Readonly PVC write attempt: %q", execW.Text())
+		if strings.Contains(execW.Text(), "exit=0") && !strings.Contains(strings.ToLower(execW.Text()), "read-only") {
+			t.Error("write to readonly PVC mount should have failed")
+		}
+
+		t.Log("PVC read-only staging test passed")
+	})
+
+	// PVC with subPath
+	t.Run("PVCSubPath", func(t *testing.T) {
+		sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+			Image:    "python:3.11-slim",
+			Metadata: map[string]string{"test": "staging-vol-pvc-sub"},
+			Volumes: []opensandbox.Volume{
+				{
+					Name:      "pvc-sub",
+					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-e2e-pvc"},
+					MountPath: "/mnt/sub",
+					SubPath:   "go-sdk-subdir",
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateSandbox with PVC subPath: %v", err)
+		}
+		defer func() { _ = sb.Kill(context.Background()) }()
+
+		exec, err := sb.RunCommand(ctx, "echo 'subpath-staging' > /mnt/sub/test.txt && cat /mnt/sub/test.txt", nil)
+		if err != nil {
+			t.Fatalf("RunCommand (subpath): %v", err)
+		}
+		t.Logf("SubPath output: %q", exec.Text())
+		if !strings.Contains(exec.Text(), "subpath-staging") {
+			t.Errorf("expected 'subpath-staging' in output, got %q", exec.Text())
+		}
+
+		sb.RunCommand(ctx, "rm -f /mnt/sub/test.txt", nil)
+		t.Log("PVC subPath staging test passed")
+	})
+}
+
+// TestStaging_NetworkPolicy exercises egress network policy on staging.
+func TestStaging_NetworkPolicy(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	config := stagingConfig(t)
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "staging-network-policy"},
+		NetworkPolicy: &opensandbox.NetworkPolicy{
+			DefaultAction: "deny",
+			Egress: []opensandbox.NetworkRule{
+				{Action: "allow", Target: "api.example.com"},
+			},
+		},
+	})
+	if err != nil {
+		// Server may require egress sidecar image config to be set
+		t.Logf("CreateSandbox with NetworkPolicy: %v", err)
+		t.Skip("NetworkPolicy not available on this server (egress sidecar image may not be configured)")
+	}
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// Get policy
+	policy, err := sb.GetEgressPolicy(ctx)
+	if err != nil {
+		t.Logf("GetEgressPolicy: %v (egress sidecar may not be available)", err)
+		t.Skip("Egress sidecar not available on staging")
+	}
+	t.Logf("Policy: mode=%s status=%s", policy.Mode, policy.Status)
+	if policy.Policy != nil {
+		t.Logf("Rules: %d, defaultAction=%s", len(policy.Policy.Egress), policy.Policy.DefaultAction)
+	}
+
+	// Patch
+	patched, err := sb.PatchEgressRules(ctx, []opensandbox.NetworkRule{
+		{Action: "allow", Target: "cdn.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("PatchEgressRules: %v", err)
+	}
+	if patched.Policy != nil && len(patched.Policy.Egress) < 2 {
+		t.Errorf("expected at least 2 rules after patch, got %d", len(patched.Policy.Egress))
+	}
+	t.Logf("After patch: %d rules", len(patched.Policy.Egress))
+
+	t.Log("Network policy staging test passed")
+}
+
+// TestStaging_CommandWithEnvs verifies env var injection on staging.
+func TestStaging_CommandWithEnvs(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	config := stagingConfig(t)
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "staging-cmd-envs"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	exec, err := sb.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
+		Command: "echo $SDK_TEST_VAR",
+		Envs:    map[string]string{"SDK_TEST_VAR": "staging-env-works"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunCommandWithOpts: %v", err)
+	}
+	t.Logf("Output: %q", exec.Text())
+	if !strings.Contains(exec.Text(), "staging-env-works") {
+		t.Errorf("expected 'staging-env-works' in output, got %q", exec.Text())
+	}
+
+	t.Log("Command with env vars staging test passed")
+}

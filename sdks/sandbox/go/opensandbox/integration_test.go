@@ -1432,7 +1432,7 @@ func TestIntegration_VolumeMounts(t *testing.T) {
 			Volumes: []opensandbox.Volume{
 				{
 					Name:      "pvc-data",
-					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-test-pvc"},
+					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-e2e-pvc"},
 					MountPath: "/mnt/pvc",
 				},
 			},
@@ -1464,7 +1464,7 @@ func TestIntegration_VolumeMounts(t *testing.T) {
 			Volumes: []opensandbox.Volume{
 				{
 					Name:      "pvc-ro",
-					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-test-pvc"},
+					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-e2e-pvc"},
 					MountPath: "/mnt/pvc-ro",
 					ReadOnly:  true,
 				},
@@ -1493,7 +1493,7 @@ func TestIntegration_VolumeMounts(t *testing.T) {
 			Volumes: []opensandbox.Volume{
 				{
 					Name:      "pvc-sub",
-					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-test-pvc"},
+					PVC:       &opensandbox.PVC{ClaimName: "go-sdk-e2e-pvc"},
 					MountPath: "/mnt/sub",
 					SubPath:   "mysubdir",
 				},
