@@ -594,10 +594,14 @@ func TestStaging_NetworkPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PatchEgressRules: %v", err)
 	}
-	if patched.Policy != nil && len(patched.Policy.Egress) < 2 {
-		t.Errorf("expected at least 2 rules after patch, got %d", len(patched.Policy.Egress))
+	if patched.Policy != nil {
+		if len(patched.Policy.Egress) < 2 {
+			t.Errorf("expected at least 2 rules after patch, got %d", len(patched.Policy.Egress))
+		}
+		t.Logf("After patch: %d rules", len(patched.Policy.Egress))
+	} else {
+		t.Log("After patch: policy field is nil (server may return status-only response)")
 	}
-	t.Logf("After patch: %d rules", len(patched.Policy.Egress))
 
 	t.Log("Network policy staging test passed")
 }
