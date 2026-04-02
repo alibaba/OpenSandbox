@@ -191,3 +191,160 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	fmt.Println("\n=== GO E2E TEST PASSED ===")
 	fmt.Println("Lifecycle: create → poll → Running → execd ping → run command (SSE) → file info → metrics → egress → delete")
 }
+
+func TestE2E_PauseResume(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	config := opensandbox.ConnectionConfig{
+		Domain:   strings.TrimPrefix(strings.TrimPrefix(getServerURL(), "http://"), "https://"),
+		Protocol: "http",
+		APIKey:   os.Getenv("OPENSANDBOX_API_KEY"),
+	}
+
+	// 1. Create sandbox via high-level API
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    getDefaultImage(),
+		Metadata: map[string]string{"test": "go-e2e-pause-resume"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	t.Logf("Created sandbox: %s", sb.ID())
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// 2. Verify sandbox is healthy
+	if !sb.IsHealthy(ctx) {
+		t.Fatal("Sandbox not healthy after creation")
+	}
+	t.Log("Sandbox is healthy")
+
+	// 3. Run a command before pause
+	exec, err := sb.RunCommand(ctx, "echo before-pause", nil)
+	if err != nil {
+		t.Fatalf("RunCommand before pause: %v", err)
+	}
+	t.Logf("Pre-pause output: %s", exec.Text())
+
+	// 4. Pause
+	if err := sb.Pause(ctx); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	t.Log("Sandbox paused")
+
+	// 5. Verify paused state
+	info, err := sb.GetInfo(ctx)
+	if err != nil {
+		t.Fatalf("GetInfo after pause: %v", err)
+	}
+	if info.Status.State != opensandbox.StatePaused {
+		t.Fatalf("Expected Paused state, got %s", info.Status.State)
+	}
+	t.Logf("Confirmed state: %s", info.Status.State)
+
+	// 6. Resume via package-level function
+	resumed, err := opensandbox.ResumeSandbox(ctx, config, sb.ID())
+	if err != nil {
+		t.Fatalf("ResumeSandbox: %v", err)
+	}
+	t.Log("Sandbox resumed")
+
+	// 7. Verify resumed sandbox is healthy and functional
+	if !resumed.IsHealthy(ctx) {
+		t.Fatal("Sandbox not healthy after resume")
+	}
+
+	exec2, err := resumed.RunCommand(ctx, "echo after-resume", nil)
+	if err != nil {
+		t.Fatalf("RunCommand after resume: %v", err)
+	}
+	t.Logf("Post-resume output: %s", exec2.Text())
+
+	// 8. Also test instance method Resume: pause again and resume via method
+	if err := resumed.Pause(ctx); err != nil {
+		t.Fatalf("Second pause: %v", err)
+	}
+	t.Log("Sandbox paused again")
+
+	resumed2, err := resumed.Resume(ctx)
+	if err != nil {
+		t.Fatalf("Sandbox.Resume(): %v", err)
+	}
+
+	exec3, err := resumed2.RunCommand(ctx, "echo instance-resume", nil)
+	if err != nil {
+		t.Fatalf("RunCommand after instance resume: %v", err)
+	}
+	t.Logf("Instance resume output: %s", exec3.Text())
+
+	// Cleanup
+	if err := resumed2.Kill(ctx); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+	t.Log("Sandbox killed — pause/resume e2e passed")
+}
+
+func TestE2E_ManualCleanup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	config := opensandbox.ConnectionConfig{
+		Domain:   strings.TrimPrefix(strings.TrimPrefix(getServerURL(), "http://"), "https://"),
+		Protocol: "http",
+		APIKey:   os.Getenv("OPENSANDBOX_API_KEY"),
+	}
+
+	// 1. Create sandbox with ManualCleanup (no auto-expiration)
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:         getDefaultImage(),
+		ManualCleanup: true,
+		Metadata:      map[string]string{"test": "go-e2e-manual-cleanup"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox with ManualCleanup: %v", err)
+	}
+	t.Logf("Created sandbox: %s", sb.ID())
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// 2. Verify sandbox has no expiration set
+	info, err := sb.GetInfo(ctx)
+	if err != nil {
+		t.Fatalf("GetInfo: %v", err)
+	}
+
+	if info.ExpiresAt != nil {
+		t.Errorf("Expected nil ExpiresAt for ManualCleanup sandbox, got %v", info.ExpiresAt)
+	} else {
+		t.Log("Confirmed: ExpiresAt is nil (no auto-expiration)")
+	}
+
+	// 3. Verify sandbox is functional
+	exec, err := sb.RunCommand(ctx, "echo manual-cleanup-works", nil)
+	if err != nil {
+		t.Fatalf("RunCommand: %v", err)
+	}
+	t.Logf("Output: %s", exec.Text())
+
+	// 4. Compare with a normal sandbox that should have an expiration
+	sbWithTimeout, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    getDefaultImage(),
+		Metadata: map[string]string{"test": "go-e2e-with-timeout"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox with default timeout: %v", err)
+	}
+	defer func() { _ = sbWithTimeout.Kill(context.Background()) }()
+
+	infoWithTimeout, err := sbWithTimeout.GetInfo(ctx)
+	if err != nil {
+		t.Fatalf("GetInfo (with timeout): %v", err)
+	}
+
+	if infoWithTimeout.ExpiresAt == nil {
+		t.Log("Warning: default sandbox also has nil ExpiresAt — server may not populate this field")
+	} else {
+		t.Logf("Default sandbox ExpiresAt: %v (confirms manual cleanup sandbox correctly omits it)", infoWithTimeout.ExpiresAt)
+	}
+
+	t.Log("Manual cleanup e2e passed")
+}

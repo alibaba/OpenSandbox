@@ -49,6 +49,23 @@ type ConnectionConfig struct {
 	// is also nil, Go's http.DefaultTransport is used.
 	// Use DefaultTransportConfig() for tuned pool settings.
 	Transport *TransportConfig
+
+	// EndpointHostRewrite maps hostnames returned by the server in endpoint
+	// URLs to replacement hostnames. This is needed when the server runs
+	// inside Docker and returns "host.docker.internal" which is not
+	// resolvable from the host machine.
+	// Example: map[string]string{"host.docker.internal": "localhost"}
+	EndpointHostRewrite map[string]string
+}
+
+// RewriteEndpointURL applies EndpointHostRewrite rules to an endpoint URL
+// returned by the server. This handles cases like Docker's
+// "host.docker.internal" being unreachable from the host machine.
+func (c *ConnectionConfig) RewriteEndpointURL(endpointURL string) string {
+	for from, to := range c.EndpointHostRewrite {
+		endpointURL = strings.Replace(endpointURL, from, to, 1)
+	}
+	return endpointURL
 }
 
 // GetDomain returns the configured domain, falling back to env var and default.

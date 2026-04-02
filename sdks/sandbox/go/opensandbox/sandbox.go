@@ -333,7 +333,7 @@ func (s *Sandbox) resolveExecd(ctx context.Context) error {
 		return err
 	}
 
-	execdURL := endpoint.Endpoint
+	execdURL := s.config.RewriteEndpointURL(endpoint.Endpoint)
 	if !strings.HasPrefix(execdURL, "http") {
 		execdURL = s.config.GetProtocol() + "://" + execdURL
 	}
@@ -373,7 +373,7 @@ func (s *Sandbox) resolveEgress(ctx context.Context) error {
 		return err
 	}
 
-	egressURL := endpoint.Endpoint
+	egressURL := s.config.RewriteEndpointURL(endpoint.Endpoint)
 	if !strings.HasPrefix(egressURL, "http") {
 		egressURL = s.config.GetProtocol() + "://" + egressURL
 	}
