@@ -95,11 +95,11 @@ async def lifespan(app: FastAPI):
         k8s_client = None
         runtime_type = app_config.runtime.type
 
-        if runtime_type == "docker":
+        if runtime_type in ("docker", "podman"):
             import docker
 
             docker_client = docker.from_env()
-            logger.info("Validating secure runtime for Docker backend")
+            logger.info("Validating secure runtime for %s backend", runtime_type)
         elif runtime_type == "kubernetes":
             from opensandbox_server.services.k8s.client import K8sClient
 

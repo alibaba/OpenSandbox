@@ -155,7 +155,7 @@ async def validate_secure_runtime_on_startup(
         logger.info("Secure runtime is not configured.")
         return
 
-    if config.runtime.type == "docker":
+    if config.runtime.type in ("docker", "podman"):
         await _validate_docker_runtime(resolver, docker_client)
     elif config.runtime.type == "kubernetes":
         await _validate_k8s_runtime_class(resolver, k8s_client, config)
