@@ -19,6 +19,7 @@ Sandbox-related data models.
 Models for sandbox creation, configuration, status, and lifecycle management.
 """
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -136,6 +137,9 @@ class NetworkPolicy(BaseModel):
 # Volume Models
 # ============================================================================
 
+# Matches Unix absolute paths (/…) and Windows drive-letter paths (C:\ or C:/).
+# Aligned with server-side pattern in server/opensandbox_server/api/schema.py.
+_HOST_PATH_RE = re.compile(r"^(/|[A-Za-z]:[\\/])")
 
 class Host(BaseModel):
     """
@@ -152,8 +156,11 @@ class Host(BaseModel):
     @field_validator("path")
     @classmethod
     def path_must_be_absolute(cls, v: str) -> str:
-        if not v.startswith("/"):
-            raise ValueError("Host path must be an absolute path starting with '/'")
+        if not _HOST_PATH_RE.match(v):
+            raise ValueError(
+                "Host path must be an absolute path starting with '/' "
+                "or a Windows drive letter (e.g. 'C:\\' or 'D:/')"
+            )
         return v
 
 

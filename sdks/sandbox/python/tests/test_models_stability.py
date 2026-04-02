@@ -161,6 +161,60 @@ def test_host_backend_requires_absolute_path() -> None:
     with pytest.raises(ValueError, match="absolute path"):
         Host(path="relative/path")
 
+def test_host_backend_accepts_unix_root_path() -> None:
+    """Unix root path '/' must be accepted."""
+    assert Host(path="/").path == "/"
+
+
+def test_host_backend_accepts_unix_nested_path() -> None:
+    """Unix nested absolute path must be accepted."""
+    assert Host(path="/mnt/host/project").path == "/mnt/host/project"
+
+
+def test_host_backend_accepts_windows_backslash_path() -> None:
+    """Windows drive path with backslashes must be accepted."""
+    backend = Host(path="D:\\sandbox-mnt\\ReMe")
+    assert backend.path == "D:\\sandbox-mnt\\ReMe"
+
+
+def test_host_backend_accepts_windows_forward_slash_path() -> None:
+    """Windows drive path with forward slashes must be accepted."""
+    backend = Host(path="D:/sandbox-mnt/ReMe")
+    assert backend.path == "D:/sandbox-mnt/ReMe"
+
+
+def test_host_backend_accepts_windows_drive_root() -> None:
+    """Windows drive root (e.g. 'Z:\\') must be accepted."""
+    assert Host(path="Z:\\").path == "Z:\\"
+
+
+def test_host_backend_accepts_windows_lowercase_drive() -> None:
+    """Lowercase drive letter must be accepted."""
+    assert Host(path="a:/lower").path == "a:/lower"
+
+
+def test_host_backend_rejects_relative_path() -> None:
+    """Relative path without leading separator must be rejected."""
+    with pytest.raises(ValueError, match="absolute path"):
+        Host(path="relative/path")
+
+
+def test_host_backend_rejects_dot_relative_path() -> None:
+    """Dot-relative paths must be rejected."""
+    with pytest.raises(ValueError, match="absolute path"):
+        Host(path="./local")
+
+
+def test_host_backend_rejects_parent_traversal_path() -> None:
+    """Parent-traversal paths must be rejected."""
+    with pytest.raises(ValueError, match="absolute path"):
+        Host(path="../parent")
+
+
+def test_host_backend_rejects_empty_path() -> None:
+    """Empty string must be rejected."""
+    with pytest.raises(ValueError, match="absolute path"):
+        Host(path="")
 
 def test_pvc_backend_rejects_blank_claim_name() -> None:
     backend = PVC(claimName="my-pvc")

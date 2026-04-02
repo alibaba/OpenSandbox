@@ -34,7 +34,8 @@ class Host:
 
         Attributes:
             path (str): Absolute path on the host filesystem to mount.
-                Must start with '/' and be under an allowed prefix.
+                Must start with '/' (Unix) or a drive letter such as 'C:\\'
+                or 'D:/' (Windows), and be under an allowed prefix.
     """
 
     path: str
