@@ -27,9 +27,9 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
 
-// createNftManager returns an nft manager for dns+nft mode, or nil for dns-only.
+// createNftManager returns an nft manager when the mode includes the nft token (dns+nft), or nil otherwise.
 func createNftManager(mode string) nftApplier {
-	if mode != constants.PolicyDnsNft {
+	if !constants.ModeUsesNft(mode) {
 		return nil
 	}
 	return nftables.NewManagerWithOptions(parseNftOptions())
@@ -43,6 +43,7 @@ func setupNft(ctx context.Context, nftMgr nftApplier, initialPolicy *policy.Netw
 		log.Warnf("nftables disabled (dns-only mode)")
 		return
 	}
+
 	log.Infof("applying nftables static policy (dns+nft mode) with %d nameserver IP(s) merged into allow set", len(nameserverIPs))
 	merged := policy.MergeAlwaysOverlay(initialPolicy, alwaysDeny, alwaysAllow)
 	policyWithNS := merged.WithExtraAllowIPs(nameserverIPs)
@@ -59,7 +60,7 @@ func setupNft(ctx context.Context, nftMgr nftApplier, initialPolicy *policy.Netw
 
 func parseNftOptions() nftables.Options {
 	opts := nftables.Options{BlockDoT: true}
-	if isTruthy(os.Getenv(constants.EnvBlockDoH443)) {
+	if constants.IsTruthy(os.Getenv(constants.EnvBlockDoH443)) {
 		opts.BlockDoH443 = true
 	}
 	if raw := os.Getenv(constants.EnvDoHBlocklist); strings.TrimSpace(raw) != "" {

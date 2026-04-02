@@ -68,7 +68,7 @@ func appendMetricAttrsFromKeyValuePairs(kvs []attribute.KeyValue, raw string) []
 // (sandbox_id + OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS).
 var egressSharedAttrs = sync.OnceValue(func() []attribute.KeyValue {
 	var kvs []attribute.KeyValue
-	if id := strings.TrimSpace(os.Getenv(constants.ENVSandboxID)); id != "" {
+	if id := strings.TrimSpace(os.Getenv(constants.EnvSandboxID)); id != "" {
 		kvs = append(kvs, attribute.String("sandbox_id", id))
 	}
 	kvs = appendMetricAttrsFromKeyValuePairs(kvs, os.Getenv(constants.EnvEgressMetricsExtraAttrs))

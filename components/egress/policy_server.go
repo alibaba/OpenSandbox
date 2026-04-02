@@ -37,7 +37,7 @@ type policyUpdater interface {
 	UpdatePolicy(*policy.NetworkPolicy)
 }
 
-// enforcementReporter reports the current enforcement mode (dns | dns+nft).
+// enforcementReporter reports the current normalized enforcement mode (see constants.ParseEgressMode).
 type enforcementReporter interface {
 	EnforcementMode() string
 }
