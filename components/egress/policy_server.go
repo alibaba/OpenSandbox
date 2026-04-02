@@ -51,7 +51,7 @@ type nftApplier interface {
 // startPolicyServer launches a lightweight HTTP API for updating the egress policy at runtime.
 //
 // nameserverIPs are merged into every applied policy so system DNS stays allowed (e.g. private DNS).
-func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier, enforcementMode string, addr string, token string, nameserverIPs []netip.Addr, policyFile string) error {
+func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier, enforcementMode string, addr string, token string, nameserverIPs []netip.Addr, policyFile string, alwaysDeny, alwaysAllow []policy.EgressRule) error {
 	maxEgressRules := maxEgressRulesFromEnv()
 	if maxEgressRules > 0 {
 		log.Infof("policy API: max egress rules per policy (POST/PATCH) = %d (set %s=0 to disable)", maxEgressRules, constants.EnvMaxEgressRules)
@@ -66,6 +66,8 @@ func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier,
 		nameserverIPs:   nameserverIPs,
 		policyFile:      strings.TrimSpace(policyFile),
 		maxEgressRules:  maxEgressRules,
+		alwaysDeny:      append([]policy.EgressRule(nil), alwaysDeny...),
+		alwaysAllow:     append([]policy.EgressRule(nil), alwaysAllow...),
 	}
 
 	mux.HandleFunc("/policy", handler.handlePolicy)
@@ -115,9 +117,11 @@ type policyServer struct {
 	token           string
 	enforcementMode string
 	nameserverIPs   []netip.Addr
-	policyFile      string     // if set, successful policy changes are persisted here
-	maxEgressRules  int        // 0 = unlimited; >0 = max len(Egress) for POST/PATCH
-	mu              sync.Mutex // serializes read-merge-apply to avoid lost updates across POST/PATCH
+	policyFile      string              // if set, successful policy changes are persisted here
+	maxEgressRules  int                 // 0 = unlimited; >0 = max len(Egress) for POST/PATCH
+	alwaysDeny      []policy.EgressRule // from deny.always at startup; merged for enforcement, not persisted
+	alwaysAllow     []policy.EgressRule // from allow.always at startup; merged for enforcement, not persisted
+	mu              sync.Mutex          // serializes read-merge-apply to avoid lost updates across POST/PATCH
 }
 
 type policyStatusResponse struct {
@@ -269,8 +273,9 @@ func (s *policyServer) commitPolicy(ctx context.Context, w http.ResponseWriter, 
 		http.Error(w, fmt.Sprintf("failed to persist policy: %v", err), http.StatusInternalServerError)
 		return false
 	}
+	merged := policy.MergeAlwaysOverlay(pol, s.alwaysDeny, s.alwaysAllow)
 	if s.nft != nil {
-		if err := s.nft.ApplyStatic(ctx, pol.WithExtraAllowIPs(s.nameserverIPs)); err != nil {
+		if err := s.nft.ApplyStatic(ctx, merged.WithExtraAllowIPs(s.nameserverIPs)); err != nil {
 			logEgressUpdateFailedError(fmt.Sprintf("nftables apply (%s): %v", op, err))
 			log.Errorf("policy API: nftables apply failed (%s): %v", op, err)
 			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)

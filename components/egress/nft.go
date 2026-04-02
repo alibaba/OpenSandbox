@@ -37,13 +37,15 @@ func createNftManager(mode string) nftApplier {
 
 // setupNft applies static policy to nft and wires DNS-resolved IPs into the proxy when nft is enabled.
 // nameserverIPs are merged into the allow set at startup so system DNS works (client + proxy upstream, e.g. private DNS).
-func setupNft(ctx context.Context, nftMgr nftApplier, initialPolicy *policy.NetworkPolicy, proxy *dnsproxy.Proxy, nameserverIPs []netip.Addr) {
+// alwaysDeny/alwaysAllow are optional file-based rules merged ahead of initialPolicy (not persisted).
+func setupNft(ctx context.Context, nftMgr nftApplier, initialPolicy *policy.NetworkPolicy, proxy *dnsproxy.Proxy, nameserverIPs []netip.Addr, alwaysDeny, alwaysAllow []policy.EgressRule) {
 	if nftMgr == nil {
 		log.Warnf("nftables disabled (dns-only mode)")
 		return
 	}
 	log.Infof("applying nftables static policy (dns+nft mode) with %d nameserver IP(s) merged into allow set", len(nameserverIPs))
-	policyWithNS := initialPolicy.WithExtraAllowIPs(nameserverIPs)
+	merged := policy.MergeAlwaysOverlay(initialPolicy, alwaysDeny, alwaysAllow)
+	policyWithNS := merged.WithExtraAllowIPs(nameserverIPs)
 	if err := nftMgr.ApplyStatic(ctx, policyWithNS); err != nil {
 		log.Fatalf("nftables static apply failed: %v", err)
 	}

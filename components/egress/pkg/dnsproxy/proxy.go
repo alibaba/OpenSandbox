@@ -36,11 +36,14 @@ import (
 const defaultListenAddr = "127.0.0.1:15353"
 
 type Proxy struct {
-	policyMu   sync.RWMutex
-	policy     *policy.NetworkPolicy
-	listenAddr string
-	upstream   string // single upstream for MVP
-	servers    []*dns.Server
+	policyMu        sync.RWMutex
+	userPolicy      *policy.NetworkPolicy
+	effectivePolicy *policy.NetworkPolicy
+	alwaysDeny      []policy.EgressRule
+	alwaysAllow     []policy.EgressRule
+	listenAddr      string
+	upstream        string // single upstream for MVP
+	servers         []*dns.Server
 
 	// optional; called in goroutine when A/AAAA are present
 	onResolved func(domain string, ips []nftables.ResolvedIP)
@@ -50,7 +53,9 @@ type Proxy struct {
 }
 
 // New builds a proxy with resolved upstream; listenAddr can be empty for default.
-func New(p *policy.NetworkPolicy, listenAddr string) (*Proxy, error) {
+// alwaysDeny and alwaysAllow are optional operator rules merged ahead of user egress
+// (see policy.MergeAlwaysOverlay); they are not persisted via the policy API.
+func New(p *policy.NetworkPolicy, listenAddr string, alwaysDeny, alwaysAllow []policy.EgressRule) (*Proxy, error) {
 	if listenAddr == "" {
 		listenAddr = defaultListenAddr
 	}
@@ -62,11 +67,18 @@ func New(p *policy.NetworkPolicy, listenAddr string) (*Proxy, error) {
 		return nil, err
 	}
 	proxy := &Proxy{
-		listenAddr: listenAddr,
-		upstream:   upstream,
-		policy:     ensurePolicyDefaults(p),
+		listenAddr:  listenAddr,
+		upstream:    upstream,
+		userPolicy:  ensurePolicyDefaults(p),
+		alwaysDeny:  append([]policy.EgressRule(nil), alwaysDeny...),
+		alwaysAllow: append([]policy.EgressRule(nil), alwaysAllow...),
 	}
+	proxy.refreshEffectivePolicy()
 	return proxy, nil
+}
+
+func (p *Proxy) refreshEffectivePolicy() {
+	p.effectivePolicy = policy.MergeAlwaysOverlay(p.userPolicy, p.alwaysDeny, p.alwaysAllow)
 }
 
 func (p *Proxy) Start(ctx context.Context) error {
@@ -113,7 +125,7 @@ func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	host := normalizeDNSHost(domain)
 
 	p.policyMu.RLock()
-	currentPolicy := p.policy
+	currentPolicy := p.effectivePolicy
 	p.policyMu.RUnlock()
 	if currentPolicy != nil && currentPolicy.Evaluate(domain) == policy.ActionDeny {
 		telemetry.RecordDNSDenied()
@@ -173,19 +185,20 @@ func (p *Proxy) UpstreamHost() string {
 	return host
 }
 
-// UpdatePolicy swaps the in-memory policy used by the proxy.
+// UpdatePolicy swaps the user-facing policy (without always-deny/allow file overlay).
 // Passing nil reverts to the default deny-all policy.
 func (p *Proxy) UpdatePolicy(newPolicy *policy.NetworkPolicy) {
 	p.policyMu.Lock()
-	p.policy = ensurePolicyDefaults(newPolicy)
+	p.userPolicy = ensurePolicyDefaults(newPolicy)
+	p.refreshEffectivePolicy()
 	p.policyMu.Unlock()
 }
 
-// CurrentPolicy returns the policy currently enforced by the proxy.
+// CurrentPolicy returns the user policy (POST/PATCH/GET), not the always-deny/allow overlay.
 func (p *Proxy) CurrentPolicy() *policy.NetworkPolicy {
 	p.policyMu.RLock()
 	defer p.policyMu.RUnlock()
-	return p.policy
+	return p.userPolicy
 }
 
 // SetOnResolved sets the callback invoked when an allowed domain resolves to A/AAAA.

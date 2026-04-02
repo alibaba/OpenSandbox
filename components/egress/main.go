@@ -62,6 +62,11 @@ func main() {
 	}
 	logEgressLoaded(initialRules)
 
+	alwaysDeny, alwaysAllow, err := policy.LoadAlwaysRuleFiles()
+	if err != nil {
+		log.Fatalf("failed to load always allow/deny rule files: %v", err)
+	}
+
 	allowIPs := AllowIPsForNft("/etc/resolv.conf")
 	// Merge nameserver exempt IPs into nft allow set so proxy traffic to them (no SO_MARK) is allowed in dns+nft mode.
 	for _, addr := range dnsproxy.ParseNameserverExemptList() {
@@ -73,7 +78,7 @@ func main() {
 	mode := parseMode()
 	log.Infof("enforcement mode: %s", mode)
 	nftMgr := createNftManager(mode)
-	proxy, err := dnsproxy.New(initialRules, "")
+	proxy, err := dnsproxy.New(initialRules, "", alwaysDeny, alwaysAllow)
 	if err != nil {
 		log.Fatalf("failed to init dns proxy: %v", err)
 	}
@@ -99,11 +104,11 @@ func main() {
 	}
 	log.Infof("iptables redirect configured (OUTPUT 53 -> 15353) with SO_MARK bypass for proxy upstream traffic")
 
-	setupNft(ctx, nftMgr, initialRules, proxy, allowIPs)
+	setupNft(ctx, nftMgr, initialRules, proxy, allowIPs, alwaysDeny, alwaysAllow)
 
 	// start policy server
 	httpAddr := envOrDefault(constants.EnvEgressHTTPAddr, constants.DefaultEgressServerAddr)
-	if err = startPolicyServer(ctx, proxy, nftMgr, mode, httpAddr, os.Getenv(constants.EnvEgressToken), allowIPs, os.Getenv(constants.EnvEgressPolicyFile)); err != nil {
+	if err = startPolicyServer(ctx, proxy, nftMgr, mode, httpAddr, os.Getenv(constants.EnvEgressToken), allowIPs, os.Getenv(constants.EnvEgressPolicyFile), alwaysDeny, alwaysAllow); err != nil {
 		log.Fatalf("failed to start policy server: %v", err)
 	}
 	log.Infof("policy server listening on %s (POST /policy)", httpAddr)
