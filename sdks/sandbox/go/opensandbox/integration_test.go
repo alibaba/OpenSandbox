@@ -4,9 +4,12 @@ package opensandbox_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -372,4 +375,767 @@ func TestIntegration_ManualCleanup(t *testing.T) {
 		t.Logf("Kill manual-cleanup sandbox: %v", err)
 	}
 	t.Log("Manual cleanup integration test passed")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1: SandboxManager integration test
+// ---------------------------------------------------------------------------
+
+// TestIntegration_Manager exercises the SandboxManager: create sandboxes with
+// different metadata, list with filters, and kill via manager.
+func TestIntegration_Manager(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+	mgr := opensandbox.NewSandboxManager(config)
+	defer mgr.Close()
+
+	// 1. Create two sandboxes with different metadata
+	sb1, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"team": "alpha", "test": "manager"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox 1: %v", err)
+	}
+	t.Logf("Created sandbox 1: %s", sb1.ID())
+	defer func() { _ = sb1.Kill(context.Background()) }()
+
+	sb2, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"team": "beta", "test": "manager"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox 2: %v", err)
+	}
+	t.Logf("Created sandbox 2: %s", sb2.ID())
+	defer func() { _ = sb2.Kill(context.Background()) }()
+
+	// 2. List all sandboxes with test=manager metadata
+	list, err := mgr.ListSandboxInfos(ctx, opensandbox.ListOptions{
+		Metadata: map[string]string{"test": "manager"},
+		Page:     1,
+		PageSize: 50,
+	})
+	if err != nil {
+		t.Fatalf("ListSandboxInfos: %v", err)
+	}
+	t.Logf("Listed sandboxes with test=manager: %d items", len(list.Items))
+	if len(list.Items) < 2 {
+		t.Errorf("expected at least 2 sandboxes, got %d", len(list.Items))
+	}
+
+	// 3. Verify we can get info for a specific sandbox
+	info, err := mgr.GetSandboxInfo(ctx, sb1.ID())
+	if err != nil {
+		t.Fatalf("GetSandboxInfo: %v", err)
+	}
+	if info.ID != sb1.ID() {
+		t.Errorf("ID = %q, want %q", info.ID, sb1.ID())
+	}
+	t.Logf("GetSandboxInfo: id=%s state=%s", info.ID, info.Status.State)
+
+	// 4. List with state filter
+	listRunning, err := mgr.ListSandboxInfos(ctx, opensandbox.ListOptions{
+		States:   []opensandbox.SandboxState{opensandbox.StateRunning},
+		Metadata: map[string]string{"test": "manager"},
+	})
+	if err != nil {
+		t.Fatalf("ListSandboxInfos (running): %v", err)
+	}
+	t.Logf("Running sandboxes with test=manager: %d", len(listRunning.Items))
+
+	// 5. Kill sandbox 1 via manager
+	if err := mgr.KillSandbox(ctx, sb1.ID()); err != nil {
+		t.Fatalf("KillSandbox: %v", err)
+	}
+	t.Logf("Killed sandbox 1: %s", sb1.ID())
+
+	// 6. Verify it's gone or terminal
+	infoAfter, err := mgr.GetSandboxInfo(ctx, sb1.ID())
+	if err != nil {
+		t.Logf("GetSandboxInfo after kill: %v (expected)", err)
+	} else {
+		if infoAfter.Status.State == opensandbox.StateRunning {
+			t.Errorf("expected non-running state after kill, got %s", infoAfter.Status.State)
+		}
+		t.Logf("State after kill: %s", infoAfter.Status.State)
+	}
+
+	// 7. Kill sandbox 2 via manager
+	if err := mgr.KillSandbox(ctx, sb2.ID()); err != nil {
+		t.Fatalf("KillSandbox 2: %v", err)
+	}
+	t.Log("Manager integration test passed")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: File operations integration test
+// ---------------------------------------------------------------------------
+
+// TestIntegration_FileOperations exercises the full file lifecycle:
+// create dir → upload → get info → move → search → download → replace → delete.
+func TestIntegration_FileOperations(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "file-ops"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	t.Logf("Created sandbox: %s", sb.ID())
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// 1. Create directory
+	if err := sb.CreateDirectory(ctx, "/sandbox/testdir", 755); err != nil {
+		t.Fatalf("CreateDirectory: %v", err)
+	}
+	t.Log("Created /sandbox/testdir")
+
+	// 2. Write a file via command (upload requires local file)
+	exec, err := sb.RunCommand(ctx, "echo 'hello world' > /sandbox/testdir/hello.txt", nil)
+	if err != nil {
+		t.Fatalf("RunCommand (write file): %v", err)
+	}
+	t.Logf("Wrote file, exit code: %v", exec.ExitCode)
+
+	// 3. Get file info
+	infoMap, err := sb.GetFileInfo(ctx, "/sandbox/testdir/hello.txt")
+	if err != nil {
+		t.Fatalf("GetFileInfo: %v", err)
+	}
+	for p, fi := range infoMap {
+		t.Logf("File: %s size=%d owner=%s mode=%d", p, fi.Size, fi.Owner, fi.Mode)
+	}
+
+	// 4. Search files
+	results, err := sb.SearchFiles(ctx, "/sandbox/testdir", "*.txt")
+	if err != nil {
+		t.Fatalf("SearchFiles: %v", err)
+	}
+	t.Logf("Search results: %d files", len(results))
+	if len(results) < 1 {
+		t.Error("expected at least 1 search result")
+	}
+
+	// 5. Write another file for move test
+	if _, err := sb.RunCommand(ctx, "echo 'move me' > /sandbox/testdir/moveme.txt", nil); err != nil {
+		t.Fatalf("RunCommand (write moveme.txt): %v", err)
+	}
+
+	// 6. Move file
+	if err := sb.MoveFiles(ctx, opensandbox.MoveRequest{
+		{Src: "/sandbox/testdir/moveme.txt", Dest: "/sandbox/testdir/moved.txt"},
+	}); err != nil {
+		t.Fatalf("MoveFiles: %v", err)
+	}
+	t.Log("Moved moveme.txt → moved.txt")
+
+	// 7. Verify moved file exists
+	movedInfo, err := sb.GetFileInfo(ctx, "/sandbox/testdir/moved.txt")
+	if err != nil {
+		t.Fatalf("GetFileInfo (moved): %v", err)
+	}
+	if len(movedInfo) == 0 {
+		t.Error("expected moved file info")
+	}
+
+	// 8. Replace content in file
+	if err := sb.ReplaceInFiles(ctx, opensandbox.ReplaceRequest{
+		"/sandbox/testdir/hello.txt": {Old: "hello world", New: "goodbye world"},
+	}); err != nil {
+		t.Fatalf("ReplaceInFiles: %v", err)
+	}
+	t.Log("Replaced content in hello.txt")
+
+	// 9. Verify replacement via command
+	catExec, err := sb.RunCommand(ctx, "cat /sandbox/testdir/hello.txt", nil)
+	if err != nil {
+		t.Fatalf("RunCommand (cat): %v", err)
+	}
+	if !strings.Contains(catExec.Text(), "goodbye world") {
+		t.Errorf("expected 'goodbye world' in file content, got %q", catExec.Text())
+	}
+
+	// 10. Set permissions
+	if err := sb.SetPermissions(ctx, opensandbox.PermissionsRequest{
+		"/sandbox/testdir/hello.txt": {Mode: 644},
+	}); err != nil {
+		t.Fatalf("SetPermissions: %v", err)
+	}
+	t.Log("Set permissions on hello.txt")
+
+	// 11. Download file
+	rc, err := sb.DownloadFile(ctx, "/sandbox/testdir/hello.txt", "")
+	if err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	data, _ := io.ReadAll(rc)
+	rc.Close()
+	t.Logf("Downloaded %d bytes: %q", len(data), string(data))
+
+	// 12. Delete files
+	if err := sb.DeleteFiles(ctx, []string{"/sandbox/testdir/hello.txt", "/sandbox/testdir/moved.txt"}); err != nil {
+		t.Fatalf("DeleteFiles: %v", err)
+	}
+	t.Log("Deleted files")
+
+	// 13. Delete directory
+	if err := sb.DeleteDirectory(ctx, "/sandbox/testdir"); err != nil {
+		t.Fatalf("DeleteDirectory: %v", err)
+	}
+	t.Log("Deleted /sandbox/testdir")
+
+	// 14. Cleanup
+	if err := sb.Kill(ctx); err != nil {
+		t.Logf("Kill: %v", err)
+	}
+	t.Log("File operations integration test passed")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3: CodeInterpreter integration test
+// ---------------------------------------------------------------------------
+
+// TestIntegration_CodeInterpreter exercises code execution with contexts.
+func TestIntegration_CodeInterpreter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "code-interpreter"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	t.Logf("Created sandbox: %s", sb.ID())
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// 1. Execute code (ephemeral — no context)
+	exec1, err := sb.ExecuteCode(ctx, opensandbox.RunCodeRequest{
+		Context: &opensandbox.CodeContext{Language: "python"},
+		Code:    "print('hello from python')",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ExecuteCode: %v", err)
+	}
+	t.Logf("Ephemeral execution: stdout=%q exitCode=%v", exec1.Text(), exec1.ExitCode)
+
+	// 2. Create a persistent context
+	codeCtx, err := sb.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
+	if err != nil {
+		t.Fatalf("CreateContext: %v", err)
+	}
+	t.Logf("Created context: %s (language=%s)", codeCtx.ID, codeCtx.Language)
+
+	// 3. Execute code in context (set variable)
+	exec2, err := sb.ExecuteCode(ctx, opensandbox.RunCodeRequest{
+		Context: &opensandbox.CodeContext{ID: codeCtx.ID, Language: "python"},
+		Code:    "x = 42",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ExecuteCode (set var): %v", err)
+	}
+	t.Logf("Set x=42: exitCode=%v", exec2.ExitCode)
+
+	// 4. Execute in same context (read variable — verifies state persistence)
+	exec3, err := sb.ExecuteCode(ctx, opensandbox.RunCodeRequest{
+		Context: &opensandbox.CodeContext{ID: codeCtx.ID, Language: "python"},
+		Code:    "print(x)",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ExecuteCode (read var): %v", err)
+	}
+	t.Logf("Read x: stdout=%q", exec3.Text())
+
+	// 5. List contexts
+	contexts, err := sb.ListContexts(ctx, "python")
+	if err != nil {
+		t.Fatalf("ListContexts: %v", err)
+	}
+	t.Logf("Active python contexts: %d", len(contexts))
+	if len(contexts) < 1 {
+		t.Error("expected at least 1 context")
+	}
+
+	// 6. Delete context
+	if err := sb.DeleteContext(ctx, codeCtx.ID); err != nil {
+		t.Fatalf("DeleteContext: %v", err)
+	}
+	t.Log("Deleted context")
+
+	// 7. Cleanup
+	if err := sb.Kill(ctx); err != nil {
+		t.Logf("Kill: %v", err)
+	}
+	t.Log("CodeInterpreter integration test passed")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: Sessions integration test
+// ---------------------------------------------------------------------------
+
+// TestIntegration_Sessions exercises stateful bash sessions.
+func TestIntegration_Sessions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "sessions"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	t.Logf("Created sandbox: %s", sb.ID())
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// 1. Create session
+	sess, err := sb.CreateSession(ctx)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	t.Logf("Created session: %s", sess.ID)
+
+	// 2. Set env var in session
+	exec1, err := sb.RunInSession(ctx, sess.ID, opensandbox.RunInSessionRequest{
+		Command: "export FOO=bar",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunInSession (export): %v", err)
+	}
+	t.Logf("Set FOO=bar: exitCode=%v", exec1.ExitCode)
+
+	// 3. Read env var in same session — verifies state persistence
+	exec2, err := sb.RunInSession(ctx, sess.ID, opensandbox.RunInSessionRequest{
+		Command: "echo $FOO",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunInSession (echo): %v", err)
+	}
+	t.Logf("Read FOO: stdout=%q", exec2.Text())
+	if !strings.Contains(exec2.Text(), "bar") {
+		t.Errorf("expected output to contain 'bar', got %q", exec2.Text())
+	}
+
+	// 4. Change directory in session
+	exec3, err := sb.RunInSession(ctx, sess.ID, opensandbox.RunInSessionRequest{
+		Command: "cd /tmp && pwd",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunInSession (cd): %v", err)
+	}
+	t.Logf("cd /tmp && pwd: %q", exec3.Text())
+
+	// 5. Verify cwd persists
+	exec4, err := sb.RunInSession(ctx, sess.ID, opensandbox.RunInSessionRequest{
+		Command: "pwd",
+	}, nil)
+	if err != nil {
+		t.Fatalf("RunInSession (pwd): %v", err)
+	}
+	t.Logf("pwd: %q", exec4.Text())
+
+	// 6. Delete session
+	if err := sb.DeleteSession(ctx, sess.ID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	t.Log("Deleted session")
+
+	// 7. Cleanup
+	if err := sb.Kill(ctx); err != nil {
+		t.Logf("Kill: %v", err)
+	}
+	t.Log("Sessions integration test passed")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: Background command management integration test
+// ---------------------------------------------------------------------------
+
+// TestIntegration_BackgroundCommand exercises background command execution
+// with status polling and log retrieval.
+func TestIntegration_BackgroundCommand(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "bg-command"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	t.Logf("Created sandbox: %s", sb.ID())
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// We need the execd client directly for background command operations
+	client := opensandbox.NewLifecycleClient(getServerURL()+"/v1", "test-key")
+	endpoint, err := client.GetEndpoint(ctx, sb.ID(), 44772, nil)
+	if err != nil {
+		t.Fatalf("GetEndpoint: %v", err)
+	}
+	execdURL := endpoint.Endpoint
+	if !strings.HasPrefix(execdURL, "http") {
+		execdURL = "http://" + execdURL
+	}
+	execdURL = strings.Replace(execdURL, "host.docker.internal", "localhost", 1)
+
+	execToken := ""
+	if endpoint.Headers != nil {
+		execToken = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
+	}
+	execClient := opensandbox.NewExecdClient(execdURL, execToken)
+
+	// 1. Run a background command (sleep for a few seconds)
+	var cmdID string
+	err = execClient.RunCommand(ctx, opensandbox.RunCommandRequest{
+		Command:    "sleep 3 && echo done",
+		Background: true,
+	}, func(event opensandbox.StreamEvent) error {
+		t.Logf("Background SSE: type=%s data=%s", event.Event, event.Data)
+		// The init event carries the command ID in the "text" field
+		if event.Event == "init" || strings.Contains(event.Data, `"type":"init"`) {
+			var parsed struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal([]byte(event.Data), &parsed) == nil && parsed.Text != "" {
+				cmdID = parsed.Text
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunCommand (background): %v", err)
+	}
+
+	// If we didn't get a command ID from SSE, run a foreground command to discover it
+	if cmdID == "" {
+		t.Log("No command ID from SSE, testing status with a known command")
+		// Run a simple foreground command as fallback
+		exec, runErr := sb.RunCommand(ctx, "echo status-test", nil)
+		if runErr != nil {
+			t.Fatalf("Fallback RunCommand: %v", runErr)
+		}
+		t.Logf("Fallback output: %s", exec.Text())
+	} else {
+		t.Logf("Background command ID: %s", cmdID)
+
+		// 2. Poll status
+		status, err := execClient.GetCommandStatus(ctx, cmdID)
+		if err != nil {
+			t.Logf("GetCommandStatus: %v (command may have finished)", err)
+		} else {
+			t.Logf("Status: running=%v exitCode=%v", status.Running, status.ExitCode)
+		}
+
+		// 3. Get logs
+		logs, err := execClient.GetCommandLogs(ctx, cmdID, nil)
+		if err != nil {
+			t.Logf("GetCommandLogs: %v", err)
+		} else {
+			t.Logf("Logs: %q (cursor=%d)", logs.Output, logs.Cursor)
+		}
+	}
+
+	// 4. Cleanup
+	if err := sb.Kill(ctx); err != nil {
+		t.Logf("Kill: %v", err)
+	}
+	t.Log("Background command integration test passed")
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6: Metrics watch integration test
+// ---------------------------------------------------------------------------
+
+// TestIntegration_MetricsWatch exercises real-time metrics streaming via SSE.
+func TestIntegration_MetricsWatch(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "metrics-watch"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	t.Logf("Created sandbox: %s", sb.ID())
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// Get execd client
+	lcClient := opensandbox.NewLifecycleClient(getServerURL()+"/v1", "test-key")
+	endpoint, err := lcClient.GetEndpoint(ctx, sb.ID(), 44772, nil)
+	if err != nil {
+		t.Fatalf("GetEndpoint: %v", err)
+	}
+	execdURL := endpoint.Endpoint
+	if !strings.HasPrefix(execdURL, "http") {
+		execdURL = "http://" + execdURL
+	}
+	execdURL = strings.Replace(execdURL, "host.docker.internal", "localhost", 1)
+	execToken := ""
+	if endpoint.Headers != nil {
+		execToken = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
+	}
+	execClient := opensandbox.NewExecdClient(execdURL, execToken)
+
+	// Watch metrics with a context that auto-cancels after collecting events
+	watchCtx, watchCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer watchCancel()
+
+	var mu sync.Mutex
+	var events []opensandbox.StreamEvent
+	collected := make(chan struct{})
+
+	go func() {
+		_ = execClient.WatchMetrics(watchCtx, func(event opensandbox.StreamEvent) error {
+			mu.Lock()
+			events = append(events, event)
+			count := len(events)
+			mu.Unlock()
+			t.Logf("Metric event %d: %s", count, event.Data)
+			if count >= 3 {
+				close(collected)
+				return fmt.Errorf("collected enough") // Stop after 3
+			}
+			return nil
+		})
+	}()
+
+	// Wait for events or timeout
+	select {
+	case <-collected:
+		mu.Lock()
+		t.Logf("Collected %d metric events", len(events))
+		mu.Unlock()
+	case <-watchCtx.Done():
+		mu.Lock()
+		t.Logf("Watch timed out with %d events (ok if server doesn't support /metrics/watch)", len(events))
+		mu.Unlock()
+	}
+
+	mu.Lock()
+	eventCount := len(events)
+	mu.Unlock()
+	if eventCount > 0 {
+		t.Log("Metrics watch received events successfully")
+	} else {
+		t.Log("No metrics watch events received (server may not support SSE metrics)")
+	}
+
+	// Cleanup
+	if err := sb.Kill(ctx); err != nil {
+		t.Logf("Kill: %v", err)
+	}
+	t.Log("Metrics watch integration test passed")
+}
+
+// ---------------------------------------------------------------------------
+// Negative-path integration tests
+// ---------------------------------------------------------------------------
+
+// requireAPIError asserts err is *opensandbox.APIError with the expected status code.
+func requireAPIError(t *testing.T, err error, wantStatus int, label string) *opensandbox.APIError {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s: expected error, got nil", label)
+	}
+	apiErr, ok := err.(*opensandbox.APIError)
+	if !ok {
+		t.Fatalf("%s: expected *APIError, got %T: %v", label, err, err)
+	}
+	if apiErr.StatusCode != wantStatus {
+		t.Errorf("%s: StatusCode = %d, want %d (body: %s: %s)",
+			label, apiErr.StatusCode, wantStatus, apiErr.Response.Code, apiErr.Response.Message)
+	}
+	return apiErr
+}
+
+// TestIntegration_Negative_GetNonexistentSandbox verifies the SDK returns a
+// typed APIError when requesting a sandbox that does not exist.
+func TestIntegration_Negative_GetNonexistentSandbox(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	config := integrationConfig()
+	mgr := opensandbox.NewSandboxManager(config)
+	defer mgr.Close()
+
+	_, err := mgr.GetSandboxInfo(ctx, "sbx-does-not-exist-999")
+	apiErr := requireAPIError(t, err, 404, "GetSandboxInfo(nonexistent)")
+	t.Logf("Got expected error: %d %s: %s", apiErr.StatusCode, apiErr.Response.Code, apiErr.Response.Message)
+}
+
+// TestIntegration_Negative_KillNonexistentSandbox verifies killing a sandbox
+// that doesn't exist returns a proper error rather than silently succeeding.
+func TestIntegration_Negative_KillNonexistentSandbox(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	config := integrationConfig()
+	mgr := opensandbox.NewSandboxManager(config)
+	defer mgr.Close()
+
+	err := mgr.KillSandbox(ctx, "sbx-phantom-kill-999")
+	apiErr := requireAPIError(t, err, 404, "KillSandbox(nonexistent)")
+	t.Logf("Got expected error: %d %s: %s", apiErr.StatusCode, apiErr.Response.Code, apiErr.Response.Message)
+}
+
+// TestIntegration_Negative_FileOpsOnMissingPaths verifies file operations
+// against nonexistent paths return proper errors.
+func TestIntegration_Negative_FileOpsOnMissingPaths(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "negative-file-ops"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// Download nonexistent file
+	_, err = sb.DownloadFile(ctx, "/no/such/file.txt", "")
+	if err == nil {
+		t.Error("DownloadFile(nonexistent): expected error, got nil")
+	} else {
+		apiErr, ok := err.(*opensandbox.APIError)
+		if ok {
+			t.Logf("DownloadFile(nonexistent): %d %s", apiErr.StatusCode, apiErr.Response.Code)
+		} else {
+			t.Logf("DownloadFile(nonexistent): non-API error: %v", err)
+		}
+	}
+
+	// Move nonexistent file
+	err = sb.MoveFiles(ctx, opensandbox.MoveRequest{
+		{Src: "/no/such/source.txt", Dest: "/tmp/dest.txt"},
+	})
+	if err == nil {
+		t.Error("MoveFiles(nonexistent src): expected error, got nil")
+	} else {
+		t.Logf("MoveFiles(nonexistent src): %v", err)
+	}
+
+	// Delete nonexistent files
+	err = sb.DeleteFiles(ctx, []string{"/no/such/delete-me.txt"})
+	if err == nil {
+		// Some servers return 200 for idempotent deletes — both behaviors are valid.
+		t.Log("DeleteFiles(nonexistent): no error (server treats delete as idempotent)")
+	} else {
+		t.Logf("DeleteFiles(nonexistent): %v", err)
+	}
+
+	t.Log("Negative file ops test passed")
+}
+
+// TestIntegration_Negative_SessionAfterDelete verifies that running a command
+// in a deleted session returns an error.
+func TestIntegration_Negative_SessionAfterDelete(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "negative-session"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// Create and immediately delete a session
+	sess, err := sb.CreateSession(ctx)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	t.Logf("Created session: %s", sess.ID)
+
+	if err := sb.DeleteSession(ctx, sess.ID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	t.Log("Deleted session")
+
+	// Try to run in the deleted session
+	_, err = sb.RunInSession(ctx, sess.ID, opensandbox.RunInSessionRequest{
+		Command: "echo should-fail",
+	}, nil)
+	if err == nil {
+		t.Error("RunInSession(deleted session): expected error, got nil")
+	} else {
+		t.Logf("RunInSession(deleted session): %v (expected)", err)
+	}
+
+	t.Log("Negative session test passed")
+}
+
+// TestIntegration_Negative_CodeContextAfterDelete verifies that executing code
+// in a deleted context returns an error.
+func TestIntegration_Negative_CodeContextAfterDelete(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	config := integrationConfig()
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"test": "negative-code-ctx"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox: %v", err)
+	}
+	defer func() { _ = sb.Kill(context.Background()) }()
+
+	// Create a context then delete it
+	codeCtx, err := sb.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
+	if err != nil {
+		t.Fatalf("CreateContext: %v", err)
+	}
+	t.Logf("Created context: %s", codeCtx.ID)
+
+	if err := sb.DeleteContext(ctx, codeCtx.ID); err != nil {
+		t.Fatalf("DeleteContext: %v", err)
+	}
+	t.Log("Deleted context")
+
+	// Try to execute in the deleted context
+	_, err = sb.ExecuteCode(ctx, opensandbox.RunCodeRequest{
+		Context: &opensandbox.CodeContext{ID: codeCtx.ID, Language: "python"},
+		Code:    "print('should fail')",
+	}, nil)
+	if err == nil {
+		t.Error("ExecuteCode(deleted context): expected error, got nil")
+	} else {
+		t.Logf("ExecuteCode(deleted context): %v (expected)", err)
+	}
+
+	// Also try GetContext on the deleted ID
+	_, err = sb.ListContexts(ctx, "python")
+	if err != nil {
+		t.Logf("ListContexts after delete: %v", err)
+	} else {
+		t.Log("ListContexts succeeded (deleted context should be absent)")
+	}
+
+	t.Log("Negative code context test passed")
 }

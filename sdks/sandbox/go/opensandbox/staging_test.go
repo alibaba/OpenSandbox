@@ -363,3 +363,78 @@ func TestStaging_ManualCleanup(t *testing.T) {
 	}
 	t.Log("Manual cleanup staging test passed")
 }
+
+// TestStaging_Manager exercises the SandboxManager on the staging server.
+// Creates 2 sandboxes with different metadata, lists with filter, kills via manager.
+func TestStaging_Manager(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	config := stagingConfig(t)
+	mgr := opensandbox.NewSandboxManager(config)
+	defer mgr.Close()
+
+	// 1. Create two sandboxes with different metadata
+	sb1, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"team": "alpha", "test": "staging-manager"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox 1: %v", err)
+	}
+	t.Logf("Created sandbox 1: %s", sb1.ID())
+	defer func() { _ = sb1.Kill(context.Background()) }()
+
+	sb2, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image:    "python:3.11-slim",
+		Metadata: map[string]string{"team": "beta", "test": "staging-manager"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox 2: %v", err)
+	}
+	t.Logf("Created sandbox 2: %s", sb2.ID())
+	defer func() { _ = sb2.Kill(context.Background()) }()
+
+	// 2. List all with test=staging-manager metadata
+	list, err := mgr.ListSandboxInfos(ctx, opensandbox.ListOptions{
+		Metadata: map[string]string{"test": "staging-manager"},
+		Page:     1,
+		PageSize: 50,
+	})
+	if err != nil {
+		t.Fatalf("ListSandboxInfos: %v", err)
+	}
+	t.Logf("Listed sandboxes with test=staging-manager: %d items", len(list.Items))
+	if len(list.Items) < 2 {
+		t.Errorf("expected at least 2 sandboxes, got %d", len(list.Items))
+	}
+
+	// 3. Get info for specific sandbox
+	info, err := mgr.GetSandboxInfo(ctx, sb1.ID())
+	if err != nil {
+		t.Fatalf("GetSandboxInfo: %v", err)
+	}
+	t.Logf("GetSandboxInfo: id=%s state=%s", info.ID, info.Status.State)
+
+	// 4. Kill sandbox 1 via manager
+	if err := mgr.KillSandbox(ctx, sb1.ID()); err != nil {
+		t.Fatalf("KillSandbox: %v", err)
+	}
+	t.Logf("Killed sandbox 1 via manager: %s", sb1.ID())
+
+	// 5. Verify killed
+	infoAfter, err := mgr.GetSandboxInfo(ctx, sb1.ID())
+	if err != nil {
+		t.Logf("GetSandboxInfo after kill: %v (expected)", err)
+	} else {
+		if infoAfter.Status.State == opensandbox.StateRunning {
+			t.Errorf("expected non-running state after kill, got %s", infoAfter.Status.State)
+		}
+	}
+
+	// 6. Clean up sandbox 2
+	if err := mgr.KillSandbox(ctx, sb2.ID()); err != nil {
+		t.Fatalf("KillSandbox 2: %v", err)
+	}
+	t.Log("Manager staging test passed")
+}
