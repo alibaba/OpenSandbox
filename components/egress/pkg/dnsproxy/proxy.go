@@ -19,12 +19,15 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 
+	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/events"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
@@ -36,14 +39,15 @@ import (
 const defaultListenAddr = "127.0.0.1:15353"
 
 type Proxy struct {
-	policyMu        sync.RWMutex
-	userPolicy      *policy.NetworkPolicy
-	effectivePolicy *policy.NetworkPolicy
-	alwaysDeny      []policy.EgressRule
-	alwaysAllow     []policy.EgressRule
-	listenAddr      string
-	upstream        string // single upstream for MVP
-	servers         []*dns.Server
+	policyMu                sync.RWMutex
+	userPolicy              *policy.NetworkPolicy
+	effectivePolicy         *policy.NetworkPolicy
+	alwaysDeny              []policy.EgressRule
+	alwaysAllow             []policy.EgressRule
+	listenAddr              string
+	upstreams               []string // ordered resolver chain; try next on forward failure
+	upstreamExchangeTimeout time.Duration
+	servers                 []*dns.Server
 
 	// optional; called in goroutine when A/AAAA are present
 	onResolved func(domain string, ips []nftables.ResolvedIP)
@@ -62,16 +66,17 @@ func New(p *policy.NetworkPolicy, listenAddr string, alwaysDeny, alwaysAllow []p
 	if p == nil {
 		p = policy.DefaultDenyPolicy()
 	}
-	_, err := discoverUpstream()
+	upstreams, err := DiscoverUpstreams()
 	if err != nil {
 		return nil, err
 	}
 	proxy := &Proxy{
-		listenAddr:  listenAddr,
-		upstream:    "29.29.29.29",
-		userPolicy:  ensurePolicyDefaults(p),
-		alwaysDeny:  append([]policy.EgressRule(nil), alwaysDeny...),
-		alwaysAllow: append([]policy.EgressRule(nil), alwaysAllow...),
+		listenAddr:              listenAddr,
+		upstreams:               upstreams,
+		upstreamExchangeTimeout: upstreamExchangeTimeoutFromEnv(),
+		userPolicy:              ensurePolicyDefaults(p),
+		alwaysDeny:              append([]policy.EgressRule(nil), alwaysDeny...),
+		alwaysAllow:             append([]policy.EgressRule(nil), alwaysAllow...),
 	}
 	proxy.refreshEffectivePolicy()
 	return proxy, nil
@@ -79,6 +84,21 @@ func New(p *policy.NetworkPolicy, listenAddr string, alwaysDeny, alwaysAllow []p
 
 func (p *Proxy) refreshEffectivePolicy() {
 	p.effectivePolicy = policy.MergeAlwaysOverlay(p.userPolicy, p.alwaysDeny, p.alwaysAllow)
+}
+
+func upstreamExchangeTimeoutFromEnv() time.Duration {
+	s := strings.TrimSpace(os.Getenv(constants.EnvDNSUpstreamTimeout))
+	if s == "" {
+		return time.Duration(constants.DefaultDNSUpstreamTimeoutSec) * time.Second
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return time.Duration(constants.DefaultDNSUpstreamTimeoutSec) * time.Second
+	}
+	if n > 120 {
+		n = 120
+	}
+	return time.Duration(n) * time.Second
 }
 
 func (p *Proxy) Start(ctx context.Context) error {
@@ -168,17 +188,65 @@ func (p *Proxy) maybeNotifyResolved(domain string, resp *dns.Msg) {
 }
 
 func (p *Proxy) forward(r *dns.Msg) (*dns.Msg, error) {
-	c := &dns.Client{
-		Timeout: 5 * time.Second,
-		Dialer:  p.dialerWithMark(),
+	var lastErr error
+	for i, upstream := range p.upstreams {
+		c := &dns.Client{
+			Timeout: p.upstreamExchangeTimeout,
+			Dialer:  p.dialerForUpstream(upstream),
+		}
+		resp, _, err := c.Exchange(r, upstream)
+		if err != nil {
+			lastErr = err
+			log.Warnf("[dns] upstream %s exchange error: %v", upstream, err)
+			continue
+		}
+		if resp == nil {
+			lastErr = fmt.Errorf("nil response from %s", upstream)
+			continue
+		}
+		if tryNext, reason := p.shouldFailoverAfterResponse(resp, i); tryNext {
+			lastErr = fmt.Errorf("%s from %s", reason, upstream)
+			log.Warnf("[dns] upstream %s: %s; trying next", upstream, reason)
+			continue
+		}
+		return resp, nil
 	}
-	resp, _, err := c.Exchange(r, p.upstream)
-	return resp, err
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("no upstream resolvers configured")
 }
 
-// UpstreamHost returns the host part of the upstream resolver, empty on parse error.
+// shouldFailoverAfterResponse returns whether to try the next upstream.
+// NXDOMAIN is not retried. NOERROR with an empty Answer (NODATA) is retried when another upstream exists:
+// a broken or non-recursive first hop may return empty NOERROR while a public resolver succeeds.
+func (p *Proxy) shouldFailoverAfterResponse(resp *dns.Msg, upstreamIdx int) (tryNext bool, reason string) {
+	if resp == nil {
+		return true, "nil response"
+	}
+	switch resp.Rcode {
+	case dns.RcodeNameError:
+		return false, ""
+	case dns.RcodeSuccess:
+		if len(resp.Answer) == 0 && upstreamIdx < len(p.upstreams)-1 {
+			return true, "empty NOERROR"
+		}
+		return false, ""
+	default:
+		rcStr := dns.RcodeToString[resp.Rcode]
+		if rcStr == "" {
+			rcStr = fmt.Sprintf("rcode %d", resp.Rcode)
+		}
+		return true, rcStr
+	}
+}
+
+// UpstreamHost returns the host part of the first upstream resolver, empty on parse error.
 func (p *Proxy) UpstreamHost() string {
-	host, _, err := net.SplitHostPort(p.upstream)
+	if len(p.upstreams) == 0 {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(p.upstreams[0])
 	if err != nil {
 		return ""
 	}
@@ -264,32 +332,133 @@ func extractResolvedIPs(resp *dns.Msg) []nftables.ResolvedIP {
 
 const fallbackUpstream = "8.8.8.8:53"
 
-func discoverUpstream() (string, error) {
+// DiscoverUpstreams returns the same ordered resolver chain used by the DNS proxy (env or /etc/resolv.conf).
+func DiscoverUpstreams() ([]string, error) {
+	raw := strings.TrimSpace(os.Getenv(constants.EnvDNSUpstream))
+	if raw != "" {
+		return parseEnvDNSUpstreams(raw)
+	}
+	return discoverUpstreamsFromResolv()
+}
+
+// parseEnvDNSUpstreams parses OPENSANDBOX_EGRESS_DNS_UPSTREAM (comma-separated).
+func parseEnvDNSUpstreams(raw string) ([]string, error) {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		addr, err := normalizeEnvUpstreamAddr(part)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", constants.EnvDNSUpstream, err)
+		}
+		out = append(out, addr)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s must list at least one upstream resolver", constants.EnvDNSUpstream)
+	}
+	return dedupeUpstreamAddrs(out), nil
+}
+
+// normalizeEnvUpstreamAddr parses a single OPENSANDBOX_EGRESS_DNS_UPSTREAM entry into host:port (default 53).
+// Only literal IPv4/IPv6 addresses are allowed. Hostnames are rejected: resolving them would use port 53,
+// which iptables redirects back into this proxy and causes recursive lookup failure.
+func normalizeEnvUpstreamAddr(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", fmt.Errorf("empty upstream address")
+	}
+	if host, port, err := net.SplitHostPort(s); err == nil {
+		if port == "" {
+			return "", fmt.Errorf("invalid port in %q", s)
+		}
+		if _, err := netip.ParseAddr(host); err != nil {
+			return "", fmt.Errorf("host %q must be a literal IP address, not a hostname (avoids DNS self-recursion with REDIRECT)", host)
+		}
+		return net.JoinHostPort(host, port), nil
+	}
+	if strings.HasPrefix(s, "[") {
+		if !strings.HasSuffix(s, "]") {
+			return "", fmt.Errorf("invalid bracketed IPv6 %q", s)
+		}
+		inner := strings.TrimPrefix(strings.TrimSuffix(s, "]"), "[")
+		if _, err := netip.ParseAddr(inner); err != nil {
+			return "", fmt.Errorf("invalid IP inside brackets %q", s)
+		}
+		return net.JoinHostPort(inner, "53"), nil
+	}
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return "", fmt.Errorf("upstream %q must be a literal IP address, not a hostname: %w", s, err)
+	}
+	return net.JoinHostPort(addr.String(), "53"), nil
+}
+
+func discoverUpstreamsFromResolv() ([]string, error) {
 	cfg, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 	if err != nil || len(cfg.Servers) == 0 {
 		if err != nil {
 			log.Warnf("[dns] fallback upstream resolver due to error: %v", err)
 		}
-		return fallbackUpstream, nil
+		return []string{fallbackUpstream}, nil
 	}
-	// Prefer first non-loopback nameserver (e.g. K8s cluster DNS after 127.0.0.11).
-	// If only loopback exists (e.g. Docker 127.0.0.11), use it: proxy upstream traffic
-	// is marked and bypasses the redirect, so loopback is reachable from the sidecar.
-	var chosen string
+	port := cfg.Port
+	if port == "" {
+		port = "53"
+	}
+	var nonLoop, loop []string
 	for _, s := range cfg.Servers {
+		addr := net.JoinHostPort(s, port)
 		if ip := net.ParseIP(s); ip != nil && ip.IsLoopback() {
-			if chosen == "" {
-				chosen = s
-			}
+			loop = append(loop, addr)
 			continue
 		}
-		chosen = s
-		break
+		nonLoop = append(nonLoop, addr)
 	}
-	if chosen == "" {
-		chosen = cfg.Servers[0]
+	out := append(nonLoop, loop...)
+	if len(out) == 0 {
+		out = []string{net.JoinHostPort(cfg.Servers[0], port)}
 	}
-	return net.JoinHostPort(chosen, cfg.Port), nil
+	if len(out) > constants.ResolvNameserverCap {
+		out = out[:constants.ResolvNameserverCap]
+	}
+	return dedupeUpstreamAddrs(out), nil
+}
+
+func dedupeUpstreamAddrs(addrs []string) []string {
+	seen := make(map[string]struct{}, len(addrs))
+	var out []string
+	for _, a := range addrs {
+		if _, ok := seen[a]; ok {
+			continue
+		}
+		seen[a] = struct{}{}
+		out = append(out, a)
+	}
+	return out
+}
+
+// AllowIPsFromUpstreamAddrs extracts literal resolver IPs from normalized upstream addresses (host:port).
+func AllowIPsFromUpstreamAddrs(upstreams []string) []netip.Addr {
+	var out []netip.Addr
+	seen := make(map[netip.Addr]struct{})
+	for _, a := range upstreams {
+		host, _, err := net.SplitHostPort(a)
+		if err != nil {
+			continue
+		}
+		ip, err := netip.ParseAddr(host)
+		if err != nil {
+			continue
+		}
+		if _, ok := seen[ip]; ok {
+			continue
+		}
+		seen[ip] = struct{}{}
+		out = append(out, ip)
+	}
+	return out
 }
 
 // ResolvNameserverIPs reads nameserver lines from resolvPath and returns parsed IPv4/IPv6 addresses.

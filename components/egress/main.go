@@ -67,14 +67,7 @@ func main() {
 		log.Fatalf("failed to load always allow/deny rule files: %v", err)
 	}
 
-	allowIPs := AllowIPsForNft("/etc/resolv.conf")
-	// Merge nameserver exempt IPs into nft allow set so proxy traffic to them (no SO_MARK) is allowed in dns+nft mode.
-	for _, addr := range dnsproxy.ParseNameserverExemptList() {
-		if !containsAddr(allowIPs, addr) {
-			allowIPs = append(allowIPs, addr)
-		}
-	}
-
+	allowIPs := allowIps()
 	mode := parseMode()
 	log.Infof("enforcement mode: %s", mode)
 	nftMgr := createNftManager(mode)
