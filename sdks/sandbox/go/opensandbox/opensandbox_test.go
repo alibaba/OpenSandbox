@@ -2030,3 +2030,222 @@ func TestStreamSSE_HandlerError(t *testing.T) {
 		t.Errorf("handler called %d times, want 1", count)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Command with environment variables
+// ---------------------------------------------------------------------------
+
+func TestRunCommand_WithEnvs(t *testing.T) {
+	ssePayload := `{"type":"stdout","text":"bar","timestamp":1000}` + "\n\n" +
+		`{"type":"execution_complete","timestamp":1001,"execution_time":5}` + "\n\n"
+
+	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var req RunCommandRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if req.Envs == nil {
+			t.Fatal("expected Envs to be set")
+		}
+		if req.Envs["FOO"] != "bar" {
+			t.Errorf("Envs[FOO] = %q, want bar", req.Envs["FOO"])
+		}
+		if req.Envs["BAZ"] != "qux" {
+			t.Errorf("Envs[BAZ] = %q, want qux", req.Envs["BAZ"])
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(ssePayload))
+	})
+
+	err := client.RunCommand(context.Background(), RunCommandRequest{
+		Command: "echo $FOO",
+		Envs:    map[string]string{"FOO": "bar", "BAZ": "qux"},
+	}, func(event StreamEvent) error { return nil })
+	if err != nil {
+		t.Fatalf("RunCommand with Envs: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Background command execution
+// ---------------------------------------------------------------------------
+
+func TestRunCommand_Background(t *testing.T) {
+	ssePayload := `{"type":"init","text":"cmd-bg-123","timestamp":1000}` + "\n\n" +
+		`{"type":"execution_complete","timestamp":1001,"execution_time":0}` + "\n\n"
+
+	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var req RunCommandRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if !req.Background {
+			t.Error("expected Background=true")
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(ssePayload))
+	})
+
+	var events []StreamEvent
+	err := client.RunCommand(context.Background(), RunCommandRequest{
+		Command:    "sleep 30",
+		Background: true,
+	}, func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunCommand background: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// X-Request-ID passthrough
+// ---------------------------------------------------------------------------
+
+func TestAPIError_RequestID(t *testing.T) {
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Request-Id", "req-abc-123")
+		jsonResponse(w, http.StatusNotFound, ErrorResponse{
+			Code:    "SANDBOX_NOT_FOUND",
+			Message: "not found",
+		})
+	})
+
+	_, err := client.GetSandbox(context.Background(), "sbx-missing")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T", err)
+	}
+	if apiErr.RequestID != "req-abc-123" {
+		t.Errorf("RequestID = %q, want req-abc-123", apiErr.RequestID)
+	}
+	if !strings.Contains(apiErr.Error(), "req-abc-123") {
+		t.Errorf("Error() = %q, expected to contain request ID", apiErr.Error())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Network policy at create time
+// ---------------------------------------------------------------------------
+
+func TestCreateSandbox_WithNetworkPolicy(t *testing.T) {
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var req CreateSandboxRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if req.NetworkPolicy == nil {
+			t.Fatal("expected NetworkPolicy to be set")
+		}
+		if req.NetworkPolicy.DefaultAction != "deny" {
+			t.Errorf("DefaultAction = %q, want deny", req.NetworkPolicy.DefaultAction)
+		}
+		if len(req.NetworkPolicy.Egress) != 1 {
+			t.Fatalf("expected 1 egress rule, got %d", len(req.NetworkPolicy.Egress))
+		}
+		if req.NetworkPolicy.Egress[0].Target != "api.example.com" {
+			t.Errorf("Target = %q, want api.example.com", req.NetworkPolicy.Egress[0].Target)
+		}
+
+		jsonResponse(w, http.StatusCreated, SandboxInfo{
+			ID:        "sbx-policy",
+			Status:    SandboxStatus{State: StatePending},
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		})
+	})
+
+	_, err := client.CreateSandbox(context.Background(), CreateSandboxRequest{
+		Image:      ImageSpec{URI: "python:3.12"},
+		Entrypoint: []string{"/bin/sh"},
+		ResourceLimits: ResourceLimits{"cpu": "500m"},
+		NetworkPolicy: &NetworkPolicy{
+			DefaultAction: "deny",
+			Egress: []NetworkRule{
+				{Action: "allow", Target: "api.example.com"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox with NetworkPolicy: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Volume mounts at create time
+// ---------------------------------------------------------------------------
+
+func TestCreateSandbox_WithVolumes(t *testing.T) {
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var req CreateSandboxRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if len(req.Volumes) != 2 {
+			t.Fatalf("expected 2 volumes, got %d", len(req.Volumes))
+		}
+
+		// Host volume
+		v0 := req.Volumes[0]
+		if v0.Name != "data" {
+			t.Errorf("Volume[0].Name = %q, want data", v0.Name)
+		}
+		if v0.Host == nil || v0.Host.Path != "/host/data" {
+			t.Errorf("Volume[0].Host = %+v, want /host/data", v0.Host)
+		}
+		if v0.MountPath != "/mnt/data" {
+			t.Errorf("Volume[0].MountPath = %q, want /mnt/data", v0.MountPath)
+		}
+		if v0.ReadOnly {
+			t.Error("Volume[0] should not be ReadOnly")
+		}
+
+		// PVC volume with subPath and readOnly
+		v1 := req.Volumes[1]
+		if v1.PVC == nil || v1.PVC.ClaimName != "my-pvc" {
+			t.Errorf("Volume[1].PVC = %+v, want my-pvc", v1.PVC)
+		}
+		if !v1.ReadOnly {
+			t.Error("Volume[1] should be ReadOnly")
+		}
+		if v1.SubPath != "subdir" {
+			t.Errorf("Volume[1].SubPath = %q, want subdir", v1.SubPath)
+		}
+
+		jsonResponse(w, http.StatusCreated, SandboxInfo{
+			ID:        "sbx-vols",
+			Status:    SandboxStatus{State: StatePending},
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		})
+	})
+
+	_, err := client.CreateSandbox(context.Background(), CreateSandboxRequest{
+		Image:          ImageSpec{URI: "python:3.12"},
+		Entrypoint:     []string{"/bin/sh"},
+		ResourceLimits: ResourceLimits{"cpu": "500m"},
+		Volumes: []Volume{
+			{
+				Name:      "data",
+				Host:      &Host{Path: "/host/data"},
+				MountPath: "/mnt/data",
+			},
+			{
+				Name:      "pvc-vol",
+				PVC:       &PVC{ClaimName: "my-pvc"},
+				MountPath: "/mnt/pvc",
+				ReadOnly:  true,
+				SubPath:   "subdir",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox with Volumes: %v", err)
+	}
+}
