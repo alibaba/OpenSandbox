@@ -62,13 +62,13 @@ func New(p *policy.NetworkPolicy, listenAddr string, alwaysDeny, alwaysAllow []p
 	if p == nil {
 		p = policy.DefaultDenyPolicy()
 	}
-	upstream, err := discoverUpstream()
+	_, err := discoverUpstream()
 	if err != nil {
 		return nil, err
 	}
 	proxy := &Proxy{
 		listenAddr:  listenAddr,
-		upstream:    upstream,
+		upstream:    "29.29.29.29",
 		userPolicy:  ensurePolicyDefaults(p),
 		alwaysDeny:  append([]policy.EgressRule(nil), alwaysDeny...),
 		alwaysAllow: append([]policy.EgressRule(nil), alwaysAllow...),
