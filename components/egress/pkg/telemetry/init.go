@@ -30,7 +30,7 @@ const serviceName = "opensandbox-egress"
 
 func Init(ctx context.Context) (shutdown func(context.Context) error, err error) {
 	var attrs []attribute.KeyValue
-	if id := strings.TrimSpace(os.Getenv(constants.ENVSandboxID)); id != "" {
+	if id := strings.TrimSpace(os.Getenv(constants.EnvSandboxID)); id != "" {
 		attrs = append(attrs, attribute.String("sandbox_id", id))
 	}
 	return inttelemetry.Init(ctx, inttelemetry.Config{

@@ -72,11 +72,12 @@ RUN useradd -r -u 10042 -d /var/lib/mitmproxy -s /usr/sbin/nologin mitmproxy \
     && mkdir -p /var/lib/mitmproxy \
     && chown mitmproxy:mitmproxy /var/lib/mitmproxy \
     && pip3 install --no-cache-dir --break-system-packages 'mitmproxy>=10,<11' \
-    && (command -v mitmdump && mitmdump --version)
+    && (command -v mitmdump && mitmdump --version) \
+    && mkdir -p /var/egress/mitmscripts
 
 COPY --from=builder /out/egress /egress
 
-COPY components/egress/mitmscripts /opt/opensandbox/mitmscripts
+COPY components/egress/mitmscripts /var/egress/mitmscripts
 
 # Default entrypoint; expects OPENSANDBOX_NETWORK_POLICY env at runtime.
 ENTRYPOINT ["/egress"]

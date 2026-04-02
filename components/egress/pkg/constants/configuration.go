@@ -32,7 +32,7 @@ const (
 	EnvMaxEgressRules   = "OPENSANDBOX_EGRESS_MAX_RULES" // max egress rules for POST/PATCH; 0 = unlimited; empty = default
 	EnvMaxNameservers   = "OPENSANDBOX_EGRESS_MAX_NS"
 	EnvBlockedWebhook   = "OPENSANDBOX_EGRESS_DENY_WEBHOOK"
-	ENVSandboxID        = "OPENSANDBOX_EGRESS_SANDBOX_ID"
+	EnvSandboxID        = "OPENSANDBOX_EGRESS_SANDBOX_ID"
 	// EnvEgressMetricsExtraAttrs optional comma-separated key=value pairs appended to every egress OTLP metric datapoint (first '=' splits key/value per segment).
 	EnvEgressMetricsExtraAttrs = "OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS"
 
