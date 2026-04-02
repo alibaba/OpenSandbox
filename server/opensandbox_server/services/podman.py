@@ -47,7 +47,7 @@ class PodmanSandboxService(DockerSandboxService):
     def __init__(self, config: Optional[AppConfig] = None):
         app_config = config or get_config()
         self._podman_base_url = self._resolve_podman_url(app_config)
-        super().__init__(config=config)
+        super().__init__(config=app_config)
         self._configure_retry_adapter()
 
     def _create_docker_client(self):
@@ -152,14 +152,21 @@ class PodmanSandboxService(DockerSandboxService):
 
 
 def _check_windows_pipe(pipe_name: str) -> Optional[str]:
-    """Verify that a Windows named pipe exists by attempting to open it."""
-    win_path = f"\\\\.\\pipe\\{pipe_name}"
+    """Verify that a Windows named pipe is reachable (non-blocking)."""
+    pipe_path = f"\\\\.\\pipe\\{pipe_name}"
     try:
-        # Opening with os.open works for named pipes on Windows and is
-        # cheap — we close immediately without reading.
-        fd = os.open(win_path, os.O_RDONLY)
-        os.close(fd)
-    except OSError:
+        import ctypes
+
+        # WaitNamedPipeW returns non-zero if the pipe is available within
+        # the timeout (milliseconds).  Using a short timeout avoids
+        # blocking startup if the pipe exists but the server is busy.
+        _TIMEOUT_MS = 1000
+        result = ctypes.windll.kernel32.WaitNamedPipeW(pipe_path, _TIMEOUT_MS)  # type: ignore[union-attr]
+        if not result:
+            return None
+    except (AttributeError, OSError):
+        # ctypes.windll is only available on Windows; AttributeError
+        # covers non-Windows platforms where this is called by mistake.
         return None
     # The Docker SDK expects forward slashes in the npipe:// URL.
     return f"npipe:////./pipe/{pipe_name}"

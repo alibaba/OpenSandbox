@@ -179,21 +179,32 @@ def test_socket_detection_returns_none_when_no_socket(mock_exists, mock_getuid):
     assert result is None
 
 
-@patch("os.close")
-@patch("os.open", return_value=3)
-def test_check_windows_pipe_found(mock_open, mock_close):
-    """Returns pipe URL with forward slashes when the named pipe can be opened."""
-    result = _check_windows_pipe("podman-machine-default")
+def test_check_windows_pipe_found():
+    """Returns pipe URL with forward slashes when WaitNamedPipeW succeeds."""
+    mock_kernel32 = MagicMock()
+    mock_kernel32.WaitNamedPipeW.return_value = 1  # non-zero = success
+    mock_windll = MagicMock(kernel32=mock_kernel32)
+    mock_ctypes = MagicMock(windll=mock_windll)
+
+    with patch.dict("sys.modules", {"ctypes": mock_ctypes}):
+        result = _check_windows_pipe("podman-machine-default")
+
     assert result == "npipe:////./pipe/podman-machine-default"
-    # os.open should use the native Windows backslash path
-    mock_open.assert_called_once_with("\\\\.\\pipe\\podman-machine-default", os.O_RDONLY)
-    mock_close.assert_called_once_with(3)
+    mock_kernel32.WaitNamedPipeW.assert_called_once_with(
+        "\\\\.\\pipe\\podman-machine-default", 1000
+    )
 
 
-@patch("os.open", side_effect=OSError("pipe not found"))
-def test_check_windows_pipe_not_found(mock_open):
-    """Returns None when the named pipe does not exist."""
-    result = _check_windows_pipe("nonexistent-pipe")
+def test_check_windows_pipe_not_found():
+    """Returns None when WaitNamedPipeW returns 0 (pipe not available)."""
+    mock_kernel32 = MagicMock()
+    mock_kernel32.WaitNamedPipeW.return_value = 0  # 0 = failure
+    mock_windll = MagicMock(kernel32=mock_kernel32)
+    mock_ctypes = MagicMock(windll=mock_windll)
+
+    with patch.dict("sys.modules", {"ctypes": mock_ctypes}):
+        result = _check_windows_pipe("nonexistent-pipe")
+
     assert result is None
 
 
@@ -205,7 +216,6 @@ def test_resolve_does_not_mutate_environ(mock_podman_docker, mock_docker):
     mock_podman_docker.DockerClient.return_value = mock_client
     mock_docker.from_env.return_value = mock_client
 
-    env_before = os.environ.get("DOCKER_HOST")
     with patch.dict(os.environ, {}, clear=False):
         os.environ.pop("DOCKER_HOST", None)
         config = _podman_config(podman=PodmanConfig(socket_path="/my/podman.sock"))
