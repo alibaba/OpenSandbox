@@ -174,10 +174,8 @@ func (c *ConnectionConfig) execdClient(endpointURL, token string, endpointHeader
 
 // egressClient creates an EgressClient for a resolved endpoint.
 // endpointHeaders are additional headers from the endpoint resolution (e.g. routing headers).
-// When UseServerProxy is true, the auth header override is included so that
-// requests routed through a reverse proxy (e.g. Caddy) carry the correct key.
 func (c *ConnectionConfig) egressClient(endpointURL, token string, endpointHeaders map[string]string) *EgressClient {
-	opts := c.clientOpts(c.UseServerProxy)
+	opts := c.clientOpts(false)
 	if len(endpointHeaders) > 0 {
 		opts = append(opts, WithHeaders(endpointHeaders))
 	}
