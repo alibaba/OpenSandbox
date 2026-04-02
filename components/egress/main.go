@@ -23,12 +23,14 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/alibaba/opensandbox/egress/hooks"
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
 	"github.com/alibaba/opensandbox/egress/pkg/events"
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
+	"github.com/alibaba/opensandbox/egress/pkg/startup"
 	"github.com/alibaba/opensandbox/egress/pkg/telemetry"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
 	"github.com/alibaba/opensandbox/internal/version"
@@ -54,6 +56,10 @@ func main() {
 			defer shutdownCancel()
 			_ = otelShutdown(shutdownCtx)
 		}()
+	}
+
+	if err = startup.RunPhasePrePolicy(ctx); err != nil {
+		log.Fatalf("startup hooks: %v", err)
 	}
 
 	initialRules, _, err := policy.LoadInitialPolicyDetailed(os.Getenv(constants.EnvEgressPolicyFile), constants.EnvEgressRules)
