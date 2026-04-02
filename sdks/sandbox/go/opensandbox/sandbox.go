@@ -3,7 +3,6 @@ package opensandbox
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +34,14 @@ type SandboxCreateOptions struct {
 
 	// Volumes to mount.
 	Volumes []Volume
+
+	// ImageAuth provides registry credentials for private images.
+	ImageAuth *ImageAuth
+
+	// ManualCleanup, when true, creates the sandbox with no TTL so it stays
+	// alive until explicitly killed. The timeout field is omitted from the
+	// request (nil), causing the server to treat it as infinite.
+	ManualCleanup bool
 
 	// Extensions for provider-specific parameters.
 	Extensions map[string]string
@@ -81,8 +88,12 @@ func CreateSandbox(ctx context.Context, config ConnectionConfig, opts SandboxCre
 	if limits == nil {
 		limits = DefaultResourceLimits
 	}
-	timeout := opts.TimeoutSeconds
-	if timeout == nil {
+	var timeout *int
+	if opts.ManualCleanup {
+		// nil timeout — omitted from JSON via omitempty, server treats as no TTL.
+	} else if opts.TimeoutSeconds != nil {
+		timeout = opts.TimeoutSeconds
+	} else {
 		t := DefaultTimeoutSeconds
 		timeout = &t
 	}
@@ -90,7 +101,7 @@ func CreateSandbox(ctx context.Context, config ConnectionConfig, opts SandboxCre
 	lc := config.lifecycleClient()
 
 	req := CreateSandboxRequest{
-		Image:          ImageSpec{URI: opts.Image},
+		Image:          ImageSpec{URI: opts.Image, Auth: opts.ImageAuth},
 		Entrypoint:     entrypoint,
 		ResourceLimits: limits,
 		Timeout:        timeout,
@@ -169,6 +180,20 @@ func ConnectSandbox(ctx context.Context, config ConnectionConfig, sandboxID stri
 	return sb, nil
 }
 
+// ResumeSandbox resumes a paused sandbox and reconnects to it.
+func ResumeSandbox(ctx context.Context, config ConnectionConfig, sandboxID string, opts ...ReadyOptions) (*Sandbox, error) {
+	lc := config.lifecycleClient()
+	if err := lc.ResumeSandbox(ctx, sandboxID); err != nil {
+		return nil, fmt.Errorf("opensandbox: resume sandbox: %w", err)
+	}
+	return ConnectSandbox(ctx, config, sandboxID, opts...)
+}
+
+// Resume resumes this sandbox if it was paused and reconnects to it.
+func (s *Sandbox) Resume(ctx context.Context, opts ...ReadyOptions) (*Sandbox, error) {
+	return ResumeSandbox(ctx, *s.config, s.id, opts...)
+}
+
 // Kill terminates the sandbox. This is irreversible.
 func (s *Sandbox) Kill(ctx context.Context) error {
 	return s.lifecycle.DeleteSandbox(ctx, s.id)
@@ -190,20 +215,20 @@ func (s *Sandbox) GetInfo(ctx context.Context) (*SandboxInfo, error) {
 	return s.lifecycle.GetSandbox(ctx, s.id)
 }
 
-// GetMetrics returns current system resource metrics from the sandbox.
-func (s *Sandbox) GetMetrics(ctx context.Context) (*Metrics, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.GetMetrics(ctx)
-}
-
 // IsHealthy checks whether the sandbox's execd service is responsive.
 func (s *Sandbox) IsHealthy(ctx context.Context) bool {
 	if s.execd == nil {
 		return false
 	}
 	return s.execd.Ping(ctx) == nil
+}
+
+// Ping checks if the execd service is responsive.
+func (s *Sandbox) Ping(ctx context.Context) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.Ping(ctx)
 }
 
 // Renew extends the sandbox's expiration by the given duration from now.
@@ -215,196 +240,6 @@ func (s *Sandbox) Renew(ctx context.Context, duration time.Duration) (*RenewExpi
 func (s *Sandbox) GetEndpoint(ctx context.Context, port int) (*Endpoint, error) {
 	useProxy := s.config.UseServerProxy
 	return s.lifecycle.GetEndpoint(ctx, s.id, port, &useProxy)
-}
-
-// GetEgressPolicy retrieves the current egress network policy.
-func (s *Sandbox) GetEgressPolicy(ctx context.Context) (*PolicyStatusResponse, error) {
-	if err := s.resolveEgress(ctx); err != nil {
-		return nil, err
-	}
-	return s.egress.GetPolicy(ctx)
-}
-
-// PatchEgressRules merges network rules into the current egress policy.
-func (s *Sandbox) PatchEgressRules(ctx context.Context, rules []NetworkRule) (*PolicyStatusResponse, error) {
-	if err := s.resolveEgress(ctx); err != nil {
-		return nil, err
-	}
-	return s.egress.PatchPolicy(ctx, rules)
-}
-
-// RunCommand executes a shell command and returns the structured result.
-func (s *Sandbox) RunCommand(ctx context.Context, command string, handlers *ExecutionHandlers) (*Execution, error) {
-	return s.RunCommandWithOpts(ctx, RunCommandRequest{Command: command}, handlers)
-}
-
-// RunCommandWithOpts executes a command with full options.
-func (s *Sandbox) RunCommandWithOpts(ctx context.Context, req RunCommandRequest, handlers *ExecutionHandlers) (*Execution, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-
-	exec := &Execution{}
-	err := s.execd.RunCommand(ctx, req, func(event StreamEvent) error {
-		return processStreamEvent(exec, event, handlers)
-	})
-	if err != nil {
-		return exec, err
-	}
-	return exec, nil
-}
-
-// Ping checks if the execd service is responsive.
-func (s *Sandbox) Ping(ctx context.Context) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.Ping(ctx)
-}
-
-// GetFileInfo retrieves file metadata.
-func (s *Sandbox) GetFileInfo(ctx context.Context, path string) (map[string]FileInfo, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.GetFileInfo(ctx, path)
-}
-
-// DeleteFiles deletes one or more files from the sandbox.
-func (s *Sandbox) DeleteFiles(ctx context.Context, paths []string) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.DeleteFiles(ctx, paths)
-}
-
-// MoveFiles renames or moves files.
-func (s *Sandbox) MoveFiles(ctx context.Context, req MoveRequest) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.MoveFiles(ctx, req)
-}
-
-// SearchFiles searches for files matching a pattern.
-func (s *Sandbox) SearchFiles(ctx context.Context, dir, pattern string) ([]FileInfo, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.SearchFiles(ctx, dir, pattern)
-}
-
-// SetPermissions changes file permissions.
-func (s *Sandbox) SetPermissions(ctx context.Context, req PermissionsRequest) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.SetPermissions(ctx, req)
-}
-
-// UploadFile uploads a local file to the sandbox.
-func (s *Sandbox) UploadFile(ctx context.Context, localPath, remotePath string) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.UploadFile(ctx, localPath, remotePath)
-}
-
-// DownloadFile downloads a file from the sandbox.
-func (s *Sandbox) DownloadFile(ctx context.Context, remotePath, rangeHeader string) (io.ReadCloser, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.DownloadFile(ctx, remotePath, rangeHeader)
-}
-
-// CreateDirectory creates a directory in the sandbox.
-// Mode is octal digits as int (e.g. 755 for rwxr-xr-x).
-func (s *Sandbox) CreateDirectory(ctx context.Context, path string, mode int) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.CreateDirectory(ctx, path, mode)
-}
-
-// DeleteDirectory deletes a directory and its contents.
-func (s *Sandbox) DeleteDirectory(ctx context.Context, path string) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.DeleteDirectory(ctx, path)
-}
-
-// ReplaceInFiles performs text replacement in files.
-func (s *Sandbox) ReplaceInFiles(ctx context.Context, req ReplaceRequest) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.ReplaceInFiles(ctx, req)
-}
-
-// ExecuteCode executes code in a context and streams output via SSE.
-func (s *Sandbox) ExecuteCode(ctx context.Context, req RunCodeRequest, handlers *ExecutionHandlers) (*Execution, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	exec := &Execution{}
-	err := s.execd.ExecuteCode(ctx, req, func(event StreamEvent) error {
-		return processStreamEvent(exec, event, handlers)
-	})
-	return exec, err
-}
-
-// CreateContext creates a code execution context.
-func (s *Sandbox) CreateContext(ctx context.Context, req CreateContextRequest) (*CodeContext, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.CreateContext(ctx, req)
-}
-
-// ListContexts lists active code execution contexts for a language.
-func (s *Sandbox) ListContexts(ctx context.Context, language string) ([]CodeContext, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.ListContexts(ctx, language)
-}
-
-// DeleteContext deletes a code execution context.
-func (s *Sandbox) DeleteContext(ctx context.Context, contextID string) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.DeleteContext(ctx, contextID)
-}
-
-// CreateSession creates a new bash session.
-func (s *Sandbox) CreateSession(ctx context.Context) (*Session, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.CreateSession(ctx)
-}
-
-// RunInSession executes a command in an existing session with structured output.
-func (s *Sandbox) RunInSession(ctx context.Context, sessionID string, req RunInSessionRequest, handlers *ExecutionHandlers) (*Execution, error) {
-	if s.execd == nil {
-		return nil, fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	exec := &Execution{}
-	err := s.execd.RunInSession(ctx, sessionID, req, func(event StreamEvent) error {
-		return processStreamEvent(exec, event, handlers)
-	})
-	return exec, err
-}
-
-// DeleteSession deletes a bash session.
-func (s *Sandbox) DeleteSession(ctx context.Context, sessionID string) error {
-	if s.execd == nil {
-		return fmt.Errorf("opensandbox: execd client not initialized")
-	}
-	return s.execd.DeleteSession(ctx, sessionID)
 }
 
 // ReadyOptions configures WaitUntilReady behavior.

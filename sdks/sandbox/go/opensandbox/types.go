@@ -5,7 +5,10 @@
 // Run `make generate` or `go generate ./...` to regenerate after spec changes.
 package opensandbox
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // ---------------------------------------------------------------------------
 // Lifecycle types (generated from sandbox-lifecycle.yml via type aliases)
@@ -177,16 +180,24 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
-// APIError wraps an ErrorResponse with the HTTP status code.
+// APIError wraps an ErrorResponse with the HTTP status code and retry metadata.
 type APIError struct {
 	StatusCode int
 	RequestID  string
 	Response   ErrorResponse
+
+	// RetryAfter is the server-suggested wait duration from the Retry-After
+	// header. Zero means no suggestion was provided.
+	RetryAfter time.Duration
 }
 
 // Error implements the error interface.
 func (e *APIError) Error() string {
-	return e.Response.Code + ": " + e.Response.Message
+	msg := fmt.Sprintf("%s: %s", e.Response.Code, e.Response.Message)
+	if e.RequestID != "" {
+		msg += fmt.Sprintf(" (request_id: %s)", e.RequestID)
+	}
+	return msg
 }
 
 // ---------------------------------------------------------------------------

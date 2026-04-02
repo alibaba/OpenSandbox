@@ -101,6 +101,69 @@ func TestCreateSandbox(t *testing.T) {
 	}
 }
 
+func TestCreateSandbox_ImageAuth(t *testing.T) {
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var req CreateSandboxRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if req.Image.Auth == nil {
+			t.Fatal("expected ImageAuth to be set")
+		}
+		if req.Image.Auth.Username != "user" {
+			t.Errorf("Username = %q, want %q", req.Image.Auth.Username, "user")
+		}
+		if req.Image.Auth.Password != "pass" {
+			t.Errorf("Password = %q, want %q", req.Image.Auth.Password, "pass")
+		}
+
+		jsonResponse(w, http.StatusCreated, SandboxInfo{
+			ID:        "sbx-auth",
+			Status:    SandboxStatus{State: StatePending},
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		})
+	})
+
+	_, err := client.CreateSandbox(context.Background(), CreateSandboxRequest{
+		Image: ImageSpec{
+			URI:  "registry.example.com/private:latest",
+			Auth: &ImageAuth{Username: "user", Password: "pass"},
+		},
+		Entrypoint:     []string{"/bin/sh"},
+		ResourceLimits: ResourceLimits{"cpu": "500m"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox with ImageAuth: %v", err)
+	}
+}
+
+func TestCreateSandbox_ManualCleanup(t *testing.T) {
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var raw map[string]json.RawMessage
+		json.Unmarshal(body, &raw)
+
+		if _, exists := raw["timeout"]; exists {
+			t.Error("expected timeout to be omitted from request when ManualCleanup is true")
+		}
+
+		jsonResponse(w, http.StatusCreated, SandboxInfo{
+			ID:        "sbx-manual",
+			Status:    SandboxStatus{State: StatePending},
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		})
+	})
+
+	_, err := client.CreateSandbox(context.Background(), CreateSandboxRequest{
+		Image:          ImageSpec{URI: "python:3.12"},
+		Entrypoint:     []string{"/bin/sh"},
+		ResourceLimits: ResourceLimits{"cpu": "500m"},
+		// Timeout is nil — simulates ManualCleanup (no timeout sent)
+	})
+	if err != nil {
+		t.Fatalf("CreateSandbox with ManualCleanup: %v", err)
+	}
+}
+
 func TestGetSandbox(t *testing.T) {
 	want := SandboxInfo{
 		ID: "sbx-456",
@@ -192,6 +255,63 @@ func TestDeleteSandbox(t *testing.T) {
 	err := client.DeleteSandbox(context.Background(), "sbx-789")
 	if err != nil {
 		t.Fatalf("DeleteSandbox: %v", err)
+	}
+}
+
+func TestResumeSandbox(t *testing.T) {
+	var resumed bool
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/sandboxes/sbx-paused/resume" {
+			resumed = true
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusNotFound)
+	})
+
+	err := client.ResumeSandbox(context.Background(), "sbx-paused")
+	if err != nil {
+		t.Fatalf("ResumeSandbox: %v", err)
+	}
+	if !resumed {
+		t.Error("expected resume endpoint to be called")
+	}
+}
+
+func TestSandbox_Resume(t *testing.T) {
+	var resumeCalled bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/resume"):
+			resumeCalled = true
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/"):
+			jsonResponse(w, http.StatusOK, Endpoint{
+				Endpoint: "http://execd.test:8080",
+				Headers:  map[string]string{"X-EXECD-ACCESS-TOKEN": "tok"},
+			})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	config := ConnectionConfig{Domain: srv.URL}
+	sb := &Sandbox{
+		id:     "sbx-resume-test",
+		config: &config,
+	}
+
+	got, err := sb.Resume(context.Background())
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	if !resumeCalled {
+		t.Error("expected resume endpoint to be called")
+	}
+	if got.ID() != "sbx-resume-test" {
+		t.Errorf("ID = %q, want %q", got.ID(), "sbx-resume-test")
 	}
 }
 
@@ -618,12 +738,15 @@ func TestStreamSSE_NDJSON(t *testing.T) {
 		t.Fatalf("expected 2 events, got %d: %+v", len(events), events)
 	}
 
-	// NDJSON events should have empty Event field and raw JSON as Data.
-	if events[0].Event != "" {
-		t.Errorf("event[0].Event = %q, want empty", events[0].Event)
+	// NDJSON events with a "type" field should have Event populated.
+	if events[0].Event != "stdout" {
+		t.Errorf("event[0].Event = %q, want %q", events[0].Event, "stdout")
 	}
 	if events[0].Data != `{"type":"stdout","data":"hello"}` {
 		t.Errorf("event[0].Data = %q", events[0].Data)
+	}
+	if events[1].Event != "result" {
+		t.Errorf("event[1].Event = %q, want %q", events[1].Event, "result")
 	}
 	if events[1].Data != `{"type":"result","exit_code":0}` {
 		t.Errorf("event[1].Data = %q", events[1].Data)

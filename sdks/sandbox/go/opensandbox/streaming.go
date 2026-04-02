@@ -2,11 +2,9 @@ package opensandbox
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -112,43 +110,3 @@ func streamSSE(ctx context.Context, resp *http.Response, handler EventHandler) e
 	}
 }
 
-// doStreamRequest builds an HTTP request, executes it, and streams SSE events
-// through handler. It is a helper used by ExecdClient for SSE endpoints.
-func (c *Client) doStreamRequest(ctx context.Context, method, path string, body any, handler EventHandler) error {
-	var bodyReader io.Reader
-	if body != nil {
-		buf, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("opensandbox: marshal request: %w", err)
-		}
-		bodyReader = bytes.NewReader(buf)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
-	if err != nil {
-		return fmt.Errorf("opensandbox: create request: %w", err)
-	}
-
-	for k, v := range c.headers {
-		req.Header.Set(k, v)
-	}
-	if c.apiKey != "" {
-		req.Header.Set(c.authHeader, c.apiKey)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	req.Header.Set("Accept", "text/event-stream")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("opensandbox: do request: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		return handleError(resp)
-	}
-
-	return streamSSE(ctx, resp, handler)
-}

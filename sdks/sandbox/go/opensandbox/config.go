@@ -39,6 +39,16 @@ type ConnectionConfig struct {
 	// AuthHeader overrides the default lifecycle auth header name.
 	// Default is "OPEN-SANDBOX-API-KEY". Use "X-API-Key" for proxied deployments.
 	AuthHeader string
+
+	// Retry enables automatic retry with exponential backoff for transient
+	// errors (429, 502, 503, 504). If nil, requests are not retried.
+	// Use DefaultRetryConfig() for sensible defaults.
+	Retry *RetryConfig
+
+	// Transport configures HTTP connection pooling. If nil and HTTPClient
+	// is also nil, Go's http.DefaultTransport is used.
+	// Use DefaultTransportConfig() for tuned pool settings.
+	Transport *TransportConfig
 }
 
 // GetDomain returns the configured domain, falling back to env var and default.
@@ -111,12 +121,19 @@ func (c *ConnectionConfig) clientOpts(includeAuthHeader bool) []Option {
 	}
 	if c.HTTPClient != nil {
 		opts = append(opts, WithHTTPClient(c.HTTPClient))
+	} else if c.Transport != nil {
+		opts = append(opts, WithHTTPClient(&http.Client{
+			Transport: c.Transport.NewTransport(),
+		}))
 	}
 	if t := c.GetRequestTimeout(); t > 0 {
 		opts = append(opts, WithTimeout(t))
 	}
 	if len(c.Headers) > 0 {
 		opts = append(opts, WithHeaders(c.Headers))
+	}
+	if c.Retry != nil {
+		opts = append(opts, WithRetry(*c.Retry))
 	}
 	return opts
 }
