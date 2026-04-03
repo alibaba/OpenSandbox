@@ -23,6 +23,7 @@ synchronous and streaming execution modes with proper session management.
 
 import json
 import logging
+from datetime import timedelta
 
 import httpx
 
@@ -54,6 +55,19 @@ from opensandbox.models.sandboxes import SandboxEndpoint
 from opensandbox.services.command import Commands
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_run_in_session_timeout(timeout: timedelta | None) -> int | None:
+    if timeout is None:
+        return None
+    if isinstance(timeout, timedelta):
+        timeout_ms = int(timeout.total_seconds() * 1000)
+        if timeout_ms < 0:
+            raise InvalidArgumentException("timeout must be positive")
+        return timeout_ms
+    raise InvalidArgumentException(
+        "timeout must be a datetime.timedelta or None"
+    )
 
 
 def _infer_foreground_exit_code(execution: Execution) -> int | None:
@@ -385,7 +399,7 @@ class CommandsAdapter(Commands):
         command: str,
         *,
         working_directory: str | None = None,
-        timeout: int | None = None,
+        timeout: timedelta | None = None,
         handlers: ExecutionHandlers | None = None,
     ) -> Execution:
         if not (session_id and session_id.strip()):
@@ -393,8 +407,9 @@ class CommandsAdapter(Commands):
         if not (command and command.strip()):
             raise InvalidArgumentException("command cannot be empty")
 
+        timeout_ms = _resolve_run_in_session_timeout(timeout)
         body = _build_run_in_session_request_body(
-            command, working_directory, timeout
+            command, working_directory, timeout_ms
         )
         url = self._get_execd_url(
             self.RUN_IN_SESSION_PATH.format(session_id=session_id)

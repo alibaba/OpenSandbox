@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -158,7 +159,7 @@ async def test_run_in_session_streaming_uses_generated_fields_and_exit_code() ->
         "sess-1",
         "pwd",
         working_directory="/var",
-        timeout=5000,
+        timeout=timedelta(seconds=5),
     )
 
     assert execution.logs.stdout[0].text == "/var"
