@@ -1,0 +1,23 @@
+{
+  "skill_name": "opensandbox",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "帮我在 OpenSandbox 里跑一段 Python 数据分析脚本。我有一个 sales.csv 文件，内容大概是 date,product,amount 这种格式，我需要你写个脚本算出每个 product 的总销售额，然后把结果输出成 JSON。用 opensandbox 的 Python SDK 来做。",
+      "expected_output": "A complete Python script using opensandbox SDK that: (1) creates a sandbox with code-interpreter image, (2) writes the CSV file and analysis script into the sandbox, (3) runs the script, (4) reads and returns the JSON output, (5) kills the sandbox. Should use correct imports, ConnectionConfig, write_file, commands.run, read_file, and kill/close.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I want to set up Claude Code inside an OpenSandbox container so it can work on a GitHub repo. I have an ANTHROPIC_AUTH_TOKEN. Walk me through the full setup — creating the sandbox, installing claude, cloning a repo, and running claude on it.",
+      "expected_output": "Step-by-step guide or script that: (1) creates sandbox with code-interpreter image and ANTHROPIC_AUTH_TOKEN injected via env, (2) installs claude-code via npm, (3) clones a repo with git, (4) runs claude CLI command on the repo. Should correctly use env parameter for auth injection, not write tokens to files.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我不想用 Python SDK，直接用 curl 调 OpenSandbox 的 REST API。帮我写一个完整的 bash 脚本：创建一个 sandbox，在里面跑 echo hello world，拿到输出，最后删掉 sandbox。",
+      "expected_output": "A bash script using curl that: (1) POST /v1/sandboxes to create with correct JSON body (image, entrypoint, timeout, resourceLimits), (2) extracts sandbox_id from response, (3) uses the execd API or SDK proxy to run a command, (4) captures output, (5) DELETE /v1/sandboxes/{id} to clean up. Should use correct auth header OPEN-SANDBOX-API-KEY.",
+      "files": []
+    }
+  ]
+}
