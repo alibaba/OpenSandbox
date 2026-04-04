@@ -62,7 +62,10 @@ export interface ExecdCommands {
   runInSession(
     sessionId: string,
     command: string,
-    options?: { workingDirectory?: string; timeout?: number },
+    options?: {
+      workingDirectory?: string;
+      timeoutSeconds?: number;
+    },
     handlers?: ExecutionHandlers,
     signal?: AbortSignal,
   ): Promise<CommandExecution>;

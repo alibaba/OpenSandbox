@@ -381,11 +381,11 @@ public class ModelsTests
         var options = new RunInSessionOptions
         {
             WorkingDirectory = "/workspace",
-            Timeout = 5000
+            TimeoutSeconds = 5
         };
 
         options.WorkingDirectory.Should().Be("/workspace");
-        options.Timeout.Should().Be(5000);
+        options.TimeoutSeconds.Should().Be(5);
     }
 
     [Fact]

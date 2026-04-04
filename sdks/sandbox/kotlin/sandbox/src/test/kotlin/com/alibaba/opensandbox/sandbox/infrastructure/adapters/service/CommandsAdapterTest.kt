@@ -40,6 +40,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
 class CommandsAdapterTest {
     // CommandsAdapter unit tests
@@ -285,7 +286,7 @@ data: {"type":"execution_complete","execution_time":100,"timestamp":167253120100
                 RunInSessionRequest.builder()
                     .command("echo Hello")
                     .workingDirectory("/workspace")
-                    .timeout(5000)
+                    .timeout(5.seconds)
                     .handlers(handlers)
                     .build(),
             )

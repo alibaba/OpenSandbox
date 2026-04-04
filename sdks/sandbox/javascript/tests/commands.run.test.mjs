@@ -101,7 +101,7 @@ test("CommandsAdapter.runInSession sends command and timeout fields", async () =
 
   const execution = await adapter.runInSession("sess-1", "pwd", {
     workingDirectory: "/var",
-    timeout: 5000,
+    timeoutSeconds: 5,
   });
 
   assert.deepEqual(requestBody, {

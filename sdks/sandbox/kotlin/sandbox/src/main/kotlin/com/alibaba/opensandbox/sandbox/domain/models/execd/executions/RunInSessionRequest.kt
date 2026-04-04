@@ -16,18 +16,20 @@
 
 package com.alibaba.opensandbox.sandbox.domain.models.execd.executions
 
+import kotlin.time.Duration
+
 /**
  * Request to run a command in an existing bash session.
  *
  * @property command Shell command to execute
  * @property workingDirectory Optional working directory override for this run
- * @property timeout Optional max execution time in milliseconds
+ * @property timeout Optional max execution time
  * @property handlers Optional execution handlers for streaming events
  */
 class RunInSessionRequest private constructor(
     val command: String,
     val workingDirectory: String?,
-    val timeout: Long?,
+    val timeout: Duration?,
     val handlers: ExecutionHandlers?,
 ) {
     companion object {
@@ -38,7 +40,7 @@ class RunInSessionRequest private constructor(
     class Builder {
         private var command: String? = null
         private var workingDirectory: String? = null
-        private var timeout: Long? = null
+        private var timeout: Duration? = null
         private var handlers: ExecutionHandlers? = null
 
         fun command(command: String): Builder {
@@ -52,7 +54,7 @@ class RunInSessionRequest private constructor(
             return this
         }
 
-        fun timeout(timeout: Long?): Builder {
+        fun timeout(timeout: Duration?): Builder {
             this.timeout = timeout
             return this
         }
