@@ -827,6 +827,35 @@ def test_renew_expiration_rejects_manual_cleanup_sandbox():
     assert exc_info.value.detail["message"] == "Sandbox manual-id does not have automatic expiration enabled."
 
 
+def test_renew_expiration_rejects_time_before_current_expires_at():
+    """Renew must be rejected when the new expiresAt is before the current expiresAt (spec alignment)."""
+    service = DockerSandboxService(config=_app_config())
+    current_expiration = datetime.now(timezone.utc) + timedelta(hours=2)
+    # Request a time that is in the future but earlier than the current expiration
+    earlier_time = datetime.now(timezone.utc) + timedelta(hours=1)
+
+    container = MagicMock()
+    container.attrs = {
+        "Config": {
+            "Labels": {
+                SANDBOX_ID_LABEL: "sbx-001",
+                SANDBOX_EXPIRES_AT_LABEL: current_expiration.isoformat(),
+            }
+        }
+    }
+    request = MagicMock(expires_at=earlier_time)
+
+    with (
+        patch.object(service, "_get_container_by_sandbox_id", return_value=container),
+        patch.object(service, "_get_tracked_expiration", return_value=current_expiration),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            service.renew_expiration("sbx-001", request)
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert "after the current expiresAt" in exc_info.value.detail["message"]
+
+
 @pytest.mark.asyncio
 @patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_async_returns_provisioning(mock_docker):
