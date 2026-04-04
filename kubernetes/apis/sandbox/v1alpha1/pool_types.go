@@ -36,6 +36,9 @@ type PoolSpec struct {
 	// ScaleStrategy controls the scaling behavior.
 	// +optional
 	ScaleStrategy *ScaleStrategy `json:"scaleStrategy,omitempty"`
+	// UpdateStrategy controls how pool pods are updated when the template changes.
+	// +optional
+	UpdateStrategy *UpdateStrategy `json:"updateStrategy,omitempty"`
 }
 
 type CapacitySpec struct {
@@ -66,6 +69,15 @@ type ScaleStrategy struct {
 	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
 }
 
+// UpdateStrategy controls how pool pods are updated when the pool template changes.
+type UpdateStrategy struct {
+	// MaxUnavailable is the maximum number of pods that can be unavailable during an update.
+	// Can be an absolute number (ex: 5) or a percentage of desired pods (ex: "20%").
+	// Defaults to 25%.
+	// +optional
+	MaxUnavailable *intstr.IntOrString `json:"maxUnavailable,omitempty"`
+}
+
 // PoolStatus defines the observed state of Pool.
 type PoolStatus struct {
 	// ObservedGeneration is the most recent generation observed for this BatchSandbox. It corresponds to the
@@ -79,6 +91,8 @@ type PoolStatus struct {
 	Allocated int32 `json:"allocated"`
 	// Available is the number of nodes currently available in the pool.
 	Available int32 `json:"available"`
+	// Updated is the number of nodes that have been updated to the latest revision.
+	Updated int32 `json:"updated,omitempty"`
 }
 
 // +genclient
@@ -88,6 +102,8 @@ type PoolStatus struct {
 // +kubebuilder:printcolumn:name="TOTAL",type="integer",JSONPath=".status.total",description="The number of all nodes in pool."
 // +kubebuilder:printcolumn:name="ALLOCATED",type="integer",JSONPath=".status.allocated",description="The number of allocated nodes in pool."
 // +kubebuilder:printcolumn:name="AVAILABLE",type="integer",JSONPath=".status.available",description="The number of available nodes in pool."
+// +kubebuilder:printcolumn:name="UPDATED",type="integer",JSONPath=".status.updated",description="The number of nodes updated to the latest revision."
+// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
 // Pool is the Schema for the pools API.
 type Pool struct {
 	metav1.TypeMeta   `json:",inline"`

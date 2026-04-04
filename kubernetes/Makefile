@@ -124,6 +124,7 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 KIND_CLUSTER ?= sandbox-k8s-test-e2e
 KIND_K8S_VERSION ?= v1.22.4
 GINKGO_ARGS ?=
+E2E_TIMEOUT ?= 30m
 
 .PHONY: install-kind
 install-kind: ## Install Kind using go install if not already installed
@@ -148,15 +149,15 @@ setup-test-e2e: install-kind ## Set up a Kind cluster for e2e tests if it does n
 .PHONY: test-e2e-main
 test-e2e-main: setup-test-e2e manifests generate fmt vet 
 	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \
-		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v $(GINKGO_ARGS)
+		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(GINKGO_ARGS)
 	$(MAKE) cleanup-test-e2e
 
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind. Use GINKGO_ARGS to pass additional arguments.
 	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \
-		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v $(GINKGO_ARGS)
+		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(GINKGO_ARGS)
 	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \
-		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e_task/ -v -ginkgo.v $(GINKGO_ARGS)
+		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e_task/ -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(GINKGO_ARGS)
 	$(MAKE) cleanup-test-e2e
 	$(MAKE) test-gvisor CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG)
 	$(MAKE) cleanup-gvisor

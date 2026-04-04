@@ -30,6 +30,26 @@ import (
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/eviction"
 )
 
+type stubAllocator struct {
+	podAllocation map[string]string
+}
+
+func (a *stubAllocator) Schedule(_ context.Context, _ *AllocSpec) (*AllocStatus, []SandboxSyncInfo, bool, error) {
+	return nil, nil, false, nil
+}
+func (a *stubAllocator) GetPoolAllocation(_ context.Context, _ *sandboxv1alpha1.Pool) (map[string]string, error) {
+	return a.podAllocation, nil
+}
+func (a *stubAllocator) PersistPoolAllocation(_ context.Context, _ *sandboxv1alpha1.Pool, _ *AllocStatus) error {
+	return nil
+}
+func (a *stubAllocator) ClearPoolAllocation(_ context.Context, _ string, _ string) error {
+	return nil
+}
+func (a *stubAllocator) SyncSandboxAllocation(_ context.Context, _ *sandboxv1alpha1.BatchSandbox, _ []string) error {
+	return nil
+}
+
 func newEvictionTestPod(name string, labels map[string]string, deleting bool) *corev1.Pod {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -46,33 +66,29 @@ func newEvictionTestPod(name string, labels map[string]string, deleting bool) *c
 	return pod
 }
 
-func newEvictionTestReconciler(objs ...runtime.Object) *PoolReconciler {
+func newEvictionTestReconciler(podAllocation map[string]string, objs ...runtime.Object) *PoolReconciler {
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	_ = sandboxv1alpha1.AddToScheme(scheme)
 
-	clientObjs := make([]corev1.Pod, 0)
+	builder := fake.NewClientBuilder().WithScheme(scheme)
 	for _, o := range objs {
 		if pod, ok := o.(*corev1.Pod); ok {
-			clientObjs = append(clientObjs, *pod)
+			p := *pod
+			builder = builder.WithObjects(&p)
 		}
-	}
-
-	builder := fake.NewClientBuilder().WithScheme(scheme)
-	for _, pod := range clientObjs {
-		p := pod
-		builder = builder.WithObjects(&p)
 	}
 	c := builder.Build()
 
 	return &PoolReconciler{
-		Client:   c,
-		Scheme:   scheme,
-		Recorder: record.NewFakeRecorder(10),
+		Client:    c,
+		Scheme:    scheme,
+		Recorder:  record.NewFakeRecorder(10),
+		Allocator: &stubAllocator{podAllocation: podAllocation},
 	}
 }
 
-func TestFilterEvictingPods(t *testing.T) {
+func TestHandleEviction(t *testing.T) {
 	pool := &sandboxv1alpha1.Pool{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
 	}
@@ -81,156 +97,112 @@ func TestFilterEvictingPods(t *testing.T) {
 	evictLabel := map[string]string{eviction.LabelEvict: ""}
 	normalLabel := map[string]string{"app": "test"}
 
-	tests := []struct {
-		name          string
-		pods          []*corev1.Pod
-		podAllocation map[string]string
-		expectNames   []string
-	}{
-		{
-			name: "no eviction labels keeps all pods",
-			pods: []*corev1.Pod{
-				newEvictionTestPod("pod-1", normalLabel, false),
-				newEvictionTestPod("pod-2", normalLabel, false),
-			},
-			podAllocation: map[string]string{},
-			expectNames:   []string{"pod-1", "pod-2"},
-		},
-		{
-			name: "unallocated eviction-labeled pods are excluded",
-			pods: []*corev1.Pod{
-				newEvictionTestPod("pod-1", evictLabel, false),
-				newEvictionTestPod("pod-2", normalLabel, false),
-			},
-			podAllocation: map[string]string{},
-			expectNames:   []string{"pod-2"},
-		},
-		{
-			name: "allocated eviction-labeled pods are kept",
-			pods: []*corev1.Pod{
-				newEvictionTestPod("pod-1", evictLabel, false),
-				newEvictionTestPod("pod-2", normalLabel, false),
-			},
-			podAllocation: map[string]string{"pod-1": "sandbox-1"},
-			expectNames:   []string{"pod-1", "pod-2"},
-		},
-		{
-			name: "mix of allocated and unallocated eviction-labeled pods",
-			pods: []*corev1.Pod{
-				newEvictionTestPod("pod-1", evictLabel, false),
-				newEvictionTestPod("pod-2", evictLabel, false),
-				newEvictionTestPod("pod-3", normalLabel, false),
-			},
-			podAllocation: map[string]string{"pod-1": "sandbox-1"},
-			expectNames:   []string{"pod-1", "pod-3"},
-		},
-		{
-			name: "deleting pods with eviction label are not excluded (DeletionTimestamp skips NeedsEviction)",
-			pods: []*corev1.Pod{
-				newEvictionTestPod("pod-1", evictLabel, true),
-			},
-			podAllocation: map[string]string{},
-			expectNames:   []string{"pod-1"},
-		},
-		{
-			name:          "empty pod list",
-			pods:          []*corev1.Pod{},
-			podAllocation: map[string]string{},
-			expectNames:   []string{},
-		},
-	}
+	t.Run("no eviction labels keeps all pods", func(t *testing.T) {
+		pods := []*corev1.Pod{
+			newEvictionTestPod("pod-1", normalLabel, false),
+			newEvictionTestPod("pod-2", normalLabel, false),
+		}
+		r := newEvictionTestReconciler(map[string]string{}, pods[0], pods[1])
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			r := newEvictionTestReconciler()
-			got := r.filterEvictingPods(ctx, pool, tt.pods, tt.podAllocation)
-
-			if len(got) != len(tt.expectNames) {
-				t.Fatalf("filterEvictingPods() returned %d pods, want %d", len(got), len(tt.expectNames))
+		got, err := r.handleEviction(ctx, pool, pods)
+		if err != nil {
+			t.Fatalf("handleEviction() returned error: %v", err)
+		}
+		expectNames := []string{"pod-1", "pod-2"}
+		if len(got) != len(expectNames) {
+			t.Fatalf("got %d pods, want %d", len(got), len(expectNames))
+		}
+		for i, pod := range got {
+			if pod.Name != expectNames[i] {
+				t.Errorf("pod[%d] = %s, want %s", i, pod.Name, expectNames[i])
 			}
-			for i, pod := range got {
-				if pod.Name != tt.expectNames[i] {
-					t.Errorf("pod[%d] = %s, want %s", i, pod.Name, tt.expectNames[i])
-				}
-			}
-		})
-	}
-}
+		}
+	})
 
-func TestHandlePodEvictions(t *testing.T) {
-	pool := &sandboxv1alpha1.Pool{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-pool", Namespace: "default"},
-	}
-	ctx := context.Background()
-
-	evictLabel := map[string]string{eviction.LabelEvict: ""}
-	normalLabel := map[string]string{"app": "test"}
-
-	t.Run("evicts unallocated pods with eviction label", func(t *testing.T) {
+	t.Run("unallocated eviction-labeled pods are evicted and excluded", func(t *testing.T) {
 		pod1 := newEvictionTestPod("pod-1", evictLabel, false)
 		pod2 := newEvictionTestPod("pod-2", normalLabel, false)
-		r := newEvictionTestReconciler(pod1, pod2)
+		r := newEvictionTestReconciler(map[string]string{}, pod1, pod2)
 
-		err := r.handlePodEvictions(ctx, pool, []*corev1.Pod{pod1, pod2}, map[string]string{})
+		got, err := r.handleEviction(ctx, pool, []*corev1.Pod{pod1, pod2})
 		if err != nil {
-			t.Fatalf("handlePodEvictions() returned error: %v", err)
+			t.Fatalf("handleEviction() returned error: %v", err)
 		}
-
+		if len(got) != 1 || got[0].Name != "pod-2" {
+			t.Fatalf("got %v, want [pod-2]", got)
+		}
 		// pod-1 should be deleted
-		got := &corev1.Pod{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-1", Namespace: "default"}, got); err == nil {
+		check := &corev1.Pod{}
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-1", Namespace: "default"}, check); err == nil {
 			t.Error("expected pod-1 to be deleted")
 		}
-		// pod-2 should still exist
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-2", Namespace: "default"}, got); err != nil {
-			t.Error("expected pod-2 to still exist")
-		}
 	})
 
-	t.Run("skips allocated pods with eviction label", func(t *testing.T) {
+	t.Run("allocated eviction-labeled pods are kept", func(t *testing.T) {
 		pod1 := newEvictionTestPod("pod-1", evictLabel, false)
-		r := newEvictionTestReconciler(pod1)
+		pod2 := newEvictionTestPod("pod-2", normalLabel, false)
+		alloc := map[string]string{"pod-1": "sandbox-1"}
+		r := newEvictionTestReconciler(alloc, pod1, pod2)
 
-		podAllocation := map[string]string{"pod-1": "sandbox-1"}
-		err := r.handlePodEvictions(ctx, pool, []*corev1.Pod{pod1}, podAllocation)
+		got, err := r.handleEviction(ctx, pool, []*corev1.Pod{pod1, pod2})
 		if err != nil {
-			t.Fatalf("handlePodEvictions() returned error: %v", err)
+			t.Fatalf("handleEviction() returned error: %v", err)
 		}
-
-		// pod-1 should still exist
-		got := &corev1.Pod{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-1", Namespace: "default"}, got); err != nil {
-			t.Error("expected allocated pod-1 to still exist")
+		expectNames := []string{"pod-1", "pod-2"}
+		if len(got) != len(expectNames) {
+			t.Fatalf("got %d pods, want %d", len(got), len(expectNames))
+		}
+		for i, pod := range got {
+			if pod.Name != expectNames[i] {
+				t.Errorf("pod[%d] = %s, want %s", i, pod.Name, expectNames[i])
+			}
 		}
 	})
 
-	t.Run("skips pods without eviction label", func(t *testing.T) {
-		pod1 := newEvictionTestPod("pod-1", normalLabel, false)
-		r := newEvictionTestReconciler(pod1)
+	t.Run("mix of allocated and unallocated eviction-labeled pods", func(t *testing.T) {
+		pod1 := newEvictionTestPod("pod-1", evictLabel, false)
+		pod2 := newEvictionTestPod("pod-2", evictLabel, false)
+		pod3 := newEvictionTestPod("pod-3", normalLabel, false)
+		alloc := map[string]string{"pod-1": "sandbox-1"}
+		r := newEvictionTestReconciler(alloc, pod1, pod2, pod3)
 
-		err := r.handlePodEvictions(ctx, pool, []*corev1.Pod{pod1}, map[string]string{})
+		got, err := r.handleEviction(ctx, pool, []*corev1.Pod{pod1, pod2, pod3})
 		if err != nil {
-			t.Fatalf("handlePodEvictions() returned error: %v", err)
+			t.Fatalf("handleEviction() returned error: %v", err)
 		}
-
-		got := &corev1.Pod{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-1", Namespace: "default"}, got); err != nil {
-			t.Error("expected pod-1 to still exist")
+		expectNames := []string{"pod-1", "pod-3"}
+		if len(got) != len(expectNames) {
+			t.Fatalf("got %d pods, want %d", len(got), len(expectNames))
+		}
+		for i, pod := range got {
+			if pod.Name != expectNames[i] {
+				t.Errorf("pod[%d] = %s, want %s", i, pod.Name, expectNames[i])
+			}
 		}
 	})
 
-	t.Run("skips pods already deleting", func(t *testing.T) {
+	t.Run("deleting pods with eviction label are not evicted", func(t *testing.T) {
 		pod1 := newEvictionTestPod("pod-1", evictLabel, true)
-		r := newEvictionTestReconciler(pod1)
+		r := newEvictionTestReconciler(map[string]string{}, pod1)
 
-		err := r.handlePodEvictions(ctx, pool, []*corev1.Pod{pod1}, map[string]string{})
+		got, err := r.handleEviction(ctx, pool, []*corev1.Pod{pod1})
 		if err != nil {
-			t.Fatalf("handlePodEvictions() returned error: %v", err)
+			t.Fatalf("handleEviction() returned error: %v", err)
 		}
+		if len(got) != 1 || got[0].Name != "pod-1" {
+			t.Fatalf("expected deleting pod to be kept, got %v", got)
+		}
+	})
 
-		got := &corev1.Pod{}
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-1", Namespace: "default"}, got); err != nil {
-			t.Error("expected deleting pod-1 to still exist")
+	t.Run("empty pod list", func(t *testing.T) {
+		r := newEvictionTestReconciler(map[string]string{})
+
+		got, err := r.handleEviction(ctx, pool, []*corev1.Pod{})
+		if err != nil {
+			t.Fatalf("handleEviction() returned error: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("expected empty result, got %d pods", len(got))
 		}
 	})
 
@@ -238,25 +210,25 @@ func TestHandlePodEvictions(t *testing.T) {
 		pod1 := newEvictionTestPod("pod-1", evictLabel, false)
 		pod2 := newEvictionTestPod("pod-2", evictLabel, false)
 		pod3 := newEvictionTestPod("pod-3", evictLabel, false)
-		r := newEvictionTestReconciler(pod1, pod2, pod3)
+		alloc := map[string]string{"pod-2": "sandbox-1"}
+		r := newEvictionTestReconciler(alloc, pod1, pod2, pod3)
 
-		podAllocation := map[string]string{"pod-2": "sandbox-1"}
-		err := r.handlePodEvictions(ctx, pool, []*corev1.Pod{pod1, pod2, pod3}, podAllocation)
+		got, err := r.handleEviction(ctx, pool, []*corev1.Pod{pod1, pod2, pod3})
 		if err != nil {
-			t.Fatalf("handlePodEvictions() returned error: %v", err)
+			t.Fatalf("handleEviction() returned error: %v", err)
+		}
+		if len(got) != 1 || got[0].Name != "pod-2" {
+			t.Fatalf("expected only pod-2, got %v", got)
 		}
 
-		got := &corev1.Pod{}
-		// pod-1 (idle, eviction-labeled) -> deleted
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-1", Namespace: "default"}, got); err == nil {
+		check := &corev1.Pod{}
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-1", Namespace: "default"}, check); err == nil {
 			t.Error("expected pod-1 to be deleted")
 		}
-		// pod-2 (allocated, eviction-labeled) -> kept
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-2", Namespace: "default"}, got); err != nil {
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-2", Namespace: "default"}, check); err != nil {
 			t.Error("expected allocated pod-2 to still exist")
 		}
-		// pod-3 (idle, eviction-labeled) -> deleted
-		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-3", Namespace: "default"}, got); err == nil {
+		if err := r.Client.Get(ctx, types.NamespacedName{Name: "pod-3", Namespace: "default"}, check); err == nil {
 			t.Error("expected pod-3 to be deleted")
 		}
 	})
