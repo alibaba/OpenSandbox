@@ -42,7 +42,7 @@ execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd
 [egress]
 # Egress configuration
 # -----------------------------------------------------------------
-image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.4"
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.5"
 # Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
 mode = "dns"
 

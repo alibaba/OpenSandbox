@@ -53,7 +53,7 @@ class TestEgressSidecarViaApply:
 
     def test_builds_container_with_basic_config(self):
         """Test that container is built with correct basic configuration."""
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[
@@ -70,7 +70,7 @@ class TestEgressSidecarViaApply:
 
     def test_contains_egress_rules_environment_variable(self):
         """Test that container includes OPENSANDBOX_EGRESS_RULES environment variable."""
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
@@ -86,7 +86,7 @@ class TestEgressSidecarViaApply:
         assert env_vars[1]["value"] == EGRESS_MODE_DNS
 
     def test_contains_egress_token_when_provided(self):
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
@@ -103,7 +103,7 @@ class TestEgressSidecarViaApply:
         assert env_vars[EGRESS_MODE_ENV] == EGRESS_MODE_DNS
 
     def test_egress_mode_dns_nft(self):
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
@@ -120,7 +120,7 @@ class TestEgressSidecarViaApply:
 
     def test_serializes_network_policy_correctly(self):
         """Test that network policy is correctly serialized to JSON."""
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[
@@ -145,7 +145,7 @@ class TestEgressSidecarViaApply:
 
     def test_handles_empty_egress_rules(self):
         """Test that empty egress rules are handled correctly."""
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="allow",
             egress=[],
@@ -161,7 +161,7 @@ class TestEgressSidecarViaApply:
 
     def test_handles_missing_default_action(self):
         """Test that missing default_action is handled (exclude_none=True)."""
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             egress=[NetworkRule(action="allow", target="example.com")],
         )
@@ -176,7 +176,7 @@ class TestEgressSidecarViaApply:
 
     def test_security_context_adds_net_admin_not_privileged(self):
         """Egress sidecar uses NET_ADMIN only (IPv6 is disabled in execd init when egress is on)."""
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[],
@@ -190,14 +190,14 @@ class TestEgressSidecarViaApply:
 
     def test_no_command_uses_image_entrypoint(self):
         container = _egress_container(
-            "opensandbox/egress:v1.0.4",
+            "opensandbox/egress:v1.0.5",
             NetworkPolicy(default_action="deny", egress=[]),
         )
         assert "command" not in container
 
     def test_container_spec_is_valid_kubernetes_format(self):
         """Test that returned container spec is in valid Kubernetes format."""
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
@@ -218,7 +218,7 @@ class TestEgressSidecarViaApply:
 
     def test_handles_wildcard_domains(self):
         """Test that wildcard domains in egress rules are handled correctly."""
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
         network_policy = NetworkPolicy(
             default_action="deny",
             egress=[
@@ -264,7 +264,7 @@ class TestApplyEgressToSpec:
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
         )
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
 
         apply_egress_to_spec(
             containers,
@@ -283,7 +283,7 @@ class TestApplyEgressToSpec:
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
         )
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
 
         apply_egress_to_spec(
             containers,
@@ -308,7 +308,7 @@ class TestApplyEgressToSpec:
             default_action="deny",
             egress=[NetworkRule(action="allow", target="example.com")],
         )
-        egress_image = "opensandbox/egress:v1.0.4"
+        egress_image = "opensandbox/egress:v1.0.5"
 
         apply_egress_to_spec(
             containers,
@@ -330,7 +330,7 @@ class TestApplyEgressToSpec:
         apply_egress_to_spec(
             containers,
             None,
-            "opensandbox/egress:v1.0.4",
+            "opensandbox/egress:v1.0.5",
         )
 
         assert len(containers) == 0
