@@ -17,6 +17,7 @@
 from opensandbox_server.services.docker import DockerSandboxService
 from opensandbox_server.services.extension_service import ExtensionService, require_extension_service
 from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
+from opensandbox_server.services.podman import PodmanSandboxService
 from opensandbox_server.services.factory import create_sandbox_service
 from opensandbox_server.services.sandbox_service import SandboxService
 
@@ -26,5 +27,6 @@ __all__ = [
     "require_extension_service",
     "DockerSandboxService",
     "KubernetesSandboxService",
+    "PodmanSandboxService",
     "create_sandbox_service",
 ]

@@ -25,6 +25,7 @@ from typing import Optional
 from opensandbox_server.config import AppConfig, get_config
 from opensandbox_server.services.docker import DockerSandboxService
 from opensandbox_server.services.k8s import KubernetesSandboxService
+from opensandbox_server.services.podman import PodmanSandboxService
 from opensandbox_server.services.sandbox_service import SandboxService
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ def create_sandbox_service(
     implementations: dict[str, type[SandboxService]] = {
         "docker": DockerSandboxService,
         "kubernetes": KubernetesSandboxService,
+        "podman": PodmanSandboxService,
         # Future implementations can be added here:
         # "containerd": ContainerdSandboxService,
     }

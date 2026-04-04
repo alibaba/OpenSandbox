@@ -136,6 +136,11 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
     This class implements sandbox lifecycle operations using Docker containers.
     """
 
+    @classmethod
+    def _supported_runtime_types(cls) -> tuple[str, ...]:
+        """Runtime types accepted by this service class (overridable by subclasses)."""
+        return ("docker",)
+
     def __init__(self, config: Optional[AppConfig] = None):
         """
         Initialize Docker sandbox service.
@@ -151,49 +156,25 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         """
         self.app_config = config or get_config()
         runtime_config = self.app_config.runtime
-        if runtime_config.type != "docker":
-            raise ValueError("DockerSandboxService requires runtime.type = 'docker'.")
+        if runtime_config.type not in self._supported_runtime_types():
+            raise ValueError(
+                f"{type(self).__name__} requires runtime.type in {self._supported_runtime_types()}."
+            )
 
         self.execd_image = runtime_config.execd_image
         self.network_mode = (self.app_config.docker.network_mode or HOST_NETWORK_MODE).lower()
         self._execd_archive_cache: Optional[bytes] = None
         self._api_timeout = self._resolve_api_timeout()
         try:
-            # Initialize Docker service from environment variables
-            client_kwargs = {}
-            try:
-                signature = inspect.signature(docker.from_env)
-                if "timeout" in signature.parameters:
-                    client_kwargs["timeout"] = self._api_timeout
-            except (ValueError, TypeError):
-                logger.debug(
-                    "Unable to introspect docker.from_env signature; using default parameters."
-                )
-            self.docker_client = docker.from_env(**client_kwargs)
-            if not client_kwargs:
-                try:
-                    self.docker_client.api.timeout = self._api_timeout
-                except AttributeError:
-                    logger.debug("Docker client API does not expose timeout attribute.")
-            logger.info("Docker service initialized from environment")
+            self.docker_client = self._create_docker_client()
+            logger.info("%s initialized from environment", type(self).__name__)
         except Exception as e:  # noqa: BLE001
-            # Common failure mode on macOS/dev machines: Docker daemon not running or socket path wrong.
-            hint = ""
-            msg = str(e)
-            if isinstance(e, FileNotFoundError) or "No such file or directory" in msg:
-                docker_host = os.environ.get("DOCKER_HOST", "")
-                hint = (
-                    " Docker daemon seems unavailable (unix socket not found). "
-                    "Make sure Docker Desktop (or Colima/Rancher Desktop) is running. "
-                    "If you use Colima on macOS, you may need to set "
-                    "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock before starting the server. "
-                    f"(current DOCKER_HOST='{docker_host}')"
-                )
+            hint = self._connection_error_hint(e)
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail={
                     "code": SandboxErrorCodes.DOCKER_INITIALIZATION_ERROR,
-                    "message": f"Failed to initialize Docker service: {str(e)}.{hint}",
+                    "message": f"Failed to initialize {type(self).__name__}: {str(e)}.{hint}",
                 },
             )
         self._expiration_lock = Lock()
@@ -217,6 +198,39 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if cfg is not None and cfg >= 1:
             return cfg
         return 180
+
+    def _connection_error_hint(self, error: Exception) -> str:
+        """Return a user-friendly hint when the container daemon is unreachable."""
+        msg = str(error)
+        if isinstance(error, FileNotFoundError) or "No such file or directory" in msg:
+            docker_host = os.environ.get("DOCKER_HOST", "")
+            return (
+                " Docker daemon seems unavailable (unix socket not found). "
+                "Make sure Docker Desktop (or Colima/Rancher Desktop) is running. "
+                "If you use Colima on macOS, you may need to set "
+                "DOCKER_HOST=unix://${HOME}/.colima/default/docker.sock before starting the server. "
+                f"(current DOCKER_HOST='{docker_host}')"
+            )
+        return ""
+
+    def _create_docker_client(self):
+        """Create and return a Docker SDK client (overridable by subclasses)."""
+        client_kwargs: dict = {}
+        try:
+            signature = inspect.signature(docker.from_env)
+            if "timeout" in signature.parameters:
+                client_kwargs["timeout"] = self._api_timeout
+        except (ValueError, TypeError):
+            logger.debug(
+                "Unable to introspect docker.from_env signature; using default parameters."
+            )
+        client = docker.from_env(**client_kwargs)
+        if not client_kwargs:
+            try:
+                client.api.timeout = self._api_timeout
+            except AttributeError:
+                logger.debug("Docker client API does not expose timeout attribute.")
+        return client
 
     @contextmanager
     def _docker_operation(self, action: str, sandbox_id: Optional[str] = None):
