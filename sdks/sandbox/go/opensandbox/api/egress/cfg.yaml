@@ -1,0 +1,7 @@
+package: egress
+output: gen.go
+generate:
+  models: true
+  client: true
+output-options:
+  name-normalizer: ToCamelCaseWithInitialisms
