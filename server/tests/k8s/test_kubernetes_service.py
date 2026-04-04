@@ -130,6 +130,28 @@ class TestKubernetesSandboxServiceCreate:
         k8s_service.workload_provider.create_workload.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_create_sandbox_normalizes_allocated_status_to_running(
+        self, k8s_service, create_sandbox_request, mock_workload
+    ):
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-sandbox-123",
+            "uid": "abc-123",
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Allocated",
+            "reason": "IP_ASSIGNED",
+            "message": "Pod has IP assigned but not ready",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+
+        response = await k8s_service.create_sandbox(create_sandbox_request)
+
+        assert response.status.state == "Running"
+        assert response.status.reason == "IP_ASSIGNED"
+        assert response.status.message == "Pod has IP assigned and sandbox is ready for requests"
+
+    @pytest.mark.asyncio
     async def test_create_sandbox_uses_configured_timeout_and_poll_interval(
         self, k8s_service, create_sandbox_request, mock_workload
     ):
