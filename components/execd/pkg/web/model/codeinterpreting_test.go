@@ -67,6 +67,7 @@ func TestRunCommandRequestValidateUidGid(t *testing.T) {
 
 func TestServerStreamEventToJSON(t *testing.T) {
 	event := ServerStreamEvent{
+		Eid:            42,
 		Type:           StreamEventTypeStdout,
 		Text:           "hello",
 		ExecutionCount: 3,
@@ -75,6 +76,7 @@ func TestServerStreamEventToJSON(t *testing.T) {
 	data := event.ToJSON()
 	var decoded ServerStreamEvent
 	require.NoError(t, json.Unmarshal(data, &decoded))
+	require.Equal(t, event.Eid, decoded.Eid)
 	require.Equal(t, event.Type, decoded.Type)
 	require.Equal(t, event.Text, decoded.Text)
 	require.Equal(t, event.ExecutionCount, decoded.ExecutionCount)
@@ -90,11 +92,12 @@ func TestServerStreamEventSummary(t *testing.T) {
 		{
 			name: "basic stdout",
 			event: ServerStreamEvent{
+				Eid:            7,
 				Type:           StreamEventTypeStdout,
 				Text:           "hello",
 				ExecutionCount: 2,
 			},
-			contains: []string{"type=stdout", "text=hello"},
+			contains: []string{"type=stdout", "eid=7", "text=hello"},
 		},
 		{
 			name: "truncated text and error",

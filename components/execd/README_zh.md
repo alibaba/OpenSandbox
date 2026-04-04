@@ -52,6 +52,7 @@
 - 通过进程组管理正确转发信号
 - 实时 stdout/stderr 流式输出
 - 支持上下文感知的中断
+- **SSE 断线续传（前台 `POST /command` / `POST /code`）**：主 SSE 存活期间 stdout/stderr 会写入有界环形缓冲；客户端断开后可用 **`GET /command/{id}/resume?after_eid=<eid>`** 按 `eid` 重放并可在命令仍运行时独占续传；主连接仍占用时返回 **`409 Conflict`**。OpenAPI 见 `specs/execd-api.yaml`。
 
 ### 文件系统
 

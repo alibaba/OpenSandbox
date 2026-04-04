@@ -54,6 +54,7 @@ English | [中文](README_zh.md)
 - Proper signal forwarding with process groups
 - Real-time stdout/stderr streaming
 - Context-aware interruption
+- **SSE resume (foreground `POST /command` and `POST /code`)**: stdout/stderr are copied to a bounded ring buffer while the primary SSE is active. If the client disconnects, **`GET /command/{id}/resume?after_eid=<eid>`** replays buffered events (`eid > after_eid`) and may attach as the sole live consumer if the command is still running. An active primary stream returns **`409 Conflict`**. See `specs/execd-api.yaml`.
 
 ### Filesystem
 
