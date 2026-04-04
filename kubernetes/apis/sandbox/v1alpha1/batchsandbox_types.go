@@ -100,6 +100,10 @@ type BatchSandboxStatus struct {
 	TaskPending int32 `json:"taskPending"`
 	// TaskUnknown is the number of Unknown task
 	TaskUnknown int32 `json:"taskUnknown"`
+	// TaskLastErrorMessage holds the most recent error message from a failed task.
+	// This includes lifecycle hook failures (e.g., ossfs mount timeout or error output).
+	// +optional
+	TaskLastErrorMessage string `json:"taskLastErrorMessage,omitempty"`
 }
 
 // +genclient
@@ -145,6 +149,17 @@ type TaskTemplateSpec struct {
 	Spec TaskSpec `json:"spec,omitempty"`
 }
 
+// ExecMode defines where a process should be executed.
+// +kubebuilder:validation:Enum=Local;Remote
+type ExecMode string
+
+const (
+	// ExecModeLocal executes in the task-executor container.
+	ExecModeLocal ExecMode = "Local"
+	// ExecModeRemote executes in the main container via nsenter.
+	ExecModeRemote ExecMode = "Remote"
+)
+
 type TaskSpec struct {
 	// +optional
 	Process *ProcessTask `json:"process,omitempty"`
@@ -169,6 +184,49 @@ type ProcessTask struct {
 	// WorkingDir task working directory.
 	// +optional
 	WorkingDir string `json:"workingDir,omitempty"`
+	// ExecMode controls where the process runs.
+	// Local: inside task-executor container.
+	// Remote: inside main container (via nsenter).
+	// +optional
+	// +kubebuilder:default=Local
+	ExecMode ExecMode `json:"execMode,omitempty"`
+	// Lifecycle defines actions to be executed before and after the main process.
+	// +optional
+	Lifecycle *ProcessLifecycle `json:"lifecycle,omitempty"`
+}
+
+// ProcessLifecycle defines lifecycle hooks for a process.
+type ProcessLifecycle struct {
+	// PreStart is executed before the main process starts.
+	// +optional
+	PreStart *LifecycleHandler `json:"preStart,omitempty"`
+	// PostStop is executed after the main process stops.
+	// +optional
+	PostStop *LifecycleHandler `json:"postStop,omitempty"`
+}
+
+// LifecycleHandler defines a lifecycle action.
+type LifecycleHandler struct {
+	// Exec specifies the action to take.
+	// +optional
+	Exec *ExecAction `json:"exec,omitempty"`
+	// ExecMode controls where the action runs.
+	// +optional
+	// +kubebuilder:default=Local
+	ExecMode ExecMode `json:"execMode,omitempty"`
+	// TimeoutSeconds is the maximum number of seconds the hook may run.
+	// If the hook does not complete within this time, it is killed and the
+	// enclosing operation (Start or Stop) is treated as failed.
+	// If not set or zero, there is no timeout.
+	// +optional
+	TimeoutSeconds *int64 `json:"timeoutSeconds,omitempty"`
+}
+
+// ExecAction describes a "run in container" action.
+type ExecAction struct {
+	// Command is the command line to execute inside the container.
+	// +kubebuilder:validation:Required
+	Command []string `json:"command"`
 }
 
 // TaskStatus task status
