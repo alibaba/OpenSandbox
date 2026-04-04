@@ -195,8 +195,15 @@ class K8sClient:
         namespace: str,
         plural: str,
         label_selector: str = "",
+        *,
+        not_found_returns_empty: bool = True,
     ) -> List[Dict[str, Any]]:
-        """List namespaced custom resources, returning the items list."""
+        """List namespaced custom resources, returning the items list.
+
+        When ``not_found_returns_empty`` is True (default), a 404 from the API is treated as an
+        empty list (caller cannot distinguish CRD missing from zero resources). When False, 404
+        is re-raised so callers can map it to a specific HTTP error (see PoolService.list_pools).
+        """
         if self._read_limiter:
             self._read_limiter.acquire()
         try:
@@ -209,7 +216,7 @@ class K8sClient:
             )
             return resp.get("items", [])
         except ApiException as e:
-            if e.status == 404:
+            if e.status == 404 and not_found_returns_empty:
                 return []
             raise
 
@@ -243,7 +250,11 @@ class K8sClient:
         name: str,
         body: Dict[str, Any],
     ) -> Dict[str, Any]:
-        """Patch a namespaced custom resource."""
+        """Patch a namespaced custom resource.
+
+        The kubernetes-client sets ``Content-Type: application/merge-patch+json`` for this call,
+        which matches Kubernetes CRD merge-patch semantics for partial ``spec`` updates.
+        """
         if self._write_limiter:
             self._write_limiter.acquire()
         return self.get_custom_objects_api().patch_namespaced_custom_object(

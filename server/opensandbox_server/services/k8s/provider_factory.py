@@ -40,6 +40,23 @@ _PROVIDER_REGISTRY: Dict[str, Type[WorkloadProvider]] = {
 }
 
 
+def resolve_workload_provider_type(provider_type: str | None) -> str:
+    """
+    Normalize ``kubernetes.workload_provider`` to a registry key.
+
+    If unset, matches ``create_workload_provider`` by using the first registered
+    provider (currently ``batchsandbox``).
+    """
+    if provider_type is None:
+        if not _PROVIDER_REGISTRY:
+            raise ValueError(
+                "No workload providers are registered. "
+                "Cannot resolve default provider."
+            )
+        return next(iter(_PROVIDER_REGISTRY.keys()))
+    return provider_type.lower()
+
+
 def create_workload_provider(
     provider_type: str | None,
     k8s_client: K8sClient,
@@ -61,17 +78,9 @@ def create_workload_provider(
     Raises:
         ValueError: If provider_type is not supported or no providers are registered
     """
-    # Use first registered provider if not specified
+    provider_type_lower = resolve_workload_provider_type(provider_type)
     if provider_type is None:
-        if not _PROVIDER_REGISTRY:
-            raise ValueError(
-                "No workload providers are registered. "
-                "Cannot create a default provider."
-            )
-        provider_type = next(iter(_PROVIDER_REGISTRY.keys()))
-        logger.info(f"No provider specified, using default: {provider_type}")
-
-    provider_type_lower = provider_type.lower()
+        logger.info(f"No provider specified, using default: {provider_type_lower}")
 
     if provider_type_lower not in _PROVIDER_REGISTRY:
         available = ", ".join(_PROVIDER_REGISTRY.keys())

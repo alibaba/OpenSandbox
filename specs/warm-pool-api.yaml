@@ -1,0 +1,457 @@
+openapi: 3.1.0
+info:
+  title: OpenSandbox WarmPool API
+  version: 0.1.0
+  description: |
+    The WarmPool API manages pre-warmed sandbox resource pools on Kubernetes (CRD kind `Pool`).
+    WarmPools reduce cold-start latency by maintaining a set of ready pods; sandboxes can reference
+    a pool via `extensions.poolRef` during sandbox creation.
+
+    These endpoints are only available when the server is configured with `runtime.type: kubernetes`
+    **and** `kubernetes.workload_provider` resolves to `batchsandbox` (WarmPool is used with
+    BatchSandbox workloads). Other runtimes or workload providers (e.g. `agent-sandbox`) return
+    HTTP `501 Not Implemented` with a machine-readable error body (`KUBERNETES::POOL_NOT_SUPPORTED`).
+
+    ## Authentication
+
+    API Key authentication is required for all operations:
+
+    1. **HTTP Header**
+       ```
+       OPEN-SANDBOX-API-KEY: your-api-key
+       ```
+
+    2. **Environment Variable** (for SDK clients)
+       ```
+       OPEN_SANDBOX_API_KEY=your-api-key
+       ```
+
+       SDK clients will automatically pick up this environment variable.
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development
+security:
+  - apiKeyAuth: []
+tags:
+  - name: WarmPools
+    description: Create, list, update, and delete pre-warmed Kubernetes WarmPool resources
+paths:
+  /warmpools:
+    get:
+      tags: [WarmPools]
+      summary: List WarmPools
+      description: |
+        Returns all WarmPool resources in the configured Kubernetes namespace.
+
+        If the cluster returns HTTP 404 for the Pool list API (CRD not installed, wrong
+        API version, or similar), the server responds with **503** and
+        `KUBERNETES::POOL_LIST_UNAVAILABLE`—this is distinct from **200** with an empty
+        `items` array when the API is healthy but no pools exist.
+      responses:
+        '200':
+          description: List of WarmPools
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListWarmPoolsResponse'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [WarmPools]
+      summary: Create a WarmPool
+      description: |
+        Creates a Pool CRD that manages a set of pre-warmed pods. After creation,
+        sandboxes can reference the pool via `extensions.poolRef` in the Sandbox Lifecycle
+        API to benefit from reduced cold-start latency.
+
+        ## Authentication
+
+        API Key authentication is required via:
+        - `OPEN-SANDBOX-API-KEY: <api-key>` header
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateWarmPoolRequest'
+            examples:
+              minimal:
+                summary: Basic WarmPool with capacity and pod template
+                value:
+                  name: my-warm-pool
+                  template:
+                    metadata:
+                      labels:
+                        app: sandbox-warm-pool
+                    spec:
+                      containers:
+                        - name: worker
+                          image: opensandbox/execd:latest
+                  capacitySpec:
+                    bufferMax: 2
+                    bufferMin: 1
+                    poolMax: 10
+                    poolMin: 2
+      responses:
+        '201':
+          description: WarmPool created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarmPool'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /warmpools/{warmPoolName}:
+    parameters:
+      - $ref: '#/components/parameters/WarmPoolName'
+    get:
+      tags: [WarmPools]
+      summary: Get a WarmPool by name
+      description: |
+        Returns the current WarmPool definition including capacity configuration and observed
+        runtime status (when reconciled).
+      responses:
+        '200':
+          description: WarmPool retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarmPool'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    put:
+      tags: [WarmPools]
+      summary: Update WarmPool capacity
+      description: |
+        Updates only the capacity configuration (`capacitySpec`: `bufferMax`, `bufferMin`,
+        `poolMax`, `poolMin`). To change the pod template, delete and recreate the WarmPool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWarmPoolRequest'
+            examples:
+              scale:
+                summary: Adjust capacity bounds
+                value:
+                  capacitySpec:
+                    bufferMax: 3
+                    bufferMin: 1
+                    poolMax: 20
+                    poolMin: 4
+      responses:
+        '200':
+          description: WarmPool capacity updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarmPool'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+    delete:
+      tags: [WarmPools]
+      summary: Delete a WarmPool
+      description: |
+        Deletes the Pool CRD. Pre-warmed pods managed by the warm pool are terminated by the
+        pool controller.
+      responses:
+        '204':
+          description: WarmPool deleted successfully
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: OPEN-SANDBOX-API-KEY
+      description: |
+        API Key for authentication. Can be provided via:
+        1. HTTP Header: OPEN-SANDBOX-API-KEY: your-api-key
+        2. Environment variable: OPEN_SANDBOX_API_KEY (for SDK clients)
+  parameters:
+    WarmPoolName:
+      name: warmPoolName
+      in: path
+      required: true
+      description: Name of the WarmPool (Kubernetes resource name)
+      schema:
+        type: string
+        pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+        maxLength: 253
+  headers:
+    XRequestId:
+      description: Unique request identifier for tracing
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: The request was invalid or malformed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Unauthorized:
+      description: Authentication credentials are missing or invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    NotFound:
+      description: The requested WarmPool does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Conflict:
+      description: A WarmPool with the same name already exists
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    NotImplemented:
+      description: |
+        WarmPool management is not supported: e.g. `runtime.type` is not `kubernetes`, or
+        `kubernetes.workload_provider` is not `batchsandbox` (same error code in both cases).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    ServiceUnavailable:
+      description: |
+        Pool list API returned 404 from Kubernetes (e.g. Pool CRD missing or API path wrong).
+        Error body uses code `KUBERNETES::POOL_LIST_UNAVAILABLE`.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    InternalServerError:
+      description: An unexpected server error occurred
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    UnprocessableEntity:
+      description: |
+        Request validation failed. Typical cases: JSON body does not match the schema (POST/PUT),
+        or path parameter `warmPoolName` violates the Kubernetes resource name pattern.
+        The response follows FastAPI's default shape: JSON object with a `detail` array of
+        validation errors (each entry includes a location, message, and type).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/HTTPValidationError'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+  schemas:
+    ValidationErrorItem:
+      type: object
+      description: Single validation issue (FastAPI / Pydantic).
+      additionalProperties: true
+    HTTPValidationError:
+      type: object
+      description: FastAPI default 422 response body.
+      properties:
+        detail:
+          type: array
+          description: List of validation errors.
+          items:
+            $ref: '#/components/schemas/ValidationErrorItem'
+      required: [detail]
+      additionalProperties: false
+    ErrorResponse:
+      type: object
+      description: |
+        Standard error response for all non-2xx HTTP responses.
+        HTTP status code indicates the error category; code and message provide details.
+      properties:
+        code:
+          type: string
+          description: |
+            Machine-readable error code (e.g., INVALID_REQUEST, NOT_FOUND, INTERNAL_ERROR).
+            Use this for programmatic error handling.
+        message:
+          type: string
+          description: Human-readable error message describing what went wrong and how to fix it.
+      required: [code, message]
+      additionalProperties: false
+    WarmPoolCapacitySpec:
+      type: object
+      description: Capacity configuration that controls the size of the WarmPool.
+      properties:
+        bufferMax:
+          type: integer
+          minimum: 0
+          description: Maximum number of nodes kept in the warm buffer.
+        bufferMin:
+          type: integer
+          minimum: 0
+          description: Minimum number of nodes that must remain in the buffer.
+        poolMax:
+          type: integer
+          minimum: 0
+          description: Maximum total number of nodes allowed in the entire pool.
+        poolMin:
+          type: integer
+          minimum: 0
+          description: Minimum total size of the pool.
+      required: [bufferMax, bufferMin, poolMax, poolMin]
+      additionalProperties: false
+    CreateWarmPoolRequest:
+      type: object
+      description: |
+        Request to create a new WarmPool. A WarmPool manages a set of
+        pre-warmed pods that can be rapidly allocated to sandboxes.
+      properties:
+        name:
+          type: string
+          description: Unique name for the WarmPool (must be a valid Kubernetes resource name).
+          pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+          maxLength: 253
+        template:
+          type: object
+          description: |
+            Kubernetes PodTemplateSpec defining the pod configuration for pre-warmed nodes.
+            Follows the same schema as `spec.template` in a Kubernetes Deployment.
+        capacitySpec:
+          $ref: '#/components/schemas/WarmPoolCapacitySpec'
+      required: [name, template, capacitySpec]
+      additionalProperties: false
+    UpdateWarmPoolRequest:
+      type: object
+      description: |
+        Request to update an existing WarmPool's capacity configuration. Only capacity settings
+        can be updated after creation; changing the pod template requires recreating the WarmPool.
+      properties:
+        capacitySpec:
+          $ref: '#/components/schemas/WarmPoolCapacitySpec'
+      required: [capacitySpec]
+      additionalProperties: false
+    WarmPoolStatus:
+      type: object
+      description: Observed runtime state of a WarmPool.
+      properties:
+        total:
+          type: integer
+          description: Total number of nodes in the warm pool.
+        allocated:
+          type: integer
+          description: Number of nodes currently allocated to sandboxes.
+        available:
+          type: integer
+          description: Number of nodes currently available in the warm pool.
+        revision:
+          type: string
+          description: Latest revision identifier of the WarmPool.
+      required: [total, allocated, available, revision]
+      additionalProperties: false
+    WarmPool:
+      type: object
+      description: Full representation of a WarmPool resource.
+      properties:
+        name:
+          type: string
+          description: Unique WarmPool name.
+        capacitySpec:
+          $ref: '#/components/schemas/WarmPoolCapacitySpec'
+        status:
+          $ref: '#/components/schemas/WarmPoolStatus'
+          description: Observed runtime state of the WarmPool. May be absent if not yet reconciled.
+        createdAt:
+          type: string
+          format: date-time
+          description: WarmPool creation timestamp.
+      required: [name, capacitySpec]
+      additionalProperties: false
+    ListWarmPoolsResponse:
+      type: object
+      description: Collection of WarmPools.
+      properties:
+        items:
+          type: array
+          description: List of WarmPools.
+          items:
+            $ref: '#/components/schemas/WarmPool'
+      required: [items]
+      additionalProperties: false

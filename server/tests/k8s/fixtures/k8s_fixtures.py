@@ -294,7 +294,7 @@ def k8s_service(k8s_app_config):
     
     with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client_cls, \
          patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
-        
+
         # Mock K8sClient instance
         mock_k8s_client = MagicMock()
         mock_k8s_client_cls.return_value = mock_k8s_client

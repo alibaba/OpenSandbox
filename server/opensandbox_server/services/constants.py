@@ -77,6 +77,8 @@ class SandboxErrorCodes:
     K8S_POOL_ALREADY_EXISTS = "KUBERNETES::POOL_ALREADY_EXISTS"
     K8S_POOL_API_ERROR = "KUBERNETES::POOL_API_ERROR"
     K8S_POOL_NOT_SUPPORTED = "KUBERNETES::POOL_NOT_SUPPORTED"
+    # List pools returned 404 (e.g. CRD/APIGroup not served, wrong version, or namespace API missing)
+    K8S_POOL_LIST_UNAVAILABLE = "KUBERNETES::POOL_LIST_UNAVAILABLE"
 
     # Volume error codes
     INVALID_VOLUME_NAME = "VOLUME::INVALID_NAME"

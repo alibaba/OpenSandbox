@@ -247,6 +247,14 @@ class TestK8sClient:
         with pytest.raises(ApiException):
             c.list_custom_objects("g", "v1", "ns", "foos")
 
+    def test_list_custom_objects_reraises_404_when_not_found_returns_empty_false(self, k8s_runtime_config):
+        """When not_found_returns_empty=False, 404 is propagated to the caller."""
+        c = self._make_client(k8s_runtime_config)
+        c._custom_objects_api.list_namespaced_custom_object.side_effect = ApiException(status=404)
+        with pytest.raises(ApiException) as exc_info:
+            c.list_custom_objects("g", "v1", "ns", "foos", not_found_returns_empty=False)
+        assert exc_info.value.status == 404
+
     def test_delete_custom_object_delegates_to_api(self, k8s_runtime_config):
         """delete_custom_object forwards arguments to the raw API."""
         c = self._make_client(k8s_runtime_config)

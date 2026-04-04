@@ -13,10 +13,10 @@
 # limitations under the License.
 
 """
-Factory for creating sandbox service instances.
+Factory for creating sandbox and WarmPool service instances.
 
-This module provides a factory function to create sandbox service implementations
-based on application configuration loaded from sandbox_server.config.
+This module provides factory functions keyed off application configuration
+(see ``get_config()`` / ``SANDBOX_CONFIG_PATH``).
 """
 
 import logging
@@ -25,6 +25,12 @@ from typing import Optional
 from opensandbox_server.config import AppConfig, get_config
 from opensandbox_server.services.docker import DockerSandboxService
 from opensandbox_server.services.k8s import KubernetesSandboxService
+from opensandbox_server.services.k8s.client import K8sClient
+from opensandbox_server.services.k8s.pool_service import PoolService
+from opensandbox_server.services.k8s.provider_factory import (
+    PROVIDER_TYPE_BATCHSANDBOX,
+    resolve_workload_provider_type,
+)
 from opensandbox_server.services.sandbox_service import SandboxService
 
 logger = logging.getLogger(__name__)
@@ -50,7 +56,7 @@ def create_sandbox_service(
     active_config = config or get_config()
     selected_type = (service_type or active_config.runtime.type).lower()
 
-    logger.info("Creating sandbox service with type: %s", selected_type)
+    logger.info(f"Creating sandbox service with type: {selected_type}")
 
     # Service implementation registry
     # Add new implementations here as they are created
@@ -70,3 +76,41 @@ def create_sandbox_service(
 
     implementation_class = implementations[selected_type]
     return implementation_class(config=active_config)
+
+
+def create_pool_service(config: Optional[AppConfig] = None) -> Optional[PoolService]:
+    """
+    Create the WarmPool CRUD service when the runtime is Kubernetes **and**
+    ``kubernetes.workload_provider`` resolves to ``batchsandbox`` (WarmPool is
+    only used with BatchSandbox workloads).
+
+    Returns ``None`` for other runtimes, missing ``[kubernetes]``, or non-batchsandbox
+    providers (e.g. ``agent-sandbox``). Uses a dedicated ``K8sClient`` (not the
+    one held by ``KubernetesSandboxService``).
+    """
+    active_config = config or get_config()
+    if active_config.runtime.type.lower() != "kubernetes":
+        logger.debug(
+            f"Pool service not created: runtime.type={active_config.runtime.type}"
+        )
+        return None
+    if not active_config.kubernetes:
+        logger.debug("Pool service not created: kubernetes config is missing")
+        return None
+
+    resolved_provider = resolve_workload_provider_type(
+        active_config.kubernetes.workload_provider
+    )
+    if resolved_provider != PROVIDER_TYPE_BATCHSANDBOX:
+        logger.debug(
+            f"Pool service not created: workload_provider={resolved_provider!r} "
+            f"(WarmPool requires {PROVIDER_TYPE_BATCHSANDBOX!r})"
+        )
+        return None
+
+    logger.info("Creating pool service (Kubernetes WarmPool CRUD, batchsandbox)")
+    k8s_client = K8sClient(active_config.kubernetes)
+    return PoolService(
+        k8s_client,
+        namespace=active_config.kubernetes.namespace,
+    )
