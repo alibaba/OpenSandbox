@@ -39,7 +39,7 @@ redis.consumer_concurrency = 8
 
 [runtime]
 type = "kubernetes"
-execd_image = "opensandbox/execd:v1.0.9"
+execd_image = "opensandbox/execd:v1.0.10"
 
 [storage]
 # Volume and storage configuration
