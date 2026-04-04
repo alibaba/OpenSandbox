@@ -666,6 +666,63 @@ def test_egress_sidecar_cleanup_wraps_unexpected_lookup_error(mock_docker):
     mock_client.api.remove_container.assert_called_once_with("sidecar-id", force=True)
 
 
+@patch("opensandbox_server.services.docker.docker")
+def test_egress_sidecar_host_config_sysctls_only_when_egress_disable_ipv6(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+
+    def host_cfg_side_effect(**kwargs):
+        return kwargs
+
+    mock_client.api.create_host_config.side_effect = host_cfg_side_effect
+    mock_client.api.create_container.return_value = {"Id": "sidecar-id"}
+    mock_client.containers.get.return_value = MagicMock()
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "bridge"
+    cfg.egress = EgressConfig(image="egress:latest", disable_ipv6=False)
+    service = DockerSandboxService(config=cfg)
+
+    with (
+        patch.object(service, "_ensure_image_available"),
+        patch.object(service, "_docker_operation") as mock_op,
+    ):
+        mock_op.return_value.__enter__.return_value = None
+        mock_op.return_value.__exit__.return_value = None
+        service._start_egress_sidecar(
+            "sandbox-id",
+            NetworkPolicy(defaultAction="deny", egress=[]),
+            egress_token="egress-token",
+            host_execd_port=44772,
+            host_http_port=8080,
+        )
+
+    hc_kwargs = mock_client.api.create_host_config.call_args.kwargs
+    assert "sysctls" not in hc_kwargs
+
+    cfg.egress = EgressConfig(image="egress:latest", disable_ipv6=True)
+    service2 = DockerSandboxService(config=cfg)
+    mock_client.api.create_host_config.reset_mock()
+
+    with (
+        patch.object(service2, "_ensure_image_available"),
+        patch.object(service2, "_docker_operation") as mock_op2,
+    ):
+        mock_op2.return_value.__enter__.return_value = None
+        mock_op2.return_value.__exit__.return_value = None
+        service2._start_egress_sidecar(
+            "sandbox-id",
+            NetworkPolicy(defaultAction="deny", egress=[]),
+            egress_token="egress-token",
+            host_execd_port=44772,
+            host_http_port=8080,
+        )
+
+    hc2 = mock_client.api.create_host_config.call_args.kwargs
+    assert hc2["sysctls"]["net.ipv6.conf.all.disable_ipv6"] == 1
+
+
 def test_expire_cleans_sidecar():
     service = DockerSandboxService(config=_app_config())
     mock_container = MagicMock()

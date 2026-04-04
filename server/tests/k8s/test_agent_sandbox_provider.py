@@ -29,6 +29,7 @@ from opensandbox_server.config import (
     AgentSandboxRuntimeConfig,
     EGRESS_MODE_DNS,
     EGRESS_MODE_DNS_NFT,
+    EgressConfig,
     ExecdInitResources,
     KubernetesRuntimeConfig,
     RuntimeConfig,
@@ -38,7 +39,12 @@ from opensandbox_server.services.k8s.agent_sandbox_provider import AgentSandboxP
 from opensandbox_server.services.constants import OPENSANDBOX_EGRESS_TOKEN
 
 
-def _app_config(shutdown_policy: str = "Delete", service_account: str | None = None, execd_init_resources: ExecdInitResources | None = None) -> AppConfig:
+def _app_config(
+    shutdown_policy: str = "Delete",
+    service_account: str | None = None,
+    execd_init_resources: ExecdInitResources | None = None,
+    egress: EgressConfig | None = None,
+) -> AppConfig:
     """Build an AppConfig for AgentSandboxProvider tests."""
     return AppConfig(
         runtime=RuntimeConfig(type="kubernetes", execd_image="execd:test"),
@@ -49,6 +55,7 @@ def _app_config(shutdown_policy: str = "Delete", service_account: str | None = N
             execd_init_resources=execd_init_resources,
         ),
         agent_sandbox=AgentSandboxRuntimeConfig(shutdown_policy=shutdown_policy),
+        egress=egress,
     )
 
 
@@ -498,7 +505,10 @@ class TestAgentSandboxProviderEgress:
         """
         Test case: Verify egress sidecar is added when network_policy is provided
         """
-        provider = AgentSandboxProvider(mock_k8s_client)
+        provider = AgentSandboxProvider(
+            mock_k8s_client,
+            _app_config(egress=EgressConfig()),
+        )
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
@@ -614,7 +624,10 @@ class TestAgentSandboxProviderEgress:
         assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS_NFT
 
     def test_create_workload_with_network_policy_does_not_add_pod_ipv6_sysctls(self, mock_k8s_client):
-        provider = AgentSandboxProvider(mock_k8s_client)
+        provider = AgentSandboxProvider(
+            mock_k8s_client,
+            _app_config(egress=EgressConfig()),
+        )
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
@@ -649,6 +662,42 @@ class TestAgentSandboxProviderEgress:
         execd_init = pod_spec["initContainers"][0]
         assert execd_init["name"] == "execd-installer"
         assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
+
+    def test_create_workload_with_egress_skips_ipv6_disable_when_not_configured(self, mock_k8s_client):
+        """With ``egress.disable_ipv6`` false, execd init stays unprivileged without sysctl writes."""
+        provider = AgentSandboxProvider(
+            mock_k8s_client,
+            _app_config(egress=EgressConfig(disable_ipv6=False)),
+        )
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image="opensandbox/egress:v1.0.3",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["podTemplate"]["spec"]
+        execd_init = pod_spec["initContainers"][0]
+        assert execd_init["name"] == "execd-installer"
+        assert "securityContext" not in execd_init
+        assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" not in execd_init["args"][0]
 
     def test_create_workload_with_network_policy_drops_net_admin_from_main_container(self, mock_k8s_client):
         """

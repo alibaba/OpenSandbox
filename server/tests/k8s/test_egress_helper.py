@@ -175,7 +175,7 @@ class TestEgressSidecarViaApply:
         assert "egress" in policy_dict
 
     def test_security_context_adds_net_admin_not_privileged(self):
-        """Egress sidecar uses NET_ADMIN only (IPv6 is disabled in execd init when egress is on)."""
+        """Egress sidecar uses NET_ADMIN only (IPv6 sysctl is optional via ``egress.disable_ipv6``)."""
         egress_image = "opensandbox/egress:v1.0.4"
         network_policy = NetworkPolicy(
             default_action="deny",

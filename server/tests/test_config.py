@@ -692,6 +692,8 @@ def test_kubernetes_runtime_with_firecracker_is_valid():
 
 
 def test_egress_config_mode_literal():
-    assert EgressConfig(image="opensandbox/egress:v1").mode == EGRESS_MODE_DNS
+    base = EgressConfig(image="opensandbox/egress:v1")
+    assert base.mode == EGRESS_MODE_DNS
+    assert base.disable_ipv6 is True
     cfg = EgressConfig(image="opensandbox/egress:v1", mode=EGRESS_MODE_DNS_NFT)
     assert cfg.mode == EGRESS_MODE_DNS_NFT

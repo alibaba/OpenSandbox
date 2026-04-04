@@ -82,3 +82,5 @@ mode = "direct"
 image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.4"
 # Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
 mode = "dns"
+# Default is true (recommended for dual-stack CNI). Set false only if you need IPv6 in the netns (see server/configuration.md).
+# disable_ipv6 = false

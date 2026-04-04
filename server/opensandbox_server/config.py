@@ -425,6 +425,14 @@ class EgressConfig(BaseModel):
         default=EGRESS_MODE_DNS,
         description="Egress enforcement passed to the sidecar as OPENSANDBOX_EGRESS_MODE (dns or dns+nft).",
     )
+    disable_ipv6: bool = Field(
+        default=True,
+        description=(
+            "Default true: egress IPv6 support is incomplete, especially on Kubernetes runtime. "
+            "Set false only if you intentionally leave IPv6 enabled in the sandbox netns "
+            "(e.g. IPv4-only CNI or experimenting with IPv6 egress despite gaps)."
+        ),
+    )
 
 
 class RuntimeConfig(BaseModel):

@@ -108,6 +108,12 @@ class AgentSandboxProvider(WorkloadProvider):
             self.resolver.get_k8s_runtime_class() if self.resolver else None
         )
 
+        self.egress_disable_ipv6 = (
+            bool(app_config.egress.disable_ipv6)
+            if app_config and app_config.egress is not None
+            else False
+        )
+
     def _resource_name(self, sandbox_id: str) -> str:
         return _to_dns1035_label(sandbox_id, prefix="sandbox")
 
@@ -225,7 +231,11 @@ class AgentSandboxProvider(WorkloadProvider):
         egress_mode: str = EGRESS_MODE_DNS,
     ) -> Dict[str, Any]:
         """Build pod spec dict for the Sandbox CRD."""
-        disable_ipv6_for_egress = network_policy is not None and egress_image is not None
+        disable_ipv6_for_egress = (
+            network_policy is not None
+            and egress_image is not None
+            and self.egress_disable_ipv6
+        )
         init_container = self._build_execd_init_container(
             execd_image, disable_ipv6_for_egress=disable_ipv6_for_egress
         )
@@ -273,7 +283,10 @@ class AgentSandboxProvider(WorkloadProvider):
         *,
         disable_ipv6_for_egress: bool = False,
     ) -> V1Container:
-        """Build init container that copies execd binary to the shared volume."""
+        """Build init container that copies execd binary to the shared volume.
+
+        ``disable_ipv6_for_egress`` is True only when ``egress.disable_ipv6`` is set and egress is used.
+        """
         script = (
             "cp ./execd /opt/opensandbox/bin/execd && "
             "cp ./bootstrap.sh /opt/opensandbox/bin/bootstrap.sh && "

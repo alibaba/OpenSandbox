@@ -26,6 +26,7 @@ from opensandbox_server.config import (
     AppConfig,
     EGRESS_MODE_DNS,
     EGRESS_MODE_DNS_NFT,
+    EgressConfig,
     ExecdInitResources,
     KubernetesRuntimeConfig,
     RuntimeConfig,
@@ -56,6 +57,15 @@ def _app_config_with_execd_resources(execd_init_resources: ExecdInitResources) -
             namespace="test-ns",
             execd_init_resources=execd_init_resources,
         ),
+    )
+
+
+def _app_config_with_egress_disable_ipv6(disable_ipv6: bool = True) -> AppConfig:
+    """Build an AppConfig with ``egress.disable_ipv6`` set (privileged execd init when egress is used)."""
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="execd:test"),
+        kubernetes=KubernetesRuntimeConfig(namespace="test-ns"),
+        egress=EgressConfig(disable_ipv6=disable_ipv6),
     )
 
 
@@ -1203,7 +1213,10 @@ class TestBatchSandboxProviderEgress:
         """
         Test case: Verify egress sidecar is added when network_policy is provided
         """
-        provider = BatchSandboxProvider(mock_k8s_client)
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_egress_disable_ipv6(),
+        )
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
@@ -1320,7 +1333,10 @@ class TestBatchSandboxProviderEgress:
 
     def test_create_workload_with_network_policy_does_not_add_pod_ipv6_sysctls(self, mock_k8s_client):
         """IPv6 all.disable is applied in privileged execd init, not Pod sysctls."""
-        provider = BatchSandboxProvider(mock_k8s_client)
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_egress_disable_ipv6(),
+        )
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
@@ -1355,6 +1371,42 @@ class TestBatchSandboxProviderEgress:
         execd_init = pod_spec["initContainers"][0]
         assert execd_init["name"] == "execd-installer"
         assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
+
+    def test_create_workload_with_egress_skips_ipv6_disable_when_not_configured(self, mock_k8s_client):
+        """With ``egress.disable_ipv6`` false, execd init is not privileged and does not write disable_ipv6."""
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_egress_disable_ipv6(False),
+        )
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image="opensandbox/egress:v1.0.3",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        execd_init = pod_spec["initContainers"][0]
+        assert execd_init["name"] == "execd-installer"
+        assert "securityContext" not in execd_init
+        assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" not in execd_init["args"][0]
 
     def test_create_workload_with_network_policy_drops_net_admin_from_main_container(self, mock_k8s_client):
         """

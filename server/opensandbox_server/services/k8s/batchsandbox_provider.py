@@ -97,6 +97,12 @@ class BatchSandboxProvider(WorkloadProvider):
         # Template manager
         self.template_manager = BatchSandboxTemplateManager(template_file_path)
 
+        self.egress_disable_ipv6 = (
+            bool(app_config.egress.disable_ipv6)
+            if app_config and app_config.egress is not None
+            else False
+        )
+
     def supports_image_auth(self) -> bool:
         """BatchSandbox supports image pull auth via imagePullSecrets injection."""
         return True
@@ -185,7 +191,11 @@ class BatchSandboxProvider(WorkloadProvider):
         extra_volumes, extra_mounts = self._extract_template_pod_extras()
 
         # Build init container for execd installation
-        disable_ipv6_for_egress = network_policy is not None and egress_image is not None
+        disable_ipv6_for_egress = (
+            network_policy is not None
+            and egress_image is not None
+            and self.egress_disable_ipv6
+        )
         init_container = self._build_execd_init_container(
             execd_image, disable_ipv6_for_egress=disable_ipv6_for_egress
         )
@@ -517,8 +527,8 @@ class BatchSandboxProvider(WorkloadProvider):
         
         Args:
             execd_image: execd container image
-            disable_ipv6_for_egress: When True, disable IPv6 in the Pod netns first
-                (privileged) then install binaries; used with egress sidecar.
+            disable_ipv6_for_egress: When True (``egress.disable_ipv6`` in server config),
+                disable IPv6 in the Pod netns first (privileged) then install binaries.
             
         Returns:
             V1Container: Init container spec
