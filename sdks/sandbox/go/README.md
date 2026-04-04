@@ -80,7 +80,7 @@ exec := opensandbox.NewExecdClient("http://localhost:9090", "your-execd-token")
 
 err := exec.RunCommand(ctx, opensandbox.RunCommandRequest{
     Command: "echo 'Hello from sandbox!'",
-    Timeout: 30000,
+    Timeout: 30 * time.Second,
 }, func(event opensandbox.StreamEvent) error {
     // event.Event is populated from the NDJSON "type" field automatically.
     switch event.Event {

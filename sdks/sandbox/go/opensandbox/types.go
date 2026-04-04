@@ -6,6 +6,7 @@
 package opensandbox
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -233,21 +234,65 @@ type CreateSessionRequest struct {
 }
 
 // RunCommandRequest is the request body for executing a shell command.
+//
+// Timeout uses time.Duration for an idiomatic Go API; it is converted to
+// milliseconds on the wire automatically via a custom MarshalJSON.
 type RunCommandRequest struct {
 	Command    string            `json:"command"`
 	Cwd        string            `json:"cwd,omitempty"`
 	Background bool              `json:"background,omitempty"`
-	Timeout    int64             `json:"timeout,omitempty"`
+	Timeout    time.Duration     `json:"timeout,omitempty"`
 	UID        *int32            `json:"uid,omitempty"`
 	GID        *int32            `json:"gid,omitempty"`
 	Envs       map[string]string `json:"envs,omitempty"`
 }
 
+// MarshalJSON implements json.Marshaler for RunCommandRequest, encoding the
+// Timeout field as milliseconds to match the execd wire format.
+func (r RunCommandRequest) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Command    string            `json:"command"`
+		Cwd        string            `json:"cwd,omitempty"`
+		Background bool              `json:"background,omitempty"`
+		Timeout    int64             `json:"timeout,omitempty"`
+		UID        *int32            `json:"uid,omitempty"`
+		GID        *int32            `json:"gid,omitempty"`
+		Envs       map[string]string `json:"envs,omitempty"`
+	}
+	return json.Marshal(wire{
+		Command:    r.Command,
+		Cwd:        r.Cwd,
+		Background: r.Background,
+		Timeout:    r.Timeout.Milliseconds(),
+		UID:        r.UID,
+		GID:        r.GID,
+		Envs:       r.Envs,
+	})
+}
+
 // RunInSessionRequest is the request body for running a command in an existing bash session.
+//
+// Timeout uses time.Duration for an idiomatic Go API; it is converted to
+// milliseconds on the wire automatically via a custom MarshalJSON.
 type RunInSessionRequest struct {
-	Command string `json:"command"`
-	Cwd     string `json:"cwd,omitempty"`
-	Timeout int64  `json:"timeout,omitempty"`
+	Command string        `json:"command"`
+	Cwd     string        `json:"cwd,omitempty"`
+	Timeout time.Duration `json:"timeout,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler for RunInSessionRequest, encoding the
+// Timeout field as milliseconds to match the execd wire format.
+func (r RunInSessionRequest) MarshalJSON() ([]byte, error) {
+	type wire struct {
+		Command string `json:"command"`
+		Cwd     string `json:"cwd,omitempty"`
+		Timeout int64  `json:"timeout,omitempty"`
+	}
+	return json.Marshal(wire{
+		Command: r.Command,
+		Cwd:     r.Cwd,
+		Timeout: r.Timeout.Milliseconds(),
+	})
 }
 
 // CommandStatusResponse contains the status of a command execution.
