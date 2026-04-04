@@ -49,6 +49,7 @@ DEFAULT_CONFIG_TEMPLATE = """\
 # domain = "localhost:8080"
 # protocol = "http"
 # request_timeout = 30
+# use_server_proxy = false
 
 [output]
 # format = "table"    # table | json | yaml
@@ -80,13 +81,14 @@ def resolve_config(
     cli_domain: str | None = None,
     cli_protocol: str | None = None,
     cli_timeout: int | None = None,
+    cli_use_server_proxy: bool | None = None,
     cli_output: str | None = None,
     config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Merge config from all sources and return a flat dict.
 
     Keys returned:
-      - api_key, domain, protocol, request_timeout (int seconds)
+      - api_key, domain, protocol, request_timeout (int seconds), use_server_proxy (bool)
       - output_format ("table" | "json" | "yaml")
       - default_image, default_timeout (str like "10m")
     """
@@ -110,6 +112,12 @@ def resolve_config(
         or _int_or_none(os.getenv("OPEN_SANDBOX_REQUEST_TIMEOUT"))
         or conn.get("request_timeout")
         or 30,
+        "use_server_proxy": _coalesce(
+            cli_use_server_proxy,
+            _bool_or_none(os.getenv("OPEN_SANDBOX_USE_SERVER_PROXY")),
+            conn.get("use_server_proxy"),
+            False,
+        ),
         "output_format": cli_output
         or os.getenv("OPEN_SANDBOX_OUTPUT")
         or output_cfg.get("format")
@@ -139,3 +147,21 @@ def _int_or_none(value: str | None) -> int | None:
         return int(value)
     except ValueError:
         return None
+
+
+def _bool_or_none(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    return None
+
+
+def _coalesce(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None

@@ -48,6 +48,7 @@ def _build_mock_client_context(
         "domain": "localhost:8080",
         "protocol": "http",
         "request_timeout": 30,
+        "use_server_proxy": False,
         "output_format": output_format,
         "color": False,
         "default_image": None,
@@ -153,6 +154,110 @@ class TestSandboxList:
         assert result.exit_code == 0
         mock_mgr.list_sandbox_infos.assert_called_once()
 
+    def test_list_help_uses_one_indexed_pages(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["sandbox", "list", "--help"])
+        assert result.exit_code == 0
+        assert "Page number (1-indexed)." in result.output
+
+    def test_list_rejects_page_zero(self, runner: CliRunner) -> None:
+        result = _invoke(runner, ["sandbox", "list", "--page", "0"])
+        assert result.exit_code != 0
+        assert "0 is not in the range x>=1" in result.output
+
+
+class TestSandboxCreate:
+    def test_create_uses_config_defaults(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_sb.id = "sb-123"
+        mock_ctx = _build_mock_client_context(sandbox=mock_sb)
+        mock_ctx.resolved_config["default_image"] = "python:3.12"
+        mock_ctx.resolved_config["default_timeout"] = "15m"
+
+        with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
+             patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx), \
+             patch("opensandbox_cli.main.OutputFormatter", side_effect=lambda fmt, **kw: OutputFormatter(fmt, **kw)), \
+             patch("opensandbox.sync.sandbox.SandboxSync.create", return_value=mock_sb) as mock_create:
+            mock_resolve.return_value = mock_ctx.resolved_config
+            result = runner.invoke(cli, ["-o", "json", "sandbox", "create"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        mock_create.assert_called_once()
+        assert mock_create.call_args.args[0] == "python:3.12"
+        assert mock_create.call_args.kwargs["timeout"].total_seconds() == 900
+
+    def test_create_requires_image_when_no_default(self, runner: CliRunner) -> None:
+        result = _invoke(runner, ["sandbox", "create"])
+        assert result.exit_code != 0
+        assert "Sandbox image is required" in result.output
+
+    def test_create_loads_volumes_from_file(self, runner: CliRunner, tmp_path: Path) -> None:
+        mock_sb = MagicMock()
+        mock_sb.id = "sb-123"
+        volumes_path = tmp_path / "volumes.json"
+        volumes_path.write_text(json.dumps([
+            {
+                "name": "workdir",
+                "host": {"path": "/tmp/workdir"},
+                "mountPath": "/workspace",
+            }
+        ]))
+
+        mock_ctx = _build_mock_client_context(sandbox=mock_sb)
+        with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
+             patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx), \
+             patch("opensandbox_cli.main.OutputFormatter", side_effect=lambda fmt, **kw: OutputFormatter(fmt, **kw)), \
+             patch("opensandbox.sync.sandbox.SandboxSync.create", return_value=mock_sb) as mock_create:
+            mock_resolve.return_value = mock_ctx.resolved_config
+            result = runner.invoke(
+                cli,
+                ["-o", "json", "sandbox", "create", "--image", "python:3.12", "--volumes-file", str(volumes_path)],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0
+        mock_create.assert_called_once()
+        volumes = mock_create.call_args.kwargs["volumes"]
+        assert len(volumes) == 1
+        assert volumes[0].name == "workdir"
+        assert volumes[0].mount_path == "/workspace"
+
+    def test_create_builds_entrypoint_argv_from_repeated_flags(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_sb.id = "sb-123"
+
+        mock_ctx = _build_mock_client_context(sandbox=mock_sb)
+        with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
+             patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx), \
+             patch("opensandbox_cli.main.OutputFormatter", side_effect=lambda fmt, **kw: OutputFormatter(fmt, **kw)), \
+             patch("opensandbox.sync.sandbox.SandboxSync.create", return_value=mock_sb) as mock_create:
+            mock_resolve.return_value = mock_ctx.resolved_config
+            result = runner.invoke(
+                cli,
+                [
+                    "-o",
+                    "json",
+                    "sandbox",
+                    "create",
+                    "--image",
+                    "python:3.12",
+                    "--entrypoint",
+                    "python",
+                    "--entrypoint",
+                    "-m",
+                    "--entrypoint",
+                    "http.server",
+                ],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["entrypoint"] == [
+            "python",
+            "-m",
+            "http.server",
+        ]
+
 
 class TestSandboxKill:
     def test_kill_multiple(self, runner: CliRunner) -> None:
@@ -180,6 +285,60 @@ class TestSandboxResume:
         assert result.exit_code == 0
         mock_mgr.resume_sandbox.assert_called_once_with("sb-123")
         assert "Sandbox resumed: sb-123" in result.output
+
+
+class TestSandboxMetrics:
+    def test_metrics_fetches_snapshot(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_metrics = MagicMock()
+        mock_metrics.model_dump.return_value = {
+            "cpu_count": 2,
+            "cpu_used_percentage": 12.5,
+            "memory_total_in_mib": 1024,
+            "memory_used_in_mib": 256,
+            "timestamp": 1710000000000,
+        }
+        mock_sb.get_metrics.return_value = mock_metrics
+
+        result = _invoke(runner, ["-o", "json", "sandbox", "metrics", "sb-1"], sandbox=mock_sb)
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["cpu_used_percentage"] == 12.5
+
+    def test_metrics_watch_streams_json_samples(self, runner: CliRunner) -> None:
+        class _FakeResponse:
+            def __init__(self) -> None:
+                self.lines = [
+                    'data: {"cpu_count": 2, "cpu_used_percentage": 12.5, "memory_total_in_mib": 1024, "memory_used_in_mib": 256, "timestamp": 1710000000000}',
+                    "",
+                    'data: {"cpu_count": 2, "cpu_used_percentage": 18.0, "memory_total_in_mib": 1024, "memory_used_in_mib": 300, "timestamp": 1710000001000}',
+                ]
+
+            def __enter__(self) -> _FakeResponse:
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def iter_lines(self):
+                yield from self.lines
+
+        mock_sb = MagicMock()
+        mock_sb.metrics._httpx_client.stream.return_value = _FakeResponse()
+
+        result = _invoke(
+            runner,
+            ["-o", "json", "sandbox", "metrics", "sb-1", "--watch"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        lines = [json.loads(line) for line in result.output.strip().splitlines()]
+        assert len(lines) == 2
+        assert lines[0]["cpu_used_percentage"] == 12.5
+        assert lines[1]["memory_used_in_mib"] == 300
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +379,37 @@ class TestFileWrite:
         mock_sb.files.write_file.assert_called_once_with(
             "/tmp/test.txt", "content here", encoding="utf-8", mode=644
         )
+
+
+class TestFileTransfer:
+    def test_upload_streams_file_object(self, runner: CliRunner, tmp_path: Path) -> None:
+        mock_sb = MagicMock()
+        local_path = tmp_path / "upload.bin"
+        local_path.write_bytes(b"hello")
+
+        result = _invoke(
+            runner,
+            ["file", "upload", "sb-1", str(local_path), "/tmp/upload.bin"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        uploaded = mock_sb.files.write_file.call_args.args[1]
+        assert hasattr(uploaded, "read")
+        assert not isinstance(uploaded, bytes)
+
+    def test_download_streams_chunks_to_disk(self, runner: CliRunner, tmp_path: Path) -> None:
+        mock_sb = MagicMock()
+        mock_sb.files.read_bytes_stream.return_value = iter([b"hel", b"lo"])
+        local_path = tmp_path / "nested" / "download.txt"
+
+        result = _invoke(
+            runner,
+            ["file", "download", "sb-1", "/tmp/download.txt", str(local_path)],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        assert local_path.read_bytes() == b"hello"
+        mock_sb.files.read_bytes_stream.assert_called_once_with("/tmp/download.txt")
 
 
 class TestFileRm:
@@ -288,6 +478,44 @@ class TestFileChmod:
 
 
 # ---------------------------------------------------------------------------
+# Egress commands
+# ---------------------------------------------------------------------------
+
+
+class TestEgressCommands:
+    def test_get_prints_policy(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_policy = MagicMock()
+        mock_policy.model_dump.return_value = {
+            "defaultAction": "deny",
+            "egress": [{"action": "allow", "target": "pypi.org"}],
+        }
+        mock_sb.get_egress_policy.return_value = mock_policy
+
+        result = _invoke(runner, ["-o", "json", "egress", "get", "sb-1"], sandbox=mock_sb)
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["defaultAction"] == "deny"
+
+    def test_patch_calls_sdk(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_sb.id = "sb-1"
+        result = _invoke(
+            runner,
+            ["-o", "json", "egress", "patch", "sb-1", "--rule", "allow=pypi.org", "--rule", "deny=bad.example.com"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        mock_sb.patch_egress_rules.assert_called_once()
+        rules = mock_sb.patch_egress_rules.call_args.args[0]
+        assert len(rules) == 2
+        assert rules[0].action == "allow"
+        assert rules[0].target == "pypi.org"
+        assert rules[1].action == "deny"
+        assert rules[1].target == "bad.example.com"
+
+
+# ---------------------------------------------------------------------------
 # Command execution
 # ---------------------------------------------------------------------------
 
@@ -335,3 +563,71 @@ class TestCommandInterrupt:
         assert result.exit_code == 0
         mock_sb.commands.interrupt.assert_called_once_with("exec-789")
         assert "Interrupted: exec-789" in result.output
+
+
+class TestCommandSession:
+    def test_session_create(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_sb.id = "sb-1"
+        mock_sb.commands.create_session.return_value = "sess-123"
+        result = _invoke(
+            runner,
+            ["-o", "json", "command", "session", "create", "sb-1", "--workdir", "/workspace"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["session_id"] == "sess-123"
+        mock_sb.commands.create_session.assert_called_once_with(working_directory="/workspace")
+
+    def test_session_run(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_execution = MagicMock()
+        mock_execution.error = None
+        mock_sb.commands.run_in_session.return_value = mock_execution
+        result = _invoke(
+            runner,
+            ["command", "session", "run", "sb-1", "sess-123", "--timeout", "30s", "--", "pwd"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        mock_sb.commands.run_in_session.assert_called_once()
+        assert mock_sb.commands.run_in_session.call_args.args[:2] == ("sess-123", "pwd")
+        assert mock_sb.commands.run_in_session.call_args.kwargs["timeout"] == 30000
+
+    def test_session_delete(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        result = _invoke(
+            runner,
+            ["command", "session", "delete", "sb-1", "sess-123"],
+            sandbox=mock_sb,
+        )
+        assert result.exit_code == 0
+        mock_sb.commands.delete_session.assert_called_once_with("sess-123")
+        assert "Deleted session: sess-123" in result.output
+
+
+# ---------------------------------------------------------------------------
+# DevOps diagnostics
+# ---------------------------------------------------------------------------
+
+
+class TestDevopsCommands:
+    def test_logs_fetches_plain_text(self, runner: CliRunner) -> None:
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = "sandbox logs"
+        mock_client.get.return_value = mock_response
+        mock_ctx = _build_mock_client_context()
+        mock_ctx.get_devops_client.return_value = mock_client
+
+        with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
+             patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx), \
+             patch("opensandbox_cli.main.OutputFormatter", side_effect=lambda fmt, **kw: OutputFormatter(fmt, **kw)):
+            mock_resolve.return_value = mock_ctx.resolved_config
+            result = runner.invoke(cli, ["devops", "logs", "sb-1"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert "sandbox logs" in result.output
+        mock_client.get.assert_called_once()

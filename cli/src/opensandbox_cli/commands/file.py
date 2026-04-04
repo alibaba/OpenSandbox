@@ -117,10 +117,10 @@ def file_upload(
     obj: ClientContext, sandbox_id: str, local_path: str, remote_path: str
 ) -> None:
     """Upload a local file to the sandbox."""
-    data = Path(local_path).read_bytes()
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
-        sandbox.files.write_file(remote_path, data)
+        with Path(local_path).open("rb") as data:
+            sandbox.files.write_file(remote_path, data)
         obj.output.success(f"Uploaded: {local_path} → {remote_path}")
     finally:
         sandbox.close()
@@ -140,8 +140,11 @@ def file_download(
     """Download a file from the sandbox to local disk."""
     sandbox = obj.connect_sandbox(sandbox_id)
     try:
-        content = sandbox.files.read_bytes(remote_path)
-        Path(local_path).write_bytes(content)
+        destination = Path(local_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open("wb") as out:
+            for chunk in sandbox.files.read_bytes_stream(remote_path):
+                out.write(chunk)
         obj.output.success(f"Downloaded: {remote_path} → {local_path}")
     finally:
         sandbox.close()

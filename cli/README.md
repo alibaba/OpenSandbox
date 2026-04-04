@@ -1,6 +1,6 @@
 # OpenSandbox CLI
 
-A command-line interface for managing OpenSandbox environments from your terminal. Built on top of the [OpenSandbox Python SDK](../sdks/sandbox/python/README.md), the CLI provides intuitive commands for sandbox lifecycle management, file operations, command execution, and code interpretation.
+A command-line interface for managing OpenSandbox environments from your terminal. Built on top of the [OpenSandbox Python SDK](../sdks/sandbox/python/README.md), the CLI provides intuitive commands for sandbox lifecycle management, file operations, command execution, and diagnostics.
 
 ## Installation
 
@@ -68,6 +68,33 @@ osb config set connection.protocol http
 osb sandbox create --image python:3.12
 ```
 
+Or configure defaults once and omit repeated flags:
+
+```bash
+osb config set defaults.image python:3.12
+osb config set defaults.timeout 15m
+osb sandbox create
+```
+
+You can also load network policy and volume mounts from JSON files:
+
+```bash
+osb sandbox create \
+  --image python:3.12 \
+  --network-policy-file network-policy.json \
+  --volumes-file volumes.json
+```
+
+Pass `--entrypoint` repeatedly to build the argv list explicitly:
+
+```bash
+osb sandbox create \
+  --image python:3.12 \
+  --entrypoint python \
+  --entrypoint -m \
+  --entrypoint http.server
+```
+
 ![Create Sandbox](assets/cli_create_sandbox.png)
 
 ### Step 4: List Sandboxes
@@ -83,23 +110,6 @@ osb -o json sandbox list
 ![List Sandboxes](assets/cli_list_sandbox.png)
 
 ![List Sandboxes JSON](assets/cli_list_sandbox_json.png)
-
-### Short ID Matching
-
-Like Docker, you don't need to type the full sandbox ID — just enough characters to uniquely identify the target sandbox:
-
-```bash
-# Full ID
-osb sandbox get db027570-4f86-45f8-b1a8-c31a2dd90da8
-
-# Short prefix — as long as it's unambiguous
-osb sandbox get db02
-osb exec db02 -- echo "hello"
-```
-
-If the prefix matches multiple sandboxes, the CLI will report an error listing the matches so you can be more specific.
-
-![Short ID Matching](assets/cli_sandbox_search.png)
 
 ### Step 5: Execute Commands
 
@@ -148,6 +158,17 @@ osb sandbox list
 | `health`   | Check sandbox health                        |
 | `metrics`  | Get sandbox resource metrics (CPU, memory)  |
 
+```bash
+# Point-in-time metrics snapshot
+osb sandbox metrics <sandbox-id>
+
+# Live metrics stream
+osb sandbox metrics <sandbox-id> --watch
+
+# Resolve a service endpoint
+osb sandbox endpoint <sandbox-id> --port 8080
+```
+
 ### `osb command` — Command Execution
 
 | Command     | Description                               |
@@ -156,6 +177,7 @@ osb sandbox list
 | `status`    | Get command execution status              |
 | `logs`      | Get background command logs               |
 | `interrupt` | Interrupt a running command               |
+| `session`   | Manage persistent bash sessions           |
 
 ### `osb exec` — Quick Command Shortcut
 
@@ -164,6 +186,21 @@ osb exec <sandbox-id> -- <command>
 ```
 
 Shortcut for `osb command run`. Everything after `--` is passed as the command.
+
+Persistent shell sessions:
+
+```bash
+# Create a bash session
+osb command session create <sandbox-id>
+
+# Reuse that session for multiple commands
+osb command session run <sandbox-id> <session-id> -- pwd
+osb command session run <sandbox-id> <session-id> -- export FOO=bar
+osb command session run <sandbox-id> <session-id> -- sh -c 'echo $FOO'
+
+# Delete the session when done
+osb command session delete <sandbox-id> <session-id>
+```
 
 ### `osb file` — File Operations
 
@@ -182,15 +219,22 @@ Shortcut for `osb command run`. Everything after `--` is passed as the command.
 | `chmod`    | Set file permissions                       |
 | `replace`  | Find and replace content in a file         |
 
-### `osb code` — Code Interpreter
+### `osb egress` — Runtime Egress Policy
 
-| Command     | Description                               |
-| ----------- | ----------------------------------------- |
-| `run`       | Execute code in a sandbox                 |
-| `context`   | Manage code execution contexts            |
-| `interrupt` | Interrupt a running code execution        |
+| Command | Description                              |
+| ------- | ---------------------------------------- |
+| `get`   | Get the current runtime egress policy    |
+| `patch` | Patch runtime egress rules with merge semantics |
 
-### `osb devops` — DevOps Diagnostics
+```bash
+# Inspect current policy
+osb egress get <sandbox-id>
+
+# Allow PyPI and deny an internal domain
+osb egress patch <sandbox-id> --rule allow=pypi.org --rule deny=internal.example.com
+```
+
+### `osb devops` — Experimental DevOps Diagnostics
 
 | Command   | Description                                          |
 | --------- | ---------------------------------------------------- |
@@ -198,6 +242,8 @@ Shortcut for `osb command run`. Everything after `--` is passed as the command.
 | `inspect` | Retrieve detailed container/pod inspection info      |
 | `events`  | Retrieve events related to a sandbox                 |
 | `summary` | One-shot diagnostics: inspect + events + logs combined |
+
+These diagnostics commands are currently experimental. They are implemented by the server and exposed by the CLI, but are not yet part of the public `specs/` API contract and may change before being formalized.
 
 ```bash
 # Quick diagnostics summary
@@ -226,36 +272,56 @@ All devops commands return plain text output, making them ideal for both human r
 
 | Command     | Description                                          |
 | ----------- | ---------------------------------------------------- |
-| `install`   | Install OpenSandbox troubleshooting skill for AI tools |
-| `list`      | List supported targets and their install status      |
-| `uninstall` | Remove installed skill from AI tools                 |
+| `install`   | Install one or more bundled OpenSandbox skills       |
+| `show`      | Show the content and trigger hint for a bundled skill |
+| `list`      | List bundled skills, targets, and install status     |
+| `uninstall` | Remove an installed OpenSandbox skill                |
 
-The troubleshooting skill enables AI coding assistants to automatically diagnose sandbox issues (OOM, crashes, image pull errors, etc.). Supported targets:
+The CLI ships with a small built-in skill set for OpenSandbox-aware AI tooling, including:
+
+- `troubleshoot-sandbox`
+- `sandbox-lifecycle`
+- `command-execution`
+- `file-operations`
+- `network-egress`
+- `devops-diagnostics`
+
+These skills cover common OpenSandbox flows such as troubleshooting, lifecycle control, command execution, file manipulation, network policy updates, and lower-level diagnostics. Supported targets:
 
 | Target    | AI Tool          | Install Location |
 | --------- | ---------------- | ---------------- |
-| `claude`  | Claude Code      | `~/.claude/skills/` |
-| `cursor`  | Cursor           | `~/.cursor/rules/` |
-| `codex`   | Codex            | `~/.codex/instructions.md` |
-| `copilot` | GitHub Copilot   | `~/.github/copilot-instructions.md` |
-| `windsurf`| Windsurf         | `~/.windsurfrules` |
-| `cline`   | Cline            | `~/.clinerules` |
+| `claude`  | Claude Code      | `project: ./.claude/skills/`, `global: ~/.claude/skills/` |
+| `cursor`  | Cursor           | `project: ./.cursor/rules/`, `global: ~/.cursor/rules/` |
+| `codex`   | Codex            | `project: ./.codex/skills/<name>/SKILL.md`, `global: ~/.codex/skills/<name>/SKILL.md` |
+| `copilot` | GitHub Copilot   | `project: ./.github/copilot-instructions.md`, `global: ~/.github/copilot-instructions.md` |
+| `windsurf`| Windsurf         | `project: ./.windsurfrules`, `global: ~/.windsurfrules` |
+| `cline`   | Cline            | `project: ./.clinerules`, `global: ~/.clinerules` |
+| `opencode`| OpenCode         | `project: ./.agents/skills/<name>/SKILL.md`, `global: ~/.agents/skills/<name>/SKILL.md` |
 
 ```bash
-# Install for Claude Code (default)
-osb skills install
-
-# Install for a specific tool
-osb skills install --target cursor
-
-# Install for all supported tools
-osb skills install --target all
-
-# Check install status
+# Show bundled skills and install status
 osb skills list
 
+# Show one bundled skill in full
+osb skills show sandbox-lifecycle
+
+# If you omit skill/target, the CLI prints install guidance
+osb skills install
+
+# Install a named skill for a specific tool and scope
+osb skills install troubleshoot-sandbox --target cursor --scope project
+
+# Install every bundled skill for a specific tool
+osb skills install --all-builtins --target codex --scope global
+
+# Install a single skill for OpenCode in the current project
+osb skills install network-egress --target opencode --scope project
+
+# Install for all supported tools
+osb skills install troubleshoot-sandbox --target all --scope project
+
 # Uninstall
-osb skills uninstall --target claude
+osb skills uninstall troubleshoot-sandbox --target claude --scope global
 ```
 
 ### `osb config` — Configuration
@@ -276,7 +342,7 @@ The CLI resolves configuration from multiple sources with the following priority
 
 ## Development
 
-For local CLI development in this monorepo, prefer `uv sync` from the `cli/` directory. That workflow honors the local `[tool.uv.sources]` overrides for `opensandbox` and `opensandbox-code-interpreter`, so the CLI resolves against the checked-out SDKs instead of published packages.
+For local CLI development in this monorepo, prefer `uv sync` from the `cli/` directory. That workflow honors the local `[tool.uv.sources]` override for `opensandbox`, so the CLI resolves against the checked-out SDK instead of the published package.
 
 ```bash
 cd cli

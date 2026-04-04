@@ -313,7 +313,6 @@ source = { editable = "." }
 dependencies = [
     { name = "click" },
     { name = "opensandbox" },
-    { name = "opensandbox-code-interpreter" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "tomli", marker = "python_full_version < '3.11'" },
@@ -331,7 +330,6 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.1.0,<9.0" },
     { name = "opensandbox", editable = "../sdks/sandbox/python" },
-    { name = "opensandbox-code-interpreter", editable = "../sdks/code-interpreter/python" },
     { name = "pyyaml", specifier = ">=6.0,<7.0" },
     { name = "rich", specifier = ">=13.0.0,<14.0" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.0" },
@@ -341,29 +339,6 @@ requires-dist = [
 dev = [
     { name = "pyright", specifier = ">=1.1.0" },
     { name = "pytest", specifier = ">=7.0.0" },
-    { name = "pytest-cov", specifier = ">=4.0.0" },
-    { name = "ruff", specifier = ">=0.14.8" },
-]
-
-[[package]]
-name = "opensandbox-code-interpreter"
-source = { editable = "../sdks/code-interpreter/python" }
-dependencies = [
-    { name = "opensandbox" },
-    { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "opensandbox", editable = "../sdks/sandbox/python" },
-    { name = "pydantic", specifier = ">=2.4.2,<3.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pyright", specifier = ">=1.1.407" },
-    { name = "pytest", specifier = ">=7.0.0" },
-    { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-cov", specifier = ">=4.0.0" },
     { name = "ruff", specifier = ">=0.14.8" },
 ]

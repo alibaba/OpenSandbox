@@ -23,10 +23,10 @@ from rich.console import Console
 
 from opensandbox_cli import __version__
 from opensandbox_cli.client import ClientContext
-from opensandbox_cli.commands.code import code_group
 from opensandbox_cli.commands.command import command_group, exec_cmd
 from opensandbox_cli.commands.config_cmd import config_group
 from opensandbox_cli.commands.devops import devops_group
+from opensandbox_cli.commands.egress import egress_group
 from opensandbox_cli.commands.file import file_group
 from opensandbox_cli.commands.sandbox import sandbox_group
 from opensandbox_cli.commands.skills import skills_group
@@ -63,6 +63,11 @@ class BannerGroup(click.Group):
 @click.option("--domain", envvar="OPEN_SANDBOX_DOMAIN", default=None, help="API server domain (e.g. localhost:8080).")
 @click.option("--protocol", type=click.Choice(["http", "https"]), default=None, help="Protocol (http/https).")
 @click.option("--timeout", "request_timeout", type=int, default=None, help="Request timeout in seconds.")
+@click.option(
+    "--use-server-proxy/--no-use-server-proxy",
+    default=None,
+    help="Route execd and endpoint traffic through the sandbox server proxy.",
+)
 @click.option("-o", "--output", "output_format", type=click.Choice(["table", "json", "yaml"]), default=None, help="Output format.")
 @click.option("--config", "config_path", type=click.Path(exists=False, path_type=Path), default=None, help="Config file path.")
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose/debug output.")
@@ -75,6 +80,7 @@ def cli(
     domain: str | None,
     protocol: str | None,
     request_timeout: int | None,
+    use_server_proxy: bool | None,
     output_format: str | None,
     config_path: Path | None,
     verbose: bool,
@@ -91,6 +97,7 @@ def cli(
         cli_domain=domain,
         cli_protocol=protocol,
         cli_timeout=request_timeout,
+        cli_use_server_proxy=use_server_proxy,
         cli_output=output_format,
         config_path=config_path,
     )
@@ -109,7 +116,7 @@ cli.add_command(sandbox_group)
 cli.add_command(command_group)
 cli.add_command(exec_cmd)
 cli.add_command(file_group)
-cli.add_command(code_group)
+cli.add_command(egress_group)
 cli.add_command(config_group)
 cli.add_command(devops_group)
 cli.add_command(skills_group)

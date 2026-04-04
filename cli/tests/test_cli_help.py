@@ -45,7 +45,7 @@ class TestRootCLI:
 
     def test_root_lists_commands(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["--help"])
-        for cmd in ("sandbox", "command", "exec", "file", "code", "config"):
+        for cmd in ("sandbox", "command", "exec", "file", "egress", "config", "devops", "skills"):
             assert cmd in result.output
 
 
@@ -80,13 +80,19 @@ class TestCommandHelp:
     def test_command_help(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["command", "--help"])
         assert result.exit_code == 0
-        for subcmd in ("run", "status", "logs", "interrupt"):
+        for subcmd in ("run", "status", "logs", "interrupt", "session"):
             assert subcmd in result.output
 
     @pytest.mark.parametrize("subcmd", ["run", "status", "logs", "interrupt"])
     def test_command_subcommand_help(self, runner: CliRunner, subcmd: str) -> None:
         result = runner.invoke(cli, ["command", subcmd, "--help"])
         assert result.exit_code == 0
+
+    def test_command_session_help(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["command", "session", "--help"])
+        assert result.exit_code == 0
+        for subcmd in ("create", "run", "delete"):
+            assert subcmd in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -123,21 +129,15 @@ class TestFileHelp:
 
 
 # ---------------------------------------------------------------------------
-# Code sub-commands
+# Egress sub-commands
 # ---------------------------------------------------------------------------
 
 
-class TestCodeHelp:
-    def test_code_help(self, runner: CliRunner) -> None:
-        result = runner.invoke(cli, ["code", "--help"])
+class TestEgressHelp:
+    def test_egress_help(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["egress", "--help"])
         assert result.exit_code == 0
-        for subcmd in ("run", "context", "interrupt"):
-            assert subcmd in result.output
-
-    def test_code_context_help(self, runner: CliRunner) -> None:
-        result = runner.invoke(cli, ["code", "context", "--help"])
-        assert result.exit_code == 0
-        for subcmd in ("create", "list", "delete", "delete-all"):
+        for subcmd in ("get", "patch"):
             assert subcmd in result.output
 
 
@@ -157,3 +157,29 @@ class TestConfigHelp:
     def test_config_subcommand_help(self, runner: CliRunner, subcmd: str) -> None:
         result = runner.invoke(cli, ["config", subcmd, "--help"])
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# DevOps sub-commands
+# ---------------------------------------------------------------------------
+
+
+class TestDevopsHelp:
+    def test_devops_help(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["devops", "--help"])
+        assert result.exit_code == 0
+        for subcmd in ("logs", "inspect", "events", "summary"):
+            assert subcmd in result.output
+
+
+# ---------------------------------------------------------------------------
+# Skills sub-commands
+# ---------------------------------------------------------------------------
+
+
+class TestSkillsHelp:
+    def test_skills_help(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["skills", "--help"])
+        assert result.exit_code == 0
+        for subcmd in ("install", "show", "list", "uninstall"):
+            assert subcmd in result.output
