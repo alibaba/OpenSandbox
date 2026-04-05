@@ -41,6 +41,11 @@ class TestHost:
         backend = Host(path="/data/opensandbox")
         assert backend.path == "/data/opensandbox"
 
+    def test_valid_windows_path(self):
+        """Windows absolute drive path should be accepted."""
+        backend = Host(path=r"D:\sandbox-mnt\ReMe")
+        assert backend.path == r"D:\sandbox-mnt\ReMe"
+
     def test_path_required(self):
         """Path field should be required."""
         with pytest.raises(ValidationError) as exc_info:

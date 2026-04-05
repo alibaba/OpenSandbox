@@ -19,6 +19,7 @@ using OpenSandbox.Models;
 using OpenSandbox.Services;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.RegularExpressions;
 
 namespace OpenSandbox;
 
@@ -31,6 +32,8 @@ namespace OpenSandbox;
 /// </remarks>
 public sealed class Sandbox : IAsyncDisposable
 {
+    private static readonly Regex HostPathPattern = new("^(/|[A-Za-z]:[\\\\/])", RegexOptions.Compiled);
+
     /// <summary>
     /// Gets the sandbox ID.
     /// </summary>
@@ -125,6 +128,7 @@ public sealed class Sandbox : IAsyncDisposable
         var logger = loggerFactory.CreateLogger("OpenSandbox.Sandbox");
         var lifecycleBaseUrl = connectionConfig.GetBaseUrl();
         var adapterFactory = options.AdapterFactory ?? DefaultAdapterFactory.Create();
+        ValidateHostPaths(options.Volumes);
         var httpClientProvider = new HttpClientProvider(connectionConfig, loggerFactory);
 
         ISandboxes sandboxes;
@@ -647,6 +651,24 @@ public sealed class Sandbox : IAsyncDisposable
         _logger.LogDebug("Disposing sandbox resources: {SandboxId}", Id);
         _httpClientProvider.Dispose();
         return default;
+    }
+
+    private static void ValidateHostPaths(IEnumerable<Volume>? volumes)
+    {
+        if (volumes == null)
+        {
+            return;
+        }
+
+        foreach (var volume in volumes)
+        {
+            var hostPath = volume.Host?.Path;
+            if (hostPath != null && !HostPathPattern.IsMatch(hostPath))
+            {
+                throw new InvalidArgumentException(
+                    "Host path must be an absolute path starting with '/' or a Windows drive letter (e.g. 'C:\\' or 'D:/')");
+            }
+        }
     }
 
     internal static IReadOnlyDictionary<string, string> MergeHeaders(

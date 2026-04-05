@@ -36,6 +36,24 @@ class VolumeModelsTest {
     }
 
     @Test
+    fun `Host should accept windows path with backslashes`() {
+        val backend = Host.of("D:\\sandbox-mnt\\ReMe")
+        assertEquals("D:\\sandbox-mnt\\ReMe", backend.path)
+    }
+
+    @Test
+    fun `Host should accept windows path with forward slashes`() {
+        val backend = Host.of("D:/sandbox-mnt/ReMe")
+        assertEquals("D:/sandbox-mnt/ReMe", backend.path)
+    }
+
+    @Test
+    fun `Host should accept windows drive root`() {
+        val backend = Host.of("Z:\\")
+        assertEquals("Z:\\", backend.path)
+    }
+
+    @Test
     fun `Host should reject relative path`() {
         assertThrows(IllegalArgumentException::class.java) {
             Host.of("relative/path")
