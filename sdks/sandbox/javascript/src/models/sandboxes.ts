@@ -75,6 +75,8 @@ export interface NetworkPolicy extends Record<string, unknown> {
 export interface Host extends Record<string, unknown> {
   /**
    * Absolute path on the host filesystem to mount.
+   * Must start with '/' (Unix) or a drive letter such as 'C:\' or 'D:/'
+   * (Windows), and be under an allowed prefix.
    */
   path: string;
 }

@@ -120,6 +120,8 @@ public class Host
 {
     /// <summary>
     /// Gets or sets the absolute host path.
+    /// Must start with '/' (Unix) or a drive letter such as 'C:\' or 'D:/'
+    /// (Windows), and be under an allowed prefix.
     /// </summary>
     [JsonPropertyName("path")]
     public required string Path { get; set; }

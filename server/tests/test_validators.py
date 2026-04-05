@@ -327,6 +327,16 @@ class TestEnsureValidHostPath:
         ensure_valid_host_path("/data/opensandbox")
         ensure_valid_host_path("/tmp")
 
+    def test_valid_windows_absolute_path(self):
+        """Windows absolute paths should be valid."""
+        ensure_valid_host_path(r"D:\sandbox-mnt\ReMe")
+        ensure_valid_host_path("D:/sandbox-mnt/ReMe")
+
+    def test_valid_windows_drive_root(self):
+        """Windows drive roots should be valid absolute paths."""
+        ensure_valid_host_path("D:\\")
+        ensure_valid_host_path("D:/")
+
     def test_empty_path_raises(self):
         """Empty path should raise HTTPException."""
         with pytest.raises(HTTPException) as exc_info:
@@ -365,6 +375,17 @@ class TestEnsureValidHostPath:
         """Exact prefix match should be valid."""
         allowed = ["/data/opensandbox"]
         ensure_valid_host_path("/data/opensandbox", allowed)
+
+    def test_allowed_prefix_match_windows_paths(self):
+        """Windows paths under an allowed Windows prefix should be valid."""
+        allowed = [r"D:\sandbox-mnt"]
+        ensure_valid_host_path(r"D:\sandbox-mnt\ReMe", allowed)
+        ensure_valid_host_path("D:/sandbox-mnt/ReMe", allowed)
+
+    def test_allowed_prefix_match_windows_paths_is_case_insensitive_for_drive(self):
+        """Drive-letter casing differences should not break allowlist checks."""
+        allowed = ["D:/sandbox-mnt"]
+        ensure_valid_host_path("d:/sandbox-mnt/ReMe", allowed)
 
     def test_path_not_in_allowed_prefix_raises(self):
         """Paths not under allowed prefixes should raise HTTPException."""

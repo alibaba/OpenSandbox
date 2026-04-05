@@ -56,6 +56,17 @@ DNS_LABEL_PATTERN = r"[a-z0-9]([-a-z0-9]*[a-z0-9])?"
 DNS_SUBDOMAIN_RE = re.compile(rf"^(?:{DNS_LABEL_PATTERN}\.)*{DNS_LABEL_PATTERN}$")
 LABEL_NAME_RE = re.compile(r"^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$")
 LABEL_VALUE_RE = re.compile(r"^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$")
+HOST_PATH_RE = re.compile(r"^(/|[A-Za-z]:[\\/])")
+
+
+def _normalize_prefix_path(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    # Windows drive letters are case-insensitive; canonicalize for comparisons.
+    if re.match(r"^[A-Za-z]:", normalized):
+        normalized = normalized[0].lower() + normalized[1:]
+    if len(normalized) > 1 and normalized.endswith("/"):
+        return normalized[:-1]
+    return normalized
 
 
 def _is_valid_label_key(key: str) -> bool:
@@ -365,20 +376,24 @@ def ensure_valid_host_path(
             },
         )
 
-    if not os.path.isabs(path):
+    if not HOST_PATH_RE.match(path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": SandboxErrorCodes.INVALID_HOST_PATH,
-                "message": f"Host path '{path}' must be an absolute path.",
+                "message": (
+                    f"Host path '{path}' must be an absolute path starting with '/' "
+                    "or a Windows drive letter (e.g. 'C:\\' or 'D:/')."
+                ),
             },
         )
 
     # Normalize separators to forward slashes for consistent security checks.
-    # Strip the drive prefix (e.g. "C:") so that "C:/" is not mis-detected as
-    # containing "//".
-    _drive, _tail = os.path.splitdrive(path)
-    _tail_fwd = _tail.replace("\\", "/")
+    # Keep checks cross-platform by parsing drive prefixes without relying on
+    # os.path.splitdrive behavior of the host OS.
+    _path_fwd = path.replace("\\", "/")
+    _windows_drive_match = re.match(r"^[A-Za-z]:/", _path_fwd)
+    _tail_fwd = _path_fwd[2:] if _windows_drive_match else _path_fwd
 
     # Reject path traversal components
     if "/.." in _tail_fwd or _tail_fwd == "/..":
@@ -402,10 +417,12 @@ def ensure_valid_host_path(
 
     # Check against allowed prefixes if provided
     if allowed_prefixes is not None:
-        norm_path = os.path.normpath(path)
+        # Normalize separators for cross-platform prefix checks so Windows-style
+        # paths can be validated consistently even when server runs on Unix.
+        norm_path = _normalize_prefix_path(path)
         is_allowed = any(
-            norm_path == os.path.normpath(prefix)
-            or norm_path.startswith(os.path.normpath(prefix) + os.sep)
+            norm_path == _normalize_prefix_path(prefix)
+            or norm_path.startswith(_normalize_prefix_path(prefix) + "/")
             for prefix in allowed_prefixes
         )
         if not is_allowed:

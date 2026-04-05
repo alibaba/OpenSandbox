@@ -43,6 +43,8 @@ import type {
 } from "./models/sandboxes.js";
 import { SandboxReadyTimeoutException } from "./core/exceptions.js";
 
+const HOST_PATH_PATTERN = /^([/]|[A-Za-z]:[\\/])/;
+
 export interface SandboxCreateOptions {
   /**
    * Connection configuration for calling the OpenSandbox Lifecycle API and the sandbox's execd API.
@@ -224,6 +226,28 @@ export class Sandbox {
   }
 
   static async create(opts: SandboxCreateOptions): Promise<Sandbox> {
+    // Validate volumes before allocating transport resources.
+    if (opts.volumes) {
+      for (const vol of opts.volumes) {
+        const backendsSpecified = [vol.host, vol.pvc, vol.ossfs].filter((b) => b != null).length;
+        if (backendsSpecified === 0) {
+          throw new Error(
+            `Volume '${vol.name}' must specify exactly one backend (host, pvc, ossfs), but none was provided.`
+          );
+        }
+        if (backendsSpecified > 1) {
+          throw new Error(
+            `Volume '${vol.name}' must specify exactly one backend (host, pvc, ossfs), but multiple were provided.`
+          );
+        }
+        if (vol.host && !HOST_PATH_PATTERN.test(vol.host.path)) {
+          throw new Error(
+            "Host path must be an absolute path starting with '/' or a Windows drive letter (e.g. 'C:\\' or 'D:/')"
+          );
+        }
+      }
+    }
+
     const baseConnectionConfig =
       opts.connectionConfig instanceof ConnectionConfig
         ? opts.connectionConfig
@@ -241,23 +265,6 @@ export class Sandbox {
     } catch (err) {
       await connectionConfig.closeTransport();
       throw err;
-    }
-
-    // Validate volumes: exactly one backend must be specified per volume
-    if (opts.volumes) {
-      for (const vol of opts.volumes) {
-        const backendsSpecified = [vol.host, vol.pvc, vol.ossfs].filter((b) => b != null).length;
-        if (backendsSpecified === 0) {
-          throw new Error(
-            `Volume '${vol.name}' must specify exactly one backend (host, pvc, ossfs), but none was provided.`
-          );
-        }
-        if (backendsSpecified > 1) {
-          throw new Error(
-            `Volume '${vol.name}' must specify exactly one backend (host, pvc, ossfs), but multiple were provided.`
-          );
-        }
-      }
     }
 
     const rawTimeout = opts.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
