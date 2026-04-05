@@ -21,7 +21,6 @@ enforce the same preconditions before performing runtime-specific work.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
