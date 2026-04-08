@@ -88,8 +88,24 @@ class TestPVC:
     def test_serialization_uses_alias(self):
         """Serialization should use camelCase alias."""
         backend = PVC(claim_name="my-pvc")
-        data = backend.model_dump(by_alias=True)
+        data = backend.model_dump(by_alias=True, exclude_none=True)
         assert data == {"claimName": "my-pvc"}
+
+    def test_serialization_with_provisioning_hints(self):
+        """Provisioning hints should serialize with aliases."""
+        backend = PVC(
+            claim_name="my-pvc",
+            storage_class="ssd",
+            storage="5Gi",
+            access_modes=["ReadWriteOnce"],
+        )
+        data = backend.model_dump(by_alias=True, exclude_none=True)
+        assert data == {
+            "claimName": "my-pvc",
+            "storageClass": "ssd",
+            "storage": "5Gi",
+            "accessModes": ["ReadWriteOnce"],
+        }
 
     def test_claim_name_required(self):
         """claim_name field should be required."""

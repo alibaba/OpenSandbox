@@ -132,10 +132,9 @@ class PVC(BaseModel):
     """
     Platform-managed named volume backend.
 
-    A runtime-neutral abstraction for referencing a pre-existing, platform-managed
-    named volume. The semantics are identical across runtimes: claim an existing
-    volume by name, mount it into the container, and leave volume lifecycle
-    management to the user.
+    A runtime-neutral abstraction for referencing a platform-managed named volume.
+    If the volume does not yet exist and ``volume_auto_create`` is enabled on the
+    server, it will be created automatically using the provisioning hints below.
 
     - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
     - Docker: maps to a Docker named volume (created via ``docker volume create``).
@@ -150,6 +149,34 @@ class PVC(BaseModel):
         ),
         pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
         max_length=253,
+    )
+
+    # Provisioning hints — used only when auto-creating a new volume.
+    # Ignored if the volume already exists on the platform.
+    storage_class: Optional[str] = Field(
+        None,
+        alias="storageClass",
+        description=(
+            "Kubernetes StorageClass name for auto-created PVCs. "
+            "None means use the cluster default. Ignored for Docker volumes."
+        ),
+    )
+    storage: Optional[str] = Field(
+        None,
+        description=(
+            "Storage capacity request for auto-created PVCs (e.g. '1Gi', '10Gi'). "
+            "Defaults to server-side configured value when omitted. "
+            "Ignored for Docker volumes."
+        ),
+        pattern=r"^\d+(\.\d+)?(Ki|Mi|Gi|Ti|Pi|Ei)?$",
+    )
+    access_modes: Optional[List[str]] = Field(
+        None,
+        alias="accessModes",
+        description=(
+            "Access modes for auto-created PVCs (e.g. ['ReadWriteOnce']). "
+            "Defaults to ['ReadWriteOnce'] when omitted. Ignored for Docker volumes."
+        ),
     )
 
     class Config:

@@ -400,6 +400,21 @@ class StorageConfig(BaseModel):
             "Each entry must be an absolute path (e.g., '/data/opensandbox')."
         ),
     )
+    volume_auto_create: bool = Field(
+        default=True,
+        description=(
+            "When enabled, PVC volumes (Kubernetes) and named volumes (Docker) "
+            "are automatically created if they do not exist. When disabled, "
+            "referencing a non-existent volume will fail."
+        ),
+    )
+    volume_default_size: str = Field(
+        default="1Gi",
+        description=(
+            "Default storage size for auto-created PVCs when the caller does "
+            "not specify a size in the PVC provisioning hints."
+        ),
+    )
     ossfs_mount_root: str = Field(
         default="/mnt/ossfs",
         description=(

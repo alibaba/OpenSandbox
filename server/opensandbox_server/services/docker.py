@@ -1246,17 +1246,35 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         try:
             vol_info = self.docker_client.api.inspect_volume(volume_name)
         except DockerNotFound:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": SandboxErrorCodes.PVC_VOLUME_NOT_FOUND,
-                    "message": (
-                        f"Volume '{volume.name}': Docker named volume '{volume_name}' "
-                        "does not exist. Named volumes must be created before sandbox "
-                        "creation (e.g., 'docker volume create <name>')."
-                    ),
-                },
-            )
+            if self.app_config.storage.volume_auto_create:
+                # Auto-create the Docker named volume
+                try:
+                    self.docker_client.api.create_volume(name=volume_name)
+                    logger.info("Auto-created Docker named volume '%s'", volume_name)
+                    vol_info = self.docker_client.api.inspect_volume(volume_name)
+                except DockerException as create_exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "code": SandboxErrorCodes.PVC_VOLUME_INSPECT_FAILED,
+                            "message": (
+                                f"Volume '{volume.name}': failed to auto-create Docker "
+                                f"named volume '{volume_name}': {create_exc}"
+                            ),
+                        },
+                    ) from create_exc
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.PVC_VOLUME_NOT_FOUND,
+                        "message": (
+                            f"Volume '{volume.name}': Docker named volume '{volume_name}' "
+                            "does not exist. Named volumes must be created before sandbox "
+                            "creation (e.g., 'docker volume create <name>')."
+                        ),
+                    },
+                )
         except DockerException as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

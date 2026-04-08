@@ -55,6 +55,13 @@ mode = "dns"
 # 示例：allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
 allowed_host_paths = []
 
+# 当沙箱请求的 PVC/Docker named volume 不存在时，是否自动创建。
+# 设为 false 则引用不存在的卷会返回错误。
+volume_auto_create = true
+
+# 自动创建 Kubernetes PVC 时的默认存储大小（当调用方未指定时使用）。
+volume_default_size = "1Gi"
+
 [docker]
 # Docker-specific knobs
 # -----------------------------------------------------------------
