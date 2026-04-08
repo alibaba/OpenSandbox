@@ -766,6 +766,13 @@ components:
             Runtime resource constraints for the sandbox instance.
             SDK clients should provide sensible defaults (e.g., cpu: "500m", memory: "512Mi").
 
+        resourceRequests:
+          $ref: '#/components/schemas/ResourceLimits'
+          description: |
+            Optional resource requests for the sandbox instance (guaranteed resources).
+            If omitted, defaults to resourceLimits (Guaranteed QoS).
+            When specified, enables Burstable QoS with requests < limits.
+
         env:
           type: object
           additionalProperties:

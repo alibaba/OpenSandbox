@@ -400,6 +400,7 @@ class Sandbox:
         env: dict[str, str] | None = None,
         metadata: dict[str, str] | None = None,
         resource: dict[str, str] | None = None,
+        resource_requests: dict[str, str] | None = None,
         platform: PlatformSpec | None = None,
         network_policy: NetworkPolicy | None = None,
         extensions: dict[str, str] | None = None,
@@ -420,6 +421,9 @@ class Sandbox:
             env: Environment variables for the sandbox
             metadata: Custom metadata for the sandbox
             resource: Resource limits (CPU, memory, etc.)
+            resource_requests: Optional resource requests (guaranteed resources).
+                If omitted, defaults to resource (Guaranteed QoS).
+                When specified, enables Burstable QoS with requests < limits.
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
@@ -471,11 +475,14 @@ class Sandbox:
                 volumes,
             )
             if platform is None:
-                response = await sandbox_service.create_sandbox(*create_args)
+                response = await sandbox_service.create_sandbox(
+                    *create_args, resource_requests=resource_requests
+                )
             else:
                 response = await sandbox_service.create_sandbox(
                     *create_args,
                     platform=platform,
+                    resource_requests=resource_requests,
                 )
             sandbox_id = response.id
 

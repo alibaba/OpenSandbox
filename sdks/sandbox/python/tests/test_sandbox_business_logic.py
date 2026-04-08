@@ -307,6 +307,7 @@ async def test_create_keeps_service_create_signature_backward_compatible(
             network_policy,
             _extensions,
             _volumes,
+            **kwargs,
         ):
             assert isinstance(network_policy, NetworkPolicy)
             return _CreateResponse()

@@ -57,6 +57,10 @@ class CreateSandboxRequest:
 
                 New resource types can be added without API changes.
                  Example: {'cpu': '500m', 'memory': '512Mi', 'gpu': '1'}.
+            resource_requests (ResourceLimits | Unset): Optional resource requests for the sandbox instance
+                (guaranteed resources).
+                If omitted, defaults to resourceLimits (Guaranteed QoS).
+                When specified, enables Burstable QoS with requests < limits.
             entrypoint (list[str]): The command to execute as the sandbox's entry process (required).
 
                 Explicitly specifies the user's expected main process, allowing the sandbox management
@@ -126,6 +130,7 @@ class CreateSandboxRequest:
     network_policy: NetworkPolicy | Unset = UNSET
     volumes: list[Volume] | Unset = UNSET
     extensions: CreateSandboxRequestExtensions | Unset = UNSET
+    resource_requests: ResourceLimits | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -168,6 +173,10 @@ class CreateSandboxRequest:
         if not isinstance(self.extensions, Unset):
             extensions = self.extensions.to_dict()
 
+        resource_requests: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.resource_requests, Unset):
+            resource_requests = self.resource_requests.to_dict()
+
         field_dict: dict[str, Any] = {}
         field_dict.update(self.additional_properties)
         field_dict.update(
@@ -191,6 +200,8 @@ class CreateSandboxRequest:
             field_dict["volumes"] = volumes
         if extensions is not UNSET:
             field_dict["extensions"] = extensions
+        if resource_requests is not UNSET:
+            field_dict["resourceRequests"] = resource_requests
 
         return field_dict
 
@@ -265,6 +276,13 @@ class CreateSandboxRequest:
         else:
             extensions = CreateSandboxRequestExtensions.from_dict(_extensions)
 
+        _resource_requests = d.pop("resourceRequests", UNSET)
+        resource_requests: ResourceLimits | Unset
+        if isinstance(_resource_requests, Unset):
+            resource_requests = UNSET
+        else:
+            resource_requests = ResourceLimits.from_dict(_resource_requests)
+
         create_sandbox_request = cls(
             image=image,
             resource_limits=resource_limits,
@@ -276,6 +294,7 @@ class CreateSandboxRequest:
             network_policy=network_policy,
             volumes=volumes,
             extensions=extensions,
+            resource_requests=resource_requests,
         )
 
         create_sandbox_request.additional_properties = d

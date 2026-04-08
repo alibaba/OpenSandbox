@@ -121,6 +121,7 @@ class SandboxesAdapter(Sandboxes):
         extensions: dict[str, str],
         volumes: list[Volume] | None,
         platform: PlatformSpec | None = None,
+        resource_requests: dict[str, str] | None = None,
     ) -> SandboxCreateResponse:
         """Create a new sandbox instance with the specified configuration."""
         logger.info(f"Creating sandbox with image: {spec.image}")
@@ -139,6 +140,7 @@ class SandboxesAdapter(Sandboxes):
                 network_policy=network_policy,
                 extensions=extensions,
                 volumes=volumes,
+                resource_requests=resource_requests,
             )
 
             client = await self._get_client()
