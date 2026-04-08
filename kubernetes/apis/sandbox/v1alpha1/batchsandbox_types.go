@@ -70,6 +70,9 @@ type BatchSandboxSpec struct {
 	// +kubebuilder:default=Retain
 	// +kubebuilder:validation:Optional
 	TaskResourcePolicyWhenCompleted *TaskResourcePolicy `json:"taskResourcePolicyWhenCompleted,omitempty"`
+	// PausePolicy defines the pause/resume policy for this sandbox.
+	// +optional
+	PausePolicy *PausePolicy `json:"pausePolicy,omitempty"`
 }
 
 type TaskResourcePolicy string
@@ -78,6 +81,29 @@ const (
 	TaskResourcePolicyRetain  TaskResourcePolicy = "Retain"
 	TaskResourcePolicyRelease TaskResourcePolicy = "Release"
 )
+
+// PausePolicy defines the policy for pause/resume operations.
+type PausePolicy struct {
+	// SnapshotRegistry is the OCI registry for snapshot images.
+	// +kubebuilder:validation:Required
+	SnapshotRegistry string `json:"snapshotRegistry"`
+
+	// SnapshotType indicates the type of snapshot (default: Rootfs).
+	// +optional
+	// +kubebuilder:validation:Optional
+	// +kubebuilder:default=Rootfs
+	SnapshotType SnapshotType `json:"snapshotType,omitempty"`
+
+	// SnapshotPushSecret is the Secret name for pushing snapshots.
+	// +optional
+	// +kubebuilder:validation:Optional
+	SnapshotPushSecret string `json:"snapshotPushSecret,omitempty"`
+
+	// ResumeImagePullSecret is the Secret name for pulling snapshots during resume.
+	// +optional
+	// +kubebuilder:validation:Optional
+	ResumeImagePullSecret string `json:"resumeImagePullSecret,omitempty"`
+}
 
 // BatchSandboxStatus defines the observed state of BatchSandbox.
 type BatchSandboxStatus struct {

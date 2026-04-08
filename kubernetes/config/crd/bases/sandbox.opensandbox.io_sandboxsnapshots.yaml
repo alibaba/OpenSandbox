@@ -1,0 +1,215 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: sandboxsnapshots.sandbox.opensandbox.io
+spec:
+  group: sandbox.opensandbox.io
+  names:
+    kind: SandboxSnapshot
+    listKind: SandboxSnapshotList
+    plural: sandboxsnapshots
+    shortNames:
+    - sbxsnap
+    singular: sandboxsnapshot
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: PHASE
+      type: string
+    - jsonPath: .spec.sandboxId
+      name: SANDBOX_ID
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SandboxSnapshotSpec defines the desired state of SandboxSnapshot.
+            properties:
+              containerSnapshots:
+                description: |-
+                  ContainerSnapshots holds per-container snapshot information.
+                  The controller fills this during resolution.
+                items:
+                  description: ContainerSnapshot represents a snapshot of a single
+                    container.
+                  properties:
+                    containerName:
+                      description: ContainerName is the name of the container.
+                      type: string
+                    imageDigest:
+                      description: ImageDigest is the digest of the pushed snapshot
+                        image.
+                      type: string
+                    imageUri:
+                      description: ImageURI is the target image URI for this container's
+                        snapshot.
+                      type: string
+                  required:
+                  - containerName
+                  - imageUri
+                  type: object
+                type: array
+              pauseVersion:
+                description: |-
+                  PauseVersion is incremented by the server to request a pause.
+                  Controller ACKs by setting status.pauseVersion to match when entering Committing phase.
+                type: integer
+              pausedAt:
+                description: PausedAt is the timestamp when pause was initiated.
+                format: date-time
+                type: string
+              resumeImagePullSecretName:
+                description: ResumeImagePullSecretName is the Secret name for pulling
+                  snapshot during resume.
+                type: string
+              resumeTemplate:
+                description: ResumeTemplate contains enough information to reconstruct
+                  BatchSandbox.
+                x-kubernetes-preserve-unknown-fields: true
+              resumeVersion:
+                description: |-
+                  ResumeVersion is incremented by the server to request a resume.
+                  Controller ACKs by setting status.resumeVersion to match when starting resume.
+                type: integer
+              sandboxId:
+                description: SandboxID is the stable public identifier for the sandbox.
+                type: string
+              snapshotPushSecretName:
+                description: SnapshotPushSecretName is the Secret name for pushing
+                  to registry.
+                type: string
+              snapshotRegistry:
+                description: SnapshotRegistry is the OCI registry for snapshot images.
+                type: string
+              snapshotType:
+                default: Rootfs
+                description: 'SnapshotType indicates the type of snapshot (default:
+                  Rootfs).'
+                type: string
+              sourceBatchSandboxName:
+                description: SourceBatchSandboxName is the name of the source BatchSandbox.
+                type: string
+              sourceNodeName:
+                description: SourceNodeName is the node where the source Pod runs.
+                type: string
+              sourcePodName:
+                description: SourcePodName is the name of the source Pod.
+                type: string
+            required:
+            - pauseVersion
+            - pausedAt
+            - resumeVersion
+            - sandboxId
+            - sourceBatchSandboxName
+            type: object
+          status:
+            description: SandboxSnapshotStatus defines the observed state of SandboxSnapshot.
+            properties:
+              containerSnapshots:
+                description: ContainerSnapshots holds per-container snapshot results
+                  (filled by controller after push).
+                items:
+                  description: ContainerSnapshot represents a snapshot of a single
+                    container.
+                  properties:
+                    containerName:
+                      description: ContainerName is the name of the container.
+                      type: string
+                    imageDigest:
+                      description: ImageDigest is the digest of the pushed snapshot
+                        image.
+                      type: string
+                    imageUri:
+                      description: ImageURI is the target image URI for this container's
+                        snapshot.
+                      type: string
+                  required:
+                  - containerName
+                  - imageUri
+                  type: object
+                type: array
+              history:
+                description: History records each pause/resume cycle.
+                items:
+                  description: SnapshotRecord represents a single pause or resume
+                    event in the snapshot history.
+                  properties:
+                    action:
+                      description: Action is "Pause" or "Resume".
+                      type: string
+                    message:
+                      description: Message is a human-readable description of the
+                        event.
+                      type: string
+                    timestamp:
+                      description: Timestamp is when this record was created.
+                      format: date-time
+                      type: string
+                    version:
+                      description: Version is the pauseVersion or resumeVersion that
+                        triggered this action.
+                      type: integer
+                  required:
+                  - action
+                  - message
+                  - timestamp
+                  - version
+                  type: object
+                type: array
+              message:
+                description: Message provides human-readable status information.
+                type: string
+              pauseVersion:
+                description: PauseVersion is ACKed by the controller when entering
+                  Committing phase.
+                type: integer
+              phase:
+                description: Phase indicates the current phase of the snapshot.
+                enum:
+                - Pending
+                - Committing
+                - Ready
+                - Failed
+                type: string
+              readyAt:
+                description: ReadyAt is the timestamp when the snapshot became Ready.
+                format: date-time
+                type: string
+              resumeVersion:
+                description: ResumeVersion is ACKed by the controller when starting
+                  resume.
+                type: integer
+            required:
+            - pauseVersion
+            - resumeVersion
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

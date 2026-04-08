@@ -52,6 +52,7 @@ class WorkloadProvider(ABC):
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
+        pause_policy: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Create a new workload resource.

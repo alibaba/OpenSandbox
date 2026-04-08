@@ -1,0 +1,11 @@
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: SandboxSnapshot
+metadata:
+  name: {{.SnapshotName}}
+  namespace: {{.Namespace}}
+spec:
+  sandboxId: {{.SandboxId}}
+  sourceBatchSandboxName: {{.SourceBatchSandboxName}}
+  pausedAt: {{.PausedAt}}
+  pauseVersion: 1
+  resumeVersion: 0

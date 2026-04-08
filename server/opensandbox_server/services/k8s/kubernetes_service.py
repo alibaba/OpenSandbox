@@ -68,6 +68,7 @@ from opensandbox_server.services.validators import (
 )
 from opensandbox_server.services.k8s.client import K8sClient
 from opensandbox_server.services.k8s.provider_factory import create_workload_provider
+from opensandbox_server.services.k8s.sandboxsnapshot_provider import SandboxSnapshotProvider
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,10 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     "message": f"Invalid workload provider configuration: {str(e)}",
                 },
             ) from e
-        
+
+        # Initialize snapshot provider for pause/resume
+        self.snapshot_provider = SandboxSnapshotProvider(self.k8s_client)
+
         logger.info(
             "KubernetesSandboxService initialized: namespace=%s, execd_image=%s",
             self.namespace,
@@ -215,7 +219,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                             ),
                         },
                     )
-                
+
             except HTTPException:
                 raise
             except Exception as e:
@@ -250,12 +254,12 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             "state": "Running",
             "message": "Pod has IP assigned and sandbox is ready for requests",
         }
-    
+
     @staticmethod
     def _is_unschedulable_status(status_info: Dict[str, Any]) -> bool:
         reason = str(status_info.get("reason") or "")
         return reason == "POD_PLATFORM_UNSCHEDULABLE"
-    
+
     def _ensure_network_policy_support(self, request: CreateSandboxRequest) -> None:
         """
         Validate that network policy can be honored under the current runtime config.
@@ -379,6 +383,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 egress_mode=egress_mode,
                 volumes=request.volumes,
                 platform=request.platform,
+                pause_policy=request.pause_policy.model_dump(by_alias=True) if request.pause_policy else None,
             )
             
             logger.info(
@@ -450,7 +455,9 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
     def get_sandbox(self, sandbox_id: str) -> Sandbox:
         """
         Get sandbox by ID.
-        
+
+        Aggregates state from both BatchSandbox and SnapshotSnapshot resources.
+
         Args:
             sandbox_id: Unique sandbox identifier
             
@@ -461,12 +468,18 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             HTTPException: If sandbox not found
         """
         try:
-            workload = self.workload_provider.get_workload(
+            # Get both BatchSandbox and Snapshot for state aggregation
+            batchsandbox = self.workload_provider.get_workload(
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
             )
-            
-            if not workload:
+            snapshot = self.snapshot_provider.get_snapshot(sandbox_id, self.namespace)
+
+            # Derive aggregated state
+            state, reason, message = self._derive_sandbox_state(batchsandbox, snapshot)
+
+            # Handle not found case
+            if state == "NotFound":
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail={
@@ -474,9 +487,61 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                         "message": f"Sandbox '{sandbox_id}' not found",
                     },
                 )
-            
-            return self._build_sandbox_from_workload(workload)
-            
+
+            # Build Sandbox from BatchSandbox if available
+            if batchsandbox:
+                sandbox = self._build_sandbox_from_workload(batchsandbox)
+                # Override status with aggregated state
+                sandbox.status.state = state
+                sandbox.status.reason = reason
+                sandbox.status.message = message
+                return sandbox
+
+            # Paused state: build from snapshot
+            if snapshot:
+                metadata = snapshot.get("metadata", {})
+                labels = metadata.get("labels", {})
+                creation_timestamp = metadata.get("creationTimestamp")
+                spec = snapshot.get("spec", {})
+
+                # Extract user metadata
+                user_metadata = {
+                    k: v for k, v in labels.items() if not k.startswith("opensandbox.io/")
+                }
+
+                # Get image URI from snapshot spec (from ContainerSnapshots for multi-container)
+                container_snapshots = spec.get("containerSnapshots", [])
+                if container_snapshots:
+                    # Multi-container: use first container's image
+                    image_uri = container_snapshots[0].get("imageUri", "unknown")
+                else:
+                    image_uri = "unknown"
+                image_spec = ImageSpec(uri=image_uri) if image_uri else ImageSpec(uri="unknown")
+
+                return Sandbox(
+                    id=sandbox_id,
+                    status=SandboxStatus(
+                        state=state,
+                        reason=reason,
+                        message=message,
+                        last_transition_at=creation_timestamp,
+                    ),
+                    created_at=creation_timestamp,
+                    expires_at=None,
+                    metadata=user_metadata if user_metadata else None,
+                    image=image_spec,
+                    entrypoint=[],
+                )
+
+            # Should not reach here due to NotFound check above
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
+                    "message": f"Sandbox '{sandbox_id}' not found",
+                },
+            )
+
         except HTTPException:
             raise
         except Exception as e:
@@ -510,11 +575,56 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             )
             
             # Convert to Sandbox objects
-            sandboxes = [
-                self._build_sandbox_from_workload(w)
-                for w in workloads
-            ]
-            
+            sandboxes = [self._build_sandbox_from_workload(w) for w in workloads]
+
+            # Include paused sandboxes (Ready snapshots without BatchSandbox)
+            try:
+                snapshots = self.snapshot_provider.list_snapshots(
+                    namespace=self.namespace,
+                    label_selector=f"sandbox.opensandbox.io/sandbox-id",
+                )
+
+                workload_ids = {
+                    w.get("metadata", {}).get("labels", {}).get(SANDBOX_ID_LABEL) for w in workloads
+                }
+
+                for snap in snapshots:
+                    snap_id = snap.get("spec", {}).get("sandboxId", "")
+                    phase = snap.get("status", {}).get("phase", "")
+                    if snap_id and phase == "Ready" and snap_id not in workload_ids:
+                        metadata = snap.get("metadata", {})
+                        labels = metadata.get("labels", {})
+                        spec = snap.get("spec", {})
+                        # Get image from ContainerSnapshots (multi-container support)
+                        container_snapshots = spec.get("containerSnapshots", [])
+                        if container_snapshots:
+                            image_uri = container_snapshots[0].get("imageUri", "unknown")
+                        else:
+                            image_uri = "unknown"
+                        user_metadata = {
+                            k: v for k, v in labels.items() if not k.startswith("opensandbox.io/")
+                        }
+
+                        paused_sandbox = Sandbox(
+                            id=snap_id,
+                            status=SandboxStatus(
+                                state="Paused",
+                                reason="SNAPSHOT_READY",
+                                message="Sandbox paused",
+                                last_transition_at=metadata.get("creationTimestamp"),
+                            ),
+                            created_at=metadata.get("creationTimestamp"),
+                            expires_at=None,
+                            metadata=user_metadata if user_metadata else None,
+                            image=(
+                                ImageSpec(uri=image_uri) if image_uri else ImageSpec(uri="unknown")
+                            ),
+                            entrypoint=[],
+                        )
+                        sandboxes.append(paused_sandbox)
+            except Exception as e:
+                logger.warning("Failed to list paused sandboxes from snapshots: %s", e)
+
             # Apply filters
             filtered = self._apply_filters(sandboxes, request.filter)
             
@@ -556,76 +666,226 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
     
     def delete_sandbox(self, sandbox_id: str) -> None:
         """
-        Delete a sandbox.
-        
-        Args:
-            sandbox_id: Unique sandbox identifier
-            
-        Raises:
-            HTTPException: If deletion fails
+        Delete sandbox and associated snapshot.
         """
+        deleted = False
+
+        # 1. Delete BatchSandbox
         try:
-            self.workload_provider.delete_workload(
-                sandbox_id=sandbox_id,
-                namespace=self.namespace,
-            )
-            
-            logger.info(f"Deleted sandbox: {sandbox_id}")
-            
+            self.workload_provider.delete_workload(sandbox_id, self.namespace)
+            deleted = True
+            logger.info("Deleted BatchSandbox %s", sandbox_id)
         except Exception as e:
-            if "not found" in str(e).lower():
+            logger.debug("BatchSandbox %s not found or already deleted: %s", sandbox_id, e)
+
+        # 2. Delete SandboxSnapshot
+        try:
+            self.snapshot_provider.delete_snapshot(sandbox_id, self.namespace)
+            deleted = True
+            logger.info("Deleted SandboxSnapshot %s", sandbox_id)
+        except Exception as e:
+            logger.debug("SandboxSnapshot %s not found or already deleted: %s", sandbox_id, e)
+
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
+                    "message": f"Sandbox '{sandbox_id}' not found",
+                },
+            )
+
+    def pause_sandbox(self, sandbox_id: str) -> None:
+        """
+        Pause sandbox by creating SandboxSnapshot CR.
+
+        The controller handles Pod discovery, commit, push, and BatchSandbox cleanup.
+        """
+        # 1. Get BatchSandbox
+        batchsandbox = self.workload_provider.get_workload(sandbox_id, self.namespace)
+        if not batchsandbox:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
+                    "message": f"Sandbox '{sandbox_id}' not found",
+                },
+            )
+
+        # 2. Validate state
+        workload_status = self.workload_provider.get_status(batchsandbox)
+        if workload_status["state"] != "Running":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_STATE,
+                    "message": f"Cannot pause sandbox in state {workload_status['state']}",
+                },
+            )
+
+        spec = batchsandbox.get("spec", {})
+        if spec.get("replicas", 0) != 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.UNSUPPORTED_REPLICAS,
+                    "message": "Pause only supports replicas=1",
+                },
+            )
+
+        if not spec.get("pausePolicy"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.PAUSE_POLICY_NOT_CONFIGURED,
+                    "message": "Sandbox does not have pausePolicy configured",
+                },
+            )
+
+        # 3. Check for in-flight snapshot or determine if re-pause
+        existing_snapshot = self.snapshot_provider.get_snapshot(sandbox_id, self.namespace)
+
+        if existing_snapshot:
+            phase = existing_snapshot.get("status", {}).get("phase")
+            # In-flight pause: versions don't match means controller is still processing
+            spec_pv = existing_snapshot.get("spec", {}).get("pauseVersion", 0)
+            status_pv = existing_snapshot.get("status", {}).get("pauseVersion", 0)
+            if spec_pv > status_pv:
                 raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
+                    status_code=status.HTTP_409_CONFLICT,
                     detail={
-                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
-                        "message": f"Sandbox '{sandbox_id}' not found",
+                        "code": SandboxErrorCodes.SNAPSHOT_IN_PROGRESS,
+                        "message": "Snapshot already in progress",
                     },
-                ) from e
-            
-            logger.error(f"Error deleting sandbox {sandbox_id}: {e}")
+                )
+
+            # Re-pause: patch existing Snapshot CR with incremented pauseVersion
+            current_pause_version = status_pv
+            new_pause_version = current_pause_version + 1
+            try:
+                self.snapshot_provider.patch_snapshot_spec(
+                    snapshot_name=sandbox_id,
+                    namespace=self.namespace,
+                    spec_patch={
+                        "pauseVersion": new_pause_version,
+                        "pausedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                        "sourceBatchSandboxName": batchsandbox["metadata"]["name"],
+                    },
+                )
+                logger.info(
+                    "Patched SandboxSnapshot %s pauseVersion=%d for re-pause",
+                    sandbox_id,
+                    new_pause_version,
+                )
+            except Exception as e:
+                logger.error("Failed to patch SandboxSnapshot for re-pause: %s", e)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": SandboxErrorCodes.K8S_API_ERROR,
+                        "message": f"Failed to re-pause snapshot: {str(e)}",
+                    },
+                )
+            return
+
+        # 4. First pause: create minimal SandboxSnapshot CR
+        batch_sandbox_name = batchsandbox["metadata"]["name"]
+        snapshot_body = {
+            "apiVersion": f"{SandboxSnapshotProvider.GROUP}/{SandboxSnapshotProvider.VERSION}",
+            "kind": "SandboxSnapshot",
+            "metadata": {
+                "name": sandbox_id,
+                "namespace": self.namespace,
+                "labels": {
+                    "sandbox.opensandbox.io/sandbox-id": sandbox_id,
+                },
+            },
+            "spec": {
+                "sandboxId": sandbox_id,
+                "sourceBatchSandboxName": batch_sandbox_name,
+                "pausedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "pauseVersion": 1,
+                "resumeVersion": 0,
+            },
+        }
+
+        try:
+            self.snapshot_provider.create_snapshot(self.namespace, snapshot_body)
+            logger.info("Created SandboxSnapshot %s for pause", sandbox_id)
+        except Exception as e:
+            logger.error("Failed to create SandboxSnapshot: %s", e)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
                     "code": SandboxErrorCodes.K8S_API_ERROR,
-                    "message": f"Failed to delete sandbox: {str(e)}",
+                    "message": f"Failed to create snapshot: {str(e)}",
                 },
-            ) from e
-    
-    def pause_sandbox(self, sandbox_id: str) -> None:
-        """
-        Pause sandbox (not supported in Kubernetes).
-        
-        Args:
-            sandbox_id: Unique sandbox identifier
-            
-        Raises:
-            HTTPException: Always raises 501 Not Implemented
-        """
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "code": SandboxErrorCodes.API_NOT_SUPPORTED,
-                "message": "Pause operation is not supported in Kubernetes runtime",
-            },
-        )
-    
+            )
+
     def resume_sandbox(self, sandbox_id: str) -> None:
         """
-        Resume sandbox (not supported in Kubernetes).
-        
-        Args:
-            sandbox_id: Unique sandbox identifier
-            
-        Raises:
-            HTTPException: Always raises 501 Not Implemented
+        Resume sandbox by patching SandboxSnapshot CR to trigger controller-driven resume.
+
+        The controller watches for spec.resumeVersion > status.resumeVersion and
+        creates the BatchSandbox from resumeTemplate.
         """
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail={
-                "code": SandboxErrorCodes.API_NOT_SUPPORTED,
-                "message": "Resume operation is not supported in Kubernetes runtime",
-            },
-        )
+        # 1. Get SandboxSnapshot
+        snapshot = self.snapshot_provider.get_snapshot(sandbox_id, self.namespace)
+        if not snapshot:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": SandboxErrorCodes.SNAPSHOT_NOT_FOUND,
+                    "message": f"No snapshot found for sandbox {sandbox_id}",
+                },
+            )
+
+        # 2. Validate snapshot is Ready
+        phase = snapshot.get("status", {}).get("phase")
+        if phase != "Ready":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": SandboxErrorCodes.SNAPSHOT_NOT_READY,
+                    "message": f"Snapshot is in phase {phase}, cannot resume",
+                },
+            )
+
+        # 3. Check BatchSandbox doesn't already exist
+        existing = self.workload_provider.get_workload(sandbox_id, self.namespace)
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_STATE,
+                    "message": "BatchSandbox already exists, cannot resume",
+                },
+            )
+
+        # 4. Increment resumeVersion to trigger controller resume
+        current_resume_version = snapshot.get("status", {}).get("resumeVersion", 0)
+        new_resume_version = current_resume_version + 1
+
+        try:
+            self.snapshot_provider.patch_snapshot_spec(
+                snapshot_name=sandbox_id,
+                namespace=self.namespace,
+                spec_patch={"resumeVersion": new_resume_version},
+            )
+            logger.info(
+                "Patched SandboxSnapshot %s resumeVersion=%d to trigger resume",
+                sandbox_id,
+                new_resume_version,
+            )
+        except Exception as e:
+            logger.error("Failed to patch SandboxSnapshot for resume: %s", e)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.K8S_API_ERROR,
+                    "message": f"Failed to trigger resume: {e}",
+                },
+            )
 
     def get_access_renew_extend_seconds(self, sandbox_id: str) -> Optional[int]:
         workload = self.workload_provider.get_workload(
@@ -807,10 +1067,59 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             return annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
         return None
 
-    def _build_sandbox_from_workload(
+    def _derive_sandbox_state(
         self,
-        workload: Any,
-    ) -> Sandbox:
+        batchsandbox: Optional[Dict[str, Any]],
+        snapshot: Optional[Dict[str, Any]],
+    ) -> tuple[str, str, str]:
+        """
+        Derive sandbox state from BatchSandbox and SnapshotSnapshot.
+
+        Returns:
+            Tuple of (state, reason, message)
+        """
+        # Snapshot failed
+        if snapshot and snapshot.get("status", {}).get("phase") == "Failed":
+            return (
+                "Failed",
+                "SNAPSHOT_FAILED",
+                snapshot.get("status", {}).get("message", "Snapshot failed"),
+            )
+
+        # Pausing (both exist, snapshot in progress)
+        if batchsandbox and snapshot:
+            phase = snapshot.get("status", {}).get("phase")
+            # Check if BatchSandbox is resumed from snapshot
+            annotations = batchsandbox.get("metadata", {}).get("annotations", {})
+            if annotations.get("sandbox.opensandbox.io/resumed-from-snapshot") == "true":
+                # Resumed sandbox - return actual workload status
+                status = self.workload_provider.get_status(batchsandbox)
+                return (status["state"], status["reason"], status["message"])
+            if phase in ("Pending", "Committing"):
+                return ("Pausing", f"SNAPSHOT_{phase.upper()}", f"Snapshot is {phase.lower()}")
+            if phase == "Ready":
+                return ("Pausing", "SNAPSHOT_READY_CLEANUP", "Releasing resources")
+
+        # Paused (no workload, snapshot ready)
+        if not batchsandbox and snapshot:
+            phase = snapshot.get("status", {}).get("phase")
+            if phase == "Ready":
+                return ("Paused", "SNAPSHOT_READY", "Sandbox paused")
+            if phase in ("Pending", "Committing"):
+                return ("Pausing", f"SNAPSHOT_{phase.upper()}", f"Snapshot is {phase.lower()}")
+
+        # Resuming (workload from snapshot)
+        if batchsandbox:
+            status = self.workload_provider.get_status(batchsandbox)
+            annotations = batchsandbox.get("metadata", {}).get("annotations", {})
+            if annotations.get("sandbox.opensandbox.io/resumed-from-snapshot") == "true":
+                if status["state"] != "Running":
+                    return ("Resuming", "RESUMING", "Restoring from snapshot")
+            return (status["state"], status["reason"], status["message"])
+
+        return ("NotFound", "SANDBOX_NOT_FOUND", "Sandbox does not exist")
+
+    def _build_sandbox_from_workload(self, workload: Any) -> Sandbox:
         """
         Build Sandbox object from Kubernetes workload.
         
@@ -868,7 +1177,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         
         image_spec = ImageSpec(uri=image_uri) if image_uri else ImageSpec(uri="unknown")
         platform_spec = self._extract_platform_from_workload(workload)
-        
+
         return Sandbox(
             id=sandbox_id,
             status=SandboxStatus(
@@ -1028,7 +1337,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             elif inferred != term_value:
                 return None
         return inferred
-    
+
     def _apply_filters(self, sandboxes: list[Sandbox], filter_spec: Any) -> list[Sandbox]:
         """
         Apply filters to sandbox list.
