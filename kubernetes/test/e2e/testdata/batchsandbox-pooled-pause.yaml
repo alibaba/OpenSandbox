@@ -8,5 +8,5 @@ spec:
   poolRef: {{.PoolName}}
   pausePolicy:
     snapshotRegistry: {{.SnapshotRegistry}}
-    snapshotPushSecretName: {{.SnapshotPushSecretName}}
-    resumeImagePullSecretName: {{.ResumeImagePullSecretName}}
+    snapshotPushSecret: {{.SnapshotPushSecret}}
+    resumeImagePullSecret: {{.ResumeImagePullSecret}}

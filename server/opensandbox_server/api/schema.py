@@ -135,12 +135,12 @@ class PausePolicy(BaseModel):
     )
     snapshot_push_secret_name: Optional[str] = Field(
         None,
-        alias="snapshotPushSecretName",
+        alias="snapshotPushSecret",
         description="K8s Secret name for pushing snapshot to registry",
     )
     resume_image_pull_secret_name: Optional[str] = Field(
         None,
-        alias="resumeImagePullSecretName",
+        alias="resumeImagePullSecret",
         description="K8s Secret name for pulling snapshot image during resume",
     )
 

@@ -289,8 +289,8 @@ func (r *SandboxSnapshotReconciler) ensureResolved(ctx context.Context, snapshot
 		resumeTemplateData["pausePolicy"] = map[string]interface{}{
 			"snapshotType":              bs.Spec.PausePolicy.SnapshotType,
 			"snapshotRegistry":          bs.Spec.PausePolicy.SnapshotRegistry,
-			"snapshotPushSecretName":    bs.Spec.PausePolicy.SnapshotPushSecret,
-			"resumeImagePullSecretName": bs.Spec.PausePolicy.ResumeImagePullSecret,
+			"snapshotPushSecret":    bs.Spec.PausePolicy.SnapshotPushSecret,
+			"resumeImagePullSecret": bs.Spec.PausePolicy.ResumeImagePullSecret,
 		}
 	}
 

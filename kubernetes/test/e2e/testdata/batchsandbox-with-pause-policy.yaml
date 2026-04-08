@@ -13,5 +13,5 @@ spec:
         command: ["sh", "-c", "echo 'Hello from sandbox' && sleep 3600"]
   pausePolicy:
     snapshotRegistry: {{.SnapshotRegistry}}
-    snapshotPushSecretName: {{.SnapshotPushSecretName}}
-    resumeImagePullSecretName: {{.ResumeImagePullSecretName}}
+    snapshotPushSecret: {{.SnapshotPushSecret}}
+    resumeImagePullSecret: {{.ResumeImagePullSecret}}

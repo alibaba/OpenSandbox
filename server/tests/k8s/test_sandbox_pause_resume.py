@@ -21,7 +21,6 @@ SandboxSnapshot CR creation, state validation, and error handling.
 
 import pytest
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
 
 from fastapi import HTTPException
 
@@ -92,8 +91,8 @@ class TestPauseSandbox:
             "sourcePodName",
             "sourceContainerName",
             "sourceNodeName",
-            "snapshotPushSecretName",
-            "resumeImagePullSecretName",
+            "snapshotPushSecret",
+            "resumeImagePullSecret",
         ):
             assert key not in snapshot_cr["spec"]
 
@@ -115,8 +114,8 @@ class TestPauseSandbox:
                 "pausePolicy": {
                     "snapshotRegistry": "registry.example.com",
                     "snapshotType": "Rootfs",
-                    "snapshotPushSecretName": "push-secret",
-                    "resumeImagePullSecretName": "pull-secret",
+                    "snapshotPushSecret": "push-secret",
+                    "resumeImagePullSecret": "pull-secret",
                 },
                 "template": {"spec": {"containers": [{"name": "sandbox", "image": "python:3.11"}]}},
             },
@@ -140,8 +139,8 @@ class TestPauseSandbox:
         assert snapshot_cr["spec"]["sandboxId"] == sandbox_id
         assert snapshot_cr["spec"]["sourceBatchSandboxName"] == sandbox_id
         assert "pausedAt" in snapshot_cr["spec"]
-        assert "snapshotPushSecretName" not in snapshot_cr["spec"]
-        assert "resumeImagePullSecretName" not in snapshot_cr["spec"]
+        assert "snapshotPushSecret" not in snapshot_cr["spec"]
+        assert "resumeImagePullSecret" not in snapshot_cr["spec"]
 
     def test_pause_sandbox_not_found(self, k8s_service):
         """

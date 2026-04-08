@@ -83,8 +83,8 @@ spec:
                 description: PausedAt is the timestamp when pause was initiated.
                 format: date-time
                 type: string
-              resumeImagePullSecretName:
-                description: ResumeImagePullSecretName is the Secret name for pulling
+              resumeImagePullSecret:
+                description: ResumeImagePullSecret is the Secret name for pulling
                   snapshot during resume.
                 type: string
               resumeTemplate:
@@ -99,9 +99,9 @@ spec:
               sandboxId:
                 description: SandboxID is the stable public identifier for the sandbox.
                 type: string
-              snapshotPushSecretName:
-                description: SnapshotPushSecretName is the Secret name for pushing
-                  to registry.
+              snapshotPushSecret:
+                description: SnapshotPushSecret is the Secret name for pushing to
+                  registry.
                 type: string
               snapshotRegistry:
                 description: SnapshotRegistry is the OCI registry for snapshot images.

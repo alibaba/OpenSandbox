@@ -581,7 +581,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             try:
                 snapshots = self.snapshot_provider.list_snapshots(
                     namespace=self.namespace,
-                    label_selector=f"sandbox.opensandbox.io/sandbox-id",
+                    label_selector="sandbox.opensandbox.io/sandbox-id",
                 )
 
                 workload_ids = {
@@ -746,7 +746,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         existing_snapshot = self.snapshot_provider.get_snapshot(sandbox_id, self.namespace)
 
         if existing_snapshot:
-            phase = existing_snapshot.get("status", {}).get("phase")
             # In-flight pause: versions don't match means controller is still processing
             spec_pv = existing_snapshot.get("spec", {}).get("pauseVersion", 0)
             status_pv = existing_snapshot.get("status", {}).get("pauseVersion", 0)

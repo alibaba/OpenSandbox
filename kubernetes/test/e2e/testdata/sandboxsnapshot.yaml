@@ -10,8 +10,8 @@ spec:
   sourcePodName: {{.SourcePodName}}
   sourceNodeName: {{.SourceNodeName}}
   snapshotRegistry: {{.SnapshotRegistry}}
-  snapshotPushSecretName: {{.SnapshotPushSecretName}}
-  resumeImagePullSecretName: {{.ResumeImagePullSecretName}}
+  snapshotPushSecret: {{.SnapshotPushSecret}}
+  resumeImagePullSecret: {{.ResumeImagePullSecret}}
   containerSnapshots:
   - containerName: sandbox
     imageUri: {{.ImageUri}}

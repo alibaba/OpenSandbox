@@ -149,8 +149,8 @@ var _ = Describe("PauseResume", Ordered, func() {
 				"Namespace":                 pauseResumeNamespace,
 				"SandboxImage":              utils.SandboxImage,
 				"SnapshotRegistry":          registryServiceAddr,
-				"SnapshotPushSecretName":    "registry-push-secret",
-				"ResumeImagePullSecretName": "registry-pull-secret",
+				"SnapshotPushSecret":    "registry-push-secret",
+				"ResumeImagePullSecret": "registry-pull-secret",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -230,8 +230,8 @@ var _ = Describe("PauseResume", Ordered, func() {
 				"SourceNodeName":            nodeName,
 				"SnapshotRegistry":          registryServiceAddr,
 				"ImageUri":                  fmt.Sprintf("%s/%s:snapshot", registryServiceAddr, sandboxName),
-				"SnapshotPushSecretName":    "registry-push-secret",
-				"ResumeImagePullSecretName": "registry-pull-secret",
+				"SnapshotPushSecret":    "registry-push-secret",
+				"ResumeImagePullSecret": "registry-pull-secret",
 				"SandboxImage":              utils.SandboxImage,
 				"PausedAt":                  pausedAt,
 			})
@@ -416,8 +416,8 @@ var _ = Describe("PauseResume", Ordered, func() {
 				"Namespace":                 pauseResumeNamespace,
 				"PoolName":                  poolName,
 				"SnapshotRegistry":          registryServiceAddr,
-				"SnapshotPushSecretName":    "registry-push-secret",
-				"ResumeImagePullSecretName": "registry-pull-secret",
+				"SnapshotPushSecret":    "registry-push-secret",
+				"ResumeImagePullSecret": "registry-pull-secret",
 			})
 			Expect(err).NotTo(HaveOccurred())
 
@@ -611,8 +611,8 @@ var _ = Describe("PauseResume", Ordered, func() {
 				"SourceNodeName":            "nonexistent-node",
 				"SnapshotRegistry":          registryServiceAddr,
 				"ImageUri":                  fmt.Sprintf("%s/nonexistent:snapshot", registryServiceAddr),
-				"SnapshotPushSecretName":    "registry-push-secret",
-				"ResumeImagePullSecretName": "registry-pull-secret",
+				"SnapshotPushSecret":    "registry-push-secret",
+				"ResumeImagePullSecret": "registry-pull-secret",
 				"SandboxImage":              utils.SandboxImage,
 				"PausedAt":                  pausedAt,
 			})

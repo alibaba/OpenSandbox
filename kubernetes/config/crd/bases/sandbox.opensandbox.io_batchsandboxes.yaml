@@ -99,12 +99,12 @@ spec:
                 description: PausePolicy defines the pause/resume policy for this
                   sandbox.
                 properties:
-                  resumeImagePullSecretName:
-                    description: ResumeImagePullSecretName is the Secret name for
-                      pulling snapshots during resume.
+                  resumeImagePullSecret:
+                    description: ResumeImagePullSecret is the Secret name for pulling
+                      snapshots during resume.
                     type: string
-                  snapshotPushSecretName:
-                    description: SnapshotPushSecretName is the Secret name for pushing
+                  snapshotPushSecret:
+                    description: SnapshotPushSecret is the Secret name for pushing
                       snapshots.
                     type: string
                   snapshotRegistry:
