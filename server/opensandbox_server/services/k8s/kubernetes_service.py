@@ -306,7 +306,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     return  # Skip all remaining PVCs — same SA, same permissions
                 raise
             if existing is not None:
-                logger.info("PVC '%s' already exists in namespace '%s'", claim_name, self.namespace)
+                logger.debug("PVC '%s' already exists in namespace '%s'", claim_name, self.namespace)
                 continue
 
             storage = vol.pvc.storage or default_size
