@@ -26,7 +26,7 @@ from opensandbox.config import ConnectionConfig, ConnectionConfigSync
 DEFAULT_DOMAIN = "localhost:8080"
 DEFAULT_PROTOCOL = "http"
 DEFAULT_API_KEY = "e2e-test"
-DEFAULT_IMAGE = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest"
+DEFAULT_IMAGE = "opensandbox/code-interpreter:latest"
 DEFAULT_RUNTIME = "docker"
 DEFAULT_USE_SERVER_PROXY = "false"
 DEFAULT_PVC_NAME = "opensandbox-e2e-pvc-test"

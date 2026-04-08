@@ -19,8 +19,6 @@ import (
 	"os"
 )
 
-// ValidateWorkingDir returns an error if cwd is non-empty and cannot be used as a process working directory.
-// An empty cwd means the caller's default (e.g. current directory) and is not validated here.
 func ValidateWorkingDir(cwd string) error {
 	if cwd == "" {
 		return nil
