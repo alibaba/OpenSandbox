@@ -135,6 +135,7 @@ public class ModelsTests
         {
             Id = "sandbox-123",
             Image = new ImageSpec { Uri = "ubuntu:latest" },
+            Platform = new PlatformSpec { Os = "linux", Arch = "amd64" },
             Entrypoint = new List<string> { "tail", "-f", "/dev/null" },
             Status = new SandboxStatus { State = "Running" },
             CreatedAt = DateTime.UtcNow,
@@ -145,6 +146,8 @@ public class ModelsTests
         // Assert
         info.Id.Should().Be("sandbox-123");
         info.Image.Uri.Should().Be("ubuntu:latest");
+        info.Platform.Should().NotBeNull();
+        info.Platform!.Os.Should().Be("linux");
         info.Entrypoint.Should().HaveCount(3);
         info.Status.State.Should().Be("Running");
         info.Metadata.Should().ContainKey("key");
@@ -217,6 +220,7 @@ public class ModelsTests
             Image = new ImageSpec { Uri = "python:3.11" },
             ResourceLimits = new Dictionary<string, string>(),
             Entrypoint = new List<string> { "python" },
+            Platform = new PlatformSpec { Os = "linux", Arch = "arm64" },
             Volumes = new List<Volume>
             {
                 new()
@@ -244,6 +248,7 @@ public class ModelsTests
         json.Should().Contain("\"accessKeyId\":\"ak\"");
         json.Should().Contain("\"accessKeySecret\":\"sk\"");
         json.Should().Contain("\"version\":\"2.0\"");
+        json.Should().Contain("\"platform\":{\"os\":\"linux\",\"arch\":\"arm64\"}");
     }
 
     [Fact]
@@ -381,11 +386,11 @@ public class ModelsTests
         var options = new RunInSessionOptions
         {
             WorkingDirectory = "/workspace",
-            Timeout = 5000
+            TimeoutSeconds = 5
         };
 
         options.WorkingDirectory.Should().Be("/workspace");
-        options.Timeout.Should().Be(5000);
+        options.TimeoutSeconds.Should().Be(5);
     }
 
     [Fact]

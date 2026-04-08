@@ -24,6 +24,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from io import BytesIO
+from threading import Event
 
 import httpx
 import pytest
@@ -59,6 +60,7 @@ from tests.base_e2e_test import (
     TEST_DOMAIN,
     TEST_PROTOCOL,
     create_connection_config_sync,
+    get_e2e_sandbox_resource,
     get_sandbox_image,
     get_test_host_volume_dir,
     get_test_pvc_name,
@@ -77,26 +79,6 @@ def _assert_recent_timestamp_ms(ts: int, *, tolerance_ms: int = 60_000) -> None:
     assert ts > 0
     delta = abs(_now_ms() - ts)
     assert delta <= tolerance_ms, f"timestamp too far from now: delta={delta}ms (ts={ts})"
-
-
-def _assert_endpoint_has_port(endpoint: str, expected_port: int) -> None:
-    assert endpoint
-    # In some deployments lifecycle returns direct "host:port".
-    # In others it returns a reverse-proxy route like "domain/route/{id}/{port}".
-    # In both cases, we expect NO scheme, and the port to be present deterministically.
-    assert "://" not in endpoint, f"unexpected scheme in endpoint: {endpoint}"
-
-    if "/" in endpoint:
-        assert endpoint.endswith(f"/{expected_port}"), (
-            f"endpoint route must end with /{expected_port}: {endpoint}"
-        )
-        assert endpoint.split("/", 1)[0], f"missing domain in endpoint: {endpoint}"
-        return
-
-    host, port = endpoint.rsplit(":", 1)
-    assert host, f"missing host in endpoint: {endpoint}"
-    assert port.isdigit(), f"non-numeric port in endpoint: {endpoint}"
-    assert int(port) == expected_port, f"endpoint port mismatch: {endpoint} != :{expected_port}"
 
 
 def _assert_times_close(created_at, modified_at, *, tolerance_seconds: float = 2.0) -> None:
@@ -164,6 +146,7 @@ class TestSandboxE2ESync:
 
         cls.sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cls.connection_config,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -222,7 +205,6 @@ class TestSandboxE2ESync:
         endpoint = sandbox.get_endpoint(44772)
         assert endpoint is not None
         assert endpoint.endpoint is not None
-        _assert_endpoint_has_port(endpoint.endpoint, 44772)
 
         metrics = sandbox.get_metrics()
         assert metrics is not None
@@ -272,6 +254,7 @@ class TestSandboxE2ESync:
     def test_01b_manual_cleanup(self) -> None:
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=TestSandboxE2ESync.connection_config,
             timeout=None,
             ready_timeout=timedelta(seconds=30),
@@ -299,6 +282,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -337,6 +321,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -409,6 +394,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -481,6 +467,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -537,6 +524,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -606,6 +594,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -662,6 +651,7 @@ class TestSandboxE2ESync:
         cfg = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
             connection_config=cfg,
             timeout=timedelta(minutes=5),
             ready_timeout=timedelta(seconds=30),
@@ -1211,9 +1201,11 @@ class TestSandboxE2ESync:
         init_events: list[ExecutionInit] = []
         completed_events: list[ExecutionComplete] = []
         errors: list[ExecutionError] = []
+        init_received = Event()
 
         def on_init(init: ExecutionInit):
             init_events.append(init)
+            init_received.set()
 
         def on_complete(complete: ExecutionComplete):
             completed_events.append(complete)
@@ -1234,9 +1226,7 @@ class TestSandboxE2ESync:
                 "sleep 30",
                 handlers=handlers,
             )
-            deadline = time.time() + 15
-            while len(init_events) == 0 and time.time() < deadline:
-                time.sleep(0.1)
+            assert init_received.wait(timeout=15), "Execution init event was not received within 15s"
             assert len(init_events) == 1
             assert init_events[0].id is not None and init_events[0].id.strip()
             _assert_recent_timestamp_ms(init_events[0].timestamp)

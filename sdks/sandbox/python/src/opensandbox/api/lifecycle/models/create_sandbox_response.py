@@ -28,6 +28,7 @@ from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.create_sandbox_response_metadata import CreateSandboxResponseMetadata
+    from ..models.platform_spec import PlatformSpec
     from ..models.sandbox_status import SandboxStatus
 
 
@@ -44,6 +45,15 @@ class CreateSandboxResponse:
         created_at (datetime.datetime): Sandbox creation timestamp
         entrypoint (list[str]): Entry process specification from creation request
         metadata (CreateSandboxResponseMetadata | Unset): Custom metadata from creation request
+        platform (PlatformSpec | Unset): Runtime platform constraint used for scheduling/provisioning.
+
+            This field is independent from `image` and expresses the expected target
+            OS and CPU architecture for sandbox execution.
+
+            Behavioral notes:
+            - If omitted, runtime uses existing default behavior (backward compatible).
+            - If provided and cannot be satisfied by runtime/template/pool constraints,
+              request must fail explicitly.
         expires_at (datetime.datetime | Unset): Timestamp when sandbox will auto-terminate. Omitted when manual cleanup
             is enabled.
     """
@@ -53,6 +63,7 @@ class CreateSandboxResponse:
     created_at: datetime.datetime
     entrypoint: list[str]
     metadata: CreateSandboxResponseMetadata | Unset = UNSET
+    platform: PlatformSpec | Unset = UNSET
     expires_at: datetime.datetime | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -68,6 +79,10 @@ class CreateSandboxResponse:
         metadata: dict[str, Any] | Unset = UNSET
         if not isinstance(self.metadata, Unset):
             metadata = self.metadata.to_dict()
+
+        platform: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.platform, Unset):
+            platform = self.platform.to_dict()
 
         expires_at: str | Unset = UNSET
         if not isinstance(self.expires_at, Unset):
@@ -85,6 +100,8 @@ class CreateSandboxResponse:
         )
         if metadata is not UNSET:
             field_dict["metadata"] = metadata
+        if platform is not UNSET:
+            field_dict["platform"] = platform
         if expires_at is not UNSET:
             field_dict["expiresAt"] = expires_at
 
@@ -93,6 +110,7 @@ class CreateSandboxResponse:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.create_sandbox_response_metadata import CreateSandboxResponseMetadata
+        from ..models.platform_spec import PlatformSpec
         from ..models.sandbox_status import SandboxStatus
 
         d = dict(src_dict)
@@ -111,6 +129,13 @@ class CreateSandboxResponse:
         else:
             metadata = CreateSandboxResponseMetadata.from_dict(_metadata)
 
+        _platform = d.pop("platform", UNSET)
+        platform: PlatformSpec | Unset
+        if isinstance(_platform, Unset):
+            platform = UNSET
+        else:
+            platform = PlatformSpec.from_dict(_platform)
+
         _expires_at = d.pop("expiresAt", UNSET)
         expires_at: datetime.datetime | Unset
         if isinstance(_expires_at, Unset):
@@ -124,6 +149,7 @@ class CreateSandboxResponse:
             created_at=created_at,
             entrypoint=entrypoint,
             metadata=metadata,
+            platform=platform,
             expires_at=expires_at,
         )
 

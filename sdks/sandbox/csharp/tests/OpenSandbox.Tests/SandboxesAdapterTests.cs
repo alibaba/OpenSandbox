@@ -66,6 +66,7 @@ public class SandboxesAdapterTests
         {
           "id": "sbx-1",
           "image": { "uri": "python:3.11" },
+          "platform": { "os": "linux", "arch": "amd64" },
           "entrypoint": ["python"],
           "status": { "state": "Running" },
           "createdAt": "2026-03-14T12:00:00Z"
@@ -76,6 +77,8 @@ public class SandboxesAdapterTests
         SandboxInfo sandbox = await adapter.GetSandboxAsync("sbx-1");
 
         sandbox.ExpiresAt.Should().BeNull();
+        sandbox.Platform.Should().NotBeNull();
+        sandbox.Platform!.Arch.Should().Be("amd64");
     }
 
     [Fact]
@@ -85,6 +88,7 @@ public class SandboxesAdapterTests
         {
           "id": "sbx-2",
           "status": { "state": "Pending" },
+          "platform": { "os": "linux", "arch": "arm64" },
           "createdAt": "2026-03-14T12:00:00Z",
           "entrypoint": ["python"]
         }
@@ -99,6 +103,8 @@ public class SandboxesAdapterTests
         });
 
         response.ExpiresAt.Should().BeNull();
+        response.Platform.Should().NotBeNull();
+        response.Platform!.Arch.Should().Be("arm64");
     }
 
     private static SandboxesAdapter CreateAdapterWithJsonResponse(string payload)

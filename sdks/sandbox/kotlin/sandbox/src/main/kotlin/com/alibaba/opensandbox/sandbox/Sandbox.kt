@@ -25,6 +25,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EGRESS_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EXECD_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
@@ -291,6 +292,7 @@ class Sandbox internal constructor(
             timeout: Duration?,
             readyTimeout: Duration,
             resource: Map<String, String>,
+            platform: PlatformSpec?,
             networkPolicy: NetworkPolicy?,
             connectionConfig: ConnectionConfig,
             healthCheck: ((Sandbox) -> Boolean)? = null,
@@ -319,6 +321,7 @@ class Sandbox internal constructor(
                         networkPolicy,
                         extensions,
                         volumes,
+                        platform,
                     )
                 InitializationResult.NewSandbox(response.id)
             }
@@ -799,6 +802,11 @@ class Sandbox internal constructor(
         private var networkPolicy: NetworkPolicy? = null
 
         /**
+         * Optional runtime platform constraint used for sandbox provisioning.
+         */
+        private var platform: PlatformSpec? = null
+
+        /**
          * Optional list of volume mounts for persistent storage.
          */
         private val volumes = mutableListOf<Volume>()
@@ -1002,6 +1010,24 @@ class Sandbox internal constructor(
         }
 
         /**
+         * Sets an explicit runtime platform constraint.
+         */
+        fun platform(platform: PlatformSpec): Builder {
+            this.platform = platform
+            return this
+        }
+
+        /**
+         * Configures runtime platform constraint for sandbox provisioning.
+         */
+        fun platform(configure: PlatformSpec.Builder.() -> Unit): Builder {
+            val builder = PlatformSpec.builder()
+            builder.configure()
+            this.platform = builder.build()
+            return this
+        }
+
+        /**
          * Adds a single volume mount.
          *
          * @param volume Volume configuration
@@ -1188,6 +1214,7 @@ class Sandbox internal constructor(
                 timeout = timeout,
                 readyTimeout = readyTimeout,
                 resource = resource,
+                platform = platform,
                 networkPolicy = networkPolicy,
                 extensions = extensions,
                 connectionConfig = connectionConfig ?: ConnectionConfig.builder().build(),

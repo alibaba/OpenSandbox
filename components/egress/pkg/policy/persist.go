@@ -23,7 +23,14 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 )
 
-// loadPolicyFromEnvVar parses policy from envName; empty → default deny.
+type PolicyInitialSource string
+
+const (
+	PolicyFromFile    PolicyInitialSource = "policy_file"
+	PolicyFromEnv     PolicyInitialSource = "env"
+	PolicyFromDefault PolicyInitialSource = "default"
+)
+
 func loadPolicyFromEnvVar(envName string) (*NetworkPolicy, error) {
 	raw := os.Getenv(envName)
 	if raw == "" {
@@ -32,35 +39,51 @@ func loadPolicyFromEnvVar(envName string) (*NetworkPolicy, error) {
 	return ParsePolicy(raw)
 }
 
-// LoadInitialPolicy prefers policyFile when present and valid; else envName (see loadPolicyFromEnvVar).
+func loadPolicyFromEnvWithSource(envName string) (*NetworkPolicy, PolicyInitialSource, error) {
+	p, err := loadPolicyFromEnvVar(envName)
+	if err != nil {
+		return nil, "", err
+	}
+	raw := strings.TrimSpace(os.Getenv(envName))
+	if raw == "" {
+		return p, PolicyFromDefault, nil
+	}
+	return p, PolicyFromEnv, nil
+}
+
 func LoadInitialPolicy(policyFile, envName string) (*NetworkPolicy, error) {
+	p, _, err := LoadInitialPolicyDetailed(policyFile, envName)
+	return p, err
+}
+
+func LoadInitialPolicyDetailed(policyFile, envName string) (*NetworkPolicy, PolicyInitialSource, error) {
 	policyFile = strings.TrimSpace(policyFile)
 	if policyFile == "" {
-		return loadPolicyFromEnvVar(envName)
+		return loadPolicyFromEnvWithSource(envName)
 	}
 
 	data, err := os.ReadFile(policyFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return loadPolicyFromEnvVar(envName)
+			return loadPolicyFromEnvWithSource(envName)
 		}
-		return nil, err
+		return nil, "", err
 	}
 
 	raw := strings.TrimSpace(string(data))
 	if raw == "" {
 		log.Warnf("egress policy file %s is empty; falling back to %s", policyFile, envName)
-		return loadPolicyFromEnvVar(envName)
+		return loadPolicyFromEnvWithSource(envName)
 	}
 
 	pol, err := ParsePolicy(raw)
 	if err != nil {
 		log.Warnf("egress policy file %s is invalid: %v; falling back to %s", policyFile, err, envName)
-		return loadPolicyFromEnvVar(envName)
+		return loadPolicyFromEnvWithSource(envName)
 	}
 
 	log.Infof("loaded egress policy from %s", policyFile)
-	return pol, nil
+	return pol, PolicyFromFile, nil
 }
 
 // SavePolicyFile overwrites path with the full serialized policy (truncate + write + fsync).

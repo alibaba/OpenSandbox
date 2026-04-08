@@ -469,6 +469,11 @@ export interface components {
                 [key: string]: string;
             };
             /**
+             * @description Platform constraint echoed from request or workload template.
+             *     Null when no scheduling constraint is provided.
+             */
+            platform?: components["schemas"]["PlatformSpec"];
+            /**
              * Format: date-time
              * @description Timestamp when sandbox will auto-terminate. Omitted when manual cleanup is enabled.
              */
@@ -490,6 +495,11 @@ export interface components {
              *     Only present in responses for GET/LIST operations. Not returned in createSandbox response.
              */
             image: components["schemas"]["ImageSpec"];
+            /**
+             * @description Platform constraint echoed from request or workload template.
+             *     Null when no scheduling constraint is provided.
+             */
+            platform?: components["schemas"]["PlatformSpec"];
             /** @description Current lifecycle status and detailed state information */
             status: components["schemas"]["SandboxStatus"];
             /** @description Custom metadata from creation request */
@@ -579,6 +589,29 @@ export interface components {
             };
         };
         /**
+         * @description Runtime platform constraint used for scheduling/provisioning.
+         *
+         *     This field is independent from `image` and expresses the expected target
+         *     OS and CPU architecture for sandbox execution.
+         *
+         *     Behavioral notes:
+         *     - If omitted, runtime uses existing default behavior (backward compatible).
+         *     - If provided and cannot be satisfied by runtime/template/pool constraints,
+         *       request must fail explicitly.
+         */
+        PlatformSpec: {
+            /**
+             * @description Target operating system (for example `linux`).
+             * @example linux
+             */
+            os: string;
+            /**
+             * @description Target CPU architecture (for example `amd64` or `arm64`).
+             * @example arm64
+             */
+            arch: string;
+        };
+        /**
          * @description Request to create a new sandbox from a container image.
          *
          *     **Note**: API Key authentication is required via the `OPEN-SANDBOX-API-KEY` header.
@@ -586,6 +619,14 @@ export interface components {
         CreateSandboxRequest: {
             /** @description Container image specification for the sandbox */
             image: components["schemas"]["ImageSpec"];
+            /**
+             * @description Optional platform constraint for sandbox scheduling/runtime selection.
+             *
+             *     If omitted, runtime default behavior applies. If specified, the runtime
+             *     must satisfy this constraint or fail explicitly.
+             *     This field is only meaningful when scheduling constraints are set.
+             */
+            platform?: components["schemas"]["PlatformSpec"];
             /**
              * @description Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
              *     The maximum is controlled by the server configuration (`server.max_sandbox_timeout_seconds`).
@@ -803,7 +844,8 @@ export interface components {
         Host: {
             /**
              * @description Absolute path on the host filesystem to mount.
-             *     Must start with '/' and be under an allowed prefix.
+             *     Must start with '/' (Unix) or a drive letter such as 'C:\' or 'D:/'
+             *     (Windows), and be under an allowed prefix.
              */
             path: string;
         };

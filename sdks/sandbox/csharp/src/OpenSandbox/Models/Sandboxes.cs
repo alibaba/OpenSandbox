@@ -59,6 +59,24 @@ public class ImageSpec
 }
 
 /// <summary>
+/// Runtime platform constraint for sandbox provisioning.
+/// </summary>
+public class PlatformSpec
+{
+    /// <summary>
+    /// Gets or sets the target operating system.
+    /// </summary>
+    [JsonPropertyName("os")]
+    public required string Os { get; set; }
+
+    /// <summary>
+    /// Gets or sets the target CPU architecture.
+    /// </summary>
+    [JsonPropertyName("arch")]
+    public required string Arch { get; set; }
+}
+
+/// <summary>
 /// Action for a network rule.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -120,6 +138,8 @@ public class Host
 {
     /// <summary>
     /// Gets or sets the absolute host path.
+    /// Must start with '/' (Unix) or a drive letter such as 'C:\' or 'D:/'
+    /// (Windows), and be under an allowed prefix.
     /// </summary>
     [JsonPropertyName("path")]
     public required string Path { get; set; }
@@ -288,6 +308,12 @@ public class SandboxInfo
     public required SandboxStatus Status { get; set; }
 
     /// <summary>
+    /// Gets or sets the effective platform used for sandbox provisioning.
+    /// </summary>
+    [JsonPropertyName("platform")]
+    public PlatformSpec? Platform { get; set; }
+
+    /// <summary>
     /// Gets or sets the sandbox creation time.
     /// </summary>
     [JsonPropertyName("createdAt")]
@@ -348,6 +374,12 @@ public class CreateSandboxRequest
     public NetworkPolicy? NetworkPolicy { get; set; }
 
     /// <summary>
+    /// Gets or sets an optional platform constraint for sandbox provisioning.
+    /// </summary>
+    [JsonPropertyName("platform")]
+    public PlatformSpec? Platform { get; set; }
+
+    /// <summary>
     /// Gets or sets storage volumes to mount into the sandbox.
     /// </summary>
     [JsonPropertyName("volumes")]
@@ -376,6 +408,12 @@ public class CreateSandboxResponse
     /// </summary>
     [JsonPropertyName("status")]
     public required SandboxStatus Status { get; set; }
+
+    /// <summary>
+    /// Gets or sets the effective platform used for sandbox provisioning.
+    /// </summary>
+    [JsonPropertyName("platform")]
+    public PlatformSpec? Platform { get; set; }
 
     /// <summary>
     /// Gets or sets the custom metadata tags.

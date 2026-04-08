@@ -218,6 +218,47 @@ class SandboxImageAuth private constructor(
 }
 
 /**
+ * Runtime platform constraint for sandbox provisioning.
+ *
+ * @property os Target operating system (currently only linux)
+ * @property arch Target CPU architecture (amd64 or arm64)
+ */
+class PlatformSpec private constructor(
+    val os: String,
+    val arch: String,
+) {
+    companion object {
+        @JvmStatic
+        fun builder(): Builder = Builder()
+    }
+
+    class Builder {
+        private var os: String? = null
+        private var arch: String? = null
+
+        fun os(os: String): Builder {
+            require(os == "linux") { "Platform os must be linux" }
+            this.os = os
+            return this
+        }
+
+        fun arch(arch: String): Builder {
+            require(arch == "amd64" || arch == "arm64") {
+                "Platform arch must be one of: amd64, arm64"
+            }
+            this.arch = arch
+            return this
+        }
+
+        fun build(): PlatformSpec {
+            val osValue = os ?: throw IllegalArgumentException("Platform os must be specified")
+            val archValue = arch ?: throw IllegalArgumentException("Platform arch must be specified")
+            return PlatformSpec(os = osValue, arch = archValue)
+        }
+    }
+}
+
+/**
  * Egress rule for matching network targets.
  *
  * @property action Whether to allow or deny matching targets.
@@ -328,6 +369,8 @@ class Host private constructor(
     val path: String,
 ) {
     companion object {
+        private val HOST_PATH_PATTERN = Regex("""^(/|[A-Za-z]:[\\/])""")
+
         @JvmStatic
         fun builder(): Builder = Builder()
 
@@ -339,7 +382,9 @@ class Host private constructor(
         private var path: String? = null
 
         fun path(path: String): Builder {
-            require(path.startsWith("/")) { "Host path must be an absolute path starting with '/'" }
+            require(HOST_PATH_PATTERN.containsMatchIn(path)) {
+                "Host path must be an absolute path starting with '/' or a Windows drive letter (e.g. 'C:\\' or 'D:/')"
+            }
             this.path = path
             return this
         }
@@ -613,6 +658,7 @@ class Volume private constructor(
  * @property expiresAt Timestamp when the sandbox is scheduled for automatic termination. Null means manual cleanup mode.
  * @property createdAt Timestamp when the sandbox was created
  * @property image Image specification used to create this sandbox
+ * @property platform Effective platform used for sandbox provisioning
  * @property metadata Custom metadata attached to the sandbox
  */
 class SandboxInfo(
@@ -622,6 +668,7 @@ class SandboxInfo(
     val expiresAt: OffsetDateTime?,
     val createdAt: OffsetDateTime,
     val image: SandboxImageSpec,
+    val platform: PlatformSpec? = null,
     val metadata: Map<String, String>? = null,
 )
 
@@ -644,9 +691,11 @@ class SandboxStatus(
  * Response returned when a sandbox is created.
  *
  * @property id Unique identifier of the newly created sandbox
+ * @property platform Effective platform used for sandbox provisioning
  */
 class SandboxCreateResponse(
     val id: String,
+    val platform: PlatformSpec? = null,
 )
 
 /**

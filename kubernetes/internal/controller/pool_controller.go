@@ -90,6 +90,7 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			// Pool resource not found, could have been deleted
 			controllerKey := req.NamespacedName.String()
 			PoolScaleExpectations.DeleteExpectations(controllerKey)
+			r.Allocator.ClearPoolAllocation(ctx, req.Namespace, req.Name)
 			log.Info("Pool resource not found, cleaned up scale expectations", "pool", controllerKey)
 			return ctrl.Result{}, nil
 		}
@@ -100,6 +101,7 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	if !pool.DeletionTimestamp.IsZero() {
 		controllerKey := controllerutils.GetControllerKey(pool)
 		PoolScaleExpectations.DeleteExpectations(controllerKey)
+		r.Allocator.ClearPoolAllocation(ctx, req.Namespace, req.Name)
 		log.Info("Pool resource is being deleted, cleaned up scale expectations", "pool", controllerKey)
 		return ctrl.Result{}, nil
 	}
@@ -185,6 +187,7 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 			supplySandbox -= int32(len(idlePods))
 		}
 
+		// 1. Persist to memory
 		if poolDirty {
 			if err := r.Allocator.PersistPoolAllocation(ctx, latestPool, &AllocStatus{PodAllocation: podAllocation}); err != nil {
 				log.Error(err, "Failed to persist pool allocation")
@@ -192,13 +195,15 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 			}
 		}
 
+		// 2. Sync BatchSandbox allocations. Rollback in memory alocation if failed to sync.
+		// Optimize this concurrently if needed.
 		var syncErrs []error
 		for _, syncInfo := range pendingSyncs {
 			if err := r.Allocator.SyncSandboxAllocation(ctx, syncInfo.Sandbox, syncInfo.Pods); err != nil {
 				log.Error(err, "Failed to sync sandbox allocation", "sandbox", syncInfo.SandboxName)
 				syncErrs = append(syncErrs, fmt.Errorf("failed to sync sandbox %s: %w", syncInfo.SandboxName, err))
 			} else {
-				log.Info("Successfully assign Sandbox", "sandbox", syncInfo.SandboxName, "pods", syncInfo.Pods)
+				log.Info("Successfully sync Sandbox allocation", "sandbox", syncInfo.SandboxName, "pods", syncInfo.Pods)
 			}
 		}
 		if len(syncErrs) > 0 {

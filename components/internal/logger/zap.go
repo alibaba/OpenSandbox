@@ -66,6 +66,36 @@ func MustNew(cfg Config) Logger {
 	return l
 }
 
+// NewWithExtraCores tees extra zap cores after the production JSON core (e.g. OTLP).
+func NewWithExtraCores(cfg Config, extra ...zapcore.Core) (Logger, error) {
+	if len(extra) == 0 {
+		return New(cfg)
+	}
+	cfg = applyEnvOutputs(cfg)
+
+	zapCfg := zap.NewProductionConfig()
+	zapCfg.Level = zap.NewAtomicLevelAt(parseLevel(cfg.Level))
+	zapCfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+	zapCfg.EncoderConfig.CallerKey = ""
+	zapCfg.DisableCaller = true
+	zapCfg.DisableStacktrace = true
+	zapCfg.EncoderConfig.StacktraceKey = ""
+
+	zapCfg.OutputPaths = cfg.OutputPaths
+	zapCfg.ErrorOutputPaths = cfg.ErrorOutputPaths
+
+	base, err := zapCfg.Build(zap.WrapCore(func(c zapcore.Core) zapcore.Core {
+		cores := make([]zapcore.Core, 0, len(extra)+1)
+		cores = append(cores, c)
+		cores = append(cores, extra...)
+		return zapcore.NewTee(cores...)
+	}))
+	if err != nil {
+		return nil, err
+	}
+	return &zapLogger{base: base, sugar: base.Sugar()}, nil
+}
+
 // AsZapSugared returns the underlying zap SugaredLogger when available.
 func AsZapSugared(l Logger) (*zap.SugaredLogger, bool) {
 	zl, ok := l.(*zapLogger)

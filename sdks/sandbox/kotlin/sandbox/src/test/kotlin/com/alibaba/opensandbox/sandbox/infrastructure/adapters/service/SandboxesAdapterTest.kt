@@ -21,6 +21,7 @@ import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.OSSFS
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxState
@@ -75,6 +76,7 @@ class SandboxesAdapterTest {
             {
                 "id": "550e8400-e29b-41d4-a716-446655440000",
                 "status": { "state": "Running" },
+                "platform": { "os": "linux", "arch": "amd64" },
                 "expiresAt": "2023-01-01T11:00:00Z",
                 "createdAt": "2023-01-01T10:00:00Z",
                 "entrypoint": ["bash"]
@@ -103,6 +105,11 @@ class SandboxesAdapterTest {
                 metadata = mapOf("meta" to "data"),
                 timeout = Duration.ofSeconds(600),
                 resource = mapOf("cpu" to "1"),
+                platform =
+                    PlatformSpec.builder()
+                        .os("linux")
+                        .arch("arm64")
+                        .build(),
                 networkPolicy = networkPolicy,
                 extensions = extensions,
                 volumes = null,
@@ -130,9 +137,14 @@ class SandboxesAdapterTest {
         val rule = egressArray[0].jsonObject
         assertEquals("allow", rule["action"]!!.jsonPrimitive.content)
         assertEquals("pypi.org", rule["target"]!!.jsonPrimitive.content)
+        val gotPlatform = payload["platform"]?.jsonObject
+        assertNotNull(gotPlatform, "platform should be present in createSandbox request")
+        assertEquals("linux", gotPlatform!!["os"]!!.jsonPrimitive.content)
+        assertEquals("arm64", gotPlatform["arch"]!!.jsonPrimitive.content)
 
         // Verify response
         assertEquals("550e8400-e29b-41d4-a716-446655440000", result.id)
+        assertEquals("amd64", result.platform?.arch)
     }
 
     @Test
@@ -158,6 +170,7 @@ class SandboxesAdapterTest {
                 metadata = emptyMap(),
                 timeout = null,
                 resource = mapOf("cpu" to "1"),
+                platform = null,
                 networkPolicy = null,
                 extensions = emptyMap(),
                 volumes = null,
@@ -206,6 +219,7 @@ class SandboxesAdapterTest {
             metadata = emptyMap(),
             timeout = null,
             resource = mapOf("cpu" to "1"),
+            platform = null,
             networkPolicy = null,
             extensions = emptyMap(),
             volumes = volumes,

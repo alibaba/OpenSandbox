@@ -156,6 +156,9 @@ paths:
                 value:
                   image:
                     uri: python:3.11
+                  platform:
+                    os: linux
+                    arch: amd64
                   resourceLimits:
                     cpu: "500m"
                     memory: "512Mi"
@@ -532,6 +535,12 @@ components:
             type: string
           description: Custom metadata from creation request
 
+        platform:
+          $ref: '#/components/schemas/PlatformSpec'
+          description: |
+            Platform constraint echoed from request or workload template.
+            Null when no scheduling constraint is provided.
+
         expiresAt:
           type: string
           format: date-time
@@ -567,6 +576,12 @@ components:
           description: |
             Container image specification used to provision this sandbox.
             Only present in responses for GET/LIST operations. Not returned in createSandbox response.
+
+        platform:
+          $ref: '#/components/schemas/PlatformSpec'
+          description: |
+            Platform constraint echoed from request or workload template.
+            Null when no scheduling constraint is provided.
 
         status:
           $ref: '#/components/schemas/SandboxStatus'
@@ -683,6 +698,34 @@ components:
           additionalProperties: false
 
       additionalProperties: false
+    PlatformSpec:
+      type: object
+      required: [os, arch]
+      description: |
+        Runtime platform constraint used for scheduling/provisioning.
+
+        This field is independent from `image` and expresses the expected target
+        OS and CPU architecture for sandbox execution.
+
+        Behavioral notes:
+        - If omitted, the runtime applies its own default platform selection behavior.
+          For Docker, requests are created without an explicit platform override.
+          For Kubernetes, no `kubernetes.io/os` or `kubernetes.io/arch` constraint
+          is injected unless provided by request or workload template.
+        - If provided and cannot be satisfied by runtime/template/pool constraints,
+          request must fail explicitly.
+      properties:
+        os:
+          type: string
+          enum: [linux]
+          description: Target operating system (for example `linux`).
+          example: linux
+        arch:
+          type: string
+          enum: [amd64, arm64]
+          description: Target CPU architecture (for example `amd64` or `arm64`).
+          example: arm64
+      additionalProperties: false
     CreateSandboxRequest:
       type: object
       required: [image, resourceLimits, entrypoint]
@@ -694,6 +737,16 @@ components:
         image:
           $ref: '#/components/schemas/ImageSpec'
           description: Container image specification for the sandbox
+
+        platform:
+          $ref: '#/components/schemas/PlatformSpec'
+          description: |
+            Optional platform constraint for sandbox scheduling/runtime selection.
+
+            If omitted, runtime default behavior applies (runtime-specific and not
+            a fixed architecture guarantee). If specified, the runtime must satisfy
+            this constraint or fail explicitly.
+            This field is only meaningful when scheduling constraints are set.
 
         timeout:
           oneOf:
@@ -956,8 +1009,9 @@ components:
           type: string
           description: |
             Absolute path on the host filesystem to mount.
-            Must start with '/' and be under an allowed prefix.
-          pattern: "^/.*"
+            Must start with '/' (Unix) or a drive letter such as 'C:\' or 'D:/'
+            (Windows), and be under an allowed prefix.
+          pattern: "^(/|[A-Za-z]:[\\\\/])"
       additionalProperties: false
 
     PVC:

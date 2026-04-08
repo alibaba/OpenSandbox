@@ -1,0 +1,1083 @@
+const OPENAPI_SPEC_YAML = `openapi: 3.1.0
+info:
+  title: OpenSandbox Lifecycle API
+  version: 0.1.0
+  description: |
+    The Sandbox Lifecycle API coordinates how untrusted workloads are created,
+    executed, paused, resumed, and finally disposed. This specification focuses on
+    the primary lifecycle flows for the \`sandbox\` domain concept. Sandboxes are
+    provisioned directly from container images without requiring pre-created templates.
+
+    ## Sandbox Lifecycle
+
+    A sandbox follows this lifecycle:
+
+    1. **Creation** → Sandbox enters \`Pending\` state (auto-starts)
+    2. **Execution** → Transitions to \`Running\` state
+    3. **Pause** (optional) → \`Pausing\` → \`Paused\` (asynchronous process)
+    4. **Resume** (optional) → Returns to \`Running\` from \`Paused\`
+    5. **Termination** → \`Stopping\` → \`Terminated\` (can be triggered by kill action, TTL expiry, or error)
+    6. **Error** → Any state can transition to \`Failed\` on critical errors
+
+    The \`status\` field provides fine-grained details through \`state\`, \`reason\`, and \`message\`.
+
+    ## Authentication
+
+    API Key authentication is required for all operations:
+
+    1. **HTTP Header**
+       \`\`\`
+       OPEN-SANDBOX-API-KEY: your-api-key
+       \`\`\`
+
+    2. **Environment Variable** (for SDK clients)
+       \`\`\`
+       OPEN_SANDBOX_API_KEY=your-api-key
+       \`\`\`
+
+       SDK clients will automatically pick up this environment variable.
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development
+security:
+  - apiKeyAuth: []
+tags:
+  - name: Sandboxes
+    description: Provision and transition sandboxes through their lifecycle
+paths:
+  /sandboxes:
+    get:
+      tags: [ Sandboxes ]
+      summary: List sandboxes
+      description: |
+        List all sandboxes with optional filtering and pagination using query parameters.
+        All filter conditions use AND logic. Multiple \`state\` parameters use OR logic within states.
+      parameters:
+        - name: state
+          in: query
+          description: |
+            Filter by lifecycle state. Pass multiple times for OR logic.
+            Example: \`?state=Running&state=Paused\`
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+        - name: metadata
+          in: query
+          description: |
+            Arbitrary metadata key-value pairs for filtering，keys and values must be url encoded
+            Example: To filter by \`project=Apollo\` and \`note=Demo Test\`: \`?metadata=project%3DApollo%26note%3DDemo%252520Test\`
+          schema:
+            type: string
+          style: form
+        - name: page
+          in: query
+          description: Page number for pagination
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          description: Number of items per page
+          schema:
+            type: integer
+            minimum: 1
+            default: 20
+      responses:
+        '200':
+          description: Paginated collection of sandboxes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSandboxesResponse'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags: [Sandboxes]
+      summary: Create a sandbox from a container image
+      description: |
+        Creates a new sandbox from a container image with optional resource limits,
+        environment variables, and metadata. Sandboxes are provisioned directly from
+        the specified image without requiring a pre-created template.
+
+        ## Authentication
+
+        API Key authentication is required via:
+        - \`OPEN-SANDBOX-API-KEY: <api-key>\` header
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSandboxRequest'
+            examples:
+              deny-with-allowlist:
+                summary: Deny by default with allowed domains
+                value:
+                  image:
+                    uri: python:3.11
+                  timeout: 3600
+                  resourceLimits:
+                    cpu: "500m"
+                    memory: "512Mi"
+                  entrypoint: ["python", "/app/main.py"]
+                  networkPolicy:
+                    defaultAction: deny
+                    egress:
+                      - action: allow
+                        target: "pypi.org"
+              allow-with-denylist:
+                summary: Allow by default with a deny rule
+                value:
+                  image:
+                    uri: python:3.11
+                  timeout: 3600
+                  resourceLimits:
+                    cpu: "500m"
+                    memory: "512Mi"
+                  entrypoint: ["python", "/app/main.py"]
+                  networkPolicy:
+                    defaultAction: allow
+                    egress:
+                      - action: deny
+                        target: "bad.example.com"
+              manual-cleanup:
+                summary: Manual cleanup without automatic expiration
+                value:
+                  image:
+                    uri: python:3.11
+                  platform:
+                    os: linux
+                    arch: amd64
+                  resourceLimits:
+                    cpu: "500m"
+                    memory: "512Mi"
+                  entrypoint: ["python", "/app/main.py"]
+      responses:
+        '202':
+          description: |
+            Sandbox created and accepted for provisioning.
+
+            The returned sandbox includes:
+            - \`id\`: Unique sandbox identifier
+            - \`status.state: "Pending"\` (auto-starting provisioning)
+            - \`status.reason\` and \`status.message\` indicating initialization stage
+            - \`metadata\`, \`expiresAt\`, \`createdAt\`: Core sandbox information
+
+            Note: \`image\` and \`updatedAt\` are not included in the create response.
+            Use GET /sandboxes/{sandboxId} to retrieve the complete sandbox information including image spec.
+
+            To track provisioning progress, poll GET /sandboxes/{sandboxId}.
+            The sandbox will automatically transition to \`Running\` state once provisioning completes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateSandboxResponse'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+            Location:
+              $ref: '#/components/headers/Location'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /sandboxes/{sandboxId}:
+    parameters:
+      - $ref: '#/components/parameters/SandboxId'
+    get:
+      tags: [Sandboxes]
+      summary: Fetch a sandbox by id
+      description: |
+        Returns the complete sandbox information including:
+        - \`id\`, \`status\`, \`metadata\`, \`expiresAt\`, \`createdAt\`: Core information
+        - \`image\`: Container image specification (not included in create response)
+        - \`entrypoint\`: Entry process specification
+
+        This is the complete representation of the sandbox resource.
+      responses:
+        '200':
+          description: Sandbox current state and metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [Sandboxes]
+      summary: Delete a sandbox
+      description: Delete a sandbox, terminating its execution. The sandbox will transition through Stopping state to Terminated.
+      responses:
+        '204':
+          description: |
+            Sandbox successfully deleted.
+
+            Sandbox has been scheduled for termination and will transition to Stopping state, then Terminated.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /sandboxes/{sandboxId}/pause:
+    post:
+      tags: [Sandboxes]
+      summary: Pause execution while retaining state
+      description: Pause a running sandbox while preserving its state. Poll GET /sandboxes/{sandboxId} to track state transition to Paused.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      responses:
+        '202':
+          description: |
+            Pause operation accepted.
+
+            Sandbox will transition to Pausing state.
+            Poll GET /sandboxes/{sandboxId} to track progress.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /sandboxes/{sandboxId}/resume:
+    post:
+      tags: [Sandboxes]
+      summary: Resume a paused sandbox
+      description: Resume execution of a paused sandbox. Poll GET /sandboxes/{sandboxId} to track state transition to Running.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      responses:
+        '202':
+          description: |
+            Resume operation accepted.
+
+            Sandbox will transition from Paused → Running.
+            Poll GET /sandboxes/{sandboxId} to track progress.
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /sandboxes/{sandboxId}/renew-expiration:
+    post:
+      tags: [Sandboxes]
+      summary: Renew sandbox expiration
+      description: Renew the absolute expiration time of a sandbox.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenewSandboxExpirationRequest'
+      responses:
+        '200':
+          description: |
+            Sandbox expiration updated successfully.
+
+            Returns only the updated expiresAt field.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RenewSandboxExpirationResponse'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /sandboxes/{sandboxId}/endpoints/{port}:
+    get:
+      tags: [Sandboxes]
+      summary: Get sandbox access endpoint
+      description: |
+        Get the public access endpoint URL for accessing a service running on a specific port
+        within the sandbox. The service must be listening on the specified port inside
+        the sandbox for the endpoint to be available.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - name: port
+          in: path
+          required: true
+          description: Port number where the service is listening inside the sandbox
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 65535
+        - name: use_server_proxy
+          in: query
+          description: Whether to return a server-proxied URL
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: |
+            Endpoint retrieved successfully.
+
+            Returns the public URL for accessing the service on the specified port.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Endpoint'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: OPEN-SANDBOX-API-KEY
+      description: |
+        API Key for authentication. Can be provided via:
+        1. HTTP Header: OPEN-SANDBOX-API-KEY: your-api-key
+        2. Environment variable: OPEN_SANDBOX_API_KEY (for SDK clients)
+  parameters:
+    SandboxId:
+      name: sandboxId
+      in: path
+      required: true
+      description: Unique sandbox identifier
+      schema:
+        type: string
+  headers:
+    XRequestId:
+      description: Unique request identifier for tracing
+      schema:
+        type: string
+        format: uuid
+    Location:
+      description: URI of the newly created or related resource
+      schema:
+        type: string
+        format: uri
+    RetryAfter:
+      description: Suggested delay in seconds before retrying
+      schema:
+        type: integer
+        minimum: 1
+  responses:
+    Error:
+      description: Error response envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BadRequest:
+      description: The request was invalid or malformed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Unauthorized:
+      description: Authentication credentials are missing or invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Forbidden:
+      description: The authenticated user lacks permission for this operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    NotFound:
+      description: The requested resource does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Conflict:
+      description: The operation conflicts with the current state
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    InternalServerError:
+      description: An unexpected server error occurred
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+  schemas:
+    ListSandboxesResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sandbox'
+        pagination:
+          $ref: '#/components/schemas/PaginationInfo'
+      required: [items, pagination]
+    PaginationInfo:
+      type: object
+      description: Pagination metadata for list responses
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          description: Current page number
+        pageSize:
+          type: integer
+          minimum: 1
+          description: Number of items per page
+        totalItems:
+          type: integer
+          minimum: 0
+          description: Total number of items matching the filter
+        totalPages:
+          type: integer
+          minimum: 0
+          description: Total number of pages
+        hasNextPage:
+          type: boolean
+          description: Whether there are more pages after the current one
+      required: [page, pageSize, totalItems, totalPages, hasNextPage]
+    CreateSandboxResponse:
+      type: object
+      description: Response from creating a new sandbox. Contains essential information without image and updatedAt.
+      properties:
+        id:
+          type: string
+          description: Unique sandbox identifier
+
+        status:
+          $ref: '#/components/schemas/SandboxStatus'
+          description: Current lifecycle status and detailed state information
+
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Custom metadata from creation request
+
+        platform:
+          $ref: '#/components/schemas/PlatformSpec'
+          description: |
+            Platform constraint echoed from request or workload template.
+            Null when no scheduling constraint is provided.
+
+        expiresAt:
+          type: string
+          format: date-time
+          description: Timestamp when sandbox will auto-terminate. Omitted when manual cleanup is enabled.
+
+        createdAt:
+          type: string
+          format: date-time
+          description: Sandbox creation timestamp
+
+        entrypoint:
+          type: array
+          items:
+            type: string
+          description: Entry process specification from creation request
+
+      required:
+        - id
+        - status
+        - createdAt
+        - entrypoint
+
+    Sandbox:
+      type: object
+      description: Runtime execution environment provisioned from a container image
+      properties:
+        id:
+          type: string
+          description: Unique sandbox identifier
+
+        image:
+          $ref: '#/components/schemas/ImageSpec'
+          description: |
+            Container image specification used to provision this sandbox.
+            Only present in responses for GET/LIST operations. Not returned in createSandbox response.
+
+        platform:
+          $ref: '#/components/schemas/PlatformSpec'
+          description: |
+            Platform constraint echoed from request or workload template.
+            Null when no scheduling constraint is provided.
+
+        status:
+          $ref: '#/components/schemas/SandboxStatus'
+          description: Current lifecycle status and detailed state information
+
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Custom metadata from creation request
+
+        entrypoint:
+          type: array
+          items:
+            type: string
+          description: |
+            The command to execute as the sandbox's entry process.
+            Always present in responses since entrypoint is required in creation requests.
+
+        expiresAt:
+          type: string
+          format: date-time
+          description: Timestamp when sandbox will auto-terminate. Omitted when manual cleanup is enabled.
+
+        createdAt:
+          type: string
+          format: date-time
+          description: Sandbox creation timestamp
+
+      required:
+        - id
+        - status
+        - createdAt
+        - entrypoint
+        - image
+    SandboxState:
+      type: string
+      description: |
+        High-level lifecycle state of the sandbox.
+
+        Common state values:
+        - Pending: Sandbox is being provisioned
+        - Running: Sandbox is running and ready to accept requests
+        - Pausing: Sandbox is in the process of pausing
+        - Paused: Sandbox has been paused while retaining its state
+        - Stopping: Sandbox is being terminated
+        - Terminated: Sandbox has been successfully terminated
+        - Failed: Sandbox encountered a critical error
+
+        State transitions:
+        - Pending → Running (after creation completes)
+        - Running → Pausing (when pause is requested)
+        - Pausing → Paused (pause operation completes)
+        - Paused → Running (when resume is requested)
+        - Running/Paused → Stopping (when kill is requested or TTL expires)
+        - Stopping → Terminated (kill/timeout operation completes)
+        - Pending/Running/Paused → Failed (on error)
+
+        Note: New state values may be added in future versions.
+        Clients should handle unknown state values gracefully.
+    SandboxStatus:
+      type: object
+      description: Detailed status information with lifecycle state and transition details
+      properties:
+        state:
+          $ref: '#/components/schemas/SandboxState'
+          description: Current lifecycle state of the sandbox
+
+        reason:
+          type: string
+          description: |
+            Short machine-readable reason code for the current state.
+            Examples: "user_delete", "ttl_expiry", "provision_timeout", "runtime_error"
+
+        message:
+          type: string
+          description: Human-readable message describing the current state or reason for state transition
+
+        lastTransitionAt:
+          type: string
+          format: date-time
+          description: Timestamp of the last state transition
+
+      required: [state]
+    ImageSpec:
+      type: object
+      required: [uri]
+      description: |
+        Container image specification for sandbox provisioning.
+
+        Supports public registry images and private registry images with authentication.
+      properties:
+        uri:
+          type: string
+          description: |
+            Container image URI in standard format.
+
+            Examples:
+              - "python:3.11" (Docker Hub)
+              - "ubuntu:22.04"
+              - "gcr.io/my-project/model-server:v1.0"
+              - "private-registry.company.com:5000/app:latest"
+
+        auth:
+          type: object
+          description: Registry authentication credentials (required for private registries)
+          properties:
+            username:
+              type: string
+              description: Registry username or service account
+            password:
+              type: string
+              description: Registry password or authentication token
+          additionalProperties: false
+
+      additionalProperties: false
+    PlatformSpec:
+      type: object
+      required: [os, arch]
+      description: |
+        Runtime platform constraint used for scheduling/provisioning.
+
+        This field is independent from \`image\` and expresses the expected target
+        OS and CPU architecture for sandbox execution.
+
+        Behavioral notes:
+        - If omitted, the runtime applies its own default platform selection behavior.
+          For Docker, requests are created without an explicit platform override.
+          For Kubernetes, no \`kubernetes.io/os\` or \`kubernetes.io/arch\` constraint
+          is injected unless provided by request or workload template.
+        - If provided and cannot be satisfied by runtime/template/pool constraints,
+          request must fail explicitly.
+      properties:
+        os:
+          type: string
+          enum: [linux]
+          description: Target operating system (for example \`linux\`).
+          example: linux
+        arch:
+          type: string
+          enum: [amd64, arm64]
+          description: Target CPU architecture (for example \`amd64\` or \`arm64\`).
+          example: arm64
+      additionalProperties: false
+    CreateSandboxRequest:
+      type: object
+      required: [image, resourceLimits, entrypoint]
+      description: |
+        Request to create a new sandbox from a container image.
+
+        **Note**: API Key authentication is required via the \`OPEN-SANDBOX-API-KEY\` header.
+      properties:
+        image:
+          $ref: '#/components/schemas/ImageSpec'
+          description: Container image specification for the sandbox
+
+        platform:
+          $ref: '#/components/schemas/PlatformSpec'
+          description: |
+            Optional platform constraint for sandbox scheduling/runtime selection.
+
+            If omitted, runtime default behavior applies (runtime-specific and not
+            a fixed architecture guarantee). If specified, the runtime must satisfy
+            this constraint or fail explicitly.
+            This field is only meaningful when scheduling constraints are set.
+
+        timeout:
+          oneOf:
+            - type: integer
+              minimum: 60
+            - type: 'null'
+          description: |
+            Sandbox timeout in seconds. The sandbox will automatically terminate after this duration.
+            The maximum is controlled by the server configuration (\`server.max_sandbox_timeout_seconds\`).
+            Omit this field or set it to null to disable automatic expiration and require explicit cleanup.
+            Note: manual cleanup support is runtime-dependent; Kubernetes providers may reject
+            omitted or null timeout when the underlying workload provider does not support non-expiring sandboxes.
+
+        resourceLimits:
+          $ref: '#/components/schemas/ResourceLimits'
+          description: |
+            Runtime resource constraints for the sandbox instance.
+            SDK clients should provide sensible defaults (e.g., cpu: "500m", memory: "512Mi").
+
+        env:
+          type: object
+          additionalProperties:
+            type: string
+          description: Environment variables to inject into the sandbox runtime.
+          example:
+            API_KEY: "secret-key"
+            DEBUG: "true"
+            LOG_LEVEL: "info"
+
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Custom key-value metadata for management, filtering, and tagging.
+            Use "name" key for a human-readable identifier.
+          example:
+            name: "Data Processing Sandbox"
+            project: "data-processing"
+            team: "ml"
+            environment: "staging"
+
+        entrypoint:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: |
+            The command to execute as the sandbox's entry process (required).
+
+            Explicitly specifies the user's expected main process, allowing the sandbox management
+            service to reliably inject control processes before executing this command.
+
+            Format: [executable, arg1, arg2, ...]
+
+            Examples:
+            - ["python", "/app/main.py"]
+            - ["/bin/bash"]
+            - ["java", "-jar", "/app/app.jar"]
+            - ["node", "server.js"]
+          example:
+            - "python"
+            - "/app/main.py"
+
+        networkPolicy:
+          $ref: '#/components/schemas/NetworkPolicy'
+          description: |
+            Optional outbound network policy for the sandbox.
+            Shape matches the sidecar \`/policy\` endpoint. If omitted or empty,
+            the sidecar starts in allow-all mode until updated.
+
+        volumes:
+          type: array
+          description: |
+            Storage mounts for the sandbox. Each volume entry specifies a named backend-specific
+            storage source and common mount settings. Exactly one backend type must be specified
+            per volume entry.
+          items:
+            $ref: '#/components/schemas/Volume'
+
+        extensions:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Opaque container for provider-specific or transient parameters not supported by the core API.
+
+            **Note**: This field is reserved for internal features, experimental flags, or temporary behaviors. Standard parameters should be proposed as core API fields.
+
+            **Best Practices**:
+            - **Namespacing**: Use prefixed keys (e.g., \`storage.id\`) to prevent collisions.
+            - **Pass-through**: SDKs and middleware must treat this object as opaque and pass it through transparently.
+
+            **Well-known keys**:
+            - \`access.renew.extend.seconds\` (optional): Decimal integer string from **300** to **86400** (5 minutes to 24 hours inclusive). Opts the sandbox into OSEP-0009 renew-on-access and sets per-renewal extension seconds. Omit to disable. Invalid values are rejected at creation with HTTP 400 (validated on the lifecycle create endpoint via \`validate_extensions\` in server \`src/extensions/validation.py\`).
+    ResourceLimits:
+      type: object
+      description: |
+        Runtime resource constraints as key-value pairs. Similar to Kubernetes resource specifications,
+        allows flexible definition of resource limits. Common resource types include:
+        - \`cpu\`: CPU allocation in millicores (e.g., "250m" for 0.25 CPU cores)
+        - \`memory\`: Memory allocation in bytes or human-readable format (e.g., "512Mi", "1Gi")
+        - \`gpu\`: Number of GPU devices (e.g., "1")
+
+        New resource types can be added without API changes.
+      additionalProperties:
+        type: string
+      example:
+        cpu: "500m"
+        memory: "512Mi"
+        gpu: "1"
+    RenewSandboxExpirationRequest:
+      type: object
+      required: [expiresAt]
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+          description: |
+            New absolute expiration time in UTC (RFC 3339 format).
+            Must be in the future and after the current expiresAt time.
+
+            Example: "2025-11-16T14:30:45Z"
+      additionalProperties: false
+    RenewSandboxExpirationResponse:
+      type: object
+      required: [expiresAt]
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+          description: |
+            The new absolute expiration time in UTC (RFC 3339 format).
+
+            Example: "2025-11-16T14:30:45Z"
+      additionalProperties: false
+    ErrorResponse:
+      type: object
+      description: |
+        Standard error response for all non-2xx HTTP responses.
+        HTTP status code indicates the error category; code and message provide details.
+      properties:
+        code:
+          type: string
+          description: |
+            Machine-readable error code (e.g., INVALID_REQUEST, NOT_FOUND, INTERNAL_ERROR).
+            Use this for programmatic error handling.
+        message:
+          type: string
+          description: Human-readable error message describing what went wrong and how to fix it.
+      required: [code, message]
+      additionalProperties: false
+    Endpoint:
+      type: object
+      description: |
+        Endpoint for accessing a service running in the sandbox.
+        The service must be listening on the specified port inside the sandbox for the endpoint to be available.
+      properties:
+        endpoint:
+          type: string
+          description: |
+            Public URL to access the service from outside the sandbox.
+            Format: {endpoint-host}/sandboxes/{sandboxId}/port/{port}
+            Example: endpoint.opensandbox.io/sandboxes/abc123/port/8080
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Requests targeting the sandbox must include the corresponding header(s).
+      required:
+        - endpoint
+      additionalProperties: false
+
+    NetworkPolicy:
+      type: object
+      description: |
+        Egress network policy matching the sidecar \`/policy\` request body.
+        If \`defaultAction\` is omitted, the sidecar defaults to "deny"; passing an empty
+        object or null results in allow-all behavior at startup.
+      properties:
+        defaultAction:
+          type: string
+          enum: [allow, deny]
+          description: Default action when no egress rule matches. Defaults to "deny".
+        egress:
+          type: array
+          description: List of egress rules evaluated in order.
+          items:
+            $ref: '#/components/schemas/NetworkRule'
+      additionalProperties: false
+
+    NetworkRule:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [allow, deny]
+          description: Whether to allow or deny matching targets.
+        target:
+          type: string
+          description: |
+            FQDN or wildcard domain (e.g., "example.com", "*.example.com").
+            IP/CIDR not yet supported in the egress MVP.
+      required: [action, target]
+      additionalProperties: false
+
+    Volume:
+      type: object
+      description: |
+        Storage mount definition for a sandbox. Each volume entry contains:
+        - A unique name identifier
+        - Exactly one backend struct (host, pvc, ossfs, etc.) with backend-specific fields
+        - Common mount settings (mountPath, readOnly, subPath)
+      required: [name, mountPath]
+      properties:
+        name:
+          type: string
+          description: |
+            Unique identifier for the volume within the sandbox.
+            Must be a valid DNS label (lowercase alphanumeric, hyphens allowed, max 63 chars).
+          pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          maxLength: 63
+        host:
+          $ref: '#/components/schemas/Host'
+        pvc:
+          $ref: '#/components/schemas/PVC'
+        ossfs:
+          $ref: '#/components/schemas/OSSFS'
+        mountPath:
+          type: string
+          description: |
+            Absolute path inside the container where the volume is mounted.
+            Must start with '/'.
+          pattern: "^/.*"
+        readOnly:
+          type: boolean
+          description: |
+            If true, the volume is mounted as read-only. Defaults to false (read-write).
+          default: false
+        subPath:
+          type: string
+          description: |
+            Optional subdirectory under the backend path to mount.
+            For \`ossfs\` backend, this field is used as the bucket prefix.
+            Must be a relative path without '..' components.
+      additionalProperties: false
+
+    Host:
+      type: object
+      description: |
+        Host path bind mount backend. Maps a directory on the host filesystem
+        into the container. Only available when the runtime supports host mounts.
+
+        Security note: Host paths are restricted by server-side allowlist.
+        Users must specify paths under permitted prefixes.
+      required: [path]
+      properties:
+        path:
+          type: string
+          description: |
+            Absolute path on the host filesystem to mount.
+            Must start with '/' and be under an allowed prefix.
+          pattern: "^/.*"
+      additionalProperties: false
+
+    PVC:
+      type: object
+      description: |
+        Platform-managed named volume backend. A runtime-neutral abstraction
+        for referencing a pre-existing, platform-managed named volume.
+
+        - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+        - Docker: maps to a Docker named volume (created via \`docker volume create\`).
+
+        The volume must already exist on the target platform before sandbox
+        creation.
+      required: [claimName]
+      properties:
+        claimName:
+          type: string
+          description: |
+            Name of the volume on the target platform.
+            In Kubernetes this is the PVC name; in Docker this is the named
+            volume name. Must be a valid DNS label.
+          pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          maxLength: 253
+      additionalProperties: false
+
+    OSSFS:
+      type: object
+      description: |
+        Alibaba Cloud OSS mount backend via ossfs.
+
+        The runtime mounts a host-side OSS path under \`storage.ossfs_mount_root\`
+        and bind-mounts the resolved path into the sandbox container.
+        Prefix selection is expressed via \`Volume.subPath\`.
+        In Docker runtime, OSSFS backend requires OpenSandbox Server to run on a Linux host with FUSE support.
+      required: [bucket, endpoint, accessKeyId, accessKeySecret]
+      properties:
+        bucket:
+          type: string
+          description: OSS bucket name.
+          minLength: 3
+          maxLength: 63
+        endpoint:
+          type: string
+          description: OSS endpoint (e.g., \`oss-cn-hangzhou.aliyuncs.com\`).
+          minLength: 1
+        version:
+          type: string
+          description: ossfs major version used by runtime mount integration.
+          enum: ["1.0", "2.0"]
+          default: "2.0"
+        options:
+          type: array
+          description: |
+            Additional ossfs mount options.
+            Runtime encodes options by \`version\`:
+            - \`1.0\`: mounts with \`ossfs ... -o <option>\`
+            - \`2.0\`: mounts with \`ossfs2 mount ... -c <config-file>\` and encodes options as \`--<option>\` lines in the config file
+            Option values must be provided as raw payloads without leading \`-\`.
+          items:
+            type: string
+        accessKeyId:
+          type: string
+          description: OSS access key ID for inline credentials mode.
+          minLength: 1
+        accessKeySecret:
+          type: string
+          description: OSS access key secret for inline credentials mode.
+          minLength: 1
+      additionalProperties: false
+`;

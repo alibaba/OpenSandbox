@@ -25,6 +25,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from datetime import timedelta
+from threading import Event
 
 import pytest
 from code_interpreter import CodeInterpreterSync
@@ -409,14 +410,16 @@ class TestCodeInterpreterE2ESync:
                 on_init=on_init,
             )
 
-            simple_result = code_interpreter.codes.run(
+            # Use retry for first execution in context because Java kernel init can be slow.
+            simple_result = run_with_retry_sync(
+                code_interpreter,
                 "System.out.println(\"Hello from Java!\");\n"
                 + "int result = 2 + 2;\n"
                 + "System.out.println(\"2 + 2 = \" + result);\n"
                 + "result",
                 context=java_context,
                 handlers=handlers,
-                )
+            )
             assert simple_result is not None
             assert simple_result.id is not None and simple_result.id.strip()
             assert simple_result.error is None
@@ -977,9 +980,11 @@ class TestCodeInterpreterE2ESync:
             init_events_int: list[ExecutionInit] = []
             completed_events: list[ExecutionComplete] = []
             errors: list[ExecutionError] = []
+            init_received = Event()
 
             def on_init(init: ExecutionInit):
                 init_events_int.append(init)
+                init_received.set()
 
             def on_complete(complete: ExecutionComplete):
                 completed_events.append(complete)
@@ -1006,10 +1011,7 @@ class TestCodeInterpreterE2ESync:
                     handlers=handlers_int,
                     )
 
-                deadline = time.time() + 15
-                while len(init_events_int) == 0 and time.time() < deadline:
-                    time.sleep(0.1)
-
+                assert init_received.wait(timeout=15), "Execution init event was not received within 15s"
                 assert len(init_events_int) == 1, "Execution should have been initialized exactly once"
                 execution_id = init_events_int[-1].id
                 assert execution_id is not None and execution_id.strip()

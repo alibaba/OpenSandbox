@@ -36,6 +36,7 @@ from .network_rule_action import NetworkRuleAction
 from .ossfs import OSSFS
 from .ossfs_version import OSSFSVersion
 from .pagination_info import PaginationInfo
+from .platform_spec import PlatformSpec
 from .pvc import PVC
 from .renew_sandbox_expiration_request import RenewSandboxExpirationRequest
 from .renew_sandbox_expiration_response import RenewSandboxExpirationResponse
@@ -66,6 +67,7 @@ __all__ = (
     "OSSFS",
     "OSSFSVersion",
     "PaginationInfo",
+    "PlatformSpec",
     "PVC",
     "RenewSandboxExpirationRequest",
     "RenewSandboxExpirationResponse",

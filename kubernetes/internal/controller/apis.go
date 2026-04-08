@@ -28,9 +28,6 @@ const (
 	AnnoAllocReleaseKey          = "sandbox.opensandbox.io/alloc-release"
 	LabelBatchSandboxPodIndexKey = "batch-sandbox.sandbox.opensandbox.io/pod-index"
 
-	AnnoPoolAllocStatusKey     = "pool.opensandbox.io/alloc-status"
-	AnnoPoolAllocGenerationKey = "pool.opensandbox.io/alloc-generation"
-
 	FinalizerTaskCleanup = "batch-sandbox.sandbox.opensandbox.io/task-cleanup"
 )
 

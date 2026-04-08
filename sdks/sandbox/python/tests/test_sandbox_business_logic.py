@@ -286,3 +286,65 @@ async def test_create_resolves_egress_endpoint_and_builds_service(
             headers={"X-Port": str(DEFAULT_EGRESS_PORT)},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_keeps_service_create_signature_backward_compatible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _CreateResponse:
+        id = "sbx-created"
+
+    class _SandboxServiceOldSignatureStub:
+        async def create_sandbox(
+            self,
+            _spec,
+            _entrypoint,
+            _env,
+            _metadata,
+            _timeout,
+            _resource,
+            network_policy,
+            _extensions,
+            _volumes,
+        ):
+            assert isinstance(network_policy, NetworkPolicy)
+            return _CreateResponse()
+
+        async def get_sandbox_endpoint(self, _sandbox_id, port: int, _use_server_proxy: bool = False):
+            return SandboxEndpoint(endpoint=f"sbx.internal:{port}")
+
+        async def kill_sandbox(self, _sandbox_id: str) -> None:
+            return None
+
+    class _FactoryStub:
+        def __init__(self, _connection_config: ConnectionConfig) -> None:
+            pass
+
+        def create_sandbox_service(self):
+            return _SandboxServiceOldSignatureStub()
+
+        def create_filesystem_service(self, _endpoint):
+            return _Noop()
+
+        def create_command_service(self, _endpoint):
+            return _Noop()
+
+        def create_health_service(self, _endpoint):
+            return _Noop()
+
+        def create_metrics_service(self, _endpoint):
+            return _Noop()
+
+        def create_egress_service(self, _endpoint):
+            return _EgressServiceStub()
+
+    monkeypatch.setattr("opensandbox.sandbox.AdapterFactory", _FactoryStub)
+    await Sandbox.create(
+        "python:3.11",
+        network_policy=NetworkPolicy(
+            defaultAction="deny",
+            egress=[NetworkRule(action="allow", target="pypi.org")],
+        ),
+        skip_health_check=True,
+    )

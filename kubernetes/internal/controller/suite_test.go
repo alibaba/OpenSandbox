@@ -120,7 +120,9 @@ func startTestManager(ctx context.Context, mgr manager.Manager) *sync.WaitGroup 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		Expect(mgr.Start(ctx)).Should(Succeed(), "failed to start manager")
+		defer GinkgoRecover()
+		err := mgr.Start(ctx)
+		Expect(err).ShouldNot(HaveOccurred(), "failed to start manager")
 	}()
 	return wg
 }

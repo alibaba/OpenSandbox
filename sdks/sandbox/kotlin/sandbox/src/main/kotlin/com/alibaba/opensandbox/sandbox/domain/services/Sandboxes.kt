@@ -18,6 +18,7 @@ package com.alibaba.opensandbox.sandbox.domain.services
 
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxCreateResponse
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter
@@ -44,6 +45,7 @@ interface Sandboxes {
      * @param metadata User-defined metadata used for management and filtering
      * @param timeout Sandbox lifetime. Pass null to require explicit cleanup.
      * @param resource Runtime resource limits (e.g. cpu/memory). Exact semantics are server-defined
+     * @param platform Optional runtime platform constraint used for provisioning
      * @param networkPolicy Optional outbound network policy (egress)
      * @param extensions Opaque extension parameters passed through to the server as-is. Prefer namespaced keys
      * @param volumes Optional list of volume mounts for persistent storage
@@ -60,6 +62,36 @@ interface Sandboxes {
         extensions: Map<String, String>,
         volumes: List<Volume>?,
     ): SandboxCreateResponse
+
+    /**
+     * Creates a new sandbox with optional runtime platform constraint.
+     *
+     * This default implementation preserves binary compatibility for existing
+     * Sandboxes implementations compiled against the older interface method.
+     */
+    fun createSandbox(
+        spec: SandboxImageSpec,
+        entrypoint: List<String>,
+        env: Map<String, String>,
+        metadata: Map<String, String>,
+        timeout: Duration?,
+        resource: Map<String, String>,
+        networkPolicy: NetworkPolicy?,
+        extensions: Map<String, String>,
+        volumes: List<Volume>?,
+        platform: PlatformSpec?,
+    ): SandboxCreateResponse =
+        createSandbox(
+            spec = spec,
+            entrypoint = entrypoint,
+            env = env,
+            metadata = metadata,
+            timeout = timeout,
+            resource = resource,
+            networkPolicy = networkPolicy,
+            extensions = extensions,
+            volumes = volumes,
+        )
 
     /**
      * Retrieves information about an existing sandbox.

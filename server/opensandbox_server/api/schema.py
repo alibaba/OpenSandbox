@@ -53,6 +53,21 @@ class ImageSpec(BaseModel):
     )
 
 
+class PlatformSpec(BaseModel):
+    """
+    Runtime platform constraint for scheduling/provisioning.
+    """
+
+    os: str = Field(
+        ...,
+        description="Target operating system (for example 'linux').",
+    )
+    arch: str = Field(
+        ...,
+        description="Target CPU architecture (for example 'amd64' or 'arm64').",
+    )
+
+
 # ============================================================================
 # Resource Limits
 # ============================================================================
@@ -313,6 +328,15 @@ class CreateSandboxRequest(BaseModel):
     Request to create a new sandbox from a container image.
     """
     image: ImageSpec = Field(..., description="Container image specification for the sandbox")
+    platform: Optional[PlatformSpec] = Field(
+        None,
+        description=(
+            "Optional platform constraint for sandbox scheduling/runtime selection. "
+            "If omitted, runtime default behavior applies (runtime-specific and not a fixed "
+            "architecture guarantee). If specified, runtime must satisfy this platform or fail "
+            "explicitly."
+        ),
+    )
     timeout: Optional[int] = Field(
         None,
         ge=60,
@@ -376,6 +400,13 @@ class CreateSandboxResponse(BaseModel):
     id: str = Field(..., description="Unique sandbox identifier")
     status: SandboxStatus = Field(..., description="Current lifecycle status and detailed state information")
     metadata: Optional[Dict[str, str]] = Field(None, description="Custom metadata from creation request")
+    platform: Optional[PlatformSpec] = Field(
+        None,
+        description=(
+            "Platform constraint echoed from request or workload template. "
+            "Null when no scheduling constraint is provided."
+        ),
+    )
     expires_at: Optional[datetime] = Field(
         None,
         alias="expiresAt",
@@ -396,6 +427,13 @@ class Sandbox(BaseModel):
     """
     id: str = Field(..., description="Unique sandbox identifier")
     image: ImageSpec = Field(..., description="Container image specification used to provision this sandbox")
+    platform: Optional[PlatformSpec] = Field(
+        None,
+        description=(
+            "Platform constraint echoed from request or workload template. "
+            "Null when no scheduling constraint is provided."
+        ),
+    )
     status: SandboxStatus = Field(..., description="Current lifecycle status and detailed state information")
     metadata: Optional[Dict[str, str]] = Field(None, description="Custom metadata from creation request")
     entrypoint: List[str] = Field(..., description="The command to execute as the sandbox's entry process")

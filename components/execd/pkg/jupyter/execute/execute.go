@@ -300,7 +300,7 @@ func (c *Client) finalizeExecution(state *streamExecutionState, resultChan chan 
 
 	pollInterval := execdflag.JupyterIdlePollInterval
 	if pollInterval <= 0 {
-		pollInterval = 10 * time.Millisecond
+		pollInterval = 100 * time.Millisecond
 	}
 
 	for {

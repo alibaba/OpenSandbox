@@ -19,6 +19,7 @@ Command service interface.
 Protocol for sandbox command execution operations.
 """
 
+from datetime import timedelta
 from typing import Protocol
 
 from opensandbox.models.execd import (
@@ -134,7 +135,7 @@ class Commands(Protocol):
         command: str,
         *,
         working_directory: str | None = None,
-        timeout: int | None = None,
+        timeout: timedelta | None = None,
         handlers: ExecutionHandlers | None = None,
     ) -> Execution:
         """
@@ -144,7 +145,7 @@ class Commands(Protocol):
             session_id: Session ID from create_session.
             command: Shell command to execute.
             working_directory: Optional working directory override for this run.
-            timeout: Optional max execution time in milliseconds for this session run.
+            timeout: Optional max execution time for this session run.
             handlers: Optional async handlers for streaming events.
 
         Returns:

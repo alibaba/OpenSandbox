@@ -20,6 +20,7 @@ import com.alibaba.opensandbox.sandbox.HttpClientProvider
 import com.alibaba.opensandbox.sandbox.api.SandboxesApi
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxCreateResponse
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter
@@ -63,6 +64,31 @@ internal class SandboxesAdapter(
         networkPolicy: NetworkPolicy?,
         extensions: Map<String, String>,
         volumes: List<Volume>?,
+    ): SandboxCreateResponse =
+        createSandbox(
+            spec = spec,
+            entrypoint = entrypoint,
+            env = env,
+            metadata = metadata,
+            timeout = timeout,
+            resource = resource,
+            networkPolicy = networkPolicy,
+            extensions = extensions,
+            volumes = volumes,
+            platform = null,
+        )
+
+    override fun createSandbox(
+        spec: SandboxImageSpec,
+        entrypoint: List<String>,
+        env: Map<String, String>,
+        metadata: Map<String, String>,
+        timeout: Duration?,
+        resource: Map<String, String>,
+        networkPolicy: NetworkPolicy?,
+        extensions: Map<String, String>,
+        volumes: List<Volume>?,
+        platform: PlatformSpec?,
     ): SandboxCreateResponse {
         logger.info("Creating sandbox with image: {}", spec.image)
 
@@ -75,6 +101,7 @@ internal class SandboxesAdapter(
                     metadata = metadata,
                     timeout = timeout,
                     resource = resource,
+                    platform = platform,
                     networkPolicy = networkPolicy,
                     extensions = extensions,
                     volumes = volumes,

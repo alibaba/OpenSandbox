@@ -34,6 +34,7 @@ from opensandbox.exceptions import (
 from opensandbox.models.sandboxes import (
     NetworkPolicy,
     NetworkRule,
+    PlatformSpec,
     SandboxEndpoint,
     SandboxImageSpec,
     SandboxInfo,
@@ -389,6 +390,7 @@ class SandboxSync:
         env: dict[str, str] | None = None,
         metadata: dict[str, str] | None = None,
         resource: dict[str, str] | None = None,
+        platform: PlatformSpec | None = None,
         network_policy: NetworkPolicy | None = None,
         extensions: dict[str, str] | None = None,
         entrypoint: list[str] | None = None,
@@ -446,7 +448,7 @@ class SandboxSync:
 
         try:
             sandbox_service = factory.create_sandbox_service()
-            response = sandbox_service.create_sandbox(
+            create_args = (
                 image,
                 entrypoint,
                 env,
@@ -457,6 +459,13 @@ class SandboxSync:
                 extensions,
                 volumes,
             )
+            if platform is None:
+                response = sandbox_service.create_sandbox(*create_args)
+            else:
+                response = sandbox_service.create_sandbox(
+                    *create_args,
+                    platform=platform,
+                )
             sandbox_id = response.id
             execd_endpoint = sandbox_service.get_sandbox_endpoint(
                 response.id, DEFAULT_EXECD_PORT, config.use_server_proxy

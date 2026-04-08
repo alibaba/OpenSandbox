@@ -51,6 +51,22 @@ def get_sandbox_image() -> str:
     return TEST_IMAGE
 
 
+def get_e2e_sandbox_resource() -> dict[str, str]:
+    """
+    CPU/memory for ``Sandbox.create`` / ``SandboxSync.create`` in E2E tests.
+
+    Read from ``OPENSANDBOX_E2E_SANDBOX_CPU`` and ``OPENSANDBOX_E2E_SANDBOX_MEMORY``.
+    When unset, matches the SDK default (1 CPU, 2Gi memory).
+
+    Kubernetes E2E entry scripts (``scripts/python-k8s-e2e*.sh``) export smaller
+    defaults for Kind; override via the same env vars.
+    """
+    return {
+        "cpu": os.getenv("OPENSANDBOX_E2E_SANDBOX_CPU", "1"),
+        "memory": os.getenv("OPENSANDBOX_E2E_SANDBOX_MEMORY", "2Gi"),
+    }
+
+
 def is_kubernetes_runtime() -> bool:
     """Whether the current E2E run targets the Kubernetes backend."""
     return TEST_RUNTIME == "kubernetes"

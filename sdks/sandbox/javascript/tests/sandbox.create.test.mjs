@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  ConnectionConfig,
   DEFAULT_EGRESS_PORT,
   DEFAULT_EXECD_PORT,
   DEFAULT_TIMEOUT_SECONDS,
@@ -215,6 +216,58 @@ test("Sandbox.create rejects volume with multiple backends", async () => {
     }),
     /must specify exactly one backend \(host, pvc, ossfs\)/
   );
+});
+
+test("Sandbox.create accepts host volume with windows drive path", async () => {
+  const { adapterFactory, recordedRequests } = createAdapterFactory();
+
+  await Sandbox.create({
+    adapterFactory,
+    connectionConfig: { domain: "http://127.0.0.1:8080" },
+    image: "python:3.12",
+    skipHealthCheck: true,
+    volumes: [{ name: "host-vol", host: { path: "D:/sandbox-mnt/ReMe" }, mountPath: "/mnt" }],
+  });
+
+  assert.equal(recordedRequests.length, 1);
+  assert.equal(recordedRequests[0].volumes[0].host.path, "D:/sandbox-mnt/ReMe");
+});
+
+test("Sandbox.create rejects host volume with relative path", async () => {
+  const { adapterFactory } = createAdapterFactory();
+
+  await assert.rejects(
+    Sandbox.create({
+      adapterFactory,
+      connectionConfig: { domain: "http://127.0.0.1:8080" },
+      image: "python:3.12",
+      skipHealthCheck: true,
+      volumes: [{ name: "host-vol", host: { path: "relative/path" }, mountPath: "/mnt" }],
+    }),
+    /Host path must be an absolute path starting with '\/' or a Windows drive letter/
+  );
+});
+
+test("Sandbox.create validates host path before transport initialization", async () => {
+  const { adapterFactory } = createAdapterFactory();
+  const connectionConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" });
+  let transportInitialized = false;
+  connectionConfig.withTransportIfMissing = () => {
+    transportInitialized = true;
+    throw new Error("transport initialized");
+  };
+
+  await assert.rejects(
+    Sandbox.create({
+      adapterFactory,
+      connectionConfig,
+      image: "python:3.12",
+      skipHealthCheck: true,
+      volumes: [{ name: "host-vol", host: { path: "relative/path" }, mountPath: "/mnt" }],
+    }),
+    /Host path must be an absolute path starting with '\/' or a Windows drive letter/
+  );
+  assert.equal(transportInitialized, false);
 });
 
 test("Sandbox.create treats null backends as absent", async () => {

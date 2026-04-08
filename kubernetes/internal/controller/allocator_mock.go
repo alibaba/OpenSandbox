@@ -11,6 +11,7 @@ import (
 	gomock "github.com/golang/mock/gomock"
 
 	v1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // MockAllocationStore is a mock of AllocationStore interface.
@@ -63,6 +64,46 @@ func (m *MockAllocationStore) SetAllocation(ctx context.Context, pool *v1alpha1.
 func (mr *MockAllocationStoreMockRecorder) SetAllocation(ctx, pool, allocation interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetAllocation", reflect.TypeOf((*MockAllocationStore)(nil).SetAllocation), ctx, pool, allocation)
+}
+
+// ClearAllocation mocks base method.
+func (m *MockAllocationStore) ClearAllocation(ctx context.Context, ns string, poolName string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ClearAllocation", ctx, ns, poolName)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ClearAllocation indicates an expected call of ClearAllocation.
+func (mr *MockAllocationStoreMockRecorder) ClearAllocation(ctx, ns, poolName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClearAllocation", reflect.TypeOf((*MockAllocationStore)(nil).ClearAllocation), ctx, ns, poolName)
+}
+
+// UpdateAllocation mocks base method.
+func (m *MockAllocationStore) UpdateAllocation(ctx context.Context, ns string, poolName string, sandboxName string, pods []string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "UpdateAllocation", ctx, ns, poolName, sandboxName, pods)
+}
+
+// UpdateAllocation indicates an expected call of UpdateAllocation.
+func (mr *MockAllocationStoreMockRecorder) UpdateAllocation(ctx, ns, poolName, sandboxName, pods interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateAllocation", reflect.TypeOf((*MockAllocationStore)(nil).UpdateAllocation), ctx, ns, poolName, sandboxName, pods)
+}
+
+// Recover mocks base method.
+func (m *MockAllocationStore) Recover(ctx context.Context, c client.Client) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Recover", ctx, c)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// Recover indicates an expected call of Recover.
+func (mr *MockAllocationStoreMockRecorder) Recover(ctx, c interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Recover", reflect.TypeOf((*MockAllocationStore)(nil).Recover), ctx, c)
 }
 
 // MockAllocationSyncer is a mock of AllocationSyncer interface.

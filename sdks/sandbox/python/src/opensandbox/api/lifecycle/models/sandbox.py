@@ -28,6 +28,7 @@ from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.image_spec import ImageSpec
+    from ..models.platform_spec import PlatformSpec
     from ..models.sandbox_metadata import SandboxMetadata
     from ..models.sandbox_status import SandboxStatus
 
@@ -48,6 +49,15 @@ class Sandbox:
         entrypoint (list[str]): The command to execute as the sandbox's entry process.
             Always present in responses since entrypoint is required in creation requests.
         created_at (datetime.datetime): Sandbox creation timestamp
+        platform (PlatformSpec | Unset): Runtime platform constraint used for scheduling/provisioning.
+
+            This field is independent from `image` and expresses the expected target
+            OS and CPU architecture for sandbox execution.
+
+            Behavioral notes:
+            - If omitted, runtime uses existing default behavior (backward compatible).
+            - If provided and cannot be satisfied by runtime/template/pool constraints,
+              request must fail explicitly.
         metadata (SandboxMetadata | Unset): Custom metadata from creation request
         expires_at (datetime.datetime | Unset): Timestamp when sandbox will auto-terminate. Omitted when manual cleanup
             is enabled.
@@ -58,6 +68,7 @@ class Sandbox:
     status: SandboxStatus
     entrypoint: list[str]
     created_at: datetime.datetime
+    platform: PlatformSpec | Unset = UNSET
     metadata: SandboxMetadata | Unset = UNSET
     expires_at: datetime.datetime | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -72,6 +83,10 @@ class Sandbox:
         entrypoint = self.entrypoint
 
         created_at = self.created_at.isoformat()
+
+        platform: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.platform, Unset):
+            platform = self.platform.to_dict()
 
         metadata: dict[str, Any] | Unset = UNSET
         if not isinstance(self.metadata, Unset):
@@ -92,6 +107,8 @@ class Sandbox:
                 "createdAt": created_at,
             }
         )
+        if platform is not UNSET:
+            field_dict["platform"] = platform
         if metadata is not UNSET:
             field_dict["metadata"] = metadata
         if expires_at is not UNSET:
@@ -102,6 +119,7 @@ class Sandbox:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.image_spec import ImageSpec
+        from ..models.platform_spec import PlatformSpec
         from ..models.sandbox_metadata import SandboxMetadata
         from ..models.sandbox_status import SandboxStatus
 
@@ -115,6 +133,13 @@ class Sandbox:
         entrypoint = cast(list[str], d.pop("entrypoint"))
 
         created_at = isoparse(d.pop("createdAt"))
+
+        _platform = d.pop("platform", UNSET)
+        platform: PlatformSpec | Unset
+        if isinstance(_platform, Unset):
+            platform = UNSET
+        else:
+            platform = PlatformSpec.from_dict(_platform)
 
         _metadata = d.pop("metadata", UNSET)
         metadata: SandboxMetadata | Unset
@@ -136,6 +161,7 @@ class Sandbox:
             status=status,
             entrypoint=entrypoint,
             created_at=created_at,
+            platform=platform,
             metadata=metadata,
             expires_at=expires_at,
         )

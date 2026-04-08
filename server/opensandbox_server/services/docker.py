@@ -60,6 +60,7 @@ from opensandbox_server.api.schema import (
     RenewSandboxExpirationResponse,
     Sandbox,
     SandboxStatus,
+    PlatformSpec,
 )
 from opensandbox_server.config import AppConfig, get_config
 from opensandbox_server.services.docker_diagnostics import DockerDiagnosticsMixin
@@ -75,6 +76,8 @@ from opensandbox_server.services.constants import (
     SANDBOX_ID_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SANDBOX_OSSFS_MOUNTS_LABEL,
+    SANDBOX_PLATFORM_ARCH_LABEL,
+    SANDBOX_PLATFORM_OS_LABEL,
     SandboxErrorCodes,
 )
 from opensandbox_server.services.endpoint_auth import (
@@ -97,6 +100,7 @@ from opensandbox_server.services.validators import (
     ensure_entrypoint,
     ensure_future_expiration,
     ensure_metadata_labels,
+    ensure_platform_valid,
     ensure_timeout_within_limit,
     ensure_valid_host_path,
     ensure_volumes_valid,
@@ -156,7 +160,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
         self.execd_image = runtime_config.execd_image
         self.network_mode = (self.app_config.docker.network_mode or HOST_NETWORK_MODE).lower()
-        self._execd_archive_cache: Optional[bytes] = None
+        self._execd_archive_cache: Dict[str, bytes] = {}
+        self._daemon_platform: Optional[PlatformSpec] = None
         self._api_timeout = self._resolve_api_timeout()
         try:
             # Initialize Docker service from environment variables
@@ -493,41 +498,107 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if restored:
             logger.info("Restored expiration timers for %d sandbox(es).", restored)
 
-    def _fetch_execd_archive(self) -> bytes:
-        """Fetch (and memoize) the execd archive from the platform container."""
-        if self._execd_archive_cache is not None:
-            return self._execd_archive_cache
+    def _normalize_platform_key(self, platform: Optional[PlatformSpec]) -> str:
+        if platform is None:
+            return "default"
+        return f"{platform.os}/{platform.arch}"
+
+    @staticmethod
+    def _normalize_arch(arch: Optional[str]) -> Optional[str]:
+        if not isinstance(arch, str):
+            return None
+        normalized = arch.strip().lower()
+        arch_aliases = {
+            "x86_64": "amd64",
+            "x86-64": "amd64",
+            "amd64": "amd64",
+            "aarch64": "arm64",
+            "arm64/v8": "arm64",
+            "arm64v8": "arm64",
+            "arm64": "arm64",
+        }
+        return arch_aliases.get(normalized, normalized)
+
+    @staticmethod
+    def _normalize_os(os_value: Optional[str]) -> Optional[str]:
+        if not isinstance(os_value, str):
+            return None
+        normalized = os_value.strip().lower()
+        os_aliases = {
+            "linux": "linux",
+        }
+        return os_aliases.get(normalized, normalized)
+
+    def _get_daemon_platform(self) -> Optional[PlatformSpec]:
+        if self._daemon_platform is not None:
+            return self._daemon_platform
+        try:
+            info = self.docker_client.info() or {}
+        except DockerException as exc:
+            logger.debug("Failed to inspect Docker daemon platform: %s", exc)
+            return None
+        os_value = info.get("OSType") or info.get("Os") or info.get("os")
+        arch_value = info.get("Architecture") or info.get("architecture")
+        if not isinstance(os_value, str) or not isinstance(arch_value, str):
+            return None
+        normalized_os = self._normalize_os(os_value)
+        normalized_arch = self._normalize_arch(arch_value)
+        if not normalized_os or not normalized_arch:
+            return None
+        self._daemon_platform = PlatformSpec(os=normalized_os, arch=normalized_arch)
+        return self._daemon_platform
+
+    def _fetch_execd_archive(self, platform: Optional[PlatformSpec] = None) -> bytes:
+        """Fetch (and memoize) the execd archive by effective target platform."""
+        cache_key = self._normalize_platform_key(platform)
+        if cache_key in self._execd_archive_cache:
+            return self._execd_archive_cache[cache_key]
 
         with self._execd_archive_lock:
             # Double-check locking to ensure only one thread initializes the cache
-            if self._execd_archive_cache is not None:
-                return self._execd_archive_cache
+            if cache_key in self._execd_archive_cache:
+                return self._execd_archive_cache[cache_key]
 
             container = None
+            docker_platform = None
+            if platform is not None:
+                docker_platform = f"{platform.os}/{platform.arch}"
             try:
-                try:
-                    # Prefer a locally built image (e.g., opensandbox/execd:local); pull only if missing.
-                    self.docker_client.images.get(self.execd_image)
-                    logger.info("Found execd image %s locally; skipping pull", self.execd_image)
-                except ImageNotFound:
-                    with self._docker_operation(
-                        f"pull execd image {self.execd_image}",
-                        "execd-cache",
-                    ):
-                        self.docker_client.images.pull(self.execd_image)
+                self._ensure_image_available(
+                    self.execd_image,
+                    auth_config=None,
+                    sandbox_id=f"execd-cache:{cache_key}",
+                    platform=platform,
+                )
 
                 with self._docker_operation("execd cache create container", "execd-cache"):
-                    container = self.docker_client.containers.create(
-                        image=self.execd_image,
-                        command=["tail", "-f", "/dev/null"],
-                        name=f"sandbox-execd-{uuid4()}",
-                        detach=True,
-                        auto_remove=False,
-                    )
+                    create_kwargs: dict[str, Any] = {
+                        "image": self.execd_image,
+                        "command": ["tail", "-f", "/dev/null"],
+                        "name": f"sandbox-execd-{uuid4()}",
+                        "detach": True,
+                        "auto_remove": False,
+                    }
+                    if docker_platform is not None:
+                        create_kwargs["platform"] = docker_platform
+                    container = self.docker_client.containers.create(**create_kwargs)
                 with self._docker_operation("execd cache start container", "execd-cache"):
                     container.start()
                     container.reload()
                     logger.info("Created sandbox execd archive for container %s", container.id)
+            except TypeError as exc:
+                if docker_platform is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "code": SandboxErrorCodes.INVALID_PARAMETER,
+                            "message": (
+                                "The configured Docker client/daemon does not support "
+                                f"platform-aware container create for '{docker_platform}'."
+                            ),
+                        },
+                    ) from exc
+                raise
             except DockerException as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -559,8 +630,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                             "Failed to cleanup temporary execd container: %s", cleanup_exc
                         )
 
-            self._execd_archive_cache = data
-            logger.info("Dumped execd archive to memory")
+            self._execd_archive_cache[cache_key] = data
+            logger.info("Dumped execd archive to memory for platform key %s", cache_key)
             return data
 
     def _container_to_sandbox(self, container, sandbox_id: Optional[str] = None) -> Sandbox:
@@ -621,6 +692,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 SANDBOX_ID_LABEL,
                 SANDBOX_EXPIRES_AT_LABEL,
                 SANDBOX_MANUAL_CLEANUP_LABEL,
+                SANDBOX_PLATFORM_OS_LABEL,
+                SANDBOX_PLATFORM_ARCH_LABEL,
                 ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY,
             }
         } or None
@@ -645,16 +718,55 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             message=message,
             last_transition_at=last_transition_at,
         )
+        platform_spec = self._resolve_platform_for_container(container, labels)
 
         return Sandbox(
             id=resolved_id,
             image=image_spec,
+            platform=platform_spec,
             status=status_info,
             metadata=metadata,
             entrypoint=entrypoint,
             expiresAt=expires_at,
             createdAt=created_at,
         )
+
+    @staticmethod
+    def _platform_from_labels(labels: Dict[str, str]) -> Optional[PlatformSpec]:
+        os_value = labels.get(SANDBOX_PLATFORM_OS_LABEL)
+        arch_value = labels.get(SANDBOX_PLATFORM_ARCH_LABEL)
+        if not isinstance(os_value, str) or not isinstance(arch_value, str):
+            return None
+        if not os_value or not arch_value:
+            return None
+        normalized_os = DockerSandboxService._normalize_os(os_value)
+        normalized_arch = DockerSandboxService._normalize_arch(arch_value)
+        if not normalized_os or not normalized_arch:
+            return None
+        return PlatformSpec(os=normalized_os, arch=normalized_arch)
+
+    def _resolve_platform_for_container(
+        self,
+        container,
+        labels: Dict[str, str],
+        include_runtime_metadata: bool = False,
+    ) -> Optional[PlatformSpec]:
+        # API contract: platform is only echoed from explicit constraints.
+        # Runtime image metadata is used only for internal runtime preparation.
+        if include_runtime_metadata:
+            image_attrs = getattr(container.image, "attrs", {}) or {}
+            if isinstance(image_attrs, dict):
+                os_value = image_attrs.get("Os") or image_attrs.get("os")
+                arch_value = image_attrs.get("Architecture") or image_attrs.get("architecture")
+            else:
+                os_value = None
+                arch_value = None
+            if isinstance(os_value, str) and isinstance(arch_value, str) and os_value and arch_value:
+                normalized_os = self._normalize_os(os_value)
+                normalized_arch = self._normalize_arch(arch_value)
+                if normalized_os and normalized_arch:
+                    return PlatformSpec(os=normalized_os, arch=normalized_arch)
+        return self._platform_from_labels(labels)
 
     def _ensure_directory(self, container, path: str, sandbox_id: Optional[str] = None) -> None:
         """Create a directory within the target container if it does not exist."""
@@ -683,9 +795,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 },
             ) from exc
 
-    def _copy_execd_to_container(self, container, sandbox_id: str) -> None:
+    def _copy_execd_to_container(
+        self,
+        container,
+        sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
+    ) -> None:
         """Copy execd artifacts from the platform container into the sandbox."""
-        archive = self._fetch_execd_archive()
+        archive = self._fetch_execd_archive(platform)
         target_parent = posixpath.dirname(EXECED_INSTALL_PATH.rstrip("/")) or "/"
         self._ensure_directory(container, target_parent, sandbox_id)
         try:
@@ -736,9 +853,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 },
             ) from exc
 
-    def _prepare_sandbox_runtime(self, container, sandbox_id: str) -> None:
+    def _prepare_sandbox_runtime(
+        self,
+        container,
+        sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
+    ) -> None:
         """Copy execd artifacts and bootstrap launcher into the sandbox container."""
-        self._copy_execd_to_container(container, sandbox_id)
+        self._copy_execd_to_container(container, sandbox_id, platform)
         self._install_bootstrap_script(container, sandbox_id)
 
     def _prepare_creation_context(
@@ -783,6 +905,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         """
         ensure_entrypoint(request.entrypoint)
         ensure_metadata_labels(request.metadata)
+        ensure_platform_valid(request.platform)
         ensure_timeout_within_limit(
             request.timeout,
             self.app_config.server.max_sandbox_timeout_seconds,
@@ -885,6 +1008,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         return Sandbox(
             id=sandbox_id,
             image=pending.request.image,
+            platform=pending.request.platform,
             status=pending.status,
             metadata=pending.request.metadata,
             entrypoint=pending.request.entrypoint,
@@ -923,10 +1047,30 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         image_uri: str,
         auth_config: Optional[dict],
         sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
     ) -> None:
+        docker_platform = None
+        if platform is not None:
+            docker_platform = f"{platform.os}/{platform.arch}"
         try:
             with self._docker_operation(f"pull image {image_uri}", sandbox_id):
-                self.docker_client.images.pull(image_uri, auth_config=auth_config)
+                pull_kwargs: dict[str, Any] = {"auth_config": auth_config}
+                if docker_platform is not None:
+                    pull_kwargs["platform"] = docker_platform
+                self.docker_client.images.pull(image_uri, **pull_kwargs)
+        except TypeError as exc:
+            if docker_platform is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": (
+                            "The configured Docker client/daemon does not support "
+                            f"platform-aware image pull for '{docker_platform}'."
+                        ),
+                    },
+                ) from exc
+            raise
         except DockerException as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -941,13 +1085,57 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         image_uri: str,
         auth_config: Optional[dict],
         sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
     ) -> None:
+        expected_platform = platform or self._get_daemon_platform()
         try:
             with self._docker_operation(f"inspect image {image_uri}", sandbox_id):
-                self.docker_client.images.get(image_uri)
+                image = self.docker_client.images.get(image_uri)
+                if expected_platform is None:
+                    logger.debug(
+                        "Sandbox %s using cached image %s without platform check (daemon platform unavailable)",
+                        sandbox_id,
+                        image_uri,
+                    )
+                    return
+                image_attrs = getattr(image, "attrs", {}) or {}
+                image_os = (image_attrs.get("Os") or image_attrs.get("os") or "").lower()
+                image_arch = (
+                    image_attrs.get("Architecture")
+                    or image_attrs.get("architecture")
+                    or ""
+                ).lower()
+                image_os = self._normalize_os(image_os) or image_os
+                image_arch = self._normalize_arch(image_arch) or image_arch
+                requested_os = self._normalize_os(expected_platform.os) or expected_platform.os.lower()
+                requested_arch = (
+                    self._normalize_arch(expected_platform.arch) or expected_platform.arch.lower()
+                )
+                if image_os != requested_os or image_arch != requested_arch:
+                    logger.info(
+                        "Sandbox %s cached image %s platform mismatch (cached=%s/%s, requested=%s/%s); repulling",
+                        sandbox_id,
+                        image_uri,
+                        image_os or "unknown",
+                        image_arch or "unknown",
+                        requested_os,
+                        requested_arch,
+                    )
+                    self._pull_image(
+                        image_uri,
+                        auth_config,
+                        sandbox_id,
+                        expected_platform,
+                    )
+                    return
                 logger.debug("Sandbox %s using cached image %s", sandbox_id, image_uri)
         except ImageNotFound:
-            self._pull_image(image_uri, auth_config, sandbox_id)
+            self._pull_image(
+                image_uri,
+                auth_config,
+                sandbox_id,
+                platform,
+            )
         except DockerException as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1028,7 +1216,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             if volume_binds:
                 host_config_kwargs["binds"] = volume_binds
 
-            self._create_and_start_container(
+            created_container = self._create_and_start_container(
                 sandbox_id,
                 image_uri,
                 request.entrypoint,
@@ -1036,6 +1224,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 environment,
                 host_config_kwargs,
                 exposed_ports,
+                request.platform,
             )
         except Exception:
             if sidecar_container is not None:
@@ -1060,10 +1249,12 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if expires_at is not None:
             self._schedule_expiration(sandbox_id, expires_at)
 
+        effective_platform = self._resolve_platform_for_container(created_container, labels)
         return CreateSandboxResponse(
             id=sandbox_id,
             status=status_info,
             metadata=request.metadata,
+            platform=effective_platform or request.platform,
             expiresAt=expires_at,
             createdAt=created_at,
             entrypoint=request.entrypoint,
@@ -1885,6 +2076,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
         else:
             labels[SANDBOX_EXPIRES_AT_LABEL] = expires_at.isoformat()
+        if request.platform is not None:
+            labels[SANDBOX_PLATFORM_OS_LABEL] = request.platform.os
+            labels[SANDBOX_PLATFORM_ARCH_LABEL] = request.platform.arch
 
         apply_access_renew_extend_seconds_to_mapping(labels, request.extensions)
 
@@ -1906,7 +2100,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 "username": request.image.auth.username,
                 "password": request.image.auth.password,
             }
-        self._ensure_image_available(image_uri, auth_config, sandbox_id)
+        self._ensure_image_available(image_uri, auth_config, sandbox_id, request.platform)
         return image_uri, auth_config
 
     def _resolve_resource_limits(
@@ -2112,6 +2306,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         environment: list[str],
         host_config_kwargs: Dict[str, Any],
         exposed_ports: Optional[list[str]],
+        platform: Optional[PlatformSpec],
     ):
         # Normalize single-string entrypoint containing spaces to avoid shell path issues in bootstrap.
         if len(bootstrap_command) == 1 and " " in bootstrap_command[0]:
@@ -2134,6 +2329,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     "labels": labels,
                     "host_config": host_config,
                 }
+                if platform is not None:
+                    container_kwargs["platform"] = f"{platform.os}/{platform.arch}"
 
                 response = self.docker_client.api.create_container(**container_kwargs)
             container_id = response.get("Id")
@@ -2146,7 +2343,12 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     },
                 )
             container = self.docker_client.containers.get(container_id)
-            self._prepare_sandbox_runtime(container, sandbox_id)
+            runtime_platform = self._resolve_platform_for_container(
+                container,
+                labels,
+                include_runtime_metadata=True,
+            )
+            self._prepare_sandbox_runtime(container, sandbox_id, runtime_platform)
             with self._docker_operation("start sandbox container", sandbox_id):
                 container.start()
             return container
@@ -2174,6 +2376,18 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
             if isinstance(exc, HTTPException):
                 raise exc
+            if isinstance(exc, TypeError) and platform is not None:
+                docker_platform = f"{platform.os}/{platform.arch}"
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": (
+                            "The configured Docker client/daemon does not support "
+                            f"platform-aware container create for '{docker_platform}'."
+                        ),
+                    },
+                ) from exc
 
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

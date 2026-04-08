@@ -51,7 +51,7 @@ The egress control is implemented as a **Sidecar** that shares the network names
   In `dns+nft` mode, the sidecar automatically allows:
   - **127.0.0.1** — so packets redirected by iptables to the proxy (127.0.0.1:15353) are accepted by nft.
   - **Nameserver IPs** from `/etc/resolv.conf` — so client DNS and proxy upstream work (e.g. private DNS).  
-  Nameserver IPs are validated (unspecified and loopback are skipped) and capped. Use `OPENSANDBOX_EGRESS_MAX_NS` (default `3`; `0` = no cap, `1`–`10` = cap). See [SECURITY-RISKS.md](SECURITY-RISKS.md) for trust and scope of this whitelist.
+  Nameserver IPs are validated (unspecified and loopback are skipped) and capped at the first **10** lines from `/etc/resolv.conf` (not configurable). See [SECURITY-RISKS.md](SECURITY-RISKS.md) for trust and scope of this whitelist.
 - **Blocked hostname webhook**  
   - `OPENSANDBOX_EGRESS_DENY_WEBHOOK`: HTTP endpoint URL. When set, egress asynchronously POSTs JSON **only when a hostname is denied**: `{"hostname": "<original query>", "timestamp": "<RFC3339>", "source": "opensandbox-egress", "sandboxId": "<id-or-empty>"}`. Default timeout 5s, up to 3 retries with exponential backoff starting at 1s; 4xx is not retried, 5xx/network errors are retried.
   - `OPENSANDBOX_EGRESS_SANDBOX_ID`: optional sandbox identifier injected into the webhook payload as `sandboxId`. The value is read once at startup (unset → empty string).
@@ -102,6 +102,12 @@ Examples:
   curl -XPATCH http://127.0.0.1:18080/policy \
     -d '[{"action":"allow","target":"www.cloudflare.com"}]'
   ```
+
+### Observability (OpenTelemetry)
+
+Egress can export **OTLP metrics**; application logs use the **native zap** logger (JSON to stdout by default, configurable via `OPENSANDBOX_LOG_OUTPUT` / `OPENSANDBOX_EGRESS_LOG_LEVEL`). **OTLP log export is not used.**
+
+See **[Egress OpenTelemetry reference](docs/opentelemetry.md)** for metrics, structured log fields, and how to enable OTLP metrics (`OTEL_EXPORTER_OTLP_*`, `OPENSANDBOX_EGRESS_SANDBOX_ID`, etc.).
 
 ## Build & Run
 

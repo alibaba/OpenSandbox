@@ -19,6 +19,7 @@ Sandbox-related data models.
 Models for sandbox creation, configuration, status, and lifecycle management.
 """
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -94,6 +95,17 @@ class SandboxImageSpec(BaseModel):
         return v
 
 
+class PlatformSpec(BaseModel):
+    """Runtime platform constraint for sandbox provisioning."""
+
+    os: Literal["linux"] = Field(
+        description="Target operating system for sandbox provisioning."
+    )
+    arch: Literal["amd64", "arm64"] = Field(
+        description="Target CPU architecture for sandbox provisioning."
+    )
+
+
 class NetworkRule(BaseModel):
     """
     Egress rule for matching network targets.
@@ -136,6 +148,9 @@ class NetworkPolicy(BaseModel):
 # Volume Models
 # ============================================================================
 
+# Matches Unix absolute paths (/…) and Windows drive-letter paths (C:\ or C:/).
+# Aligned with server-side pattern in server/opensandbox_server/api/schema.py.
+_HOST_PATH_RE = re.compile(r"^(/|[A-Za-z]:[\\/])")
 
 class Host(BaseModel):
     """
@@ -152,8 +167,11 @@ class Host(BaseModel):
     @field_validator("path")
     @classmethod
     def path_must_be_absolute(cls, v: str) -> str:
-        if not v.startswith("/"):
-            raise ValueError("Host path must be an absolute path starting with '/'")
+        if not _HOST_PATH_RE.match(v):
+            raise ValueError(
+                "Host path must be an absolute path starting with '/' "
+                "or a Windows drive letter (e.g. 'C:\\' or 'D:/')"
+            )
         return v
 
 
@@ -344,6 +362,9 @@ class SandboxInfo(BaseModel):
     image: SandboxImageSpec | None = Field(
         default=None, description="Image specification used to create sandbox"
     )
+    platform: PlatformSpec | None = Field(
+        default=None, description="Effective platform used for sandbox provisioning."
+    )
     metadata: dict[str, str] | None = Field(default=None, description="Custom metadata")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -355,6 +376,9 @@ class SandboxCreateResponse(BaseModel):
     """
 
     id: str = Field(description="Unique identifier of the newly created sandbox")
+    platform: PlatformSpec | None = Field(
+        default=None, description="Effective platform used for sandbox provisioning."
+    )
 
 
 class SandboxRenewResponse(BaseModel):

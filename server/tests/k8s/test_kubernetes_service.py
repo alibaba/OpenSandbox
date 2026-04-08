@@ -28,7 +28,7 @@ from opensandbox_server.services.constants import (
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SandboxErrorCodes,
 )
-from opensandbox_server.api.schema import ImageAuth, ListSandboxesRequest, NetworkPolicy
+from opensandbox_server.api.schema import ImageAuth, ListSandboxesRequest, NetworkPolicy, PlatformSpec
 from opensandbox_server.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT, EgressConfig
 from opensandbox_server.api.schema import Endpoint
 
@@ -128,6 +128,28 @@ class TestKubernetesSandboxServiceCreate:
         assert response.id is not None
         assert response.status.state == "Running"
         k8s_service.workload_provider.create_workload.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_sandbox_normalizes_allocated_status_to_running(
+        self, k8s_service, create_sandbox_request, mock_workload
+    ):
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-sandbox-123",
+            "uid": "abc-123",
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Allocated",
+            "reason": "IP_ASSIGNED",
+            "message": "Pod has IP assigned but not ready",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+
+        response = await k8s_service.create_sandbox(create_sandbox_request)
+
+        assert response.status.state == "Running"
+        assert response.status.reason == "IP_ASSIGNED"
+        assert response.status.message == "Pod has IP assigned and sandbox is ready for requests"
 
     @pytest.mark.asyncio
     async def test_create_sandbox_uses_configured_timeout_and_poll_interval(
@@ -232,7 +254,7 @@ class TestKubernetesSandboxServiceCreate:
         self, k8s_service, create_sandbox_request
     ):
         create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
-        k8s_service.app_config.egress = EgressConfig(image="opensandbox/egress:v1.0.4")
+        k8s_service.app_config.egress = EgressConfig(image="opensandbox/egress:v1.0.6")
         k8s_service.workload_provider.create_workload.return_value = {
             "name": "test-id", "uid": "uid-1"
         }
@@ -259,7 +281,7 @@ class TestKubernetesSandboxServiceCreate:
     ):
         create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
         k8s_service.app_config.egress = EgressConfig(
-            image="opensandbox/egress:v1.0.4",
+            image="opensandbox/egress:v1.0.6",
             mode=EGRESS_MODE_DNS_NFT,
         )
         k8s_service.workload_provider.create_workload.return_value = {
@@ -279,6 +301,129 @@ class TestKubernetesSandboxServiceCreate:
 
         _, kwargs = k8s_service.workload_provider.create_workload.call_args
         assert kwargs["egress_mode"] == EGRESS_MODE_DNS_NFT
+
+    @pytest.mark.asyncio
+    async def test_create_sandbox_passes_platform_to_workload_provider(
+        self, k8s_service, create_sandbox_request
+    ):
+        create_sandbox_request.platform = PlatformSpec(os="linux", arch="arm64")
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-id", "uid": "uid-1"
+        }
+        k8s_service.workload_provider.get_workload.return_value = {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "nodeSelector": {
+                            "kubernetes.io/os": "linux",
+                            "kubernetes.io/arch": "arm64",
+                        }
+                    }
+                }
+            }
+        }
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running", "reason": "", "message": "",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+
+        response = await k8s_service.create_sandbox(create_sandbox_request)
+
+        _, kwargs = k8s_service.workload_provider.create_workload.call_args
+        assert kwargs["platform"] == create_sandbox_request.platform
+        assert response.platform is not None
+        assert response.platform.os == "linux"
+        assert response.platform.arch == "arm64"
+
+    @pytest.mark.asyncio
+    async def test_create_sandbox_rejects_unsupported_platform(self, k8s_service, create_sandbox_request):
+        create_sandbox_request.platform = PlatformSpec(os="darwin", arch="arm64")
+
+        with pytest.raises(HTTPException) as exc_info:
+            await k8s_service.create_sandbox(create_sandbox_request)
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+        k8s_service.workload_provider.create_workload.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_sandbox_derives_platform_from_node_affinity(
+        self, k8s_service, create_sandbox_request
+    ):
+        create_sandbox_request.platform = None
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-id", "uid": "uid-1"
+        }
+        k8s_service.workload_provider.get_workload.return_value = {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "affinity": {
+                            "nodeAffinity": {
+                                "requiredDuringSchedulingIgnoredDuringExecution": {
+                                    "nodeSelectorTerms": [
+                                        {
+                                            "matchExpressions": [
+                                                {
+                                                    "key": "kubernetes.io/os",
+                                                    "operator": "In",
+                                                    "values": ["linux"],
+                                                },
+                                                {
+                                                    "key": "kubernetes.io/arch",
+                                                    "operator": "In",
+                                                    "values": ["arm64"],
+                                                },
+                                            ]
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running", "reason": "", "message": "",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+
+        response = await k8s_service.create_sandbox(create_sandbox_request)
+
+        assert response.platform is not None
+        assert response.platform.os == "linux"
+        assert response.platform.arch == "arm64"
+
+    @pytest.mark.asyncio
+    async def test_create_sandbox_uses_template_platform_constraints(
+        self, k8s_service, create_sandbox_request
+    ):
+        create_sandbox_request.platform = PlatformSpec(os="linux", arch="arm64")
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-id", "uid": "uid-1"
+        }
+        k8s_service.workload_provider.get_workload.return_value = {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "nodeSelector": {
+                            "kubernetes.io/os": "linux",
+                            "kubernetes.io/arch": "arm64",
+                        }
+                    }
+                }
+            }
+        }
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running", "reason": "", "message": "",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        response = await k8s_service.create_sandbox(create_sandbox_request)
+
+        assert response.platform is not None
+        assert response.platform.os == "linux"
+        assert response.platform.arch == "arm64"
 
     def test_get_endpoint_merges_egress_auth_header_from_instance_metadata(
         self, k8s_service
@@ -403,6 +548,54 @@ class TestWaitForSandboxReady:
         assert exc_info.value.status_code == 504  # Gateway Timeout
         assert "timeout" in exc_info.value.detail["message"].lower()
 
+    @pytest.mark.asyncio
+    async def test_wait_returns_400_when_scheduler_marks_platform_unschedulable(self, k8s_service, mock_workload):
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Failed",
+            "reason": "POD_PLATFORM_UNSCHEDULABLE",
+            "message": "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity.",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+
+        with pytest.raises(HTTPException) as exc_info:
+            await k8s_service._wait_for_sandbox_ready(
+                "test-sandbox-id",
+                timeout_seconds=10,
+                poll_interval_seconds=0.1,
+            )
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+        assert "unschedulable" in exc_info.value.detail["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_wait_keeps_polling_for_generic_failed_scheduling(self, k8s_service, mock_workload):
+        status_sequence = [
+            {
+                "state": "Pending",
+                "reason": "FailedScheduling",
+                "message": "0/1 nodes are available: 1 Insufficient cpu.",
+                "last_transition_at": datetime.now(timezone.utc),
+            },
+            {
+                "state": "Running",
+                "reason": "",
+                "message": "Running",
+                "last_transition_at": datetime.now(timezone.utc),
+            },
+        ]
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.side_effect = status_sequence
+
+        result = await k8s_service._wait_for_sandbox_ready(
+            "test-sandbox-id",
+            timeout_seconds=10,
+            poll_interval_seconds=0.1,
+        )
+
+        assert result == mock_workload
+
 
 class TestKubernetesSandboxServiceRenew:
     def test_renew_expiration_rejects_manual_cleanup_sandbox(self, k8s_service):
@@ -430,6 +623,16 @@ class TestGetSandbox:
         
         Purpose: Verify that existing sandbox details can be successfully retrieved
         """
+        mock_workload["spec"] = {
+            "template": {
+                "spec": {
+                    "nodeSelector": {
+                        "kubernetes.io/os": "linux",
+                        "kubernetes.io/arch": "amd64",
+                    }
+                }
+            }
+        }
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.get_status.return_value = {
             "state": "Running",
@@ -446,6 +649,9 @@ class TestGetSandbox:
         # Sandbox uses 'id' field
         assert sandbox.id == "test-sandbox-123"
         assert sandbox.status.state == "Running"
+        assert sandbox.platform is not None
+        assert sandbox.platform.os == "linux"
+        assert sandbox.platform.arch == "amd64"
     
     def test_get_nonexistent_sandbox_raises_404(self, k8s_service):
         """
@@ -460,6 +666,136 @@ class TestGetSandbox:
         
         assert exc_info.value.status_code == 404
         assert "not found" in exc_info.value.detail["message"].lower()
+
+    def test_get_sandbox_extracts_platform_from_affinity(self, k8s_service, mock_workload):
+        mock_workload["spec"] = {
+            "template": {
+                "spec": {
+                    "affinity": {
+                        "nodeAffinity": {
+                            "requiredDuringSchedulingIgnoredDuringExecution": {
+                                "nodeSelectorTerms": [
+                                    {
+                                        "matchExpressions": [
+                                            {
+                                                "key": "kubernetes.io/os",
+                                                "operator": "In",
+                                                "values": ["linux"],
+                                            },
+                                            {
+                                                "key": "kubernetes.io/arch",
+                                                "operator": "In",
+                                                "values": ["amd64"],
+                                            },
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        sandbox = k8s_service.get_sandbox("test-sandbox-123")
+
+        assert sandbox.platform is not None
+        assert sandbox.platform.os == "linux"
+        assert sandbox.platform.arch == "amd64"
+
+    def test_get_sandbox_uses_template_platform_constraints(self, k8s_service, mock_workload):
+        mock_workload["spec"] = {
+            "template": {
+                "spec": {
+                    "nodeSelector": {
+                        "kubernetes.io/os": "linux",
+                        "kubernetes.io/arch": "arm64",
+                    }
+                }
+            }
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        sandbox = k8s_service.get_sandbox("test-sandbox-123")
+
+        assert sandbox.platform is not None
+        assert sandbox.platform.os == "linux"
+        assert sandbox.platform.arch == "arm64"
+
+    def test_get_sandbox_merges_selector_and_affinity_platform_constraints(self, k8s_service, mock_workload):
+        mock_workload["spec"] = {
+            "template": {
+                "spec": {
+                    "nodeSelector": {
+                        "kubernetes.io/os": "linux",
+                    },
+                    "affinity": {
+                        "nodeAffinity": {
+                            "requiredDuringSchedulingIgnoredDuringExecution": {
+                                "nodeSelectorTerms": [
+                                    {
+                                        "matchExpressions": [
+                                            {
+                                                "key": "kubernetes.io/arch",
+                                                "operator": "In",
+                                                "values": ["arm64"],
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                }
+            }
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        sandbox = k8s_service.get_sandbox("test-sandbox-123")
+
+        assert sandbox.platform is not None
+        assert sandbox.platform.os == "linux"
+        assert sandbox.platform.arch == "arm64"
+
+    def test_get_sandbox_returns_null_platform_for_default_scheduling(self, k8s_service, mock_workload):
+        mock_workload["spec"] = {
+            "template": {
+                "spec": {
+                    # no nodeSelector/nodeAffinity constraints
+                }
+            }
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        sandbox = k8s_service.get_sandbox("test-sandbox-123")
+
+        assert sandbox.platform is None
 
 
 class TestDeleteSandbox:
@@ -632,6 +968,41 @@ class TestListSandboxes:
         # Also verify the creation times are in descending order
         for i in range(len(response.items) - 1):
             assert response.items[i].created_at >= response.items[i + 1].created_at
+
+    def test_list_sandboxes_returns_null_platform_for_default_scheduling(self, k8s_service):
+        workloads = [
+            {
+                "metadata": {
+                    "name": "sandbox-1",
+                    "uid": "uid-1",
+                    "labels": {"opensandbox.io/id": "sandbox-1"},
+                    "annotations": {},
+                    "creationTimestamp": datetime.now(timezone.utc).isoformat(),
+                },
+                "spec": {
+                    "template": {
+                        "spec": {
+                            # Default scheduling: no nodeSelector/nodeAffinity constraints.
+                        }
+                    }
+                },
+                "status": {},
+            }
+        ]
+        k8s_service.workload_provider.list_workloads.return_value = workloads
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        from opensandbox_server.api.schema import PaginationRequest
+        request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=10))
+        response = k8s_service.list_sandboxes(request)
+
+        assert len(response.items) == 1
+        assert response.items[0].platform is None
 
 
 class TestRenewExpiration:

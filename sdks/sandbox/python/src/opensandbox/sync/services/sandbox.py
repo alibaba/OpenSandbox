@@ -26,6 +26,7 @@ from typing import Protocol
 from opensandbox.models.sandboxes import (
     NetworkPolicy,
     PagedSandboxInfos,
+    PlatformSpec,
     SandboxCreateResponse,
     SandboxEndpoint,
     SandboxFilter,
@@ -55,6 +56,7 @@ class SandboxesSync(Protocol):
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
         volumes: list[Volume] | None,
+        platform: PlatformSpec | None = None,
     ) -> SandboxCreateResponse:
         """
         Create a new sandbox with the specified configuration (blocking).

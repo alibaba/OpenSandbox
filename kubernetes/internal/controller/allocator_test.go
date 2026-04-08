@@ -288,6 +288,8 @@ func TestAllocatorSchedule(t *testing.T) {
 			},
 		},
 	}
+	// Recover is called only once due to sync.Once
+	store.EXPECT().Recover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			store.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(c.poolAlloc, nil).Times(1)
@@ -344,6 +346,7 @@ func TestScheduleReturnsPendingSyncs(t *testing.T) {
 		Pool:      &sandboxv1alpha1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool1"}},
 	}
 
+	store.EXPECT().Recover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	store.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(&PoolAllocation{PodAllocation: map[string]string{}}, nil).Times(1)
 	syncer.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(&SandboxAllocation{Pods: []string{}}, nil).Times(2)
 	syncer.EXPECT().GetRelease(gomock.Any(), gomock.Any()).Return(&AllocationRelease{Pods: []string{}}, nil).Times(2)
@@ -380,6 +383,7 @@ func TestSyncSandboxAllocation(t *testing.T) {
 			return nil
 		}).Times(1)
 
+	syncer.EXPECT().GetAllocation(gomock.Any(), sandbox).Return(nil, nil).Times(1)
 	err := allocator.SyncSandboxAllocation(context.Background(), sandbox, pods)
 	assert.NoError(t, err)
 }
@@ -417,6 +421,7 @@ func TestDoAllocateIdempotency(t *testing.T) {
 		Pool:      &sandboxv1alpha1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool1"}},
 	}
 
+	store.EXPECT().Recover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	store.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(poolAlloc, nil).Times(1)
 	syncer.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(sandboxAlloc, nil).Times(1)
 	syncer.EXPECT().GetRelease(gomock.Any(), gomock.Any()).Return(release, nil).Times(1)
@@ -461,6 +466,7 @@ func TestDoAllocateSkipsAlreadyAllocatedPod(t *testing.T) {
 		Pool:      &sandboxv1alpha1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "pool1"}},
 	}
 
+	store.EXPECT().Recover(gomock.Any(), gomock.Any()).Return(nil).Times(1)
 	store.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(poolAlloc, nil).Times(1)
 	syncer.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(&SandboxAllocation{Pods: []string{"pod1"}}, nil).Times(1)
 	syncer.EXPECT().GetAllocation(gomock.Any(), gomock.Any()).Return(&SandboxAllocation{Pods: []string{}}, nil).Times(1)
@@ -487,8 +493,11 @@ func TestSyncSandboxAllocationError(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "sbx1"},
 	}
 	pods := []string{"pod1"}
+	oldPods := []string{}
 
+	syncer.EXPECT().GetAllocation(gomock.Any(), sandbox).Return(&SandboxAllocation{Pods: oldPods}, nil).Times(1)
 	syncer.EXPECT().SetAllocation(gomock.Any(), sandbox, gomock.Any()).Return(assert.AnError).Times(1)
+	store.EXPECT().UpdateAllocation(gomock.Any(), gomock.Any(), "", sandbox.Name, oldPods).Times(1)
 
 	err := allocator.SyncSandboxAllocation(context.Background(), sandbox, pods)
 	assert.Error(t, err)

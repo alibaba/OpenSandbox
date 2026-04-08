@@ -37,6 +37,7 @@ from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.models.sandboxes import (
     NetworkPolicy,
     PagedSandboxInfos,
+    PlatformSpec,
     SandboxCreateResponse,
     SandboxEndpoint,
     SandboxFilter,
@@ -96,6 +97,7 @@ class SandboxesAdapterSync(SandboxesSync):
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
         volumes: list[Volume] | None,
+        platform: PlatformSpec | None = None,
     ) -> SandboxCreateResponse:
         logger.info("Creating sandbox with image: %s", spec.image)
         try:
@@ -111,6 +113,7 @@ class SandboxesAdapterSync(SandboxesSync):
                 metadata=metadata,
                 timeout=timeout,
                 resource=resource,
+                platform=platform,
                 network_policy=network_policy,
                 extensions=extensions,
                 volumes=volumes,

@@ -188,6 +188,9 @@ internal sealed class SandboxesAdapter : ISandboxes
                     ? JsonSerializer.Deserialize<ImageAuth>(auth.GetRawText(), JsonOptions)
                     : null
             },
+            Platform = element.TryGetProperty("platform", out var platform) && platform.ValueKind == JsonValueKind.Object
+                ? JsonSerializer.Deserialize<PlatformSpec>(platform.GetRawText(), JsonOptions)
+                : null,
             Entrypoint = element.GetProperty("entrypoint").EnumerateArray().Select(e => e.GetString() ?? string.Empty).ToList(),
             Metadata = element.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object
                 ? metadata.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString() ?? string.Empty)
@@ -218,6 +221,9 @@ internal sealed class SandboxesAdapter : ISandboxes
                 Reason = status.TryGetProperty("reason", out var reason) ? reason.GetString() : null,
                 Message = status.TryGetProperty("message", out var message) ? message.GetString() : null
             },
+            Platform = element.TryGetProperty("platform", out var platform) && platform.ValueKind == JsonValueKind.Object
+                ? JsonSerializer.Deserialize<PlatformSpec>(platform.GetRawText(), JsonOptions)
+                : null,
             Metadata = element.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == JsonValueKind.Object
                 ? metadata.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString() ?? string.Empty)
                 : null,

@@ -23,7 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 from kubernetes.client import ApiException
 
-from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule
+from opensandbox_server.api.schema import ImageSpec, NetworkPolicy, NetworkRule, PlatformSpec
 from opensandbox_server.config import (
     AppConfig,
     AgentSandboxRuntimeConfig,
@@ -112,6 +112,97 @@ class TestAgentSandboxProvider:
         assert "initContainers" in body["spec"]["podTemplate"]["spec"]
         assert "containers" in body["spec"]["podTemplate"]["spec"]
         assert "volumes" in body["spec"]["podTemplate"]["spec"]
+
+    def test_create_workload_injects_platform_node_selector(self, mock_k8s_client):
+        provider = AgentSandboxProvider(mock_k8s_client, _app_config())
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={"cpu": "1", "memory": "1Gi"},
+            labels={"opensandbox.io/id": "test-id"},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="linux", arch="arm64"),
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        selector = body["spec"]["podTemplate"]["spec"]["nodeSelector"]
+        assert selector["kubernetes.io/os"] == "linux"
+        assert selector["kubernetes.io/arch"] == "arm64"
+
+    def test_create_workload_rejects_platform_conflict_with_template_selector(self, mock_k8s_client, tmp_path):
+        template_file = tmp_path / "agent_template.yaml"
+        template_file.write_text(
+            """
+spec:
+  podTemplate:
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+"""
+        )
+        app_config = _app_config()
+        app_config.agent_sandbox.template_file = str(template_file)
+        provider = AgentSandboxProvider(mock_k8s_client, app_config)
+
+        with pytest.raises(ValueError, match="platform conflict with template nodeSelector"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="python:3.11"),
+                entrypoint=["/bin/bash"],
+                env={},
+                resource_limits={"cpu": "1", "memory": "1Gi"},
+                labels={"opensandbox.io/id": "test-id"},
+                expires_at=None,
+                execd_image="execd:latest",
+                platform=PlatformSpec(os="linux", arch="arm64"),
+            )
+
+    def test_create_workload_rejects_platform_conflict_with_template_node_affinity(
+        self, mock_k8s_client, tmp_path
+    ):
+        template_file = tmp_path / "agent_template.yaml"
+        template_file.write_text(
+            """
+spec:
+  podTemplate:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64"]
+"""
+        )
+        app_config = _app_config()
+        app_config.agent_sandbox.template_file = str(template_file)
+        provider = AgentSandboxProvider(mock_k8s_client, app_config)
+
+        with pytest.raises(ValueError, match="platform conflict with template nodeAffinity"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="python:3.11"),
+                entrypoint=["/bin/bash"],
+                env={},
+                resource_limits={"cpu": "1", "memory": "1Gi"},
+                labels={"opensandbox.io/id": "test-id"},
+                expires_at=None,
+                execd_image="execd:latest",
+                platform=PlatformSpec(os="linux", arch="arm64"),
+            )
 
     def test_create_workload_sanitizes_resource_name(self, mock_k8s_client):
         """
@@ -364,6 +455,147 @@ class TestAgentSandboxProvider:
         assert result["state"] == "Allocated"
         assert result["reason"] == "IP_ASSIGNED"
 
+    def test_get_status_returns_failed_when_ready_condition_unschedulable(self):
+        provider = AgentSandboxProvider(MagicMock())
+        workload = {
+            "spec": {
+                "podTemplate": {
+                    "spec": {
+                        "nodeSelector": {
+                            "kubernetes.io/os": "linux",
+                            "kubernetes.io/arch": "arm64",
+                        }
+                    }
+                }
+            },
+            "status": {
+                "conditions": [
+                    {
+                        "type": "Ready",
+                        "status": "False",
+                        "reason": "FailedScheduling",
+                        "message": "0/1 nodes are available: 1 node(s) didn't match Pod's node affinity.",
+                        "lastTransitionTime": "2025-12-31T10:00:00Z",
+                    }
+                ]
+            },
+            "metadata": {"creationTimestamp": "2025-12-31T09:00:00Z"},
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Failed"
+        assert result["reason"] == "POD_PLATFORM_UNSCHEDULABLE"
+        assert "nodes are available" in result["message"]
+
+    def test_get_status_keeps_pending_for_generic_scheduler_backpressure(self, mock_k8s_client):
+        provider = AgentSandboxProvider(mock_k8s_client)
+        mock_k8s_client.list_pods.return_value = [
+            SimpleNamespace(
+                status=SimpleNamespace(
+                    phase="Pending",
+                    pod_ip=None,
+                    conditions=[
+                        SimpleNamespace(
+                            type="PodScheduled",
+                            status="False",
+                            reason="Unschedulable",
+                            message="0/1 nodes are available: 1 Insufficient cpu.",
+                        )
+                    ],
+                )
+            )
+        ]
+        workload = {
+            "status": {"conditions": [], "selector": "app=sandbox"},
+            "metadata": {"creationTimestamp": "2025-12-31T09:00:00Z", "namespace": "test-ns"},
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Pending"
+        assert result["reason"] in {"POD_SCHEDULED", "POD_PENDING"}
+
+    def test_get_status_keeps_pending_when_non_platform_affinity_mismatch(self, mock_k8s_client):
+        provider = AgentSandboxProvider(mock_k8s_client)
+        mock_k8s_client.list_pods.return_value = [
+            SimpleNamespace(
+                status=SimpleNamespace(
+                    phase="Pending",
+                    pod_ip=None,
+                    conditions=[
+                        SimpleNamespace(
+                            type="PodScheduled",
+                            status="False",
+                            reason="Unschedulable",
+                            message="0/1 nodes are available: 1 node(s) didn't match Pod's node affinity.",
+                        )
+                    ],
+                )
+            )
+        ]
+        workload = {
+            "spec": {
+                "podTemplate": {
+                    "spec": {
+                        "nodeSelector": {
+                            "kubernetes.io/os": "linux",
+                            "kubernetes.io/arch": "arm64",
+                            "workload-class": "gpu",
+                        }
+                    }
+                }
+            },
+            "status": {"conditions": [], "selector": "app=sandbox"},
+            "metadata": {"creationTimestamp": "2025-12-31T09:00:00Z", "namespace": "test-ns"},
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Pending"
+        assert result["reason"] in {"POD_SCHEDULED", "POD_PENDING"}
+
+    def test_get_status_keeps_pending_for_mixed_capacity_and_affinity_message(self, mock_k8s_client):
+        provider = AgentSandboxProvider(mock_k8s_client)
+        mock_k8s_client.list_pods.return_value = [
+            SimpleNamespace(
+                status=SimpleNamespace(
+                    phase="Pending",
+                    pod_ip=None,
+                    conditions=[
+                        SimpleNamespace(
+                            type="PodScheduled",
+                            status="False",
+                            reason="Unschedulable",
+                            message=(
+                                "0/2 nodes are available: 1 Insufficient cpu, "
+                                "1 node(s) didn't match Pod's node affinity/selector."
+                            ),
+                        )
+                    ],
+                )
+            )
+        ]
+        workload = {
+            "spec": {
+                "podTemplate": {
+                    "spec": {
+                        "nodeSelector": {
+                            "kubernetes.io/os": "linux",
+                            "kubernetes.io/arch": "arm64",
+                        }
+                    }
+                }
+            },
+            "status": {"conditions": [], "selector": "app=sandbox"},
+            "metadata": {"creationTimestamp": "2025-12-31T09:00:00Z", "namespace": "test-ns"},
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Pending"
+        assert result["reason"] in {"POD_SCHEDULED", "POD_PENDING"}
+
     def test_get_endpoint_info_prefers_running_pod(self, mock_k8s_client):
         """
         Test case: Verify endpoint uses running pod IP
@@ -530,7 +762,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.6",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -543,7 +775,7 @@ class TestAgentSandboxProviderEgress:
         # Find sidecar container
         sidecar = next((c for c in containers if c["name"] == "egress"), None)
         assert sidecar is not None
-        assert sidecar["image"] == "opensandbox/egress:v1.0.4"
+        assert sidecar["image"] == "opensandbox/egress:v1.0.6"
         
         # Verify sidecar has environment variable
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
@@ -580,7 +812,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=None,
             execd_image="execd:latest",
             network_policy=NetworkPolicy(default_action="deny", egress=[]),
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.6",
             annotations={SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY: "egress-token"},
             egress_auth_token="egress-token",
         )
@@ -612,7 +844,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=None,
             execd_image="execd:latest",
             network_policy=NetworkPolicy(default_action="deny", egress=[]),
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.6",
             egress_mode=EGRESS_MODE_DNS_NFT,
         )
 
@@ -649,7 +881,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.6",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -725,7 +957,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.6",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -808,7 +1040,7 @@ class TestAgentSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.6",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]

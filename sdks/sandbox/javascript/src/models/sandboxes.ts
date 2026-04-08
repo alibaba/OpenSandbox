@@ -35,6 +35,17 @@ export interface ImageSpec {
   auth?: ImageAuth;
 }
 
+export interface PlatformSpec extends Record<string, unknown> {
+  /**
+   * Target operating system for sandbox provisioning.
+   */
+  os: "linux";
+  /**
+   * Target CPU architecture for sandbox provisioning.
+   */
+  arch: "amd64" | "arm64";
+}
+
 export type ResourceLimits = Record<string, string>;
 
 export type NetworkRuleAction = "allow" | "deny";
@@ -75,6 +86,8 @@ export interface NetworkPolicy extends Record<string, unknown> {
 export interface Host extends Record<string, unknown> {
   /**
    * Absolute path on the host filesystem to mount.
+   * Must start with '/' (Unix) or a drive letter such as 'C:\' or 'D:/'
+   * (Windows), and be under an allowed prefix.
    */
   path: string;
 }
@@ -190,6 +203,7 @@ export interface SandboxStatus extends Record<string, unknown> {
 export interface SandboxInfo extends Record<string, unknown> {
   id: SandboxId;
   image: ImageSpec;
+  platform?: PlatformSpec;
   entrypoint: string[];
   metadata?: Record<string, string>;
   status: SandboxStatus;
@@ -206,6 +220,7 @@ export interface SandboxInfo extends Record<string, unknown> {
 export interface CreateSandboxRequest extends Record<string, unknown> {
   image: ImageSpec;
   entrypoint: string[];
+  platform?: PlatformSpec;
   /**
    * Timeout in seconds (server semantics).
    */
@@ -227,6 +242,7 @@ export interface CreateSandboxRequest extends Record<string, unknown> {
 export interface CreateSandboxResponse extends Record<string, unknown> {
   id: SandboxId;
   status: SandboxStatus;
+  platform?: PlatformSpec;
   metadata?: Record<string, string>;
   /**
    * Sandbox expiration time after creation.

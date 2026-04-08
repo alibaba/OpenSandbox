@@ -46,6 +46,7 @@ from opensandbox.models.sandboxes import (
     NetworkRule,
     PagedSandboxInfos,
     PaginationInfo,
+    PlatformSpec,
     SandboxCreateResponse,
     SandboxEndpoint,
     SandboxImageSpec,
@@ -143,6 +144,7 @@ class SandboxModelConverter:
         metadata: dict[str, str],
         timeout: timedelta | None,
         resource: dict[str, str],
+        platform: PlatformSpec | None,
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
         volumes: list[Volume] | None,
@@ -171,6 +173,9 @@ class SandboxModelConverter:
         )
         from opensandbox.api.lifecycle.models.network_rule_action import (
             NetworkRuleAction,
+        )
+        from opensandbox.api.lifecycle.models.platform_spec import (
+            PlatformSpec as ApiPlatformSpec,
         )
         from opensandbox.api.lifecycle.models.resource_limits import ResourceLimits
         from opensandbox.api.lifecycle.types import UNSET
@@ -220,6 +225,17 @@ class SandboxModelConverter:
             CreateSandboxRequestExtensions.from_dict(extensions) if extensions else UNSET
         )
 
+        api_platform = UNSET
+        if platform is not None:
+            # Use from_dict to support both string-backed and enum-backed
+            # generated PlatformSpec models across generator versions.
+            api_platform = ApiPlatformSpec.from_dict(
+                {
+                    "os": platform.os,
+                    "arch": platform.arch,
+                }
+            )
+
         # Convert volumes to API model
         api_volumes = UNSET
         if volumes is not None and len(volumes) > 0:
@@ -233,6 +249,7 @@ class SandboxModelConverter:
             env=api_env,
             metadata=api_metadata,
             resource_limits=api_resource_limits,
+            platform=api_platform,
             network_policy=api_network_policy,
             extensions=api_extensions,
             volumes=api_volumes,
@@ -290,13 +307,19 @@ class SandboxModelConverter:
 
         default_action: str | None = "deny"
         if not isinstance(api_policy.default_action, Unset):
-            default_action = str(api_policy.default_action.value)
+            default_action = cast(
+                Literal["allow", "deny"],
+                getattr(api_policy.default_action, "value", api_policy.default_action),
+            )
 
         egress: list[NetworkRule] | None = None
         if not isinstance(api_policy.egress, Unset):
             egress = [
                 NetworkRule(
-                    action=cast(Literal["allow", "deny"], rule.action.value),
+                    action=cast(
+                        Literal["allow", "deny"],
+                        getattr(rule.action, "value", rule.action),
+                    ),
                     target=rule.target,
                 )
                 for rule in api_policy.egress
@@ -332,10 +355,21 @@ class SandboxModelConverter:
         api_response: CreateSandboxResponse,
     ) -> SandboxCreateResponse:
         """Convert API CreateSandboxResponse to domain SandboxCreateResponse."""
+        from opensandbox.api.lifecycle.types import Unset
         from opensandbox.models.sandboxes import SandboxCreateResponse
 
+        platform: PlatformSpec | None = None
+        if hasattr(api_response, "platform") and not isinstance(api_response.platform, Unset):
+            platform = PlatformSpec.model_validate(
+                {
+                    "os": str(getattr(api_response.platform.os, "value", api_response.platform.os)),
+                    "arch": str(getattr(api_response.platform.arch, "value", api_response.platform.arch)),
+                }
+            )
+
         return SandboxCreateResponse(
-            id=str(api_response.id)
+            id=str(api_response.id),
+            platform=platform,
         )
 
     @staticmethod
@@ -380,10 +414,20 @@ class SandboxModelConverter:
         if isinstance(expires_at, Unset):
             expires_at = None
 
+        platform: PlatformSpec | None = None
+        if hasattr(api_sandbox, "platform") and not isinstance(api_sandbox.platform, Unset):
+            platform = PlatformSpec.model_validate(
+                {
+                    "os": str(getattr(api_sandbox.platform.os, "value", api_sandbox.platform.os)),
+                    "arch": str(getattr(api_sandbox.platform.arch, "value", api_sandbox.platform.arch)),
+                }
+            )
+
         return SandboxInfo(
             id=api_sandbox.id,
             status=SandboxModelConverter._convert_sandbox_status(api_sandbox.status),
             image=domain_image_spec,
+            platform=platform,
             created_at=api_sandbox.created_at,
             expires_at=expires_at,
             entrypoint=api_sandbox.entrypoint,

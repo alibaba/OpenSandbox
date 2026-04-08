@@ -19,16 +19,15 @@ import (
 	"net/netip"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 )
 
-// SetupRedirect installs OUTPUT nat redirect for DNS (udp/tcp 53 -> port).
-//
-// exemptDst: optional list of destination IPs; traffic to these is not redirected. Packets carrying mark are also RETURNed (proxy's own upstream). Requires CAP_NET_ADMIN.
-func SetupRedirect(port int, exemptDst []netip.Addr) error {
-	log.Infof("installing iptables DNS redirect: OUTPUT port 53 -> %d (mark %s bypass)", port, constants.MarkHex)
+// dnsRedirectRules returns the iptables/ip6tables argv lines for OUTPUT DNS redirect (append or delete via op).
+// op must be "-A" (append) or "-D" (delete).
+func dnsRedirectRules(port int, exemptDst []netip.Addr, op string) [][]string {
 	targetPort := strconv.Itoa(port)
 
 	var rules [][]string
@@ -37,36 +36,61 @@ func SetupRedirect(port int, exemptDst []netip.Addr) error {
 		dStr := d.String()
 		if addr.Is4() {
 			rules = append(rules,
-				[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
-				[]string{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
+				[]string{"iptables", "-t", "nat", op, "OUTPUT", "-p", "udp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
+				[]string{"iptables", "-t", "nat", op, "OUTPUT", "-p", "tcp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
 			)
 		} else {
 			rules = append(rules,
-				[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
-				[]string{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
+				[]string{"ip6tables", "-t", "nat", op, "OUTPUT", "-p", "udp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
+				[]string{"ip6tables", "-t", "nat", op, "OUTPUT", "-p", "tcp", "--dport", "53", "-d", dStr, "-j", "RETURN"},
 			)
 		}
 	}
-	// Bypass packets marked by the proxy itself (see dnsproxy dialer).
 	markAndRedirect := [][]string{
-		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
-		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
-		// Redirect all other DNS traffic to local proxy port.
-		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
-		{"iptables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
-		// IPv6 equivalents (ip6tables)
-		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
-		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
-		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
-		{"ip6tables", "-t", "nat", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
+		{"iptables", "-t", "nat", op, "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
+		{"iptables", "-t", "nat", op, "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
+		{"iptables", "-t", "nat", op, "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
+		{"iptables", "-t", "nat", op, "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
+		{"ip6tables", "-t", "nat", op, "OUTPUT", "-p", "udp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
+		{"ip6tables", "-t", "nat", op, "OUTPUT", "-p", "tcp", "--dport", "53", "-m", "mark", "--mark", constants.MarkHex, "-j", "RETURN"},
+		{"ip6tables", "-t", "nat", op, "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
+		{"ip6tables", "-t", "nat", op, "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REDIRECT", "--to-port", targetPort},
 	}
 	rules = append(rules, markAndRedirect...)
+	return rules
+}
 
+func runRedirectRules(rules [][]string) error {
 	for _, args := range rules {
 		if output, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
 			return fmt.Errorf("iptables command failed: %v (output: %s)", err, output)
 		}
 	}
+	return nil
+}
+
+// SetupRedirect installs OUTPUT nat redirect for DNS (udp/tcp 53 -> port).
+//
+// exemptDst: optional list of destination IPs; traffic to these is not redirected. Packets carrying mark are also RETURNed (proxy's own upstream). Requires CAP_NET_ADMIN.
+func SetupRedirect(port int, exemptDst []netip.Addr) error {
+	log.Infof("installing iptables DNS redirect: OUTPUT port 53 -> %d (mark %s bypass)", port, constants.MarkHex)
+	rules := dnsRedirectRules(port, exemptDst, "-A")
+	if err := runRedirectRules(rules); err != nil {
+		return err
+	}
 	log.Infof("iptables DNS redirect installed successfully")
 	return nil
+}
+
+// RemoveRedirect removes rules installed by SetupRedirect with the same port and exemptDst.
+// Deletion order is reverse of insertion. Missing rules are ignored so teardown is best-effort.
+func RemoveRedirect(port int, exemptDst []netip.Addr) {
+	rules := dnsRedirectRules(port, exemptDst, "-D")
+	for i := len(rules) - 1; i >= 0; i-- {
+		args := rules[i]
+		if output, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+			log.Warnf("iptables remove rule (ignored): %v (output: %s)", err, strings.TrimSpace(string(output)))
+		}
+	}
+	log.Infof("iptables DNS redirect removed")
 }

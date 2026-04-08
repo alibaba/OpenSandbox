@@ -31,7 +31,7 @@ from kubernetes.client import (
 
 from opensandbox_server.config import AppConfig, EGRESS_MODE_DNS
 from opensandbox_server.services.helpers import format_ingress_endpoint
-from opensandbox_server.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
+from opensandbox_server.api.schema import Endpoint, ImageSpec, NetworkPolicy, PlatformSpec, Volume
 from opensandbox_server.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from opensandbox_server.services.k8s.client import K8sClient
 from opensandbox_server.services.k8s.egress_helper import (
@@ -143,6 +143,7 @@ class AgentSandboxProvider(WorkloadProvider):
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
         volumes: Optional[List[Volume]] = None,
+        platform: Optional[PlatformSpec] = None,
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
@@ -173,6 +174,7 @@ class AgentSandboxProvider(WorkloadProvider):
 
         if self.service_account:
             pod_spec["serviceAccountName"] = self.service_account
+        self._apply_platform_node_selector(pod_spec, platform)
 
         resource_name = self._resource_name(sandbox_id)
         spec = {
@@ -204,6 +206,9 @@ class AgentSandboxProvider(WorkloadProvider):
             sandbox["spec"].pop("shutdownTime", None)
         else:
             sandbox["spec"]["shutdownTime"] = expires_at.isoformat()
+        if platform is not None:
+            merged_pod_spec = sandbox.get("spec", {}).get("podTemplate", {}).get("spec", {})
+            WorkloadProvider.ensure_platform_compatible_with_affinity(merged_pod_spec, platform)
 
         created = self.k8s_client.create_custom_object(
             group=self.group,
@@ -217,6 +222,26 @@ class AgentSandboxProvider(WorkloadProvider):
             "name": created["metadata"]["name"],
             "uid": created["metadata"]["uid"],
         }
+
+    def _apply_platform_node_selector(
+        self,
+        pod_spec: Dict[str, Any],
+        platform: Optional[PlatformSpec],
+    ) -> None:
+        if platform is None:
+            return
+
+        template = self.template_manager.get_base_template()
+        template_spec = (
+            template.get("spec", {})
+            .get("podTemplate", {})
+            .get("spec", {})
+        )
+        WorkloadProvider.apply_platform_node_selector(
+            pod_spec=pod_spec,
+            template_spec=template_spec if isinstance(template_spec, dict) else {},
+            platform=platform,
+        )
 
     def _build_pod_spec(
         self,
@@ -508,11 +533,23 @@ class AgentSandboxProvider(WorkloadProvider):
         reason = ready_condition.get("reason")
         message = ready_condition.get("message")
         last_transition_at = ready_condition.get("lastTransitionTime") or creation_timestamp
+        has_platform_constraints, has_non_platform_constraints = (
+            self._workload_platform_constraint_scope(workload)
+        )
 
         if cond_status == "True":
             state = "Running"
         elif reason == "SandboxExpired":
             state = "Terminated"
+        elif cond_status == "False" and self.is_platform_unschedulable(
+            reason,
+            message,
+            has_platform_constraints,
+            has_non_platform_constraints,
+        ):
+            state = "Failed"
+            reason = "POD_PLATFORM_UNSCHEDULABLE"
+            message = message or "Pod scheduling constraints cannot be satisfied."
         elif cond_status == "False":
             state = "Pending"
         else:
@@ -548,15 +585,37 @@ class AgentSandboxProvider(WorkloadProvider):
         except Exception:
             return None
 
+        has_platform_constraints, has_non_platform_constraints = (
+            self._workload_platform_constraint_scope(workload)
+        )
         for pod in pods:
-            if pod.status:
-                if pod.status.pod_ip and pod.status.phase == "Running":
+            unschedulable_message = self._extract_platform_unschedulable_message_from_pod(
+                pod,
+                has_platform_constraints,
+                has_non_platform_constraints,
+            )
+            if unschedulable_message:
+                return ("Failed", "POD_PLATFORM_UNSCHEDULABLE", unschedulable_message)
+
+            pod_status = pod.get("status") if isinstance(pod, dict) else getattr(pod, "status", None)
+            if pod_status:
+                pod_ip = (
+                    pod_status.get("podIP")
+                    if isinstance(pod_status, dict)
+                    else getattr(pod_status, "pod_ip", None)
+                )
+                pod_phase = (
+                    pod_status.get("phase")
+                    if isinstance(pod_status, dict)
+                    else getattr(pod_status, "phase", None)
+                )
+                if pod_ip and pod_phase == "Running":
                     return (
                         "Running",
                         "POD_READY",
                         "Pod is running with IP assigned",
                     )
-                if pod.status.pod_ip:
+                if pod_ip:
                     return (
                         "Allocated",
                         "IP_ASSIGNED",
@@ -571,6 +630,96 @@ class AgentSandboxProvider(WorkloadProvider):
         if pods:
             return ("Pending", "POD_PENDING", "Pod is pending")
 
+        return None
+
+    @staticmethod
+    def _workload_has_platform_constraints(workload: Dict[str, Any]) -> bool:
+        has_platform_constraints, _ = AgentSandboxProvider._workload_platform_constraint_scope(workload)
+        return has_platform_constraints
+
+    @staticmethod
+    def _workload_platform_constraint_scope(workload: Dict[str, Any]) -> tuple[bool, bool]:
+        pod_spec = (
+            workload.get("spec", {})
+            .get("podTemplate", {})
+            .get("spec", {})
+        )
+        return AgentSandboxProvider.analyze_platform_constraints_in_pod_spec(pod_spec)
+
+    def _extract_platform_unschedulable_message_from_pod(
+        self,
+        pod: Any,
+        workload_has_platform_constraints: bool,
+        workload_has_non_platform_constraints: bool,
+    ) -> Optional[str]:
+        if not workload_has_platform_constraints:
+            return None
+        pod_status = pod.get("status") if isinstance(pod, dict) else getattr(pod, "status", None)
+        if pod_status is None:
+            return None
+        conditions = (
+            pod_status.get("conditions", [])
+            if isinstance(pod_status, dict)
+            else getattr(pod_status, "conditions", []) or []
+        )
+        for condition in conditions:
+            condition_type = (
+                condition.get("type")
+                if isinstance(condition, dict)
+                else getattr(condition, "type", None)
+            )
+            condition_status = (
+                condition.get("status")
+                if isinstance(condition, dict)
+                else getattr(condition, "status", None)
+            )
+            condition_reason = (
+                condition.get("reason")
+                if isinstance(condition, dict)
+                else getattr(condition, "reason", None)
+            )
+            condition_message = (
+                condition.get("message")
+                if isinstance(condition, dict)
+                else getattr(condition, "message", None)
+            )
+            if (
+                condition_type == "PodScheduled"
+                and str(condition_status).lower() == "false"
+                and self.is_platform_unschedulable(
+                    condition_reason,
+                    condition_message,
+                    workload_has_platform_constraints,
+                    workload_has_non_platform_constraints,
+                )
+            ):
+                return (
+                    condition_message
+                    if isinstance(condition_message, str) and condition_message
+                    else "Pod scheduling constraints cannot be satisfied."
+                )
+
+        pod_reason = (
+            pod_status.get("reason")
+            if isinstance(pod_status, dict)
+            else getattr(pod_status, "reason", None)
+        )
+        pod_message = (
+            pod_status.get("message")
+            if isinstance(pod_status, dict)
+            else getattr(pod_status, "message", None)
+        )
+        if self.is_platform_unschedulable(
+            pod_reason,
+            pod_message,
+            workload_has_platform_constraints,
+            workload_has_non_platform_constraints,
+        ):
+            return (
+                pod_message
+                if isinstance(pod_message, str) and pod_message
+                else "Pod scheduling constraints cannot be satisfied."
+            )
         return None
 
     def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[Endpoint]:

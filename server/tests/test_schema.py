@@ -22,6 +22,7 @@ from opensandbox_server.api.schema import (
     Host,
     ImageSpec,
     OSSFS,
+    PlatformSpec,
     PVC,
     ResourceLimits,
     Volume,
@@ -40,6 +41,11 @@ class TestHost:
         """Valid absolute path should be accepted."""
         backend = Host(path="/data/opensandbox")
         assert backend.path == "/data/opensandbox"
+
+    def test_valid_windows_path(self):
+        """Windows absolute drive path should be accepted."""
+        backend = Host(path=r"D:\sandbox-mnt\ReMe")
+        assert backend.path == r"D:\sandbox-mnt\ReMe"
 
     def test_path_required(self):
         """Path field should be required."""
@@ -414,6 +420,19 @@ class TestCreateSandboxRequestWithVolumes:
         assert request.volumes is not None
         assert len(request.volumes) == 2
 
+    def test_request_with_platform(self):
+        """Request with platform should be valid."""
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=3600,
+            platform=PlatformSpec(os="linux", arch="arm64"),
+            resource_limits=ResourceLimits({"cpu": "500m", "memory": "512Mi"}),
+            entrypoint=["python", "-c", "print('hello')"],
+        )
+        assert request.platform is not None
+        assert request.platform.os == "linux"
+        assert request.platform.arch == "arm64"
+
     def test_serialization_with_volumes(self):
         """Request with volumes should serialize correctly."""
         request = CreateSandboxRequest(
@@ -480,6 +499,20 @@ class TestCreateSandboxRequestWithVolumes:
         assert request.volumes[1].pvc.claim_name == "shared-models-pvc"
         assert request.volumes[1].mount_path == "/mnt/models"
         assert request.volumes[1].read_only is True
+
+    def test_deserialization_with_platform(self):
+        """Request with platform should deserialize correctly."""
+        data = {
+            "image": {"uri": "python:3.11"},
+            "platform": {"os": "linux", "arch": "amd64"},
+            "timeout": 3600,
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+            "entrypoint": ["python", "-c", "print('hello')"],
+        }
+        request = CreateSandboxRequest.model_validate(data)
+        assert request.platform is not None
+        assert request.platform.os == "linux"
+        assert request.platform.arch == "amd64"
 
     def test_request_rejects_zero_timeout(self):
         """Zero timeout should still be rejected."""

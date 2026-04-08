@@ -516,20 +516,11 @@ func getSandboxAllocation(obj kclient.Object) (*SandboxAllocation, error) {
 }
 
 func getPoolAllocation(pool *sandboxv1alpha1.Pool) (*PoolAllocation, error) {
-	allocation := &PoolAllocation{}
-	anno := pool.GetAnnotations()
-	if anno == nil {
-		return allocation, nil
-	}
-	str, ok := anno[AnnoPoolAllocStatusKey]
-	if !ok {
-		return allocation, nil
-	}
-	err := json.Unmarshal([]byte(str), allocation)
-	if err != nil {
+	store := NewInMemoryAllocationStore()
+	if err := store.Recover(ctx, k8sClient); err != nil {
 		return nil, err
 	}
-	return allocation, nil
+	return store.GetAllocation(ctx, pool)
 }
 
 var _ = Describe("Pool deletion and recreation", func() {
@@ -646,6 +637,112 @@ var _ = Describe("Pool deletion and recreation", func() {
 				cnt := min(pool.Spec.CapacitySpec.PoolMax, pool.Spec.CapacitySpec.BufferMin)
 				g.Expect(pool.Status.ObservedGeneration).To(Equal(pool.Generation))
 				g.Expect(pool.Status.Total).To(Equal(cnt), "new Pool should have correct total pod count")
+			}, timeout, interval).Should(Succeed())
+		})
+
+		It("should clear allocation when recreating a Pool with the same name", func() {
+			By("setting pool pods to running state")
+			pool := &sandboxv1alpha1.Pool{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, pool)).To(Succeed())
+			pods := &v1.PodList{}
+			Expect(k8sClient.List(ctx, pods, &kclient.ListOptions{
+				Namespace:     typeNamespacedName.Namespace,
+				FieldSelector: fields.SelectorFromSet(fields.Set{fieldindex.IndexNameForOwnerRefUID: string(pool.UID)}),
+			})).To(Succeed())
+			// Mock pod running
+			for _, pod := range pods.Items {
+				pod.Status.Phase = v1.PodRunning
+				Expect(k8sClient.Status().Update(ctx, &pod)).To(Succeed())
+			}
+
+			By("creating a BatchSandbox to allocate pods from the pool")
+
+			bsbxNamespaceName := types.NamespacedName{
+				Name:      "batch-sandbox-recreate-test-" + rand.String(8),
+				Namespace: typeNamespacedName.Namespace,
+			}
+			batchSandbox := &sandboxv1alpha1.BatchSandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      bsbxNamespaceName.Name,
+					Namespace: bsbxNamespaceName.Namespace,
+				},
+				Spec: sandboxv1alpha1.BatchSandboxSpec{
+					Replicas: ptr.To(int32(1)),
+					PoolRef:  typeNamespacedName.Name,
+				},
+			}
+			Expect(k8sClient.Create(ctx, batchSandbox)).To(Succeed())
+
+			By("waiting for allocation to complete")
+			var allocatedPod string
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, bsbxNamespaceName, batchSandbox)).To(Succeed())
+				alloc, err := getSandboxAllocation(batchSandbox)
+				Expect(err).NotTo(HaveOccurred())
+				g.Expect(alloc.Pods).NotTo(BeEmpty())
+				allocatedPod = alloc.Pods[0]
+			}, timeout, interval).Should(Succeed())
+
+			By("verifying pool allocation exists")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, pool)).To(Succeed())
+			allocation, err := getPoolAllocation(pool)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(len(allocation.PodAllocation)).To(Equal(1))
+			Expect(allocation.PodAllocation[allocatedPod]).To(Equal(batchSandbox.Name))
+
+			By("deleting the BatchSandbox")
+			Expect(k8sClient.Delete(ctx, batchSandbox)).To(Succeed())
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, bsbxNamespaceName, batchSandbox)
+				g.Expect(errors.IsNotFound(err)).To(BeTrue())
+			}, timeout, interval).Should(Succeed())
+
+			By("deleting the Pool")
+			Expect(k8sClient.Get(ctx, typeNamespacedName, pool)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, pool)).To(Succeed())
+
+			By("waiting for the Pool to be fully deleted")
+			Eventually(func(g Gomega) {
+				pool := &sandboxv1alpha1.Pool{}
+				err := k8sClient.Get(ctx, typeNamespacedName, pool)
+				g.Expect(errors.IsNotFound(err)).To(BeTrue(), "Pool should be deleted")
+			}, timeout, interval).Should(Succeed())
+
+			By("recreating a Pool with the same name")
+			newPool := &sandboxv1alpha1.Pool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      typeNamespacedName.Name,
+					Namespace: typeNamespacedName.Namespace,
+				},
+				Spec: sandboxv1alpha1.PoolSpec{
+					Template: &v1.PodTemplateSpec{
+						Spec: v1.PodSpec{
+							Containers: []v1.Container{
+								{
+									Name:  "main",
+									Image: "example.com",
+								},
+							},
+						},
+					},
+					CapacitySpec: sandboxv1alpha1.CapacitySpec{
+						PoolMin:   0,
+						PoolMax:   2,
+						BufferMin: 1,
+						BufferMax: 1,
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, newPool)).To(Succeed())
+
+			By("verifying the new Pool has empty allocation")
+			Eventually(func(g Gomega) {
+				pool := &sandboxv1alpha1.Pool{}
+				err := k8sClient.Get(ctx, typeNamespacedName, pool)
+				g.Expect(err).NotTo(HaveOccurred())
+				allocation, err := getPoolAllocation(pool)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(len(allocation.PodAllocation)).To(Equal(0), "new Pool should have empty allocation, not reuse old allocation")
 			}, timeout, interval).Should(Succeed())
 		})
 	})

@@ -15,10 +15,11 @@
 import pytest
 from fastapi import HTTPException
 
-from opensandbox_server.api.schema import Host, OSSFS, PVC, Volume
+from opensandbox_server.api.schema import Host, OSSFS, PVC, Volume, PlatformSpec
 from opensandbox_server.services.constants import SandboxErrorCodes
 from opensandbox_server.services.validators import (
     ensure_metadata_labels,
+    ensure_platform_valid,
     ensure_timeout_within_limit,
     ensure_valid_host_path,
     ensure_valid_mount_path,
@@ -27,6 +28,22 @@ from opensandbox_server.services.validators import (
     ensure_valid_volume_name,
     ensure_volumes_valid,
 )
+
+
+def test_ensure_platform_valid_rejects_windows_until_runtime_support_ready():
+    platform = PlatformSpec(os="windows", arch="amd64")
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_platform_valid(platform)
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+
+
+def test_ensure_platform_valid_rejects_unsupported_os():
+    platform = PlatformSpec(os="darwin", arch="amd64")
+    with pytest.raises(HTTPException) as exc_info:
+        ensure_platform_valid(platform)
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
 
 
 def test_ensure_metadata_labels_accepts_common_k8s_forms():
@@ -327,6 +344,16 @@ class TestEnsureValidHostPath:
         ensure_valid_host_path("/data/opensandbox")
         ensure_valid_host_path("/tmp")
 
+    def test_valid_windows_absolute_path(self):
+        """Windows absolute paths should be valid."""
+        ensure_valid_host_path(r"D:\sandbox-mnt\ReMe")
+        ensure_valid_host_path("D:/sandbox-mnt/ReMe")
+
+    def test_valid_windows_drive_root(self):
+        """Windows drive roots should be valid absolute paths."""
+        ensure_valid_host_path("D:\\")
+        ensure_valid_host_path("D:/")
+
     def test_empty_path_raises(self):
         """Empty path should raise HTTPException."""
         with pytest.raises(HTTPException) as exc_info:
@@ -365,6 +392,17 @@ class TestEnsureValidHostPath:
         """Exact prefix match should be valid."""
         allowed = ["/data/opensandbox"]
         ensure_valid_host_path("/data/opensandbox", allowed)
+
+    def test_allowed_prefix_match_windows_paths(self):
+        """Windows paths under an allowed Windows prefix should be valid."""
+        allowed = [r"D:\sandbox-mnt"]
+        ensure_valid_host_path(r"D:\sandbox-mnt\ReMe", allowed)
+        ensure_valid_host_path("D:/sandbox-mnt/ReMe", allowed)
+
+    def test_allowed_prefix_match_windows_paths_is_case_insensitive_for_drive(self):
+        """Drive-letter casing differences should not break allowlist checks."""
+        allowed = ["D:/sandbox-mnt"]
+        ensure_valid_host_path("d:/sandbox-mnt/ReMe", allowed)
 
     def test_path_not_in_allowed_prefix_raises(self):
         """Paths not under allowed prefixes should raise HTTPException."""

@@ -41,6 +41,7 @@ from opensandbox_server.api.schema import (
     RenewSandboxExpirationResponse,
     Sandbox,
     SandboxStatus,
+    PlatformSpec,
 )
 from opensandbox_server.config import AppConfig, EGRESS_MODE_DNS, get_config
 from opensandbox_server.services.constants import (
@@ -61,6 +62,7 @@ from opensandbox_server.services.validators import (
     ensure_egress_configured,
     ensure_future_expiration,
     ensure_metadata_labels,
+    ensure_platform_valid,
     ensure_timeout_within_limit,
     ensure_volumes_valid,
 )
@@ -185,7 +187,9 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     continue
                 
                 # Get status
-                status_info = self.workload_provider.get_status(workload)
+                status_info = self._normalize_create_status(
+                    self.workload_provider.get_status(workload)
+                )
                 current_state = status_info["state"]
                 current_message = status_info["message"]
                 
@@ -200,6 +204,17 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 # Check if Running or Allocated (IP assigned)
                 if current_state in ("Running", "Allocated"):
                     return workload
+                if self._is_unschedulable_status(status_info):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "code": SandboxErrorCodes.INVALID_PARAMETER,
+                            "message": (
+                                f"Sandbox {sandbox_id} is unschedulable: "
+                                f"{current_message or status_info.get('reason') or 'no scheduler details'}"
+                            ),
+                        },
+                    )
                 
             except HTTPException:
                 raise
@@ -224,6 +239,22 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 ),
             },
         )
+
+    @staticmethod
+    def _normalize_create_status(status_info: Dict[str, Any]) -> Dict[str, Any]:
+        if status_info.get("state") != "Allocated":
+            return status_info
+
+        return {
+            **status_info,
+            "state": "Running",
+            "message": "Pod has IP assigned and sandbox is ready for requests",
+        }
+    
+    @staticmethod
+    def _is_unschedulable_status(status_info: Dict[str, Any]) -> bool:
+        reason = str(status_info.get("reason") or "")
+        return reason == "POD_PLATFORM_UNSCHEDULABLE"
     
     def _ensure_network_policy_support(self, request: CreateSandboxRequest) -> None:
         """
@@ -273,6 +304,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         # Validate request
         ensure_entrypoint(request.entrypoint)
         ensure_metadata_labels(request.metadata)
+        ensure_platform_valid(request.platform)
         ensure_timeout_within_limit(
             request.timeout,
             self.app_config.server.max_sandbox_timeout_seconds,
@@ -346,6 +378,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 egress_auth_token=egress_auth_token,
                 egress_mode=egress_mode,
                 volumes=request.volumes,
+                platform=request.platform,
             )
             
             logger.info(
@@ -363,7 +396,10 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 )
                 
                 # Get final status
-                status_info = self.workload_provider.get_status(workload)
+                status_info = self._normalize_create_status(
+                    self.workload_provider.get_status(workload)
+                )
+                effective_platform = self._extract_platform_from_workload(workload)
                 
                 # Build and return response with Running state
                 return CreateSandboxResponse(
@@ -377,8 +413,8 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     created_at=created_at,
                     expires_at=expires_at,
                     metadata=request.metadata,
-                    image=request.image,
                     entrypoint=request.entrypoint,
+                    platform=effective_platform or request.platform,
                 )
                 
             except HTTPException as e:
@@ -475,7 +511,8 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             
             # Convert to Sandbox objects
             sandboxes = [
-                self._build_sandbox_from_workload(w) for w in workloads
+                self._build_sandbox_from_workload(w)
+                for w in workloads
             ]
             
             # Apply filters
@@ -770,7 +807,10 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             return annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
         return None
 
-    def _build_sandbox_from_workload(self, workload: Any) -> Sandbox:
+    def _build_sandbox_from_workload(
+        self,
+        workload: Any,
+    ) -> Sandbox:
         """
         Build Sandbox object from Kubernetes workload.
         
@@ -827,6 +867,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 entrypoint = container.command or []
         
         image_spec = ImageSpec(uri=image_uri) if image_uri else ImageSpec(uri="unknown")
+        platform_spec = self._extract_platform_from_workload(workload)
         
         return Sandbox(
             id=sandbox_id,
@@ -841,7 +882,152 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             metadata=user_metadata if user_metadata else None,
             image=image_spec,
             entrypoint=entrypoint,
+            platform=platform_spec,
         )
+
+    def _extract_platform_from_workload(
+        self,
+        workload: Any,
+    ) -> Optional[PlatformSpec]:
+        if isinstance(workload, dict):
+            spec = workload.get("spec", {})
+            pod_spec = (
+                spec.get("template", {}).get("spec")
+                or spec.get("podTemplate", {}).get("spec")
+                or {}
+            )
+        else:
+            spec = getattr(workload, "spec", None)
+            template = getattr(spec, "template", None)
+            pod_template = getattr(spec, "pod_template", None)
+            pod_spec = (
+                getattr(template, "spec", None)
+                or getattr(pod_template, "spec", None)
+                or {}
+            )
+
+        node_selector = (
+            pod_spec.get("nodeSelector", {})
+            if isinstance(pod_spec, dict)
+            else getattr(pod_spec, "node_selector", {}) or {}
+        )
+        if not isinstance(node_selector, dict):
+            return None
+
+        os_value = node_selector.get("kubernetes.io/os")
+        arch_value = node_selector.get("kubernetes.io/arch")
+        os_constraint = os_value if isinstance(os_value, str) and os_value else None
+        arch_constraint = arch_value if isinstance(arch_value, str) and arch_value else None
+
+        affinity = (
+            pod_spec.get("affinity")
+            if isinstance(pod_spec, dict)
+            else getattr(pod_spec, "affinity", None)
+        )
+        if os_constraint is None:
+            os_constraint = self._extract_platform_value_from_affinity(
+                affinity,
+                "kubernetes.io/os",
+            )
+        if arch_constraint is None:
+            arch_constraint = self._extract_platform_value_from_affinity(
+                affinity,
+                "kubernetes.io/arch",
+            )
+
+        if os_constraint and arch_constraint:
+            return PlatformSpec(os=os_constraint, arch=arch_constraint)
+        return None
+
+    @staticmethod
+    def _extract_platform_from_affinity(affinity: Any) -> Optional[PlatformSpec]:
+        os_value = KubernetesSandboxService._extract_platform_value_from_affinity(
+            affinity,
+            "kubernetes.io/os",
+        )
+        arch_value = KubernetesSandboxService._extract_platform_value_from_affinity(
+            affinity,
+            "kubernetes.io/arch",
+        )
+        if not os_value or not arch_value:
+            return None
+        return PlatformSpec(os=os_value, arch=arch_value)
+
+    @staticmethod
+    def _extract_platform_value_from_affinity(
+        affinity: Any,
+        key: str,
+    ) -> Optional[str]:
+        if affinity is None:
+            return None
+        node_affinity = (
+            affinity.get("nodeAffinity")
+            if isinstance(affinity, dict)
+            else getattr(affinity, "node_affinity", None)
+        )
+        if node_affinity is None:
+            return None
+        required = (
+            node_affinity.get("requiredDuringSchedulingIgnoredDuringExecution")
+            if isinstance(node_affinity, dict)
+            else getattr(
+                node_affinity,
+                "required_during_scheduling_ignored_during_execution",
+                None,
+            )
+        )
+        if required is None:
+            return None
+        terms = (
+            required.get("nodeSelectorTerms", [])
+            if isinstance(required, dict)
+            else getattr(required, "node_selector_terms", []) or []
+        )
+        if not isinstance(terms, list) or not terms:
+            return None
+
+        inferred: Optional[str] = None
+        for term in terms:
+            expressions = (
+                term.get("matchExpressions", [])
+                if isinstance(term, dict)
+                else getattr(term, "match_expressions", []) or []
+            )
+            if not isinstance(expressions, list):
+                return None
+            term_value: Optional[str] = None
+            for expr in expressions:
+                expr_key = (
+                    expr.get("key")
+                    if isinstance(expr, dict)
+                    else getattr(expr, "key", None)
+                )
+                if expr_key != key:
+                    continue
+                operator = (
+                    expr.get("operator")
+                    if isinstance(expr, dict)
+                    else getattr(expr, "operator", None)
+                )
+                values = (
+                    expr.get("values", [])
+                    if isinstance(expr, dict)
+                    else getattr(expr, "values", []) or []
+                )
+                if operator != "In" or not isinstance(values, list) or len(values) != 1:
+                    return None
+                value = values[0]
+                if not isinstance(value, str) or not value:
+                    return None
+                term_value = value
+                break
+            if term_value is None:
+                return None
+            if inferred is None:
+                inferred = term_value
+            elif inferred != term_value:
+                return None
+        return inferred
     
     def _apply_filters(self, sandboxes: list[Sandbox], filter_spec: Any) -> list[Sandbox]:
         """

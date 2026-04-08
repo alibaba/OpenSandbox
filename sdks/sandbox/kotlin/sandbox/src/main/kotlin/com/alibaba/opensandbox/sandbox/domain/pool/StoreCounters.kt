@@ -21,6 +21,6 @@ package com.alibaba.opensandbox.sandbox.domain.pool
  *
  * @property idleCount Number of sandbox IDs currently in the idle set.
  */
-data class StoreCounters(
+class StoreCounters(
     val idleCount: Int,
 )

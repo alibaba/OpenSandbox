@@ -31,7 +31,7 @@ from kubernetes.client import (
 
 from opensandbox_server.config import AppConfig, EGRESS_MODE_DNS, INGRESS_MODE_GATEWAY
 from opensandbox_server.services.helpers import format_ingress_endpoint
-from opensandbox_server.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
+from opensandbox_server.api.schema import Endpoint, ImageSpec, NetworkPolicy, PlatformSpec, Volume
 from opensandbox_server.services.k8s.image_pull_secret_helper import (
     build_image_pull_secret,
     build_image_pull_secret_name,
@@ -122,6 +122,7 @@ class BatchSandboxProvider(WorkloadProvider):
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
         volumes: Optional[List[Volume]] = None,
+        platform: Optional[PlatformSpec] = None,
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
@@ -169,6 +170,11 @@ class BatchSandboxProvider(WorkloadProvider):
 
         # If poolRef is provided and not empty, create workload from pool
         if extensions.get("poolRef"):
+            if platform is not None:
+                raise ValueError(
+                    "platform is not supported together with extensions.poolRef yet. "
+                    "Pool-level platform modeling is not available in this iteration."
+                )
             # Pool mode does not support volumes
             if volumes:
                 raise ValueError(
@@ -223,6 +229,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 }
             ],
         }
+        self._apply_platform_node_selector(pod_spec, platform)
 
         # Inject runtimeClassName if secure runtime is configured
         if self.runtime_class:
@@ -274,6 +281,9 @@ class BatchSandboxProvider(WorkloadProvider):
         else:
             batchsandbox["spec"]["expireTime"] = expires_at.isoformat()
         self._merge_pod_spec_extras(batchsandbox, extra_volumes, extra_mounts)
+        if platform is not None:
+            merged_pod_spec = batchsandbox.get("spec", {}).get("template", {}).get("spec", {})
+            WorkloadProvider.ensure_platform_compatible_with_affinity(merged_pod_spec, platform)
         
         # Create BatchSandbox
         created = self.k8s_client.create_custom_object(
@@ -316,6 +326,26 @@ class BatchSandboxProvider(WorkloadProvider):
             "name": created["metadata"]["name"],
             "uid": created["metadata"]["uid"],
         }
+
+    def _apply_platform_node_selector(
+        self,
+        pod_spec: Dict[str, Any],
+        platform: Optional[PlatformSpec],
+    ) -> None:
+        if platform is None:
+            return
+
+        template = self.template_manager.get_base_template()
+        template_spec = (
+            template.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+        )
+        WorkloadProvider.apply_platform_node_selector(
+            pod_spec=pod_spec,
+            template_spec=template_spec if isinstance(template_spec, dict) else {},
+            platform=platform,
+        )
     
     def _create_workload_from_pool(
         self,
@@ -796,6 +826,126 @@ class BatchSandboxProvider(WorkloadProvider):
             pass
         return None
 
+    @staticmethod
+    def _workload_has_platform_constraints(workload: Dict[str, Any]) -> bool:
+        has_platform_constraints, _ = BatchSandboxProvider._workload_platform_constraint_scope(workload)
+        return has_platform_constraints
+
+    @staticmethod
+    def _workload_platform_constraint_scope(workload: Dict[str, Any]) -> tuple[bool, bool]:
+        pod_spec = (
+            workload.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+        )
+        return BatchSandboxProvider.analyze_platform_constraints_in_pod_spec(pod_spec)
+
+    def _extract_platform_unschedulable_message_from_pod(
+        self,
+        pod: Any,
+        workload_has_platform_constraints: bool,
+        workload_has_non_platform_constraints: bool,
+    ) -> Optional[str]:
+        if not workload_has_platform_constraints:
+            return None
+        pod_status = pod.get("status") if isinstance(pod, dict) else getattr(pod, "status", None)
+        if pod_status is None:
+            return None
+
+        conditions = (
+            pod_status.get("conditions", [])
+            if isinstance(pod_status, dict)
+            else getattr(pod_status, "conditions", []) or []
+        )
+        for condition in conditions:
+            condition_type = (
+                condition.get("type")
+                if isinstance(condition, dict)
+                else getattr(condition, "type", None)
+            )
+            condition_status = (
+                condition.get("status")
+                if isinstance(condition, dict)
+                else getattr(condition, "status", None)
+            )
+            condition_reason = (
+                condition.get("reason")
+                if isinstance(condition, dict)
+                else getattr(condition, "reason", None)
+            )
+            condition_message = (
+                condition.get("message")
+                if isinstance(condition, dict)
+                else getattr(condition, "message", None)
+            )
+            if (
+                condition_type == "PodScheduled"
+                and str(condition_status).lower() == "false"
+                and self.is_platform_unschedulable(
+                    condition_reason,
+                    condition_message,
+                    workload_has_platform_constraints,
+                    workload_has_non_platform_constraints,
+                )
+            ):
+                return (
+                    condition_message
+                    if isinstance(condition_message, str) and condition_message
+                    else "Pod scheduling constraints cannot be satisfied."
+                )
+
+        pod_reason = (
+            pod_status.get("reason")
+            if isinstance(pod_status, dict)
+            else getattr(pod_status, "reason", None)
+        )
+        pod_message = (
+            pod_status.get("message")
+            if isinstance(pod_status, dict)
+            else getattr(pod_status, "message", None)
+        )
+        if self.is_platform_unschedulable(
+            pod_reason,
+            pod_message,
+            workload_has_platform_constraints,
+            workload_has_non_platform_constraints,
+        ):
+            return (
+                pod_message
+                if isinstance(pod_message, str) and pod_message
+                else "Pod scheduling constraints cannot be satisfied."
+            )
+        return None
+
+    def _platform_unschedulable_message_from_selector(self, workload: Dict[str, Any]) -> Optional[str]:
+        workload_has_platform_constraints, workload_has_non_platform_constraints = (
+            self._workload_platform_constraint_scope(workload)
+        )
+        if not workload_has_platform_constraints:
+            return None
+        status = workload.get("status", {})
+        selector = status.get("selector")
+        namespace = workload.get("metadata", {}).get("namespace")
+        if not selector or not namespace:
+            return None
+        try:
+            pods = self.k8s_client.list_pods(
+                namespace=namespace,
+                label_selector=selector,
+            )
+        except Exception:
+            return None
+
+        for pod in pods:
+            message = self._extract_platform_unschedulable_message_from_pod(
+                pod,
+                workload_has_platform_constraints,
+                workload_has_non_platform_constraints,
+            )
+            if message:
+                return message
+        return None
+
     def get_status(self, workload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Get status from BatchSandbox.
@@ -825,14 +975,20 @@ class BatchSandboxProvider(WorkloadProvider):
             reason = "IP_ASSIGNED"
             message = f"Pod has IP assigned but not ready ({allocated}/{replicas} allocated, {ready} ready)"
         else:
+            unschedulable_message = self._platform_unschedulable_message_from_selector(workload)
+            if unschedulable_message:
+                state = "Failed"
+                reason = "POD_PLATFORM_UNSCHEDULABLE"
+                message = unschedulable_message
+            else:
             # Pod is not allocated yet or allocated but no IP
-            state = "Pending"
-            reason = "POD_SCHEDULED" if allocated > 0 else "BATCHSANDBOX_PENDING"
-            message = (
-                f"Pod is scheduled but waiting for IP ({allocated}/{replicas} allocated, {ready} ready)"
-                if allocated > 0
-                else "BatchSandbox is pending allocation"
-            )
+                state = "Pending"
+                reason = "POD_SCHEDULED" if allocated > 0 else "BATCHSANDBOX_PENDING"
+                message = (
+                    f"Pod is scheduled but waiting for IP ({allocated}/{replicas} allocated, {ready} ready)"
+                    if allocated > 0
+                    else "BatchSandbox is pending allocation"
+                )
         
         # Get creation timestamp
         creation_timestamp = workload.get("metadata", {}).get("creationTimestamp")

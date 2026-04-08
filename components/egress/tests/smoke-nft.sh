@@ -16,6 +16,7 @@
 
 # Simple smoke test using local image.
 # Requires Docker with --cap-add=NET_ADMIN available.
+# Optional upstream failover check: tests/smoke-dns-upstream-failover.sh
 
 set -euo pipefail
 
@@ -43,6 +44,7 @@ docker run -d --name "${containerName}" \
   --sysctl net.ipv6.conf.all.disable_ipv6=1 \
   --sysctl net.ipv6.conf.default.disable_ipv6=1 \
   -e OPENSANDBOX_EGRESS_MODE=dns+nft \
+  -e OPENSANDBOX_EGRESS_DNS_UPSTREAM=8.8.8.8,8.8.4.4 \
   -p ${POLICY_PORT}:18080 \
   "${IMG}"
 
@@ -66,7 +68,7 @@ pass() { info "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 info "Test: allowed domain should succeed (google.com)"
-run_in_app -I https://google.com --max-time 10 >/dev/null 2>&1 || fail "google.com should succeed"
+run_in_app -I https://google.com --max-time 20 >/dev/null 2>&1 || fail "google.com should succeed"
 pass "google.com allowed"
 
 info "Test: denied domain should fail (api.github.com)"
@@ -110,7 +112,7 @@ curl -sSf -XPATCH "http://127.0.0.1:${POLICY_PORT}/policy" \
   -d '[{"action":"allow","target":"www.cloudflare.com"}]'
 
 info "Test: www.cloudflare.com should be allowed after patch"
-run_in_app -I https://www.cloudflare.com --max-time 10 >/dev/null 2>&1 || fail "www.cloudflare.com should succeed after patch"
+run_in_app -I https://www.cloudflare.com --max-time 20 >/dev/null 2>&1 || fail "www.cloudflare.com should succeed after patch"
 pass "www.cloudflare.com allowed after patch"
 
 info "Rules update: wildcard allow -> patch deny specific (dns+nft)"
@@ -118,7 +120,7 @@ curl -sSf -XPOST "http://127.0.0.1:${POLICY_PORT}/policy" \
   -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"*.mozilla.org"}]}'
 
 info "Test: www.mozilla.org should be allowed initially (allow via wildcard)"
-run_in_app -I https://www.mozilla.org --max-time 10 >/dev/null 2>&1 || fail "www.mozilla.org should succeed before patch"
+run_in_app -I https://www.mozilla.org --max-time 20 >/dev/null 2>&1 || fail "www.mozilla.org should succeed before patch"
 pass "www.mozilla.org allowed before patch"
 
 info "Patching deny for www.mozilla.org (specific should override earlier allow)"

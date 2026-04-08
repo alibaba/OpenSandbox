@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from httpx import HTTPStatusError, Request, Response
+from pydantic import ValidationError
 
 from opensandbox.adapters.converter.exception_converter import (
     ExceptionConverter,
@@ -47,7 +48,12 @@ from opensandbox.exceptions import (
     SandboxInternalException,
 )
 from opensandbox.models.execd import RunCommandOpts
-from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule, SandboxImageSpec
+from opensandbox.models.sandboxes import (
+    NetworkPolicy,
+    NetworkRule,
+    PlatformSpec,
+    SandboxImageSpec,
+)
 
 
 def test_parse_sandbox_error_from_json_bytes() -> None:
@@ -235,6 +241,7 @@ def test_sandbox_model_converter_to_api_create_request_and_renew_tz() -> None:
         metadata={},
         timeout=timedelta(seconds=3),
         resource={"cpu": "100m"},
+        platform=PlatformSpec(os="linux", arch="arm64"),
         network_policy=NetworkPolicy(
             defaultAction="deny",
             egress=[NetworkRule(action="allow", target="pypi.org")],
@@ -247,11 +254,17 @@ def test_sandbox_model_converter_to_api_create_request_and_renew_tz() -> None:
     assert d["timeout"] == 3
     assert "env" not in d
     assert "metadata" not in d
+    assert d["platform"] == {"os": "linux", "arch": "arm64"}
     assert d["networkPolicy"]["defaultAction"] == "deny"
     assert d["networkPolicy"]["egress"] == [{"action": "allow", "target": "pypi.org"}]
 
     renew = SandboxModelConverter.to_api_renew_request(datetime(2025, 1, 1))
     assert renew.expires_at.tzinfo is timezone.utc
+
+
+def test_platform_spec_rejects_windows_before_request_conversion() -> None:
+    with pytest.raises(ValidationError):
+        PlatformSpec(os="windows", arch="amd64")
 
 
 def test_sandbox_model_converter_omits_timeout_for_manual_cleanup() -> None:
@@ -262,6 +275,7 @@ def test_sandbox_model_converter_omits_timeout_for_manual_cleanup() -> None:
         metadata={},
         timeout=None,
         resource={"cpu": "100m"},
+        platform=None,
         network_policy=None,
         extensions={},
         volumes=None,
@@ -269,3 +283,25 @@ def test_sandbox_model_converter_omits_timeout_for_manual_cleanup() -> None:
 
     dumped = req.to_dict()
     assert "timeout" not in dumped
+
+
+def test_sandbox_model_converter_maps_platform_from_create_response() -> None:
+    from opensandbox.api.lifecycle.models.create_sandbox_response import (
+        CreateSandboxResponse,
+    )
+    from opensandbox.api.lifecycle.models.platform_spec import (
+        PlatformSpec as ApiPlatformSpec,
+    )
+    from opensandbox.api.lifecycle.models.sandbox_status import SandboxStatus
+
+    api_response = CreateSandboxResponse(
+        id="sbx-1",
+        status=SandboxStatus(state="Running"),
+        platform=ApiPlatformSpec(os="linux", arch="arm64"),
+        created_at=datetime(2025, 1, 1),
+        entrypoint=["/bin/sh"],
+    )
+
+    converted = SandboxModelConverter.to_sandbox_create_response(api_response)
+    assert converted.platform is not None
+    assert converted.platform.arch == "arm64"

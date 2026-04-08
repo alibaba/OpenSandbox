@@ -39,6 +39,8 @@ from opensandbox_server.services.constants import (
     SANDBOX_ID_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SANDBOX_OSSFS_MOUNTS_LABEL,
+    SANDBOX_PLATFORM_ARCH_LABEL,
+    SANDBOX_PLATFORM_OS_LABEL,
     SandboxErrorCodes,
 )
 from opensandbox_server.services.docker import DockerSandboxService, PendingSandbox
@@ -51,6 +53,7 @@ from opensandbox_server.api.schema import (
     NetworkPolicy,
     ListSandboxesRequest,
     OSSFS,
+    PlatformSpec,
     PVC,
     ResourceLimits,
     Sandbox,
@@ -260,6 +263,183 @@ async def test_create_sandbox_rejects_timeout_above_configured_maximum(mock_dock
     assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
     assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
     assert "configured maximum of 3600s" in exc.value.detail["message"]
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_rejects_unsupported_platform(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        platform=PlatformSpec(os="darwin", arch="arm64"),
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await service.create_sandbox(request)
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    mock_client.containers.create.assert_not_called()
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_ensure_image_available_repulls_when_cached_platform_mismatch(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cached_image = MagicMock()
+    cached_image.attrs = {"Os": "linux", "Architecture": "amd64"}
+    mock_client.images.get.return_value = cached_image
+
+    service = DockerSandboxService(config=_app_config())
+    with patch.object(service, "_pull_image") as mock_pull:
+        service._ensure_image_available(
+            "python:3.11",
+            auth_config=None,
+            sandbox_id="sandbox-1",
+            platform=PlatformSpec(os="linux", arch="arm64"),
+        )
+
+    mock_pull.assert_called_once()
+    call = mock_pull.call_args
+    assert call.args[0] == "python:3.11"
+    assert call.args[3] is not None
+    assert call.args[3].os == "linux"
+    assert call.args[3].arch == "arm64"
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_ensure_image_available_repulls_when_platform_omitted_and_cached_arch_differs(
+    mock_docker,
+):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cached_image = MagicMock()
+    cached_image.attrs = {"Os": "linux", "Architecture": "arm64"}
+    mock_client.images.get.return_value = cached_image
+    mock_client.info.return_value = {"OSType": "linux", "Architecture": "amd64"}
+
+    service = DockerSandboxService(config=_app_config())
+    with patch.object(service, "_pull_image") as mock_pull:
+        service._ensure_image_available(
+            "python:3.11",
+            auth_config=None,
+            sandbox_id="sandbox-default",
+            platform=None,
+        )
+
+    mock_pull.assert_called_once()
+    call = mock_pull.call_args
+    assert call.args[0] == "python:3.11"
+    assert call.args[3] is not None
+    assert call.args[3].os == "linux"
+    assert call.args[3].arch == "amd64"
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_ensure_image_available_does_not_repull_when_platform_omitted_and_cached_amd64(
+    mock_docker,
+):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cached_image = MagicMock()
+    cached_image.attrs = {"Os": "linux", "Architecture": "amd64"}
+    mock_client.images.get.return_value = cached_image
+    # Docker daemon may report x86_64/aarch64 aliases; this should still match amd64.
+    mock_client.info.return_value = {"OSType": "linux", "Architecture": "x86_64"}
+    service = DockerSandboxService(config=_app_config())
+    with patch.object(service, "_pull_image") as mock_pull:
+        service._ensure_image_available(
+            "python:3.11",
+            auth_config=None,
+            sandbox_id="sandbox-default",
+            platform=None,
+        )
+
+    mock_pull.assert_not_called()
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_pull_image_passes_platform_to_docker_api(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    service = DockerSandboxService(config=_app_config())
+    service._pull_image(
+        image_uri="python:3.11",
+        auth_config=None,
+        sandbox_id="sandbox-1",
+        platform=PlatformSpec(os="linux", arch="arm64"),
+    )
+
+    mock_client.images.pull.assert_called_once_with(
+        "python:3.11",
+        auth_config=None,
+        platform="linux/arm64",
+    )
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_fetch_execd_archive_caches_by_platform_key(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.info.return_value = {"OSType": "linux", "Architecture": "amd64"}
+
+    container_amd64 = MagicMock()
+    container_amd64.get_archive.return_value = ([b"amd64"], {})
+    container_arm64 = MagicMock()
+    container_arm64.get_archive.return_value = ([b"arm64"], {})
+    mock_client.containers.create.side_effect = [container_amd64, container_arm64]
+
+    service = DockerSandboxService(config=_app_config())
+    with patch.object(service, "_docker_operation"):
+        amd64_first = service._fetch_execd_archive(
+            platform=PlatformSpec(os="linux", arch="amd64")
+        )
+        amd64_second = service._fetch_execd_archive(
+            platform=PlatformSpec(os="linux", arch="amd64")
+        )
+        arm64_data = service._fetch_execd_archive(
+            platform=PlatformSpec(os="linux", arch="arm64")
+        )
+
+    assert amd64_first == b"amd64"
+    assert amd64_second == b"amd64"
+    assert arm64_data == b"arm64"
+    assert mock_client.containers.create.call_count == 2
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_fetch_execd_archive_maps_platform_typeerror_to_invalid_parameter(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.containers.create.side_effect = TypeError("unexpected keyword argument 'platform'")
+
+    service = DockerSandboxService(config=_app_config())
+    with patch.object(service, "_ensure_image_available"):
+        with pytest.raises(HTTPException) as exc_info:
+            service._fetch_execd_archive(PlatformSpec(os="linux", arch="arm64"))
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "platform-aware container create" in exc_info.value.detail["message"]
 
 
 @pytest.mark.asyncio
@@ -811,6 +991,22 @@ def test_build_labels_stores_extensions_json():
     assert labels[ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY] == "3600"
 
 
+def test_build_labels_store_platform_constraints():
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        entrypoint=["python"],
+        platform=PlatformSpec(os="linux", arch="arm64"),
+    )
+
+    labels, _ = service._build_labels_and_env("sandbox-platform", request, None)
+
+    assert labels[SANDBOX_PLATFORM_OS_LABEL] == "linux"
+    assert labels[SANDBOX_PLATFORM_ARCH_LABEL] == "arm64"
+
+
 @pytest.mark.asyncio
 @patch("opensandbox_server.services.docker.docker")
 async def test_create_sandbox_with_manual_cleanup_completes_full_create_path(mock_docker):
@@ -838,6 +1034,114 @@ async def test_create_sandbox_with_manual_cleanup_completes_full_create_path(moc
     assert response.entrypoint == ["python"]
     mock_create.assert_called_once()
     mock_schedule.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_passes_platform_to_container_create(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        resourceLimits=ResourceLimits(root={}),
+        entrypoint=["python", "-c", "print('hello')"],
+        platform=PlatformSpec(os="linux", arch="arm64"),
+    )
+
+    with patch.object(service, "_create_and_start_container") as mock_create:
+        await service.create_sandbox(request)
+
+    called_args = mock_create.call_args.args
+    assert called_args[-1] is not None
+    assert called_args[-1].os == "linux"
+    assert called_args[-1].arch == "arm64"
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_response_keeps_platform_null_when_unconstrained(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    service = DockerSandboxService(config=_app_config())
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        resourceLimits=ResourceLimits(root={}),
+        entrypoint=["python", "-c", "print('hello')"],
+    )
+    created_container = MagicMock()
+    created_container.image.attrs = {"Os": "linux", "Architecture": "amd64"}
+
+    with patch.object(
+        service,
+        "_create_and_start_container",
+        return_value=created_container,
+    ):
+        response = await service.create_sandbox(request)
+
+    assert response.platform is None
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_create_and_start_container_uses_unconstrained_platform_for_execd(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.api.create_host_config.return_value = {}
+    mock_client.api.create_container.return_value = {"Id": "cid"}
+
+    created_container = MagicMock()
+    created_container.image.attrs = {"Os": "linux", "Architecture": "arm64"}
+    mock_client.containers.get.return_value = created_container
+
+    service = DockerSandboxService(config=_app_config())
+    labels = {SANDBOX_ID_LABEL: "sandbox-1"}
+    with patch.object(service, "_prepare_sandbox_runtime") as mock_prepare:
+        service._create_and_start_container(
+            sandbox_id="sandbox-1",
+            image_uri="python:3.11",
+            bootstrap_command=["python", "-c", "print('hello')"],
+            labels=labels,
+            environment=[],
+            host_config_kwargs={},
+            exposed_ports=None,
+            platform=None,
+        )
+
+    passed_platform = mock_prepare.call_args.args[2]
+    assert passed_platform is not None
+    assert passed_platform.os == "linux"
+    assert passed_platform.arch == "arm64"
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_create_and_start_container_maps_platform_typeerror_to_invalid_parameter(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.api.create_host_config.return_value = {}
+    mock_client.api.create_container.side_effect = TypeError("unexpected keyword argument 'platform'")
+
+    service = DockerSandboxService(config=_app_config())
+    with pytest.raises(HTTPException) as exc_info:
+        service._create_and_start_container(
+            sandbox_id="sandbox-1",
+            image_uri="python:3.11",
+            bootstrap_command=["python", "-c", "print('hello')"],
+            labels={SANDBOX_ID_LABEL: "sandbox-1"},
+            environment=[],
+            host_config_kwargs={},
+            exposed_ports=None,
+            platform=PlatformSpec(os="linux", arch="arm64"),
+        )
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "platform-aware container create" in exc_info.value.detail["message"]
 
 
 def test_restore_existing_sandboxes_ignores_manual_cleanup_without_warning():

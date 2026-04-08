@@ -32,15 +32,17 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
  * @property resource Resource limits (default: cpu=1, memory=2Gi).
  * @property env Environment variables.
  * @property metadata User-defined metadata.
+ * @property extensions Optional extension parameters for server-side customized behaviors.
  * @property networkPolicy Optional outbound network policy.
  * @property volumes Optional volume mounts.
  */
-data class PoolCreationSpec(
+class PoolCreationSpec private constructor(
     val imageSpec: SandboxImageSpec,
     val entrypoint: List<String> = DEFAULT_ENTRYPOINT,
     val resource: Map<String, String> = DEFAULT_RESOURCE,
     val env: Map<String, String> = emptyMap(),
     val metadata: Map<String, String> = emptyMap(),
+    val extensions: Map<String, String> = emptyMap(),
     val networkPolicy: NetworkPolicy? = null,
     val volumes: List<Volume>? = null,
 ) {
@@ -65,6 +67,7 @@ data class PoolCreationSpec(
         private var resource: Map<String, String> = DEFAULT_RESOURCE
         private var env: Map<String, String> = emptyMap()
         private var metadata: Map<String, String> = emptyMap()
+        private var extensions: Map<String, String> = emptyMap()
         private var networkPolicy: NetworkPolicy? = null
         private var volumes: List<Volume>? = null
 
@@ -105,8 +108,61 @@ data class PoolCreationSpec(
             return this
         }
 
+        fun env(
+            key: String,
+            value: String,
+        ): Builder {
+            require(key.isNotBlank()) { "Environment variable key cannot be blank" }
+            this.env = this.env + (key to value)
+            return this
+        }
+
+        fun env(configure: MutableMap<String, String>.() -> Unit): Builder {
+            val map = this.env.toMutableMap()
+            map.configure()
+            this.env = map
+            return this
+        }
+
         fun metadata(metadata: Map<String, String>): Builder {
             this.metadata = metadata
+            return this
+        }
+
+        fun metadata(
+            key: String,
+            value: String,
+        ): Builder {
+            require(key.isNotBlank()) { "Metadata key cannot be blank" }
+            this.metadata = this.metadata + (key to value)
+            return this
+        }
+
+        fun metadata(configure: MutableMap<String, String>.() -> Unit): Builder {
+            val map = this.metadata.toMutableMap()
+            map.configure()
+            this.metadata = map
+            return this
+        }
+
+        fun extension(
+            key: String,
+            value: String,
+        ): Builder {
+            require(key.isNotBlank()) { "Extension key cannot be blank" }
+            this.extensions = this.extensions + (key to value)
+            return this
+        }
+
+        fun extensions(extensions: Map<String, String>): Builder {
+            this.extensions = this.extensions + extensions
+            return this
+        }
+
+        fun extensions(configure: MutableMap<String, String>.() -> Unit): Builder {
+            val map = this.extensions.toMutableMap()
+            map.configure()
+            this.extensions = map
             return this
         }
 
@@ -115,9 +171,27 @@ data class PoolCreationSpec(
             return this
         }
 
+        fun networkPolicy(configure: NetworkPolicy.Builder.() -> Unit): Builder {
+            val builder = NetworkPolicy.builder()
+            builder.configure()
+            this.networkPolicy = builder.build()
+            return this
+        }
+
         fun volumes(volumes: List<Volume>?): Builder {
             this.volumes = volumes
             return this
+        }
+
+        fun volume(volume: Volume): Builder {
+            this.volumes = (this.volumes ?: emptyList()) + volume
+            return this
+        }
+
+        fun volume(configure: Volume.Builder.() -> Unit): Builder {
+            val builder = Volume.builder()
+            builder.configure()
+            return volume(builder.build())
         }
 
         fun build(): PoolCreationSpec {
@@ -128,6 +202,7 @@ data class PoolCreationSpec(
                 resource = resource,
                 env = env,
                 metadata = metadata,
+                extensions = extensions,
                 networkPolicy = networkPolicy,
                 volumes = volumes,
             )

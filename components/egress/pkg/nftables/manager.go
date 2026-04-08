@@ -24,6 +24,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
+	"github.com/alibaba/opensandbox/egress/pkg/telemetry"
 )
 
 const (
@@ -39,52 +40,35 @@ const (
 
 type runner func(ctx context.Context, script string) ([]byte, error)
 
-// Options controls nftables enforcement extras.
 type Options struct {
-	// BlockDoT drops tcp/udp 853 to prevent DNS-over-TLS bypass.
-	BlockDoT bool
-	// BlockDoH443 drops HTTPS DoH endpoints; when blocklist is empty and enabled, 443 is dropped.
+	BlockDoT       bool
 	BlockDoH443    bool
 	DoHBlocklistV4 []string
 	DoHBlocklistV6 []string
 }
 
-// Manager applies static IP/CIDR policy into nftables and dynamic DNS-learned IPs.
 type Manager struct {
 	run  runner
 	opts Options
 	mu   sync.Mutex
 }
 
-// NewManager builds an nftables manager that shells out to `nft -f -` with defaults.
 func NewManager() *Manager {
 	return &Manager{run: defaultRunner, opts: Options{BlockDoT: true}}
 }
 
-// NewManagerWithRunner is for tests; allows capturing the rendered ruleset (defaults to BlockDoT=true).
 func NewManagerWithRunner(r runner) *Manager {
 	return &Manager{run: r, opts: Options{BlockDoT: true}}
 }
 
-// NewManagerWithRunnerAndOptions is for tests needing custom options.
 func NewManagerWithRunnerAndOptions(r runner, opts Options) *Manager {
 	return &Manager{run: r, opts: opts}
 }
 
-// NewManagerWithOptions allows customizing behavior (used by main()).
 func NewManagerWithOptions(opts Options) *Manager {
 	return &Manager{run: defaultRunner, opts: opts}
 }
 
-// ApplyStatic reconciles static allow/deny IP and CIDR entries into nftables.
-//
-// It creates a dedicated table/chain and overwrites previous state.
-// Uses the same mutex as AddResolvedIPs so a /policy update never overlaps a DNS
-// callback: without this, add-element could run while the table is being deleted/recreated
-// and fail, causing a transient deny for a client that already got an allowed DNS answer.
-//
-// On every call (startup and /policy updates), static allow/deny and DoH blocklist
-// interval sets are normalized so overlapping CIDR/host pairs do not make nft fail.
 func (m *Manager) ApplyStatic(ctx context.Context, p *policy.NetworkPolicy) error {
 	if p == nil {
 		p = policy.DefaultDenyPolicy()
@@ -99,24 +83,24 @@ func (m *Manager) ApplyStatic(ctx context.Context, p *policy.NetworkPolicy) erro
 		return err
 	}
 	if _, err := m.run(ctx, script); err != nil {
-		// On a fresh host the delete-table may fail; retry once without the delete line.
 		if isMissingTableError(err) {
 			fallback := removeDeleteTableLine(script)
 			if fallback != script {
 				if _, retryErr := m.run(ctx, fallback); retryErr == nil {
+					telemetry.SetNftablesRuleCount(telemetry.NftRuleCountFromPolicy(p))
+					telemetry.RecordNftablesUpdate()
 					return nil
 				}
 			}
 		}
 		return err
 	}
+	telemetry.SetNftablesRuleCount(telemetry.NftRuleCountFromPolicy(p))
+	telemetry.RecordNftablesUpdate()
 	log.Infof("nftables: static policy applied successfully")
 	return nil
 }
 
-// AddResolvedIPs adds DNS-learned IPs to dynamic allow sets with TTL-based timeout.
-// Each element timeout is DNS TTL + 60s, then clamped to minTTLSec–maxTTLSec.
-// Call only when table exists (dns+nft mode).
 func (m *Manager) AddResolvedIPs(ctx context.Context, ips []ResolvedIP) error {
 	if len(ips) == 0 {
 		return nil
@@ -130,7 +114,27 @@ func (m *Manager) AddResolvedIPs(ctx context.Context, ips []ResolvedIP) error {
 	}
 	log.Infof("nftables: adding %d resolved IP(s) to dynamic allow sets with script statement %s", len(ips), script)
 	_, err := m.run(ctx, script)
+	if err == nil {
+		telemetry.RecordNftablesUpdate()
+	}
 	return err
+}
+
+// RemoveEnforcement deletes the inet opensandbox table (output filter hook and sets). Idempotent if the table is missing.
+func (m *Manager) RemoveEnforcement(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	script := fmt.Sprintf("delete table inet %s\n", tableName)
+	_, err := m.run(ctx, script)
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "no such file") || strings.Contains(msg, "does not exist") {
+			return nil
+		}
+		return err
+	}
+	log.Infof("nftables: removed table inet %s", tableName)
+	return nil
 }
 
 func buildRuleset(p *policy.NetworkPolicy, opts Options) (string, error) {

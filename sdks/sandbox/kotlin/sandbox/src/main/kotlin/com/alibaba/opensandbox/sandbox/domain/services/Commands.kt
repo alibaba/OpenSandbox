@@ -21,6 +21,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.CommandSta
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.Execution
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommandRequest
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunInSessionRequest
+import kotlin.time.Duration
 
 /**
  * Command execution operations for sandbox environments.
@@ -112,7 +113,7 @@ interface Commands {
         sessionId: String,
         command: String,
         workingDirectory: String? = null,
-        timeout: Long? = null,
+        timeout: Duration? = null,
     ): Execution {
         return runInSession(
             sessionId,

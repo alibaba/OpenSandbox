@@ -41,6 +41,7 @@ from opensandbox.config import ConnectionConfig
 from opensandbox.models.sandboxes import (
     NetworkPolicy,
     PagedSandboxInfos,
+    PlatformSpec,
     SandboxCreateResponse,
     SandboxEndpoint,
     SandboxFilter,
@@ -119,6 +120,7 @@ class SandboxesAdapter(Sandboxes):
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
         volumes: list[Volume] | None,
+        platform: PlatformSpec | None = None,
     ) -> SandboxCreateResponse:
         """Create a new sandbox instance with the specified configuration."""
         logger.info(f"Creating sandbox with image: {spec.image}")
@@ -133,6 +135,7 @@ class SandboxesAdapter(Sandboxes):
                 metadata=metadata,
                 timeout=timeout,
                 resource=resource,
+                platform=platform,
                 network_policy=network_policy,
                 extensions=extensions,
                 volumes=volumes,

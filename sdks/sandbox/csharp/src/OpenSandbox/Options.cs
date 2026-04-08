@@ -71,6 +71,11 @@ public class SandboxCreateOptions
     public NetworkPolicy? NetworkPolicy { get; set; }
 
     /// <summary>
+    /// Gets or sets an optional runtime platform constraint for sandbox provisioning.
+    /// </summary>
+    public PlatformSpec? Platform { get; set; }
+
+    /// <summary>
     /// Gets or sets storage volumes mounted into the sandbox.
     /// </summary>
     public IReadOnlyList<Volume>? Volumes { get; set; }

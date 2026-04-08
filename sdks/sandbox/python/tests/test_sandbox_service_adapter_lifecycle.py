@@ -104,6 +104,7 @@ async def test_create_sandbox_success(monkeypatch: pytest.MonkeyPatch) -> None:
         metadata={},
         timeout=timedelta(seconds=3),
         resource={"cpu": "100m"},
+        platform=None,
         network_policy=NetworkPolicy(
             defaultAction="deny",
             egress=[NetworkRule(action="allow", target="pypi.org")],
@@ -140,6 +141,7 @@ async def test_create_sandbox_manual_cleanup_omits_timeout(monkeypatch: pytest.M
         metadata={},
         timeout=None,
         resource={"cpu": "100m"},
+        platform=None,
         network_policy=None,
         extensions={},
         volumes=None,
@@ -167,6 +169,7 @@ async def test_create_sandbox_empty_response_raises(monkeypatch: pytest.MonkeyPa
             metadata={},
             timeout=timedelta(seconds=1),
             resource={"cpu": "100m"},
+            platform=None,
             extensions={"debug": "true"},
             network_policy=NetworkPolicy(),
             volumes=None,
