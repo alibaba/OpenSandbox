@@ -23,6 +23,7 @@ import (
 	"github.com/go-playground/validator/v10"
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
+	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 )
 
 // RunCodeRequest represents a code execution request.
@@ -68,7 +69,7 @@ func (r *RunCommandRequest) Validate() error {
 	if r.Gid != nil && r.Uid == nil {
 		return errors.New("uid is required when gid is provided")
 	}
-	return nil
+	return runtime.ValidateWorkingDir(r.Cwd)
 }
 
 type ServerStreamEventType string

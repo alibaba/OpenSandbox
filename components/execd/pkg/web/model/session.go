@@ -16,6 +16,8 @@ package model
 
 import (
 	"github.com/go-playground/validator/v10"
+
+	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 )
 
 // CreateSessionRequest is the request body for creating a bash session.
@@ -38,5 +40,8 @@ type RunInSessionRequest struct {
 // Validate validates RunInSessionRequest.
 func (r *RunInSessionRequest) Validate() error {
 	validate := validator.New()
-	return validate.Struct(r)
+	if err := validate.Struct(r); err != nil {
+		return err
+	}
+	return runtime.ValidateWorkingDir(r.Cwd)
 }
