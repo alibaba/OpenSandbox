@@ -53,6 +53,8 @@ type Proxy struct {
 	upstreamProbeInterval   time.Duration
 	upstreamExchangeTimeout time.Duration
 	servers                 []*dns.Server
+	shutdownOnce            sync.Once
+	probeCancel             context.CancelFunc // stops runUpstreamProbes; set when Start succeeds
 
 	// optional; called in goroutine when A/AAAA are present
 	onResolved func(domain string, ips []nftables.ResolvedIP)
@@ -111,7 +113,7 @@ func upstreamExchangeTimeoutFromEnv() time.Duration {
 	return time.Duration(n) * time.Second
 }
 
-func (p *Proxy) Start(ctx context.Context) error {
+func (p *Proxy) Start() error {
 	handler := dns.HandlerFunc(p.serveDNS)
 
 	udpServer := &dns.Server{Addr: p.listenAddr, Net: "udp", Handler: handler}
@@ -128,23 +130,37 @@ func (p *Proxy) Start(ctx context.Context) error {
 		}()
 	}
 
-	// Shutdown on context done
-	go func() {
-		<-ctx.Done()
-		for _, srv := range p.servers {
-			_ = srv.Shutdown()
-		}
-	}()
-
-	go p.runUpstreamProbes(ctx)
-
+	timer := time.NewTimer(200 * time.Millisecond)
+	defer timer.Stop()
 	select {
 	case err := <-errCh:
 		return fmt.Errorf("dns proxy failed: %w", err)
-	case <-time.After(200 * time.Millisecond):
-		// small grace window; running fine
-		return nil
+	case <-timer.C:
+		// listeners bound; start upstream probes only after DNS servers are up
 	}
+
+	probeCtx, cancel := context.WithCancel(context.Background())
+	p.probeCancel = cancel
+	go p.runUpstreamProbes(probeCtx)
+
+	return nil
+}
+
+// Shutdown stops UDP/TCP DNS listeners. Safe to call more than once.
+func (p *Proxy) Shutdown() error {
+	var outErr error
+	p.shutdownOnce.Do(func() {
+		if p.probeCancel != nil {
+			p.probeCancel()
+			p.probeCancel = nil
+		}
+		for _, srv := range p.servers {
+			if e := srv.Shutdown(); e != nil && outErr == nil {
+				outErr = e
+			}
+		}
+	})
+	return outErr
 }
 
 func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {

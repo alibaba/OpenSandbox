@@ -120,6 +120,23 @@ func (m *Manager) AddResolvedIPs(ctx context.Context, ips []ResolvedIP) error {
 	return err
 }
 
+// RemoveEnforcement deletes the inet opensandbox table (output filter hook and sets). Idempotent if the table is missing.
+func (m *Manager) RemoveEnforcement(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	script := fmt.Sprintf("delete table inet %s\n", tableName)
+	_, err := m.run(ctx, script)
+	if err != nil {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "no such file") || strings.Contains(msg, "does not exist") {
+			return nil
+		}
+		return err
+	}
+	log.Infof("nftables: removed table inet %s", tableName)
+	return nil
+}
+
 func buildRuleset(p *policy.NetworkPolicy, opts Options) (string, error) {
 	allowV4, allowV6, denyV4, denyV6 := p.StaticIPSets()
 	var err error

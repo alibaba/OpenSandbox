@@ -24,6 +24,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from io import BytesIO
+from threading import Event
 
 import httpx
 import pytest
@@ -1200,9 +1201,11 @@ class TestSandboxE2ESync:
         init_events: list[ExecutionInit] = []
         completed_events: list[ExecutionComplete] = []
         errors: list[ExecutionError] = []
+        init_received = Event()
 
         def on_init(init: ExecutionInit):
             init_events.append(init)
+            init_received.set()
 
         def on_complete(complete: ExecutionComplete):
             completed_events.append(complete)
@@ -1223,9 +1226,7 @@ class TestSandboxE2ESync:
                 "sleep 30",
                 handlers=handlers,
             )
-            deadline = time.time() + 15
-            while len(init_events) == 0 and time.time() < deadline:
-                time.sleep(0.1)
+            assert init_received.wait(timeout=15), "Execution init event was not received within 15s"
             assert len(init_events) == 1
             assert init_events[0].id is not None and init_events[0].id.strip()
             _assert_recent_timestamp_ms(init_events[0].timestamp)

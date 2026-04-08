@@ -58,6 +58,10 @@ func (s *stubNft) AddResolvedIPs(_ context.Context, _ []nftables.ResolvedIP) err
 	return nil
 }
 
+func (s *stubNft) RemoveEnforcement(_ context.Context) error {
+	return nil
+}
+
 func TestHandlePolicy_AlwaysDenyMergedIntoNft(t *testing.T) {
 	deny, err := policy.ParseValidatedEgressRule(policy.ActionDeny, "9.9.9.9")
 	require.NoError(t, err)

@@ -96,18 +96,27 @@ public class CodeInterpreterE2ETests : IClassFixture<CodeInterpreterE2ETestFixtu
     {
         var interpreter = _fixture.Interpreter;
 
-        var py = await interpreter.Codes.RunAsync("print(1+2)", new RunCodeOptions { Language = SupportedLanguage.Python });
-        Assert.Contains(py.Logs.Stdout, s => s.Text.Contains("3", StringComparison.Ordinal));
+        var py = await RunWithRetryAsync(
+            interpreter,
+            "result = 1 + 2\nresult",
+            new RunCodeOptions { Language = SupportedLanguage.Python });
+        Assert.True(HasText(py, "3"));
         Assert.Null(py.ExitCode);
         Assert.NotNull(py.Complete);
 
-        var js = await interpreter.Codes.RunAsync("console.log(3+4)", new RunCodeOptions { Language = SupportedLanguage.JavaScript });
-        Assert.Contains(js.Logs.Stdout, s => s.Text.Contains("7", StringComparison.Ordinal));
+        var js = await RunWithRetryAsync(
+            interpreter,
+            "console.log(3+4)",
+            new RunCodeOptions { Language = SupportedLanguage.JavaScript });
+        Assert.True(HasText(js, "7"));
         Assert.Null(js.ExitCode);
         Assert.NotNull(js.Complete);
 
-        var bash = await interpreter.Codes.RunAsync("echo $((8+9))", new RunCodeOptions { Language = SupportedLanguage.Bash });
-        Assert.Contains(bash.Logs.Stdout, s => s.Text.Contains("17", StringComparison.Ordinal));
+        var bash = await RunWithRetryAsync(
+            interpreter,
+            "echo $((8+9))",
+            new RunCodeOptions { Language = SupportedLanguage.Bash });
+        Assert.True(HasText(bash, "17"));
         Assert.Null(bash.ExitCode);
         Assert.NotNull(bash.Complete);
     }

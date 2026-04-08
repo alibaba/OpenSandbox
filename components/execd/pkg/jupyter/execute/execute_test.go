@@ -295,6 +295,6 @@ func TestExecuteCodeStreamFallsBackWhenPollIntervalIsNonPositive(t *testing.T) {
 	elapsed := time.Since(start)
 
 	require.True(t, gotLateResult, "expected late execute_result to be delivered before stream close")
-	require.GreaterOrEqual(t, elapsed, 10*time.Millisecond, "expected non-positive poll interval to fall back to runtime default")
-	require.Less(t, elapsed, 120*time.Millisecond, "expected fallback poll interval to still close stream promptly")
+	require.GreaterOrEqual(t, elapsed, 90*time.Millisecond, "expected non-positive poll interval to fall back to runtime default (100ms)")
+	require.Less(t, elapsed, 300*time.Millisecond, "expected fallback poll interval to still close stream promptly")
 }

@@ -8,12 +8,12 @@ configs:
 
       [runtime]
       type = "docker"
-      # execd_image = "opensandbox/execd:v1.0.9"
-      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9"
+      # execd_image = "opensandbox/execd:v1.0.10"
+      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.10"
 
       [egress]
-      image = "opensandbox/egress:v1.0.4"
-      # image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.4"
+      image = "opensandbox/egress:v1.0.6"
+      # image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.6"
 
       [docker]
       network_mode = "bridge"

@@ -46,12 +46,13 @@ type enforcementReporter interface {
 type nftApplier interface {
 	ApplyStatic(context.Context, *policy.NetworkPolicy) error
 	AddResolvedIPs(context.Context, []nftables.ResolvedIP) error
+	RemoveEnforcement(context.Context) error
 }
 
 // startPolicyServer launches a lightweight HTTP API for updating the egress policy at runtime.
 //
 // nameserverIPs are merged into every applied policy so system DNS stays allowed (e.g. private DNS).
-func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier, enforcementMode string, addr string, token string, nameserverIPs []netip.Addr, policyFile string, alwaysDeny, alwaysAllow []policy.EgressRule) error {
+func startPolicyServer(proxy policyUpdater, nft nftApplier, enforcementMode string, addr string, token string, nameserverIPs []netip.Addr, policyFile string, alwaysDeny, alwaysAllow []policy.EgressRule) (*http.Server, error) {
 	maxEgressRules := maxEgressRulesFromEnv()
 	if maxEgressRules > 0 {
 		log.Infof("policy API: max egress rules per policy (POST/PATCH) = %d (set %s=0 to disable)", maxEgressRules, constants.EnvMaxEgressRules)
@@ -79,16 +80,6 @@ func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier,
 	srv := &http.Server{Addr: addr, Handler: mux}
 	handler.server = srv
 
-	// Shutdown listener when context ends.
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Warnf("policy server shutdown error: %v", err)
-		}
-	}()
-
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -98,7 +89,7 @@ func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier,
 
 	select {
 	case err := <-errCh:
-		return err
+		return nil, err
 	case <-time.After(200 * time.Millisecond):
 		// assume healthy start; keep logging future errors
 		go func() {
@@ -106,7 +97,7 @@ func startPolicyServer(ctx context.Context, proxy policyUpdater, nft nftApplier,
 				log.Errorf("policy server error: %v", err)
 			}
 		}()
-		return nil
+		return srv, nil
 	}
 }
 

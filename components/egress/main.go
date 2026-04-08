@@ -75,7 +75,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to init dns proxy: %v", err)
 	}
-	if err := proxy.Start(ctx); err != nil {
+	if err := proxy.Start(); err != nil {
 		log.Fatalf("failed to start dns proxy: %v", err)
 	}
 	log.Infof("dns proxy started on 127.0.0.1:15353")
@@ -101,14 +101,13 @@ func main() {
 
 	// start policy server
 	httpAddr := envOrDefault(constants.EnvEgressHTTPAddr, constants.DefaultEgressServerAddr)
-	if err = startPolicyServer(ctx, proxy, nftMgr, mode, httpAddr, os.Getenv(constants.EnvEgressToken), allowIPs, os.Getenv(constants.EnvEgressPolicyFile), alwaysDeny, alwaysAllow); err != nil {
+	policySrv, err := startPolicyServer(proxy, nftMgr, mode, httpAddr, os.Getenv(constants.EnvEgressToken), allowIPs, os.Getenv(constants.EnvEgressPolicyFile), alwaysDeny, alwaysAllow)
+	if err != nil {
 		log.Fatalf("failed to start policy server: %v", err)
 	}
 	log.Infof("policy server listening on %s (POST /policy)", httpAddr)
 
-	<-ctx.Done()
-	log.Infof("received shutdown signal; exiting")
-	_ = os.Stderr.Sync()
+	waitForShutdown(ctx, proxy, policySrv, exemptDst, nftMgr)
 }
 
 func withLogger(ctx context.Context) context.Context {
