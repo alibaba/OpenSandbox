@@ -408,6 +408,16 @@ class StorageConfig(BaseModel):
             "referencing a non-existent volume will fail."
         ),
     )
+    volume_auto_delete: bool = Field(
+        default=False,
+        description=(
+            "When enabled (Docker only), named volumes that were auto-created "
+            "by the server are automatically removed when the sandbox is deleted. "
+            "Volumes that existed before sandbox creation are never removed. "
+            "Has no effect on Kubernetes PVCs, whose lifecycle is managed by "
+            "the StorageClass reclaim policy."
+        ),
+    )
     volume_default_size: str = Field(
         default="1Gi",
         description=(

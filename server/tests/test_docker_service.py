@@ -1297,10 +1297,14 @@ class TestDockerVolumeValidation:
             mount_path="/mnt/data",
             read_only=False,
         )
-        vol_info = service._validate_pvc_volume(volume)
+        vol_info, auto_created = service._validate_pvc_volume(volume)
 
-        mock_client.api.create_volume.assert_called_once_with(name="my-volume")
+        mock_client.api.create_volume.assert_called_once_with(
+            name="my-volume",
+            labels={"opensandbox.io/volume-managed-by": "server"},
+        )
         assert vol_info["Name"] == "my-volume"
+        assert auto_created is True
 
     def test_ossfs_inline_credentials_missing_rejected(self, mock_docker):
         """OSSFS with missing inline credentials should be rejected at schema validation."""
