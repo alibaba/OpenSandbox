@@ -245,15 +245,15 @@ class LogConfig(BaseModel):
         default=None,
         description=(
             "Path to the main log file. When file_enabled=true and this is unset, "
-            "defaults to /var/log/opensandbox/server.log."
+            "defaults to ~/logs/opensandbox/server.log."
         ),
     )
     access_file_path: Optional[str] = Field(
         default=None,
         description=(
-            "Path to the HTTP access log file. When set, uvicorn.access logs are written to this "
-            "file separately. When file_enabled=true and this is unset, access logs go to the main log. "
-            "Example: '/var/log/opensandbox/access.log'."
+            "Path to the HTTP access log file. When file_enabled=true, access logs are written "
+            "to a separate file by default (~/logs/opensandbox/access.log). Set this to override "
+            "the path. Example: '~/logs/opensandbox/access.log'."
         ),
     )
     file_max_bytes: int = Field(
@@ -268,8 +268,9 @@ class LogConfig(BaseModel):
     )
 
     # Default paths when file_enabled=true and user paths are not set.
-    DEFAULT_FILE_PATH: ClassVar[str] = "/var/log/opensandbox/server.log"
-    DEFAULT_ACCESS_FILE_PATH: ClassVar[str] = "/var/log/opensandbox/access.log"
+    # Uses ~/logs/opensandbox/ which is writable for non-root users.
+    DEFAULT_FILE_PATH: ClassVar[str] = str(Path.home() / "logs" / "opensandbox" / "server.log")
+    DEFAULT_ACCESS_FILE_PATH: ClassVar[str] = str(Path.home() / "logs" / "opensandbox" / "access.log")
 
     def resolved_file_path(self) -> Optional[str]:
         """Return the effective file path, using default if file_enabled and not overridden."""
@@ -278,10 +279,10 @@ class LogConfig(BaseModel):
         return self.file_path or self.DEFAULT_FILE_PATH
 
     def resolved_access_file_path(self) -> Optional[str]:
-        """Return the effective access file path, or None if access logs should merge into main."""
+        """Return the effective access file path (defaults to separate file when file_enabled)."""
         if not self.file_enabled:
             return None
-        return self.access_file_path  # None means merge into main log
+        return self.access_file_path or self.DEFAULT_ACCESS_FILE_PATH
 
 
 class ServerConfig(BaseModel):
@@ -305,10 +306,6 @@ class ServerConfig(BaseModel):
             "Idle keep-alive timeout in seconds passed to uvicorn. "
             "Connections idle longer than this may be closed by the server."
         ),
-    )
-    log: LogConfig = Field(
-        default_factory=LogConfig,
-        description="Logging configuration (level, file output, rotation).",
     )
     api_key: Optional[str] = Field(
         default=None,
@@ -624,6 +621,10 @@ class AppConfig(BaseModel):
     """Root application configuration model."""
 
     server: ServerConfig = Field(default_factory=ServerConfig)
+    log: LogConfig = Field(
+        default_factory=LogConfig,
+        description="Logging configuration (level, file output, rotation).",
+    )
     renew_intent: RenewIntentConfig = Field(
         default_factory=RenewIntentConfig,
         description="Auto-renew sandbox expiration when reverse-proxy access is observed.",

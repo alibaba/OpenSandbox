@@ -27,11 +27,11 @@ host = "0.0.0.0"
 port = 8080
 # api_key = "your-secret-api-key"  # Optional: Uncomment to enable API key authentication
 
-[server.log]
+[log]
 level = "INFO"
 file_enabled = true  # When true, logs go to rotating files instead of stdout
-# file_path = "/var/log/opensandbox/server.log"  # Optional: override default server log path
-# access_file_path = "/var/log/opensandbox/access.log"  # Optional: separate access log file
+# file_path = "~/logs/opensandbox/server.log"  # Optional: override default server log path
+# access_file_path = "~/logs/opensandbox/access.log"  # Optional: override default access log path
 # file_max_bytes = 104857600  # 100MB - max file size before rotation
 # file_backup_count = 5       # Number of rotated files to keep
 

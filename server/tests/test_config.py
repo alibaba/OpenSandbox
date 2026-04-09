@@ -49,7 +49,7 @@ def test_load_config_from_file(tmp_path, monkeypatch):
         api_key = "secret"
         max_sandbox_timeout_seconds = 172800
 
-        [server.log]
+        [log]
         level = "DEBUG"
 
         [runtime]
@@ -68,7 +68,7 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     loaded = config_module.load_config(config_path)
     assert loaded.server.host == "127.0.0.1"
     assert loaded.server.port == 9000
-    assert loaded.server.log.level == "DEBUG"
+    assert loaded.log.level == "DEBUG"
     assert loaded.server.api_key == "secret"
     assert loaded.server.max_sandbox_timeout_seconds == 172800
     assert loaded.runtime.type == "kubernetes"
@@ -731,16 +731,16 @@ def test_log_config_resolved_file_path():
 
 
 def test_log_config_resolved_access_file_path():
-    """resolved_access_file_path() should return None when not configured."""
+    """resolved_access_file_path() should return default path when file_enabled."""
     # file_enabled=False always returns None
     cfg = LogConfig(file_enabled=False, access_file_path="/path/access.log")
     assert cfg.resolved_access_file_path() is None
 
-    # file_enabled=True without access_file_path returns None (merge into main)
+    # file_enabled=True without access_file_path returns default path
     cfg = LogConfig(file_enabled=True)
-    assert cfg.resolved_access_file_path() is None
+    assert cfg.resolved_access_file_path() == LogConfig.DEFAULT_ACCESS_FILE_PATH
 
-    # file_enabled=True with access_file_path returns the path
+    # file_enabled=True with access_file_path returns the custom path
     cfg = LogConfig(file_enabled=True, access_file_path="/custom/access.log")
     assert cfg.resolved_access_file_path() == "/custom/access.log"
 
@@ -771,16 +771,18 @@ def test_log_config_file_backup_count_validation():
     assert cfg_zero.file_backup_count == 0
 
 
-def test_server_config_log_defaults():
-    """ServerConfig should include default LogConfig."""
-    cfg = ServerConfig()
+def test_app_config_log_defaults():
+    """AppConfig should include default LogConfig."""
+    cfg = AppConfig(
+        runtime=RuntimeConfig(type="docker", execd_image="test:latest")
+    )
     assert cfg.log is not None
     assert cfg.log.level == "INFO"
     assert cfg.log.file_path is None
 
 
 def test_load_config_with_log_subsection(tmp_path, monkeypatch):
-    """LogConfig should be loaded from [server.log] TOML subsection."""
+    """LogConfig should be loaded from [log] TOML section."""
     _reset_config(monkeypatch)
     toml = textwrap.dedent(
         """
@@ -788,7 +790,7 @@ def test_load_config_with_log_subsection(tmp_path, monkeypatch):
         host = "127.0.0.1"
         port = 9000
 
-        [server.log]
+        [log]
         level = "DEBUG"
         file_path = "/var/log/opensandbox/server.log"
         file_max_bytes = 52428800
@@ -803,14 +805,14 @@ def test_load_config_with_log_subsection(tmp_path, monkeypatch):
     config_path.write_text(toml)
 
     loaded = config_module.load_config(config_path)
-    assert loaded.server.log.level == "DEBUG"
-    assert loaded.server.log.file_path == "/var/log/opensandbox/server.log"
-    assert loaded.server.log.file_max_bytes == 52428800
-    assert loaded.server.log.file_backup_count == 3
+    assert loaded.log.level == "DEBUG"
+    assert loaded.log.file_path == "/var/log/opensandbox/server.log"
+    assert loaded.log.file_max_bytes == 52428800
+    assert loaded.log.file_backup_count == 3
 
 
 def test_load_config_without_log_subsection_uses_defaults(tmp_path, monkeypatch):
-    """AppConfig should use default LogConfig when [server.log] is not in TOML."""
+    """AppConfig should use default LogConfig when [log] is not in TOML."""
     _reset_config(monkeypatch)
     toml = textwrap.dedent(
         """
@@ -827,10 +829,10 @@ def test_load_config_without_log_subsection_uses_defaults(tmp_path, monkeypatch)
     config_path.write_text(toml)
 
     loaded = config_module.load_config(config_path)
-    assert loaded.server.log.level == "INFO"
-    assert loaded.server.log.file_path is None
-    assert loaded.server.log.file_max_bytes == 100 * 1024 * 1024
-    assert loaded.server.log.file_backup_count == 5
+    assert loaded.log.level == "INFO"
+    assert loaded.log.file_path is None
+    assert loaded.log.file_max_bytes == 100 * 1024 * 1024
+    assert loaded.log.file_backup_count == 5
 
 
 def test_load_config_log_file_path_only(tmp_path, monkeypatch):
@@ -842,7 +844,7 @@ def test_load_config_log_file_path_only(tmp_path, monkeypatch):
         host = "127.0.0.1"
         port = 9000
 
-        [server.log]
+        [log]
         file_path = "/var/log/test.log"
 
         [runtime]
@@ -854,11 +856,11 @@ def test_load_config_log_file_path_only(tmp_path, monkeypatch):
     config_path.write_text(toml)
 
     loaded = config_module.load_config(config_path)
-    assert loaded.server.log.level == "INFO"  # default
-    assert loaded.server.log.file_path == "/var/log/test.log"
-    assert loaded.server.log.access_file_path is None  # default
-    assert loaded.server.log.file_max_bytes == 100 * 1024 * 1024  # default
-    assert loaded.server.log.file_backup_count == 5  # default
+    assert loaded.log.level == "INFO"  # default
+    assert loaded.log.file_path == "/var/log/test.log"
+    assert loaded.log.access_file_path is None  # default
+    assert loaded.log.file_max_bytes == 100 * 1024 * 1024  # default
+    assert loaded.log.file_backup_count == 5  # default
 
 
 def test_load_config_log_access_file_path(tmp_path, monkeypatch):
@@ -870,7 +872,7 @@ def test_load_config_log_access_file_path(tmp_path, monkeypatch):
         host = "127.0.0.1"
         port = 9000
 
-        [server.log]
+        [log]
         file_path = "/var/log/opensandbox/server.log"
         access_file_path = "/var/log/opensandbox/access.log"
 
@@ -883,8 +885,8 @@ def test_load_config_log_access_file_path(tmp_path, monkeypatch):
     config_path.write_text(toml)
 
     loaded = config_module.load_config(config_path)
-    assert loaded.server.log.file_path == "/var/log/opensandbox/server.log"
-    assert loaded.server.log.access_file_path == "/var/log/opensandbox/access.log"
+    assert loaded.log.file_path == "/var/log/opensandbox/server.log"
+    assert loaded.log.access_file_path == "/var/log/opensandbox/access.log"
 
 
 def test_load_config_log_file_enabled(tmp_path, monkeypatch):
@@ -896,7 +898,7 @@ def test_load_config_log_file_enabled(tmp_path, monkeypatch):
         host = "127.0.0.1"
         port = 9000
 
-        [server.log]
+        [log]
         file_enabled = true
 
         [runtime]
@@ -908,12 +910,12 @@ def test_load_config_log_file_enabled(tmp_path, monkeypatch):
     config_path.write_text(toml)
 
     loaded = config_module.load_config(config_path)
-    assert loaded.server.log.file_enabled is True
-    assert loaded.server.log.file_path is None  # not set, uses default
-    assert loaded.server.log.access_file_path is None
+    assert loaded.log.file_enabled is True
+    assert loaded.log.file_path is None  # not set, uses default
+    assert loaded.log.access_file_path is None
     # resolved_* methods should return default paths
-    assert loaded.server.log.resolved_file_path() == LogConfig.DEFAULT_FILE_PATH
-    assert loaded.server.log.resolved_access_file_path() is None
+    assert loaded.log.resolved_file_path() == LogConfig.DEFAULT_FILE_PATH
+    assert loaded.log.resolved_access_file_path() == LogConfig.DEFAULT_ACCESS_FILE_PATH
 
 
 def test_load_config_log_file_enabled_with_custom_paths(tmp_path, monkeypatch):
@@ -925,7 +927,7 @@ def test_load_config_log_file_enabled_with_custom_paths(tmp_path, monkeypatch):
         host = "127.0.0.1"
         port = 9000
 
-        [server.log]
+        [log]
         file_enabled = true
         file_path = "/custom/server.log"
         access_file_path = "/custom/access.log"
@@ -939,6 +941,6 @@ def test_load_config_log_file_enabled_with_custom_paths(tmp_path, monkeypatch):
     config_path.write_text(toml)
 
     loaded = config_module.load_config(config_path)
-    assert loaded.server.log.file_enabled is True
-    assert loaded.server.log.resolved_file_path() == "/custom/server.log"
-    assert loaded.server.log.resolved_access_file_path() == "/custom/access.log"
+    assert loaded.log.file_enabled is True
+    assert loaded.log.resolved_file_path() == "/custom/server.log"
+    assert loaded.log.resolved_access_file_path() == "/custom/access.log"

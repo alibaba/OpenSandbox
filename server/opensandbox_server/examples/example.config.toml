@@ -26,13 +26,13 @@ port = 8080
 # Maximum TTL for sandboxes that specify timeout. Comment out this line to disable the upper bound.
 max_sandbox_timeout_seconds = 86400
 
-[server.log]
+[log]
 # Logging configuration
 # -----------------------------------------------------------------
 level = "INFO"
 file_enabled = true  # When true, logs go to rotating files instead of stdout
-# file_path = "/var/log/opensandbox/server.log"  # Optional: override default server log path
-# access_file_path = "/var/log/opensandbox/access.log"  # Optional: separate access log file
+# file_path = "~/logs/opensandbox/server.log"  # Optional: override default server log path
+# access_file_path = "~/logs/opensandbox/access.log"  # Optional: override default access log path
 # file_max_bytes = 104857600  # 100MB - max file size before rotation
 # file_backup_count = 5       # Number of rotated files to keep
 

@@ -27,11 +27,11 @@ host = "0.0.0.0"
 port = 8080
 # api_key = "your-secret-api-key"  # 可选：取消注释以启用 API Key 认证
 
-[server.log]
+[log]
 level = "INFO"
-file_enabled = true  # 开启后日志写入文件（默认路径 /var/log/opensandbox/）
-# file_path = "/var/log/opensandbox/server.log"  # 可选：自定义 server.log 路径
-# access_file_path = "/var/log/opensandbox/access.log"  # 可选：分离 access log
+file_enabled = true  # 开启后日志写入文件（默认路径 ~/logs/opensandbox/）
+# file_path = "~/logs/opensandbox/server.log"  # 可选：自定义 server.log 路径
+# access_file_path = "~/logs/opensandbox/access.log"  # 可选：自定义 access.log 路径
 # file_max_bytes = 104857600  # 100MB - 轮转前最大文件大小
 # file_backup_count = 5       # 保留的轮转文件数量
 

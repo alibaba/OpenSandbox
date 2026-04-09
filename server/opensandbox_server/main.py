@@ -35,7 +35,7 @@ from opensandbox_server.logging_config import configure_logging
 
 # Load configuration before initializing routers/middleware
 app_config = load_config()
-_log_config = configure_logging(app_config.server.log)
+_log_config = configure_logging(app_config.log)
 
 from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402
