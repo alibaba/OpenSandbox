@@ -474,16 +474,14 @@ class Sandbox:
                 extensions,
                 volumes,
             )
-            if platform is None:
-                response = await sandbox_service.create_sandbox(
-                    *create_args, resource_requests=resource_requests
-                )
-            else:
-                response = await sandbox_service.create_sandbox(
-                    *create_args,
-                    platform=platform,
-                    resource_requests=resource_requests,
-                )
+            create_kwargs: dict = {}
+            if platform is not None:
+                create_kwargs["platform"] = platform
+            if resource_requests is not None:
+                create_kwargs["resource_requests"] = resource_requests
+            response = await sandbox_service.create_sandbox(
+                *create_args, **create_kwargs
+            )
             sandbox_id = response.id
 
             execd_endpoint = await sandbox_service.get_sandbox_endpoint(

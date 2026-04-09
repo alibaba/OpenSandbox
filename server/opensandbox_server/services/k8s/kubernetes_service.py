@@ -366,6 +366,9 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             )
             
             # Create workload
+            create_kwargs: dict = {}
+            if resource_requests is not None:
+                create_kwargs["resource_requests"] = resource_requests
             workload_info = self.workload_provider.create_workload(
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
@@ -384,7 +387,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 egress_mode=egress_mode,
                 volumes=request.volumes,
                 platform=request.platform,
-                resource_requests=resource_requests,
+                **create_kwargs,
             )
             
             logger.info(
