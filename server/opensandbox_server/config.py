@@ -26,7 +26,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, ClassVar, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
@@ -226,6 +226,64 @@ class IngressConfig(BaseModel):
         return self
 
 
+class LogConfig(BaseModel):
+    """Logging configuration."""
+
+    level: str = Field(
+        default="INFO",
+        description="Python logging level for the server process.",
+        min_length=3,
+    )
+    file_enabled: bool = Field(
+        default=False,
+        description=(
+            "When true, logs are written to rotating files instead of stdout. "
+            "Uses default paths (/var/log/opensandbox/) unless file_path/access_file_path are set."
+        ),
+    )
+    file_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to the main log file. When file_enabled=true and this is unset, "
+            "defaults to /var/log/opensandbox/server.log."
+        ),
+    )
+    access_file_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to the HTTP access log file. When set, uvicorn.access logs are written to this "
+            "file separately. When file_enabled=true and this is unset, access logs go to the main log. "
+            "Example: '/var/log/opensandbox/access.log'."
+        ),
+    )
+    file_max_bytes: int = Field(
+        default=100 * 1024 * 1024,  # 100MB
+        ge=1,
+        description="Maximum size of each log file in bytes before rotation (default: 100MB).",
+    )
+    file_backup_count: int = Field(
+        default=5,
+        ge=0,
+        description="Number of backup log files to keep after rotation (default: 5).",
+    )
+
+    # Default paths when file_enabled=true and user paths are not set.
+    DEFAULT_FILE_PATH: ClassVar[str] = "/var/log/opensandbox/server.log"
+    DEFAULT_ACCESS_FILE_PATH: ClassVar[str] = "/var/log/opensandbox/access.log"
+
+    def resolved_file_path(self) -> Optional[str]:
+        """Return the effective file path, using default if file_enabled and not overridden."""
+        if not self.file_enabled:
+            return None
+        return self.file_path or self.DEFAULT_FILE_PATH
+
+    def resolved_access_file_path(self) -> Optional[str]:
+        """Return the effective access file path, or None if access logs should merge into main."""
+        if not self.file_enabled:
+            return None
+        return self.access_file_path  # None means merge into main log
+
+
 class ServerConfig(BaseModel):
     """FastAPI server configuration."""
 
@@ -248,10 +306,9 @@ class ServerConfig(BaseModel):
             "Connections idle longer than this may be closed by the server."
         ),
     )
-    log_level: str = Field(
-        default="INFO",
-        description="Python logging level for the server process.",
-        min_length=3,
+    log: LogConfig = Field(
+        default_factory=LogConfig,
+        description="Logging configuration (level, file output, rotation).",
     )
     api_key: Optional[str] = Field(
         default=None,
@@ -696,6 +753,7 @@ __all__ = [
     "RenewIntentConfig",
     "RenewIntentRedisConfig",
     "ServerConfig",
+    "LogConfig",
     "RuntimeConfig",
     "IngressConfig",
     "GatewayConfig",
