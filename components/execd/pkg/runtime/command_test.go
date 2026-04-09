@@ -133,10 +133,10 @@ func TestRunCommand_Echo(t *testing.T) {
 		Timeout: 5 * time.Second,
 		Hooks: ExecuteResultHook{
 			OnExecuteInit: func(s string) { sessionID = s },
-			OnExecuteStdout: func(s string) {
+			OnExecuteStdout: func(_ int64, s string) {
 				stdoutLines = append(stdoutLines, s)
 			},
-			OnExecuteStderr: func(s string) {
+			OnExecuteStderr: func(_ int64, s string) {
 				stderrLines = append(stderrLines, s)
 			},
 			OnExecuteError: func(err *execute.ErrorOutput) {
@@ -188,8 +188,8 @@ func TestRunCommand_Error(t *testing.T) {
 		Timeout: 5 * time.Second,
 		Hooks: ExecuteResultHook{
 			OnExecuteInit:   func(s string) { sessionID = s },
-			OnExecuteStdout: func(s string) { stdoutLines = append(stdoutLines, s) },
-			OnExecuteStderr: func(s string) { stderrLines = append(stderrLines, s) },
+			OnExecuteStdout: func(_ int64, s string) { stdoutLines = append(stdoutLines, s) },
+			OnExecuteStderr: func(_ int64, s string) { stderrLines = append(stderrLines, s) },
 			OnExecuteError: func(err *execute.ErrorOutput) {
 				gotErr = err
 				completeCh <- struct{}{}

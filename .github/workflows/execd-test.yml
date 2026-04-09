@@ -101,6 +101,7 @@ jobs:
 
           sleep 5
           python3 tests/smoke_api.py
+          python3 tests/command_resume_test.py
       - name: Show logs
         if: always()
         run: |

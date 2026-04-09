@@ -43,6 +43,11 @@ type CodeInterpretingController struct {
 
 	// chunkWriter serializes SSE event writes to prevent interleaved output.
 	chunkWriter sync.Mutex
+
+	resumeStreamMu sync.Mutex
+	resumeStreamID string
+	// resumeEnabled opts into disconnect resume (event buffer + live hub) for RunCommand / RunCode.
+	resumeEnabled bool
 }
 
 type codeExecutionRunner interface {
@@ -131,6 +136,11 @@ func (c *CodeInterpretingController) RunCode() {
 
 	ctx, cancel := context.WithCancel(c.ctx.Request.Context())
 	defer cancel()
+	c.resumeEnabled = true
+	defer func() {
+		deferResumeCleanup(c)
+		c.resumeEnabled = false
+	}()
 	runCodeRequest := c.buildExecuteCodeRequest(request)
 	eventsHandler := c.setServerEventsHandler(ctx)
 

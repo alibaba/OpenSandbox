@@ -50,7 +50,7 @@ const (
 //  2. Acquire exclusive WS lock → 409 if already held
 //  3. Upgrade HTTP → WebSocket
 //  4. Start bash if not already running
-//  5+6. AtomicAttachOutputWithSnapshot (snapshot + attach under outMu — no loss window)
+//     5+6. AtomicAttachOutputWithSnapshot (snapshot + attach under outMu — no loss window)
 //  7. defer: detach → pumpWg.Wait → UnlockWS
 //  8. Send replay frame if snapshot non-empty
 //  9. Send connected frame
