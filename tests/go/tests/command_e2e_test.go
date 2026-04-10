@@ -3,28 +3,24 @@
 package tests
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCommand_RunSimple(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
 	exec, err := sb.RunCommand(ctx, "echo hello-from-go-e2e", nil)
-	if err != nil {
-		t.Fatalf("RunCommand: %v", err)
-	}
+	require.NoError(t, err)
 
-	if exec.ExitCode == nil || *exec.ExitCode != 0 {
-		t.Errorf("Expected exit code 0, got %v", exec.ExitCode)
-	}
+	require.NotNil(t, exec.ExitCode)
+	assert.Equal(t, 0, *exec.ExitCode)
 
 	text := exec.Text()
-	if !strings.Contains(text, "hello-from-go-e2e") {
-		t.Errorf("Expected stdout to contain 'hello-from-go-e2e', got: %q", text)
-	}
+	assert.Contains(t, text, "hello-from-go-e2e")
 	t.Logf("Output: %s", text)
 }
 
@@ -40,13 +36,9 @@ func TestCommand_RunWithHandlers(t *testing.T) {
 	}
 
 	exec, err := sb.RunCommand(ctx, "echo line1 && echo line2", handlers)
-	if err != nil {
-		t.Fatalf("RunCommand: %v", err)
-	}
+	require.NoError(t, err)
 
-	if len(stdoutLines) == 0 {
-		t.Error("Expected handler to receive stdout events")
-	}
+	assert.NotEmpty(t, stdoutLines, "expected handler to receive stdout events")
 	t.Logf("Handler received %d stdout events", len(stdoutLines))
 	t.Logf("Execution stdout count: %d", len(exec.Stdout))
 }
@@ -55,12 +47,9 @@ func TestCommand_ExitCode(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
 	exec, err := sb.RunCommand(ctx, "true", nil)
-	if err != nil {
-		t.Fatalf("RunCommand(true): %v", err)
-	}
-	if exec.ExitCode == nil || *exec.ExitCode != 0 {
-		t.Errorf("Expected exit code 0 for 'true', got %v", exec.ExitCode)
-	}
+	require.NoError(t, err)
+	require.NotNil(t, exec.ExitCode)
+	assert.Equal(t, 0, *exec.ExitCode)
 	t.Log("Exit code tests passed")
 }
 
@@ -68,14 +57,11 @@ func TestCommand_MultiLine(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
 	exec, err := sb.RunCommand(ctx, "echo hello && echo world && uname -a", nil)
-	if err != nil {
-		t.Fatalf("RunCommand: %v", err)
-	}
+	require.NoError(t, err)
 
 	text := exec.Text()
-	if !strings.Contains(text, "hello") || !strings.Contains(text, "world") {
-		t.Errorf("Expected multi-line output, got: %q", text)
-	}
+	assert.Contains(t, text, "hello")
+	assert.Contains(t, text, "world")
 	t.Logf("Multi-line output (%d bytes): %s", len(text), text)
 }
 
@@ -88,14 +74,10 @@ func TestCommand_EnvInjection(t *testing.T) {
 			"CUSTOM_VAR": "injected-from-go-e2e",
 		},
 	}, nil)
-	if err != nil {
-		t.Fatalf("RunCommand with envs: %v", err)
-	}
+	require.NoError(t, err)
 
 	text := exec.Text()
-	if !strings.Contains(text, "injected-from-go-e2e") {
-		t.Errorf("Expected env var in output, got: %q", text)
-	}
+	assert.Contains(t, text, "injected-from-go-e2e")
 	t.Logf("Env injection: %s", text)
 }
 
@@ -107,9 +89,7 @@ func TestCommand_BackgroundStatusLogs(t *testing.T) {
 		Command:    "echo bg-output && sleep 1 && echo bg-done",
 		Background: true,
 	}, nil)
-	if err != nil {
-		t.Fatalf("RunCommand background: %v", err)
-	}
+	require.NoError(t, err)
 
 	// The init event should give us an execution ID
 	if exec.ID == "" {
@@ -127,9 +107,7 @@ func TestCommand_Interrupt(t *testing.T) {
 		Command:    "sleep 300",
 		Background: true,
 	}, nil)
-	if err != nil {
-		t.Fatalf("RunCommand background: %v", err)
-	}
+	require.NoError(t, err)
 	if exec.ID == "" {
 		t.Log("No execution ID — cannot test interrupt")
 		return
@@ -137,11 +115,7 @@ func TestCommand_Interrupt(t *testing.T) {
 
 	// Verify it's running — try a quick command to confirm sandbox is responsive
 	pingExec, err := sb.RunCommand(ctx, "echo still-alive", nil)
-	if err != nil {
-		t.Fatalf("Ping after background: %v", err)
-	}
-	if !strings.Contains(pingExec.Text(), "still-alive") {
-		t.Error("Sandbox should still be responsive")
-	}
+	require.NoError(t, err)
+	assert.Contains(t, pingExec.Text(), "still-alive")
 	t.Log("Interrupt test: sandbox responsive during background command")
 }

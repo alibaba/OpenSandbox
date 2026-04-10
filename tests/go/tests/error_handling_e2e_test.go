@@ -4,11 +4,12 @@ package tests
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestError_XRequestIDPassthrough(t *testing.T) {
@@ -21,18 +22,12 @@ func TestError_XRequestIDPassthrough(t *testing.T) {
 
 	// Request a non-existent sandbox — server should return 404 with x-request-id
 	_, err := mgr.GetSandboxInfo(ctx, "non-existent-sandbox-id-12345")
-	if err == nil {
-		t.Fatal("Expected error for non-existent sandbox")
-	}
+	require.Error(t, err, "expected error for non-existent sandbox")
 
 	var apiErr *opensandbox.APIError
-	if !errors.As(err, &apiErr) {
-		t.Fatalf("Expected *APIError, got %T: %v", err, err)
-	}
+	require.ErrorAs(t, err, &apiErr)
 
-	if apiErr.StatusCode != 404 {
-		t.Errorf("Expected 404, got %d", apiErr.StatusCode)
-	}
+	assert.Equal(t, 404, apiErr.StatusCode)
 
 	// x-request-id should be present on server errors
 	if apiErr.RequestID != "" {

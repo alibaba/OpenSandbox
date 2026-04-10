@@ -4,27 +4,22 @@ package tests
 
 import (
 	"io"
-	"strings"
 	"testing"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFilesystem_GetFileInfo(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
 	info, err := sb.GetFileInfo(ctx, "/etc/os-release")
-	if err != nil {
-		t.Fatalf("GetFileInfo: %v", err)
-	}
+	require.NoError(t, err)
 
 	fi, ok := info["/etc/os-release"]
-	if !ok {
-		t.Fatal("Expected /etc/os-release in result")
-	}
-	if fi.Size == 0 {
-		t.Error("Expected non-zero file size")
-	}
+	require.True(t, ok, "expected /etc/os-release in result")
+	assert.NotZero(t, fi.Size, "expected non-zero file size")
 	t.Logf("File info: path=%s size=%d owner=%s", fi.Path, fi.Size, fi.Owner)
 }
 
@@ -33,45 +28,30 @@ func TestFilesystem_WriteReadDelete(t *testing.T) {
 
 	// Write via command
 	exec, err := sb.RunCommand(ctx, `echo "go-e2e-content" > /tmp/test-rw.txt`, nil)
-	if err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	if exec.ExitCode != nil && *exec.ExitCode != 0 {
-		t.Fatalf("Write exit code: %d", *exec.ExitCode)
+	require.NoError(t, err)
+	if exec.ExitCode != nil {
+		require.Equal(t, 0, *exec.ExitCode, "write exit code")
 	}
 
 	// Read back via command
 	exec, err = sb.RunCommand(ctx, "cat /tmp/test-rw.txt", nil)
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if !strings.Contains(exec.Text(), "go-e2e-content") {
-		t.Errorf("Expected content, got: %q", exec.Text())
-	}
+	require.NoError(t, err)
+	assert.Contains(t, exec.Text(), "go-e2e-content")
 
 	// GetFileInfo
 	info, err := sb.GetFileInfo(ctx, "/tmp/test-rw.txt")
-	if err != nil {
-		t.Fatalf("GetFileInfo: %v", err)
-	}
-	if _, ok := info["/tmp/test-rw.txt"]; !ok {
-		t.Fatal("File not found via GetFileInfo")
-	}
+	require.NoError(t, err)
+	_, ok := info["/tmp/test-rw.txt"]
+	require.True(t, ok, "file not found via GetFileInfo")
 
 	// Delete
 	err = sb.DeleteFiles(ctx, []string{"/tmp/test-rw.txt"})
-	if err != nil {
-		t.Fatalf("DeleteFiles: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify deleted
 	exec, err = sb.RunCommand(ctx, "test -f /tmp/test-rw.txt && echo exists || echo gone", nil)
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if !strings.Contains(exec.Text(), "gone") {
-		t.Errorf("File should be deleted, got: %q", exec.Text())
-	}
+	require.NoError(t, err)
+	assert.Contains(t, exec.Text(), "gone")
 	t.Log("Write/Read/Delete cycle passed")
 }
 
@@ -85,18 +65,12 @@ func TestFilesystem_MoveFiles(t *testing.T) {
 	err := sb.MoveFiles(ctx, opensandbox.MoveRequest{
 		{Src: "/tmp/move-src.txt", Dest: "/tmp/move-dst.txt"},
 	})
-	if err != nil {
-		t.Fatalf("MoveFiles: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify destination exists
 	exec, err := sb.RunCommand(ctx, "cat /tmp/move-dst.txt", nil)
-	if err != nil {
-		t.Fatalf("Read moved file: %v", err)
-	}
-	if !strings.Contains(exec.Text(), "move-me") {
-		t.Errorf("Moved file content mismatch: %q", exec.Text())
-	}
+	require.NoError(t, err)
+	assert.Contains(t, exec.Text(), "move-me")
 	t.Log("MoveFiles passed")
 }
 
@@ -105,24 +79,16 @@ func TestFilesystem_Directories(t *testing.T) {
 
 	// Create directory
 	err := sb.CreateDirectory(ctx, "/tmp/test-dir-e2e", 755)
-	if err != nil {
-		t.Fatalf("CreateDirectory: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Verify exists
 	exec, err := sb.RunCommand(ctx, "test -d /tmp/test-dir-e2e && echo yes || echo no", nil)
-	if err != nil {
-		t.Fatalf("Verify dir: %v", err)
-	}
-	if !strings.Contains(exec.Text(), "yes") {
-		t.Error("Directory should exist")
-	}
+	require.NoError(t, err)
+	assert.Contains(t, exec.Text(), "yes")
 
 	// Delete directory
 	err = sb.DeleteDirectory(ctx, "/tmp/test-dir-e2e")
-	if err != nil {
-		t.Fatalf("DeleteDirectory: %v", err)
-	}
+	require.NoError(t, err)
 	t.Log("Directory create/delete passed")
 }
 
@@ -130,9 +96,7 @@ func TestFilesystem_SearchFiles(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
 	results, err := sb.SearchFiles(ctx, "/etc", "*.conf")
-	if err != nil {
-		t.Fatalf("SearchFiles: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("Found %d files matching *.conf in /etc", len(results))
 }
 
@@ -140,17 +104,11 @@ func TestFilesystem_DownloadFile(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
 	rc, err := sb.DownloadFile(ctx, "/etc/os-release", "")
-	if err != nil {
-		t.Fatalf("DownloadFile: %v", err)
-	}
+	require.NoError(t, err)
 	defer rc.Close()
 
 	data, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("Read download: %v", err)
-	}
-	if len(data) == 0 {
-		t.Error("Downloaded file is empty")
-	}
+	require.NoError(t, err)
+	assert.NotEmpty(t, data, "downloaded file is empty")
 	t.Logf("Downloaded %d bytes", len(data))
 }

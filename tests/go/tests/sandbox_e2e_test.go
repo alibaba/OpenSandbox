@@ -4,11 +4,12 @@ package tests
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSandbox_CreateAndKill(t *testing.T) {
@@ -27,9 +28,7 @@ func TestSandbox_CreateAndKill(t *testing.T) {
 			"test": "go-e2e-create",
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("Created sandbox: %s", sb.ID())
 
 	defer func() {
@@ -38,34 +37,20 @@ func TestSandbox_CreateAndKill(t *testing.T) {
 		}
 	}()
 
-	if !sb.IsHealthy(ctx) {
-		t.Error("Sandbox should be healthy after creation")
-	}
+	assert.True(t, sb.IsHealthy(ctx), "sandbox should be healthy after creation")
 
 	info, err := sb.GetInfo(ctx)
-	if err != nil {
-		t.Fatalf("GetInfo: %v", err)
-	}
-	if info.ID != sb.ID() {
-		t.Errorf("ID mismatch: got %s, want %s", info.ID, sb.ID())
-	}
-	if info.Status.State != opensandbox.StateRunning {
-		t.Errorf("Expected Running state, got %s", info.Status.State)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, sb.ID(), info.ID)
+	assert.Equal(t, opensandbox.StateRunning, info.Status.State)
 	t.Logf("Info: state=%s, created=%s", info.Status.State, info.CreatedAt)
 
 	metrics, err := sb.GetMetrics(ctx)
-	if err != nil {
-		t.Fatalf("GetMetrics: %v", err)
-	}
-	if metrics.CPUCount == 0 {
-		t.Error("Expected non-zero CPU count")
-	}
+	require.NoError(t, err)
+	assert.NotZero(t, metrics.CPUCount, "expected non-zero CPU count")
 	t.Logf("Metrics: cpu=%.0f, mem=%.0fMiB", metrics.CPUCount, metrics.MemTotalMB)
 
-	if err := sb.Kill(ctx); err != nil {
-		t.Fatalf("Kill: %v", err)
-	}
+	require.NoError(t, sb.Kill(ctx))
 	t.Log("Sandbox killed successfully")
 }
 
@@ -84,12 +69,8 @@ func TestSandbox_GetEndpoint(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
 	endpoint, err := sb.GetEndpoint(ctx, opensandbox.DefaultExecdPort)
-	if err != nil {
-		t.Fatalf("GetEndpoint: %v", err)
-	}
-	if endpoint.Endpoint == "" {
-		t.Error("Expected non-empty endpoint")
-	}
+	require.NoError(t, err)
+	assert.NotEmpty(t, endpoint.Endpoint)
 	t.Logf("Endpoint: %s", endpoint.Endpoint)
 }
 
@@ -101,27 +82,17 @@ func TestSandbox_ConnectToExisting(t *testing.T) {
 	sb1, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 	defer sb1.Kill(context.Background())
 
 	sb2, err := opensandbox.ConnectSandbox(ctx, config, sb1.ID(), opensandbox.ReadyOptions{})
-	if err != nil {
-		t.Fatalf("ConnectSandbox: %v", err)
-	}
+	require.NoError(t, err)
 
-	if sb2.ID() != sb1.ID() {
-		t.Errorf("IDs should match: %s vs %s", sb1.ID(), sb2.ID())
-	}
+	assert.Equal(t, sb1.ID(), sb2.ID())
 
 	exec, err := sb2.RunCommand(ctx, "echo connected", nil)
-	if err != nil {
-		t.Fatalf("RunCommand via connected sandbox: %v", err)
-	}
-	if !strings.Contains(exec.Text(), "connected") {
-		t.Errorf("Expected 'connected' in output, got: %q", exec.Text())
-	}
+	require.NoError(t, err)
+	assert.Contains(t, exec.Text(), "connected")
 	t.Log("ConnectSandbox works")
 }
 
@@ -129,9 +100,7 @@ func TestSandbox_Session(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
 	session, err := sb.CreateSession(ctx)
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("Created session: %s", session.ID)
 
 	sb.RunInSession(ctx, session.ID, opensandbox.RunInSessionRequest{
@@ -141,18 +110,12 @@ func TestSandbox_Session(t *testing.T) {
 	exec, err := sb.RunInSession(ctx, session.ID, opensandbox.RunInSessionRequest{
 		Command: "echo $MY_VAR",
 	}, nil)
-	if err != nil {
-		t.Fatalf("RunInSession (read var): %v", err)
-	}
-	if !strings.Contains(exec.Text(), "hello_session") {
-		t.Errorf("Session state not preserved, got: %q", exec.Text())
-	}
+	require.NoError(t, err)
+	assert.Contains(t, exec.Text(), "hello_session")
 	t.Log("Session state persists across commands")
 
 	err = sb.DeleteSession(ctx, session.ID)
-	if err != nil {
-		t.Fatalf("DeleteSession: %v", err)
-	}
+	require.NoError(t, err)
 	t.Log("Session deleted")
 }
 
@@ -165,15 +128,11 @@ func TestSandbox_ManualCleanup(t *testing.T) {
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 	defer sb.Kill(context.Background())
 
 	info, err := sb.GetInfo(ctx)
-	if err != nil {
-		t.Fatalf("GetInfo: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("Sandbox %s created (expiresAt=%v)", info.ID, info.ExpiresAt)
 }
 
@@ -199,9 +158,7 @@ func TestSandbox_NetworkPolicyCreate(t *testing.T) {
 	defer sb.Kill(context.Background())
 
 	// Verify sandbox is running
-	if !sb.IsHealthy(ctx) {
-		t.Error("Sandbox with network policy should be healthy")
-	}
+	assert.True(t, sb.IsHealthy(ctx), "sandbox with network policy should be healthy")
 	t.Log("Sandbox created with deny-default network policy + 2 allow rules")
 }
 
@@ -220,9 +177,7 @@ func TestSandbox_EgressPolicyGetAndPatch(t *testing.T) {
 	patched, err := sb.PatchEgressRules(ctx, []opensandbox.NetworkRule{
 		{Action: "allow", Target: "example.com"},
 	})
-	if err != nil {
-		t.Fatalf("PatchEgressRules: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("Patched policy: mode=%s", patched.Mode)
 }
 
@@ -234,9 +189,7 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 	defer sb.Kill(context.Background())
 
 	// Pause
@@ -250,16 +203,14 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 	// Poll until Paused
 	for i := 0; i < 30; i++ {
 		info, err := sb.GetInfo(ctx)
-		if err != nil {
-			t.Fatalf("GetInfo during pause: %v", err)
-		}
+		require.NoError(t, err)
 		t.Logf("  Poll %d: state=%s", i+1, info.Status.State)
 		if info.Status.State == opensandbox.StatePaused {
 			t.Log("Sandbox is Paused")
 			break
 		}
 		if info.Status.State == opensandbox.StateFailed {
-			t.Fatalf("Sandbox failed: %s", info.Status.Reason)
+			require.FailNowf(t, "sandbox failed: %s", info.Status.Reason)
 		}
 		time.Sleep(2 * time.Second)
 	}
@@ -267,17 +218,13 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 	// Resume — need to use manager since Sandbox doesn't have Resume yet
 	mgr := opensandbox.NewSandboxManager(config)
 	err = mgr.ResumeSandbox(ctx, sb.ID())
-	if err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
+	require.NoError(t, err)
 	t.Log("Resume requested")
 
 	// Poll until Running again
 	for i := 0; i < 30; i++ {
 		info, err := sb.GetInfo(ctx)
-		if err != nil {
-			t.Fatalf("GetInfo during resume: %v", err)
-		}
+		require.NoError(t, err)
 		t.Logf("  Poll %d: state=%s", i+1, info.Status.State)
 		if info.Status.State == opensandbox.StateRunning {
 			t.Log("Sandbox is Running again after resume")
@@ -285,5 +232,5 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 		}
 		time.Sleep(2 * time.Second)
 	}
-	t.Fatal("Sandbox did not resume to Running state")
+	require.FailNow(t, "sandbox did not resume to Running state")
 }

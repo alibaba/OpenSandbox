@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
@@ -66,9 +68,8 @@ func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
 	t.Logf("Created %d/%d sandboxes in %s", succeeded, count, elapsed.Round(time.Millisecond))
 	// Allow some failures on resource-constrained staging clusters
 	minRequired := 3
-	if succeeded < minRequired {
-		t.Fatalf("Expected at least %d/%d sandboxes to succeed, only %d did", minRequired, count, succeeded)
-	}
+	require.GreaterOrEqual(t, succeeded, minRequired,
+		"expected at least %d/%d sandboxes to succeed, only %d did", minRequired, count, succeeded)
 
 	// Run a command on each to verify they're independent
 	var cmdWg sync.WaitGroup
@@ -80,8 +81,7 @@ func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
 		go func(idx int) {
 			defer cmdWg.Done()
 			exec, err := sandboxes[idx].RunCommand(ctx, fmt.Sprintf("echo sandbox-%d", idx), nil)
-			if err != nil {
-				t.Errorf("Command on sandbox %d failed: %v", idx, err)
+			if !assert.NoError(t, err, "command on sandbox %d", idx) {
 				return
 			}
 			t.Logf("Sandbox %d output: %s", idx, exec.Text())

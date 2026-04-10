@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/require"
 )
 
 func getConnectionConfig(t *testing.T) opensandbox.ConnectionConfig {
@@ -46,6 +47,13 @@ func getConnectionConfig(t *testing.T) opensandbox.ConnectionConfig {
 	return config
 }
 
+func connectionConfigForStreaming(t *testing.T) opensandbox.ConnectionConfig {
+	t.Helper()
+	c := getConnectionConfig(t)
+	c.RequestTimeout = 3 * time.Minute
+	return c
+}
+
 func getSandboxImage() string {
 	if img := os.Getenv("OPENSANDBOX_SANDBOX_DEFAULT_IMAGE"); img != "" {
 		return img
@@ -56,16 +64,14 @@ func getSandboxImage() string {
 // createTestSandbox creates a sandbox with default settings and registers cleanup.
 func createTestSandbox(t *testing.T) (context.Context, *opensandbox.Sandbox) {
 	t.Helper()
-	config := getConnectionConfig(t)
+	config := connectionConfigForStreaming(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	t.Cleanup(cancel)
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 	t.Cleanup(func() { sb.Kill(context.Background()) })
 	return ctx, sb
 }

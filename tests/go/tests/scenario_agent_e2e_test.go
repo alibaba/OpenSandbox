@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // getLLMEndpoint returns the Bifrost LLM gateway URL.
@@ -125,9 +127,7 @@ func TestScenario_SimpleAgentLoop(t *testing.T) {
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 	defer sb.Kill(context.Background())
 	t.Logf("Sandbox ready: %s", sb.ID())
 
@@ -139,9 +139,7 @@ func TestScenario_SimpleAgentLoop(t *testing.T) {
 		{"role": "system", "content": "You are a coding assistant. Respond ONLY with a Python code block. No explanation."},
 		{"role": "user", "content": task},
 	})
-	if err != nil {
-		t.Fatalf("LLM call: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("LLM response:\n%s", llmResponse)
 
 	// Step 2: Extract code
@@ -155,28 +153,24 @@ func TestScenario_SimpleAgentLoop(t *testing.T) {
 	// Step 3: Write code to file and execute in sandbox
 	writeCmd := fmt.Sprintf("cat > /tmp/agent_task.py << 'PYEOF'\n%s\nPYEOF", code)
 	writeResult, writeErr := sb.RunCommand(ctx, writeCmd, nil)
-	if writeErr != nil {
-		t.Fatalf("Write code to sandbox: %v", writeErr)
-	}
-	if writeResult.ExitCode != nil && *writeResult.ExitCode != 0 {
-		t.Fatalf("Write code to sandbox failed with exit code %d: %s", *writeResult.ExitCode, writeResult.Text())
+	require.NoError(t, writeErr)
+	if writeResult.ExitCode != nil {
+		require.Equal(t, 0, *writeResult.ExitCode, "write code to sandbox: %s", writeResult.Text())
 	}
 	exec, err := sb.RunCommand(ctx, "python3 /tmp/agent_task.py", nil)
-	if err != nil {
-		t.Fatalf("Execute code: %v", err)
-	}
+	require.NoError(t, err)
 
 	output := exec.Text()
 	t.Logf("Execution output: %s", output)
 
-	if exec.ExitCode != nil && *exec.ExitCode != 0 {
-		t.Errorf("Code execution failed with exit code %d", *exec.ExitCode)
+	if exec.ExitCode != nil {
+		assert.Equal(t, 0, *exec.ExitCode, "code execution exit code")
 	}
 
 	// Step 4: Verify result contains Fibonacci numbers (sequence includes 0,1,1,2,3,5,8,13,21,34)
-	if !strings.Contains(output, "1") || !strings.Contains(output, "8") || !strings.Contains(output, "34") {
-		t.Errorf("Output doesn't look like Fibonacci numbers: %q", output)
-	}
+	assert.Contains(t, output, "1")
+	assert.Contains(t, output, "8")
+	assert.Contains(t, output, "34")
 	t.Log("Agent loop completed successfully: task → LLM → code → execute → result")
 }
 
@@ -198,17 +192,13 @@ func TestScenario_CodeInterpreterAgent(t *testing.T) {
 		ReadyTimeout:        60 * time.Second,
 		HealthCheckInterval: 500 * time.Millisecond,
 	})
-	if err != nil {
-		t.Fatalf("CreateCodeInterpreter: %v", err)
-	}
+	require.NoError(t, err)
 	defer ci.Kill(context.Background())
 	t.Logf("Code interpreter ready: %s", ci.ID())
 
 	// Create persistent Python context
 	codeCtx, err := ci.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
-	if err != nil {
-		t.Fatalf("CreateContext: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("Python context: %s", codeCtx.ID)
 
 	// Agent conversation: multi-turn data analysis
@@ -223,9 +213,7 @@ func TestScenario_CodeInterpreterAgent(t *testing.T) {
 	})
 
 	reply1, err := chatCompletion(ctx, llmEndpoint, getLLMModel(), conversation)
-	if err != nil {
-		t.Fatalf("LLM turn 1: %v", err)
-	}
+	require.NoError(t, err)
 	code1 := extractCode(reply1)
 	if code1 == "" {
 		code1 = strings.TrimSpace(reply1)
@@ -233,9 +221,7 @@ func TestScenario_CodeInterpreterAgent(t *testing.T) {
 	t.Logf("Turn 1 code: %s", code1)
 
 	exec1, err := ci.ExecuteInContext(ctx, codeCtx.ID, "python", code1, nil)
-	if err != nil {
-		t.Fatalf("Execute turn 1: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("Turn 1 output: %s", exec1.Text())
 	conversation = append(conversation, map[string]string{"role": "assistant", "content": reply1})
 
@@ -246,9 +232,7 @@ func TestScenario_CodeInterpreterAgent(t *testing.T) {
 	})
 
 	reply2, err := chatCompletion(ctx, llmEndpoint, getLLMModel(), conversation)
-	if err != nil {
-		t.Fatalf("LLM turn 2: %v", err)
-	}
+	require.NoError(t, err)
 	code2 := extractCode(reply2)
 	if code2 == "" {
 		code2 = strings.TrimSpace(reply2)
@@ -256,16 +240,12 @@ func TestScenario_CodeInterpreterAgent(t *testing.T) {
 	t.Logf("Turn 2 code: %s", code2)
 
 	exec2, err := ci.ExecuteInContext(ctx, codeCtx.ID, "python", code2, nil)
-	if err != nil {
-		t.Fatalf("Execute turn 2: %v", err)
-	}
+	require.NoError(t, err)
 	output2 := exec2.Text()
 	t.Logf("Turn 2 output: %s", output2)
 
 	// Verify the analysis used the persisted state
-	if output2 == "" {
-		t.Error("Turn 2 produced no output — context persistence may have failed")
-	}
+	assert.NotEmpty(t, output2, "turn 2 produced no output — context persistence may have failed")
 	// The total is 2170, so "exceed 2000" should be True/Yes
 	if !strings.Contains(strings.ToLower(output2), "true") && !strings.Contains(strings.ToLower(output2), "yes") && !strings.Contains(output2, "2170") {
 		t.Logf("Warning: output may not confirm total > 2000: %q", output2)
@@ -293,9 +273,7 @@ func TestScenario_SandboxToolUse(t *testing.T) {
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 	defer sb.Kill(context.Background())
 
 	// Ask LLM what command to run to get system info
@@ -303,9 +281,7 @@ func TestScenario_SandboxToolUse(t *testing.T) {
 		{"role": "system", "content": "You have access to a Linux shell. Respond ONLY with the exact shell command to run. No explanation, no code blocks, just the raw command."},
 		{"role": "user", "content": "What command shows the Linux kernel version, CPU count, and total memory in one line?"},
 	})
-	if err != nil {
-		t.Fatalf("LLM: %v", err)
-	}
+	require.NoError(t, err)
 	command := strings.TrimSpace(reply)
 	// Strip code block markers if present
 	command = strings.TrimPrefix(command, "```bash\n")
@@ -317,9 +293,7 @@ func TestScenario_SandboxToolUse(t *testing.T) {
 
 	// Execute in sandbox
 	exec, err := sb.RunCommand(ctx, command, nil)
-	if err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
+	require.NoError(t, err)
 	shellOutput := exec.Text()
 	t.Logf("Shell output: %s", shellOutput)
 
@@ -328,13 +302,9 @@ func TestScenario_SandboxToolUse(t *testing.T) {
 		{"role": "system", "content": "Summarize the system information in one sentence."},
 		{"role": "user", "content": fmt.Sprintf("Shell output:\n%s", shellOutput)},
 	})
-	if err != nil {
-		t.Fatalf("LLM interpret: %v", err)
-	}
+	require.NoError(t, err)
 	t.Logf("LLM interpretation: %s", interpretation)
 
-	if interpretation == "" {
-		t.Error("LLM produced no interpretation")
-	}
+	assert.NotEmpty(t, interpretation, "LLM produced no interpretation")
 	t.Log("Tool-use agent completed: task → LLM → shell → LLM → answer")
 }

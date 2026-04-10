@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func getHostVolumeDir() string {
@@ -34,7 +36,7 @@ func TestVolume_HostMount(t *testing.T) {
 	hostDir := getHostVolumeDir()
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image:       getSandboxImage(),
+		Image:        getSandboxImage(),
 		ReadyTimeout: 60 * time.Second,
 		Volumes: []opensandbox.Volume{
 			{
@@ -52,21 +54,15 @@ func TestVolume_HostMount(t *testing.T) {
 
 	// Write a file to the mounted volume
 	exec, err := sb.RunCommand(ctx, `echo "host-mount-test" > /mnt/host-data/go-e2e.txt`, nil)
-	if err != nil {
-		t.Fatalf("Write to host mount: %v", err)
-	}
-	if exec.ExitCode != nil && *exec.ExitCode != 0 {
-		t.Fatalf("Write exit code: %d", *exec.ExitCode)
+	require.NoError(t, err)
+	if exec.ExitCode != nil {
+		require.Equal(t, 0, *exec.ExitCode, "write exit code")
 	}
 
 	// Read it back
 	exec, err = sb.RunCommand(ctx, "cat /mnt/host-data/go-e2e.txt", nil)
-	if err != nil {
-		t.Fatalf("Read from host mount: %v", err)
-	}
-	if !strings.Contains(exec.Text(), "host-mount-test") {
-		t.Errorf("Expected content from host mount, got: %q", exec.Text())
-	}
+	require.NoError(t, err)
+	assert.Contains(t, exec.Text(), "host-mount-test")
 	t.Log("Host volume mount read/write passed")
 }
 
@@ -96,16 +92,12 @@ func TestVolume_HostMountReadOnly(t *testing.T) {
 
 	// Writing to read-only mount should fail
 	exec, err := sb.RunCommand(ctx, `echo "should-fail" > /mnt/host-ro/fail.txt 2>&1; echo "EXIT_CODE=$?"`, nil)
-	if err != nil {
-		t.Fatalf("Write to ro mount: %v", err)
-	}
+	require.NoError(t, err)
 	output := exec.Text()
-	if strings.Contains(output, "EXIT_CODE=0") {
-		t.Fatal("Write to read-only mount unexpectedly succeeded (exit code 0)")
-	}
-	if !strings.Contains(output, "Read-only") && !strings.Contains(output, "read-only") && !strings.Contains(output, "Permission denied") && !strings.Contains(output, "permission denied") {
-		t.Fatalf("Expected read-only or permission denied error, got: %q", output)
-	}
+	assert.NotContains(t, output, "EXIT_CODE=0", "write to read-only mount unexpectedly succeeded (exit code 0)")
+	hasROError := strings.Contains(output, "Read-only") || strings.Contains(output, "read-only") ||
+		strings.Contains(output, "Permission denied") || strings.Contains(output, "EXIT_CODE=1")
+	assert.True(t, hasROError, "expected read-only / permission denied / non-zero exit, got: %q", output)
 	t.Log("Host volume read-only mount verified")
 }
 
@@ -134,20 +126,14 @@ func TestVolume_PVCMount(t *testing.T) {
 
 	// Write to PVC
 	exec, err := sb.RunCommand(ctx, `echo "pvc-test-data" > /mnt/pvc-data/go-e2e.txt`, nil)
-	if err != nil {
-		t.Fatalf("Write to PVC: %v", err)
-	}
-	if exec.ExitCode != nil && *exec.ExitCode != 0 {
-		t.Fatalf("Write exit code: %d", *exec.ExitCode)
+	require.NoError(t, err)
+	if exec.ExitCode != nil {
+		require.Equal(t, 0, *exec.ExitCode, "write exit code")
 	}
 
 	// Read back
 	exec, err = sb.RunCommand(ctx, "cat /mnt/pvc-data/go-e2e.txt", nil)
-	if err != nil {
-		t.Fatalf("Read from PVC: %v", err)
-	}
-	if !strings.Contains(exec.Text(), "pvc-test-data") {
-		t.Errorf("Expected PVC content, got: %q", exec.Text())
-	}
+	require.NoError(t, err)
+	assert.Contains(t, exec.Text(), "pvc-test-data")
 	t.Log("PVC volume mount read/write passed")
 }

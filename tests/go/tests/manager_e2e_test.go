@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestManager_ListSandboxes(t *testing.T) {
@@ -22,9 +24,7 @@ func TestManager_ListSandboxes(t *testing.T) {
 		Page:     1,
 		PageSize: 10,
 	})
-	if err != nil {
-		t.Fatalf("ListSandboxInfos: %v", err)
-	}
+	require.NoError(t, err)
 
 	t.Logf("Listed %d sandboxes (page %d/%d)",
 		len(result.Items), result.Pagination.Page, result.Pagination.TotalPages)
@@ -42,9 +42,7 @@ func TestManager_ListByState(t *testing.T) {
 			"test": "go-e2e-manager",
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 	defer sb.Kill(context.Background())
 
 	mgr := opensandbox.NewSandboxManager(config)
@@ -54,19 +52,13 @@ func TestManager_ListByState(t *testing.T) {
 	result, err := mgr.ListSandboxInfos(ctx, opensandbox.ListOptions{
 		States: []opensandbox.SandboxState{opensandbox.StateRunning},
 	})
-	if err != nil {
-		t.Fatalf("ListSandboxInfos(Running): %v", err)
-	}
+	require.NoError(t, err)
 
-	if len(result.Items) == 0 {
-		t.Error("Expected at least one Running sandbox")
-	}
+	assert.NotEmpty(t, result.Items, "expected at least one Running sandbox")
 
 	// Verify all returned sandboxes are Running
 	for _, item := range result.Items {
-		if item.Status.State != opensandbox.StateRunning {
-			t.Errorf("Expected Running state, got %s for sandbox %s", item.Status.State, item.ID)
-		}
+		assert.Equal(t, opensandbox.StateRunning, item.Status.State, "sandbox %s", item.ID)
 	}
 	t.Logf("Found %d Running sandboxes", len(result.Items))
 }
@@ -80,26 +72,18 @@ func TestManager_GetAndKill(t *testing.T) {
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoError(t, err)
 
 	mgr := opensandbox.NewSandboxManager(config)
 	defer mgr.Close()
 
 	// Get via manager
 	info, err := mgr.GetSandboxInfo(ctx, sb.ID())
-	if err != nil {
-		t.Fatalf("GetSandboxInfo: %v", err)
-	}
-	if info.ID != sb.ID() {
-		t.Errorf("ID mismatch: got %s, want %s", info.ID, sb.ID())
-	}
+	require.NoError(t, err)
+	assert.Equal(t, sb.ID(), info.ID)
 	t.Logf("Got sandbox %s via manager (state=%s)", info.ID, info.Status.State)
 
 	// Kill via manager
-	if err := mgr.KillSandbox(ctx, sb.ID()); err != nil {
-		t.Fatalf("KillSandbox: %v", err)
-	}
+	require.NoError(t, mgr.KillSandbox(ctx, sb.ID()))
 	t.Log("Killed sandbox via manager")
 }
