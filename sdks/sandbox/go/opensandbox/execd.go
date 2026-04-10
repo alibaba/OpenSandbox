@@ -49,8 +49,7 @@ func (e *ExecdClient) ListContexts(ctx context.Context, language string) ([]Code
 	return result, err
 }
 
-// CreateContext creates a new code execution context and returns it with a
-// session ID for subsequent code execution requests.
+// CreateContext creates a new code execution context and returns its context ID.
 func (e *ExecdClient) CreateContext(ctx context.Context, req CreateContextRequest) (*CodeContext, error) {
 	var result CodeContext
 	err := e.client.doRequest(ctx, http.MethodPost, "/code/context", req, &result)

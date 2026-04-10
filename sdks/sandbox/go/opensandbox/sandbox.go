@@ -256,7 +256,8 @@ type ReadyOptions struct {
 	HealthCheck     func(ctx context.Context, sb *Sandbox) (bool, error)
 }
 
-// WaitUntilReady polls the execd /ping endpoint until it responds or the timeout expires.
+// WaitUntilReady polls until the sandbox is ready or the timeout expires.
+// By default it checks execd /ping; if HealthCheck is provided, it uses that instead.
 func (s *Sandbox) WaitUntilReady(ctx context.Context, opts ReadyOptions) error {
 	timeout := opts.Timeout
 	if timeout == 0 {

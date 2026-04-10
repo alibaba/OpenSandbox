@@ -83,7 +83,7 @@ func CreateCodeInterpreter(ctx context.Context, config ConnectionConfig, opts Co
 }
 
 // Execute runs code in the specified language and returns the structured result.
-// If contextID is empty, a new ephemeral context is used.
+// If language is non-empty, it is sent as CodeContext.Language.
 func (ci *CodeInterpreter) Execute(ctx context.Context, language, code string, handlers *ExecutionHandlers) (*Execution, error) {
 	req := RunCodeRequest{
 		Code: code,

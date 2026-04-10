@@ -29,8 +29,8 @@ func (c *EgressClient) GetPolicy(ctx context.Context) (*PolicyStatusResponse, er
 }
 
 // PatchPolicy merges the given network rules into the current egress policy.
-// Existing rules remain unless overridden. For duplicate targets within the
-// same patch, the first rule wins.
+// Existing rules remain unless overridden. Rule conflict behavior is determined
+// by the server.
 func (c *EgressClient) PatchPolicy(ctx context.Context, rules []NetworkRule) (*PolicyStatusResponse, error) {
 	var resp PolicyStatusResponse
 	if err := c.doRequest(ctx, "PATCH", "/policy", rules, &resp); err != nil {

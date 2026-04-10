@@ -1,8 +1,5 @@
 // Package opensandbox provides Go client libraries for the OpenSandbox
 // Lifecycle, Egress, and Execd APIs.
-//
-// Lifecycle types are generated from OpenAPI specifications using oapi-codegen.
-// Run `make generate` or `go generate ./...` to regenerate after spec changes.
 package opensandbox
 
 import (
@@ -11,12 +8,11 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Lifecycle types (generated from sandbox-lifecycle.yml via type aliases)
+// Lifecycle types
 // ---------------------------------------------------------------------------
 
-// Note: the generated client is at opensandbox/api/lifecycle/ and can be
-// used directly for consumers who prefer the raw generated interface.
-// These aliases provide the ergonomic public API.
+// Note: the generated lifecycle client is available at
+// opensandbox/api/lifecycle/ for consumers who prefer the raw generated interface.
 
 // SandboxState represents the high-level lifecycle state of a sandbox.
 type SandboxState string
@@ -205,7 +201,7 @@ func (e *APIError) Error() string {
 // upload, and text responses not representable in generated client)
 // ---------------------------------------------------------------------------
 
-// CodeContext represents a code execution context with session identifier.
+// CodeContext represents a code execution context identifier and language.
 type CodeContext struct {
 	ID       string `json:"id,omitempty"`
 	Language string `json:"language"`
