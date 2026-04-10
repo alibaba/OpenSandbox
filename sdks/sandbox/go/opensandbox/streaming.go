@@ -109,4 +109,3 @@ func streamSSE(ctx context.Context, resp *http.Response, handler EventHandler) e
 		}
 	}
 }
-

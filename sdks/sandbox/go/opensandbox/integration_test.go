@@ -1282,7 +1282,7 @@ func TestIntegration_NetworkPolicy(t *testing.T) {
 
 	// Create sandbox WITH a network policy
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image: "python:3.11-slim",
+		Image:    "python:3.11-slim",
 		Metadata: map[string]string{"test": "network-policy"},
 		NetworkPolicy: &opensandbox.NetworkPolicy{
 			DefaultAction: "deny",

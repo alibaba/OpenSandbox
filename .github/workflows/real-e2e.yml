@@ -381,7 +381,6 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-          cache-dependency-path: sdks/sandbox/go/go.sum
 
       - name: Clean up previous E2E resources
         run: |

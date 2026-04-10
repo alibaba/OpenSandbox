@@ -19,15 +19,15 @@ func TestIsTransient(t *testing.T) {
 		status    int
 		transient bool
 	}{
-		{http.StatusTooManyRequests, true},   // 429
-		{http.StatusBadGateway, true},        // 502
-		{http.StatusServiceUnavailable, true}, // 503
-		{http.StatusGatewayTimeout, true},     // 504
-		{http.StatusBadRequest, false},        // 400
-		{http.StatusUnauthorized, false},      // 401
-		{http.StatusForbidden, false},         // 403
-		{http.StatusNotFound, false},          // 404
-		{http.StatusConflict, false},          // 409
+		{http.StatusTooManyRequests, true},      // 429
+		{http.StatusBadGateway, true},           // 502
+		{http.StatusServiceUnavailable, true},   // 503
+		{http.StatusGatewayTimeout, true},       // 504
+		{http.StatusBadRequest, false},          // 400
+		{http.StatusUnauthorized, false},        // 401
+		{http.StatusForbidden, false},           // 403
+		{http.StatusNotFound, false},            // 404
+		{http.StatusConflict, false},            // 409
 		{http.StatusUnprocessableEntity, false}, // 422
 		{http.StatusInternalServerError, false}, // 500
 	}
@@ -434,10 +434,10 @@ func TestConnectionConfig_RetryAndTransport(t *testing.T) {
 	transport := DefaultTransportConfig()
 
 	config := ConnectionConfig{
-		Domain:   srv.Listener.Addr().String(),
-		Protocol: "http",
-		APIKey:   "test-key",
-		Retry:    &retry,
+		Domain:    srv.Listener.Addr().String(),
+		Protocol:  "http",
+		APIKey:    "test-key",
+		Retry:     &retry,
 		Transport: &transport,
 	}
 

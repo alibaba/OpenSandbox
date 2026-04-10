@@ -2164,8 +2164,8 @@ func TestCreateSandbox_WithNetworkPolicy(t *testing.T) {
 	})
 
 	_, err := client.CreateSandbox(context.Background(), CreateSandboxRequest{
-		Image:      ImageSpec{URI: "python:3.12"},
-		Entrypoint: []string{"/bin/sh"},
+		Image:          ImageSpec{URI: "python:3.12"},
+		Entrypoint:     []string{"/bin/sh"},
 		ResourceLimits: ResourceLimits{"cpu": "500m"},
 		NetworkPolicy: &NetworkPolicy{
 			DefaultAction: "deny",
