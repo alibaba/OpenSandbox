@@ -118,9 +118,27 @@ func (m *taskManager) Create(ctx context.Context, task *types.Task) (*types.Task
 	}
 
 	if err := m.executor.Start(ctx, task); err != nil {
-		if delErr := m.store.Delete(ctx, task.Name); delErr != nil {
-			klog.ErrorS(delErr, "failed to rollback task creation", "name", task.Name)
+		// Persist the task in Failed state so the scheduler can observe the failure
+		// and surface it in BatchSandbox status, rather than silently discarding it.
+		reason := "StartFailed"
+		var startErr *types.StartError
+		if errors.As(err, &startErr) {
+			reason = startErr.Reason
 		}
+		now := time.Now()
+		task.Status = types.Status{
+			State: types.TaskStateFailed,
+			SubStatuses: []types.SubStatus{{
+				Reason:     reason,
+				Message:    err.Error(),
+				ExitCode:   1,
+				FinishedAt: &now,
+			}},
+		}
+		if updateErr := m.store.Update(ctx, task); updateErr != nil {
+			klog.ErrorS(updateErr, "failed to persist failed task status after Start error", "name", task.Name)
+		}
+		m.tasks[task.Name] = task
 		return nil, fmt.Errorf("failed to start task: %w", err)
 	}
 
@@ -282,7 +300,25 @@ func (m *taskManager) createTaskLocked(ctx context.Context, task *types.Task) er
 	}
 
 	if err := m.executor.Start(ctx, task); err != nil {
-		m.store.Delete(ctx, task.Name)
+		reason := "StartFailed"
+		var startErr *types.StartError
+		if errors.As(err, &startErr) {
+			reason = startErr.Reason
+		}
+		now := time.Now()
+		task.Status = types.Status{
+			State: types.TaskStateFailed,
+			SubStatuses: []types.SubStatus{{
+				Reason:     reason,
+				Message:    err.Error(),
+				ExitCode:   1,
+				FinishedAt: &now,
+			}},
+		}
+		if updateErr := m.store.Update(ctx, task); updateErr != nil {
+			klog.ErrorS(updateErr, "failed to persist failed task status after Start error", "name", task.Name)
+		}
+		m.tasks[task.Name] = task
 		return fmt.Errorf("failed to start task: %w", err)
 	}
 
@@ -380,6 +416,16 @@ func (m *taskManager) reconcileTasks(ctx context.Context) {
 		}
 		state := status.State
 
+		// If the task is already in a terminal state (e.g., preStart hook failure set it
+		// to Failed) but Inspect returns non-terminal (e.g., Pending because no process
+		// was ever started), preserve the existing terminal state. Without this, the
+		// reconcile loop would overwrite the Failed status with Pending and prevent
+		// deletion of tasks that failed before the process launched.
+		if isTerminalState(task.Status.State) && !isTerminalState(state) {
+			state = task.Status.State
+			status = &task.Status
+		}
+
 		shouldStop := false
 		stopReason := ""
 
@@ -407,12 +453,32 @@ func (m *taskManager) reconcileTasks(ctx context.Context) {
 				klog.V(1).InfoS("task stop initiated", "name", taskName, "reason", stopReason)
 				if err := m.executor.Stop(ctx, t); err != nil {
 					klog.ErrorS(err, "failed to stop task", "name", taskName)
+					// Extract structured reason from StopError and annotate task status
+					reason := "StopFailed"
+					var stopErr *types.StopError
+					if errors.As(err, &stopErr) {
+						reason = stopErr.Reason
+					}
+					m.mu.Lock()
+					if existingTask, ok := m.tasks[taskName]; ok {
+						now := time.Now()
+						existingTask.Status.State = types.TaskStateFailed
+						existingTask.Status.SubStatuses = append(existingTask.Status.SubStatuses, types.SubStatus{
+							Reason:     reason,
+							Message:    err.Error(),
+							FinishedAt: &now,
+						})
+						if updateErr := m.store.Update(ctx, existingTask); updateErr != nil {
+							klog.ErrorS(updateErr, "failed to persist stop error status", "name", taskName)
+						}
+					}
+					m.mu.Unlock()
 				}
 				klog.InfoS("task stopped", "name", taskName)
 			}(task, name)
 		}
 
-		if task.DeletionTimestamp != nil && isTerminalState(state) {
+		if task.DeletionTimestamp != nil && isTerminalState(state) && !m.stopping[name] {
 			klog.InfoS("task terminated, finalizing deletion", "name", name)
 			tasksToDelete = append(tasksToDelete, name)
 		}
