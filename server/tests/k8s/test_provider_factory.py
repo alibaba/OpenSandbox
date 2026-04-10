@@ -24,6 +24,7 @@ from opensandbox_server.services.k8s.provider_factory import (
     register_provider,
     create_workload_provider,
     list_available_providers,
+    resolve_workload_provider_type,
     PROVIDER_TYPE_BATCHSANDBOX,
     PROVIDER_TYPE_AGENT_SANDBOX,
 )
@@ -33,6 +34,15 @@ from opensandbox_server.services.k8s.agent_sandbox_provider import AgentSandboxP
 
 
 
+
+
+class TestResolveWorkloadProviderType:
+    def test_none_returns_default_registry_key(self):
+        assert resolve_workload_provider_type(None) == PROVIDER_TYPE_BATCHSANDBOX
+
+    def test_normalizes_case(self):
+        assert resolve_workload_provider_type("BatchSandbox") == PROVIDER_TYPE_BATCHSANDBOX
+        assert resolve_workload_provider_type("Agent-Sandbox") == PROVIDER_TYPE_AGENT_SANDBOX
 
 
 class TestProviderFactory:

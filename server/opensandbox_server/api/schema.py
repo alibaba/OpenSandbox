@@ -22,7 +22,7 @@ for request/response validation and serialization.
 from datetime import datetime
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, RootModel, model_validator
+from pydantic import BaseModel, ConfigDict, Field, RootModel, model_validator
 
 
 # ============================================================================
@@ -620,8 +620,7 @@ class PoolCapacitySpec(BaseModel):
         description="Minimum total size of the pool.",
     )
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class CreatePoolRequest(BaseModel):
@@ -650,8 +649,7 @@ class CreatePoolRequest(BaseModel):
         description="Capacity configuration controlling pool size and buffer behavior.",
     )
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class UpdatePoolRequest(BaseModel):
@@ -667,8 +665,7 @@ class UpdatePoolRequest(BaseModel):
         description="New capacity configuration for the pool.",
     )
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class PoolStatus(BaseModel):
@@ -701,8 +698,7 @@ class PoolResponse(BaseModel):
         description="Pool creation timestamp.",
     )
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ListPoolsResponse(BaseModel):

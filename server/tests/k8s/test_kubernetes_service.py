@@ -44,12 +44,12 @@ class TestKubernetesSandboxServiceInit:
         """
         with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client, \
              patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
-            
+
             mock_provider = MagicMock()
             mock_create_provider.return_value = mock_provider
-            
+
             service = KubernetesSandboxService(k8s_app_config)
-            
+
             assert service.namespace == k8s_app_config.kubernetes.namespace
             assert service.execd_image == k8s_app_config.runtime.execd_image
             mock_k8s_client.assert_called_once_with(k8s_app_config.kubernetes)
