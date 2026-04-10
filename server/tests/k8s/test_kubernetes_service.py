@@ -1014,11 +1014,12 @@ class TestRenewExpiration:
         
         Purpose: Verify that sandbox expiration can be successfully renewed
         """
+        current_expiration = datetime.now(timezone.utc) + timedelta(hours=1)
         new_expiration = datetime.now(timezone.utc) + timedelta(hours=2)
         
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.update_expiration.return_value = None
-        k8s_service.workload_provider.get_expiration.return_value = new_expiration
+        k8s_service.workload_provider.get_expiration.return_value = current_expiration
         
         from opensandbox_server.api.schema import RenewSandboxExpirationRequest
         request = RenewSandboxExpirationRequest(expires_at=new_expiration)
@@ -1064,4 +1065,38 @@ class TestRenewExpiration:
 
         assert exc_info.value.status_code == 409
         assert "does not have automatic expiration" in exc_info.value.detail["message"]
+        k8s_service.workload_provider.update_expiration.assert_not_called()
+
+    def test_renew_rejects_time_before_current_expires_at(self, k8s_service):
+        """Renew is rejected when the new expiresAt is not after the current expiresAt (spec alignment)."""
+        current_expiration = datetime.now(timezone.utc) + timedelta(hours=2)
+        # Request a time that is in the future but earlier than the current expiration
+        earlier_time = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        k8s_service.workload_provider.get_workload.return_value = MagicMock()
+        k8s_service.workload_provider.get_expiration.return_value = current_expiration
+
+        from opensandbox_server.api.schema import RenewSandboxExpirationRequest
+        request = RenewSandboxExpirationRequest(expires_at=earlier_time)
+
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service.renew_expiration("test-sandbox-id", request)
+
+        assert exc_info.value.status_code == 400
+        assert "after the current expiresAt" in exc_info.value.detail["message"]
+        k8s_service.workload_provider.update_expiration.assert_not_called()
+
+    def test_renew_equal_time_is_idempotent_noop(self, k8s_service):
+        """Renew with expiresAt equal to current expiresAt returns 200 without writing (idempotent)."""
+        current_expiration = datetime.now(timezone.utc) + timedelta(hours=2)
+
+        k8s_service.workload_provider.get_workload.return_value = MagicMock()
+        k8s_service.workload_provider.get_expiration.return_value = current_expiration
+
+        from opensandbox_server.api.schema import RenewSandboxExpirationRequest
+        request = RenewSandboxExpirationRequest(expires_at=current_expiration)
+
+        response = k8s_service.renew_expiration("test-sandbox-id", request)
+
+        assert response.expires_at == current_expiration
         k8s_service.workload_provider.update_expiration.assert_not_called()

@@ -697,6 +697,18 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     },
                 )
 
+            if new_expiration < current_expiration:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_EXPIRATION,
+                        "message": "New expiration time must be after the current expiresAt time.",
+                    },
+                )
+            if new_expiration == current_expiration:
+                # Idempotent: requested time equals current expiration, return as no-op.
+                return RenewSandboxExpirationResponse(expires_at=current_expiration)
+
             # Update BatchSandbox spec.expireTime field
             self.workload_provider.update_expiration(
                 sandbox_id=sandbox_id,

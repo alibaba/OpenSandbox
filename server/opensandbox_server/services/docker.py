@@ -1886,7 +1886,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     "message": f"Sandbox {sandbox_id} does not have automatic expiration enabled.",
                 },
             )
-        if self._get_tracked_expiration(sandbox_id, labels) is None:
+        current_expiration = self._get_tracked_expiration(sandbox_id, labels)
+        if current_expiration is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -1896,6 +1897,17 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     ),
                 },
             )
+        if new_expiration < current_expiration:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_EXPIRATION,
+                    "message": "New expiration time must be after the current expiresAt time.",
+                },
+            )
+        if new_expiration == current_expiration:
+            # Idempotent: requested time equals current expiration, return as no-op.
+            return RenewSandboxExpirationResponse(expires_at=current_expiration)
 
         # Persist the new timeout in memory; it will also be respected on restart via _restore_existing_sandboxes
         self._schedule_expiration(sandbox_id, new_expiration)
