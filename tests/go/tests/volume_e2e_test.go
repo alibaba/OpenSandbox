@@ -49,14 +49,12 @@ func TestVolume_HostMount(t *testing.T) {
 	}
 	defer sb.Kill(context.Background())
 
-	// Write a file to the mounted volume
 	exec, err := sb.RunCommand(ctx, `echo "host-mount-test" > /mnt/host-data/go-e2e.txt`, nil)
 	require.NoError(t, err)
 	if exec.ExitCode != nil {
 		require.Equal(t, 0, *exec.ExitCode, "write exit code")
 	}
 
-	// Read it back
 	exec, err = sb.RunCommand(ctx, "cat /mnt/host-data/go-e2e.txt", nil)
 	require.NoError(t, err)
 	require.Contains(t, exec.Text(), "host-mount-test")
@@ -87,7 +85,6 @@ func TestVolume_HostMountReadOnly(t *testing.T) {
 	}
 	defer sb.Kill(context.Background())
 
-	// Writing to read-only mount should fail
 	exec, err := sb.RunCommand(ctx, `echo "should-fail" > /mnt/host-ro/fail.txt 2>&1; echo "EXIT_CODE=$?"`, nil)
 	require.NoError(t, err)
 	output := exec.Text()
@@ -121,14 +118,12 @@ func TestVolume_PVCMount(t *testing.T) {
 	}
 	defer sb.Kill(context.Background())
 
-	// Write to PVC
 	exec, err := sb.RunCommand(ctx, `echo "pvc-test-data" > /mnt/pvc-data/go-e2e.txt`, nil)
 	require.NoError(t, err)
 	if exec.ExitCode != nil {
 		require.Equal(t, 0, *exec.ExitCode, "write exit code")
 	}
 
-	// Read back
 	exec, err = sb.RunCommand(ctx, "cat /mnt/pvc-data/go-e2e.txt", nil)
 	require.NoError(t, err)
 	require.Contains(t, exec.Text(), "pvc-test-data")

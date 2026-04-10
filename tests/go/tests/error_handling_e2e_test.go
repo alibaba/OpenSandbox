@@ -17,17 +17,14 @@ func TestError_XRequestIDPassthrough(t *testing.T) {
 	mgr := opensandbox.NewSandboxManager(config)
 	defer mgr.Close()
 
-	// Request a non-existent sandbox — server should return 404 with x-request-id
 	_, err := mgr.GetSandboxInfo(ctx, "non-existent-sandbox-id-12345")
 	require.Error(t, err, "expected error for non-existent sandbox")
 
 	var apiErr *opensandbox.APIError
 	require.ErrorAs(t, err, &apiErr)
 
-	// Primary contract of this test: missing sandbox maps to HTTP 404.
 	require.Equal(t, 404, apiErr.StatusCode)
 
-	// x-request-id should be present on server errors
 	if apiErr.RequestID != "" {
 		t.Logf("x-request-id present: %s (status=%d, code=%s)",
 			apiErr.RequestID, apiErr.StatusCode, apiErr.Response.Code)

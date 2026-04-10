@@ -7,10 +7,6 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
-// Lifecycle types
-// ---------------------------------------------------------------------------
-
 // Note: the generated lifecycle client is available at
 // opensandbox/api/lifecycle/ for consumers who prefer the raw generated interface.
 
@@ -152,10 +148,8 @@ type RenewExpirationResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// ---------------------------------------------------------------------------
-// Egress types (hand-written — egress spec types use *string which hurts
-// ergonomics; the generated client is at opensandbox/api/egress/)
-// ---------------------------------------------------------------------------
+// Egress types are hand-written: generated egress spec types use *string which hurts
+// ergonomics. The generated client is at opensandbox/api/egress/.
 
 // PolicyStatusResponse is the response from the egress policy endpoints.
 type PolicyStatusResponse struct {
@@ -165,10 +159,6 @@ type PolicyStatusResponse struct {
 	Reason          string         `json:"reason,omitempty"`
 	Policy          *NetworkPolicy `json:"policy,omitempty"`
 }
-
-// ---------------------------------------------------------------------------
-// Error types
-// ---------------------------------------------------------------------------
 
 // ErrorResponse is the standard error response for non-2xx HTTP responses.
 type ErrorResponse struct {
@@ -196,10 +186,8 @@ func (e *APIError) Error() string {
 	return msg
 }
 
-// ---------------------------------------------------------------------------
-// Execd types (hand-written — execd endpoints use SSE streaming, multipart
-// upload, and text responses not representable in generated client)
-// ---------------------------------------------------------------------------
+// Execd types are hand-written: execd uses SSE streaming, multipart upload, and
+// text responses not representable in a generated client.
 
 // CodeContext represents a code execution context identifier and language.
 type CodeContext struct {

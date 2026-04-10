@@ -82,14 +82,12 @@ func TestCommand_EnvInjection(t *testing.T) {
 func TestCommand_BackgroundStatusLogs(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
-	// Run a background command
 	exec, err := sb.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
 		Command:    "echo bg-output && sleep 1 && echo bg-done",
 		Background: true,
 	}, nil)
 	require.NoError(t, err)
 
-	// The init event should give us an execution ID
 	if exec.ID == "" {
 		t.Log("No execution ID from background command (server may not return init event for background)")
 		return
@@ -100,7 +98,6 @@ func TestCommand_BackgroundStatusLogs(t *testing.T) {
 func TestCommand_Interrupt(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
-	// Start a long-running command in background
 	exec, err := sb.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
 		Command:    "sleep 300",
 		Background: true,
@@ -111,7 +108,6 @@ func TestCommand_Interrupt(t *testing.T) {
 		return
 	}
 
-	// Verify it's running — try a quick command to confirm sandbox is responsive
 	pingExec, err := sb.RunCommand(ctx, "echo still-alive", nil)
 	require.NoError(t, err)
 	require.Contains(t, pingExec.Text(), "still-alive")

@@ -14,10 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
-// Transient error classification
-// ---------------------------------------------------------------------------
-
 func TestIsTransient(t *testing.T) {
 	tests := []struct {
 		status    int
@@ -43,10 +39,6 @@ func TestIsTransient(t *testing.T) {
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Retry on transient errors
-// ---------------------------------------------------------------------------
 
 func TestRetry_TransientThenSuccess(t *testing.T) {
 	var attempts atomic.Int32
@@ -79,10 +71,6 @@ func TestRetry_TransientThenSuccess(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// No retry on permanent errors
-// ---------------------------------------------------------------------------
-
 func TestRetry_PermanentError(t *testing.T) {
 	var attempts atomic.Int32
 
@@ -105,10 +93,6 @@ func TestRetry_PermanentError(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("attempts = %d, want 1 (no retry on 404)", attempts.Load()))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Retry exhaustion
-// ---------------------------------------------------------------------------
 
 func TestRetry_Exhausted(t *testing.T) {
 	var attempts atomic.Int32
@@ -139,10 +123,6 @@ func TestRetry_Exhausted(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("attempts = %d, want 3", attempts.Load()))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Context cancellation during retry
-// ---------------------------------------------------------------------------
 
 func TestRetry_ContextCancelled(t *testing.T) {
 	var attempts atomic.Int32
@@ -177,10 +157,6 @@ func TestRetry_ContextCancelled(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// No retry when RetryConfig is nil
-// ---------------------------------------------------------------------------
-
 func TestRetry_Disabled(t *testing.T) {
 	var attempts atomic.Int32
 
@@ -201,10 +177,6 @@ func TestRetry_Disabled(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("attempts = %d, want 1 (retry disabled)", attempts.Load()))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Retry-After header
-// ---------------------------------------------------------------------------
 
 func TestRetry_RetryAfterHeader(t *testing.T) {
 	var attempts atomic.Int32
@@ -242,10 +214,6 @@ func TestRetry_RetryAfterHeader(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Retry on 429 (rate limit)
-// ---------------------------------------------------------------------------
-
 func TestRetry_RateLimit429(t *testing.T) {
 	var attempts atomic.Int32
 
@@ -276,10 +244,6 @@ func TestRetry_RateLimit429(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("attempts = %d, want 2", attempts.Load()))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Streaming retry (connection phase only)
-// ---------------------------------------------------------------------------
 
 func TestRetry_StreamingConnection(t *testing.T) {
 	var attempts atomic.Int32
@@ -317,10 +281,6 @@ func TestRetry_StreamingConnection(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("attempts = %d, want 2", attempts.Load()))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Backoff computation
-// ---------------------------------------------------------------------------
 
 func TestBackoff(t *testing.T) {
 	cfg := RetryConfig{
@@ -366,10 +326,6 @@ func TestBackoff_WithJitter(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Transport / connection pooling
-// ---------------------------------------------------------------------------
-
 func TestDefaultTransport(t *testing.T) {
 	tr := DefaultTransport()
 	if tr.MaxIdleConns != 100 {
@@ -403,10 +359,6 @@ func TestTransportConfig_NewTransport(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("MaxIdleConnsPerHost = %d, want 5", tr.MaxIdleConnsPerHost))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// ConnectionConfig with Retry and Transport
-// ---------------------------------------------------------------------------
 
 func TestConnectionConfig_RetryAndTransport(t *testing.T) {
 	var attempts atomic.Int32
@@ -444,10 +396,6 @@ func TestConnectionConfig_RetryAndTransport(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// APIError.Error() with request ID
-// ---------------------------------------------------------------------------
-
 func TestAPIError_ErrorWithRequestID(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Request-Id", "req-abc-123")
@@ -473,10 +421,6 @@ func TestAPIError_ErrorWithRequestID(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("Error() = %q, want %q", got, want))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// parseRetryAfter
-// ---------------------------------------------------------------------------
 
 func TestParseRetryAfter(t *testing.T) {
 	tests := []struct {
@@ -510,10 +454,6 @@ func TestParseRetryAfter_NilResponse(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("parseRetryAfter(nil) = %v, want 0", got))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// isTransientError with wrapped errors
-// ---------------------------------------------------------------------------
 
 func TestIsTransientError(t *testing.T) {
 	tests := []struct {

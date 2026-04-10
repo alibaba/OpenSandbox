@@ -124,20 +124,17 @@ func CreateSandbox(ctx context.Context, config ConnectionConfig, opts SandboxCre
 		lifecycle: lc,
 	}
 
-	// Poll until Running
 	if err := sb.waitForRunning(ctx, opts.ReadyTimeout); err != nil {
 		// Best-effort cleanup
 		_ = lc.DeleteSandbox(context.Background(), created.ID)
 		return nil, err
 	}
 
-	// Resolve execd endpoint
 	if err := sb.resolveExecd(ctx); err != nil {
 		_ = lc.DeleteSandbox(context.Background(), created.ID)
 		return nil, fmt.Errorf("opensandbox: resolve execd: %w", err)
 	}
 
-	// Wait until execd is ready
 	if !opts.SkipHealthCheck {
 		readyOpts := ReadyOptions{
 			Timeout:         opts.ReadyTimeout,
@@ -177,7 +174,6 @@ func ConnectSandbox(ctx context.Context, config ConnectionConfig, sandboxID stri
 		return nil, fmt.Errorf("opensandbox: resolve execd: %w", err)
 	}
 
-	// Optional readiness check
 	if len(opts) > 0 {
 		if err := sb.WaitUntilReady(ctx, opts[0]); err != nil {
 			return nil, err

@@ -121,7 +121,6 @@ func TestSandbox_ManualCleanup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Create with no timeout (manual cleanup)
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
@@ -151,7 +150,6 @@ func TestSandbox_NetworkPolicyCreate(t *testing.T) {
 	require.NoError(t, err)
 	defer sb.Kill(context.Background())
 
-	// Verify sandbox is running
 	require.True(t, sb.IsHealthy(ctx), "sandbox with network policy should be healthy")
 	t.Log("Sandbox created with deny-default network policy + 2 allow rules")
 }
@@ -167,7 +165,6 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 	require.NoError(t, err)
 	defer sb.Kill(context.Background())
 
-	// Pause
 	err = sb.Pause(ctx)
 	if err != nil {
 		t.Logf("Pause: %v (may not be supported by runtime)", err)
@@ -175,7 +172,6 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 	}
 	t.Log("Pause requested")
 
-	// Poll until Paused
 	reachedPaused := false
 	for i := 0; i < 30; i++ {
 		info, err := sb.GetInfo(ctx)
@@ -193,13 +189,11 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 	}
 	require.True(t, reachedPaused, "sandbox did not reach Paused state within timeout")
 
-	// Resume — need to use manager since Sandbox doesn't have Resume yet
 	mgr := opensandbox.NewSandboxManager(config)
 	err = mgr.ResumeSandbox(ctx, sb.ID())
 	require.NoError(t, err)
 	t.Log("Resume requested")
 
-	// Poll until Running again
 	for i := 0; i < 30; i++ {
 		info, err := sb.GetInfo(ctx)
 		require.NoError(t, err)

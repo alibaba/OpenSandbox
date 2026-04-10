@@ -32,7 +32,6 @@ func TestManager_ListByState(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Create a sandbox to ensure there's at least one Running
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 		Metadata: map[string]string{
@@ -45,7 +44,6 @@ func TestManager_ListByState(t *testing.T) {
 	mgr := opensandbox.NewSandboxManager(config)
 	defer mgr.Close()
 
-	// Filter by Running state
 	result, err := mgr.ListSandboxInfos(ctx, opensandbox.ListOptions{
 		States: []opensandbox.SandboxState{opensandbox.StateRunning},
 	})
@@ -53,7 +51,6 @@ func TestManager_ListByState(t *testing.T) {
 
 	require.NotEmpty(t, result.Items, "expected at least one Running sandbox")
 
-	// Verify all returned sandboxes are Running
 	for _, item := range result.Items {
 		require.Equal(t, opensandbox.StateRunning, item.Status.State, "sandbox %s", item.ID)
 	}
@@ -65,7 +62,6 @@ func TestManager_GetAndKill(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Create via high-level API
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
 	})
@@ -74,13 +70,11 @@ func TestManager_GetAndKill(t *testing.T) {
 	mgr := opensandbox.NewSandboxManager(config)
 	defer mgr.Close()
 
-	// Get via manager
 	info, err := mgr.GetSandboxInfo(ctx, sb.ID())
 	require.NoError(t, err)
 	require.Equal(t, sb.ID(), info.ID)
 	t.Logf("Got sandbox %s via manager (state=%s)", info.ID, info.Status.State)
 
-	// Kill via manager
 	require.NoError(t, mgr.KillSandbox(ctx, sb.ID()))
 	t.Log("Killed sandbox via manager")
 }

@@ -31,10 +31,8 @@ import (
 func main() {
     ctx := context.Background()
 
-    // Create a lifecycle client
     lc := opensandbox.NewLifecycleClient("http://localhost:8080/v1", "your-api-key")
 
-    // Create a sandbox
     sbx, err := lc.CreateSandbox(ctx, opensandbox.CreateSandboxRequest{
         Image:      opensandbox.ImageSpec{URI: "python:3.12"},
         Entrypoint: []string{"/bin/sh"},
@@ -48,13 +46,11 @@ func main() {
     }
     fmt.Printf("Created sandbox: %s (state: %s)\n", sbx.ID, sbx.Status.State)
 
-    // Get sandbox details
     sbx, err = lc.GetSandbox(ctx, sbx.ID)
     if err != nil {
         log.Fatal(err)
     }
 
-    // List all running sandboxes
     list, err := lc.ListSandboxes(ctx, opensandbox.ListOptions{
         States:   []opensandbox.SandboxState{opensandbox.StateRunning},
         PageSize: 10,
@@ -64,11 +60,9 @@ func main() {
     }
     fmt.Printf("Running sandboxes: %d\n", list.Pagination.TotalItems)
 
-    // Pause and resume
     _ = lc.PauseSandbox(ctx, sbx.ID)
     _ = lc.ResumeSandbox(ctx, sbx.ID)
 
-    // Clean up
     _ = lc.DeleteSandbox(ctx, sbx.ID)
 }
 ```
@@ -82,7 +76,6 @@ err := exec.RunCommand(ctx, opensandbox.RunCommandRequest{
     Command: "echo 'Hello from sandbox!'",
     Timeout: 30000,
 }, func(event opensandbox.StreamEvent) error {
-    // event.Event is populated from the NDJSON "type" field automatically.
     switch event.Event {
     case "stdout":
         fmt.Print(event.Data)
@@ -100,11 +93,9 @@ err := exec.RunCommand(ctx, opensandbox.RunCommandRequest{
 ```go
 egress := opensandbox.NewEgressClient("http://localhost:18080", "your-egress-token")
 
-// Get current policy
 policy, err := egress.GetPolicy(ctx)
 fmt.Printf("Mode: %s, Default: %s\n", policy.Mode, policy.Policy.DefaultAction)
 
-// Add a rule
 updated, err := egress.PatchPolicy(ctx, []opensandbox.NetworkRule{
     {Action: "allow", Target: "api.example.com"},
 })
@@ -211,12 +202,10 @@ Return a non-nil error from the handler to stop processing the stream early.
 All client constructors accept optional `Option` functions:
 
 ```go
-// Use a custom http.Client
 client := opensandbox.NewLifecycleClient(url, key,
     opensandbox.WithHTTPClient(myHTTPClient),
 )
 
-// Set a custom timeout
 client := opensandbox.NewExecdClient(url, token,
     opensandbox.WithTimeout(60 * time.Second),
 )

@@ -43,7 +43,6 @@ func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	// Cleanup all sandboxes
 	defer func() {
 		for _, sb := range sandboxes {
 			if sb != nil {
@@ -52,7 +51,6 @@ func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
 		}
 	}()
 
-	// Check results
 	succeeded := 0
 	for i := 0; i < count; i++ {
 		if errors[i] != nil {
@@ -64,12 +62,10 @@ func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
 	}
 
 	t.Logf("Created %d/%d sandboxes in %s", succeeded, count, elapsed.Round(time.Millisecond))
-	// Allow some failures on resource-constrained staging clusters
 	minRequired := 3
 	require.GreaterOrEqual(t, succeeded, minRequired,
 		"expected at least %d/%d sandboxes to succeed, only %d did", minRequired, count, succeeded)
 
-	// Run a command on each to verify they're independent
 	var cmdWg sync.WaitGroup
 	for i := 0; i < count; i++ {
 		if sandboxes[i] == nil {

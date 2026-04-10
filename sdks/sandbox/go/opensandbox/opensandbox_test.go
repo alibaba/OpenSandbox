@@ -17,10 +17,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 // newLifecycleServer creates an httptest.Server and a LifecycleClient pointing at it.
 func newLifecycleServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *LifecycleClient) {
 	t.Helper()
@@ -53,10 +49,6 @@ func jsonResponse(w http.ResponseWriter, status int, v any) {
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
 }
-
-// ---------------------------------------------------------------------------
-// Lifecycle tests
-// ---------------------------------------------------------------------------
 
 func TestCreateSandbox(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
@@ -339,10 +331,6 @@ func TestAPIError(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Egress tests
-// ---------------------------------------------------------------------------
-
 func TestGetPolicy(t *testing.T) {
 	want := PolicyStatusResponse{
 		Status:          "active",
@@ -413,10 +401,6 @@ func TestPatchPolicy(t *testing.T) {
 	require.NotNil(t, got.Policy)
 	require.Len(t, got.Policy.Egress, 2)
 }
-
-// ---------------------------------------------------------------------------
-// Execd tests
-// ---------------------------------------------------------------------------
 
 func TestPing(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -673,10 +657,6 @@ func TestGetMetrics(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// SSE streaming test
-// ---------------------------------------------------------------------------
-
 func TestStreamSSE(t *testing.T) {
 	ssePayload := strings.Join([]string{
 		"event: start",
@@ -737,10 +717,6 @@ func TestStreamSSE(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// NDJSON streaming test
-// ---------------------------------------------------------------------------
-
 func TestStreamSSE_NDJSON(t *testing.T) {
 	// Simulate the real execd server format: raw JSON blobs separated by blank lines.
 	ndjsonPayload := "{\"type\":\"stdout\",\"data\":\"hello\"}\n\n{\"type\":\"result\",\"exit_code\":0}\n\n"
@@ -780,10 +756,6 @@ func TestStreamSSE_NDJSON(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Auth header tests
-// ---------------------------------------------------------------------------
-
 func TestLifecycleAuthHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("OPEN-SANDBOX-API-KEY")
@@ -813,14 +785,6 @@ func TestExecdAuthHeader(t *testing.T) {
 	err := client.Ping(context.Background())
 	require.NoErrorf(t, err, "Ping")
 }
-
-// ---------------------------------------------------------------------------
-// Handler error propagation
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Phase 1: SandboxManager tests
-// ---------------------------------------------------------------------------
 
 func TestSandboxManager_ListFilter(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
@@ -1020,10 +984,6 @@ func TestSandboxManager_RenewSandbox(t *testing.T) {
 		assert.Fail(t, "expected non-zero ExpiresAt in response")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Phase 2: File operation tests
-// ---------------------------------------------------------------------------
 
 func TestCreateDirectory(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -1277,10 +1237,6 @@ func TestDownloadFile_WithCustomHeaders(t *testing.T) {
 	defer rc.Close()
 }
 
-// ---------------------------------------------------------------------------
-// Phase 3: CodeInterpreter / Code context tests
-// ---------------------------------------------------------------------------
-
 func TestCreateContext(t *testing.T) {
 	want := CodeContext{ID: "ctx-123", Language: "python"}
 
@@ -1508,10 +1464,6 @@ func TestInterruptCode(t *testing.T) {
 	require.NoErrorf(t, err, "InterruptCode")
 }
 
-// ---------------------------------------------------------------------------
-// Phase 4: Session tests
-// ---------------------------------------------------------------------------
-
 func TestCreateSession(t *testing.T) {
 	want := Session{ID: "sess-abc"}
 
@@ -1588,10 +1540,6 @@ func TestDeleteSession(t *testing.T) {
 		assert.Fail(t, "expected DELETE to be called")
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Phase 5: Command management tests
-// ---------------------------------------------------------------------------
 
 func TestGetCommandStatus(t *testing.T) {
 	started := time.Now().Add(-10 * time.Second).UTC().Truncate(time.Second)
@@ -1745,10 +1693,6 @@ func TestInterruptCommand(t *testing.T) {
 	require.NoErrorf(t, err, "InterruptCommand")
 }
 
-// ---------------------------------------------------------------------------
-// Phase 6: Metrics watch test
-// ---------------------------------------------------------------------------
-
 func TestWatchMetrics_SSE(t *testing.T) {
 	// Simulate SSE metric events (NDJSON format)
 	ssePayload := strings.Join([]string{
@@ -1838,10 +1782,6 @@ func TestWatchMetrics_ContextCancel(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("expected at least 1 event before cancel, got %d", eventCount))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Execution result aggregation tests
-// ---------------------------------------------------------------------------
 
 func TestExecution_ProcessStreamEvents(t *testing.T) {
 	// Test the full Execution aggregation pipeline with all event types
@@ -1950,10 +1890,6 @@ func TestExecution_HandlersInvoked(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// OctalMode helper test
-// ---------------------------------------------------------------------------
-
 func TestOctalMode(t *testing.T) {
 	tests := []struct {
 		mode os.FileMode
@@ -1971,10 +1907,6 @@ func TestOctalMode(t *testing.T) {
 		}
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Handler error propagation
-// ---------------------------------------------------------------------------
 
 func TestStreamSSE_HandlerError(t *testing.T) {
 	ssePayload := "event: first\ndata: a\n\nevent: second\ndata: b\n\n"
@@ -2004,10 +1936,6 @@ func TestStreamSSE_HandlerError(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("handler called %d times, want 1", count))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Command with environment variables
-// ---------------------------------------------------------------------------
 
 func TestRunCommand_WithEnvs(t *testing.T) {
 	ssePayload := `{"type":"stdout","text":"bar","timestamp":1000}` + "\n\n" +
@@ -2039,10 +1967,6 @@ func TestRunCommand_WithEnvs(t *testing.T) {
 	require.NoErrorf(t, err, "RunCommand with Envs")
 }
 
-// ---------------------------------------------------------------------------
-// Background command execution
-// ---------------------------------------------------------------------------
-
 func TestRunCommand_Background(t *testing.T) {
 	ssePayload := `{"type":"init","text":"cmd-bg-123","timestamp":1000}` + "\n\n" +
 		`{"type":"execution_complete","timestamp":1001,"execution_time":0}` + "\n\n"
@@ -2072,10 +1996,6 @@ func TestRunCommand_Background(t *testing.T) {
 	require.Len(t, events, 2)
 }
 
-// ---------------------------------------------------------------------------
-// X-Request-ID passthrough
-// ---------------------------------------------------------------------------
-
 func TestAPIError_RequestID(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Request-Id", "req-abc-123")
@@ -2097,10 +2017,6 @@ func TestAPIError_RequestID(t *testing.T) {
 		assert.Fail(t, fmt.Sprintf("Error() = %q, expected to contain request ID", apiErr.Error()))
 	}
 }
-
-// ---------------------------------------------------------------------------
-// Network policy at create time
-// ---------------------------------------------------------------------------
 
 func TestCreateSandbox_WithNetworkPolicy(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -2138,10 +2054,6 @@ func TestCreateSandbox_WithNetworkPolicy(t *testing.T) {
 	})
 	require.NoErrorf(t, err, "CreateSandbox with NetworkPolicy")
 }
-
-// ---------------------------------------------------------------------------
-// Volume mounts at create time
-// ---------------------------------------------------------------------------
 
 func TestCreateSandbox_WithVolumes(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {

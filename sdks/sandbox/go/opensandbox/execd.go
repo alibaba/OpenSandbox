@@ -28,18 +28,10 @@ func NewExecdClient(baseURL, accessToken string, opts ...Option) *ExecdClient {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Health
-// ---------------------------------------------------------------------------
-
 // Ping verifies that the Execd server is running and responsive.
 func (e *ExecdClient) Ping(ctx context.Context) error {
 	return e.client.doRequest(ctx, http.MethodGet, "/ping", nil, nil)
 }
-
-// ---------------------------------------------------------------------------
-// Code Execution
-// ---------------------------------------------------------------------------
 
 // ListContexts returns all active code execution contexts for the given language.
 func (e *ExecdClient) ListContexts(ctx context.Context, language string) ([]CodeContext, error) {
@@ -93,10 +85,6 @@ func (e *ExecdClient) InterruptCode(ctx context.Context, sessionID string) error
 	path := "/code?id=" + url.QueryEscape(sessionID)
 	return e.client.doRequest(ctx, http.MethodDelete, path, nil, nil)
 }
-
-// ---------------------------------------------------------------------------
-// Command Execution
-// ---------------------------------------------------------------------------
 
 // CreateSession creates a new bash session and returns it with a session ID.
 func (e *ExecdClient) CreateSession(ctx context.Context) (*Session, error) {
@@ -199,10 +187,6 @@ func (e *ExecdClient) GetCommandLogs(ctx context.Context, commandID string, curs
 	}
 	return result, nil
 }
-
-// ---------------------------------------------------------------------------
-// File Operations
-// ---------------------------------------------------------------------------
 
 // GetFileInfo retrieves metadata for the file at the given path.
 func (e *ExecdClient) GetFileInfo(ctx context.Context, path string) (map[string]FileInfo, error) {
@@ -375,10 +359,6 @@ func (e *ExecdClient) DownloadFile(ctx context.Context, remotePath string, range
 	return resp.Body, nil
 }
 
-// ---------------------------------------------------------------------------
-// Directory Operations
-// ---------------------------------------------------------------------------
-
 // CreateDirectory creates a directory at the given path with the specified mode.
 // Parent directories are created as needed (like mkdir -p).
 // Mode is specified as octal digits in decimal form (e.g. 755 for rwxr-xr-x).
@@ -402,10 +382,6 @@ func (e *ExecdClient) DeleteDirectory(ctx context.Context, path string) error {
 	reqPath := "/directories?path=" + url.QueryEscape(path)
 	return e.client.doRequest(ctx, http.MethodDelete, reqPath, nil, nil)
 }
-
-// ---------------------------------------------------------------------------
-// Metrics
-// ---------------------------------------------------------------------------
 
 // GetMetrics retrieves current system resource metrics.
 func (e *ExecdClient) GetMetrics(ctx context.Context) (*Metrics, error) {

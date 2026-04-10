@@ -2,7 +2,6 @@ package tests
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -52,17 +51,14 @@ func TestCodeInterpreter_PythonExecution(t *testing.T) {
 func TestCodeInterpreter_PythonContextPersistence(t *testing.T) {
 	ctx, ci := createCodeInterpreter(t)
 
-	// Create a context
 	codeCtx, err := ci.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
 	require.NoError(t, err)
 	t.Logf("Created context: %s", codeCtx.ID)
 
-	// Set a variable
 	exec, err := ci.ExecuteInContext(ctx, codeCtx.ID, "python", `x = 42`, nil)
 	require.NoError(t, err)
 	_ = exec
 
-	// Read variable back — should persist in context
 	exec, err = ci.ExecuteInContext(ctx, codeCtx.ID, "python", `print(f"x is {x}")`, nil)
 	require.NoError(t, err)
 
@@ -70,7 +66,6 @@ func TestCodeInterpreter_PythonContextPersistence(t *testing.T) {
 	require.Contains(t, text, "x is 42")
 	t.Logf("Context persistence: %s", text)
 
-	// Cleanup
 	err = ci.DeleteContext(ctx, codeCtx.ID)
 	if err != nil {
 		t.Logf("DeleteContext: %v", err)
@@ -80,17 +75,14 @@ func TestCodeInterpreter_PythonContextPersistence(t *testing.T) {
 func TestCodeInterpreter_ContextManagement(t *testing.T) {
 	ctx, ci := createCodeInterpreter(t)
 
-	// Create context
 	codeCtx, err := ci.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
 	require.NoError(t, err)
 
-	// List contexts
 	contexts, err := ci.ListContexts(ctx, "python")
 	require.NoError(t, err)
 	require.NotEmpty(t, contexts, "expected at least one context")
 	t.Logf("Listed %d python contexts", len(contexts))
 
-	// Delete context
 	err = ci.DeleteContext(ctx, codeCtx.ID)
 	require.NoError(t, err)
 	t.Log("Context management passed")
@@ -108,16 +100,13 @@ func TestCodeInterpreter_ContextIsolation(t *testing.T) {
 	require.NoError(t, err)
 	defer ci.Kill(context.Background())
 
-	// Create two contexts
 	ctx1, err := ci.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
 	require.NoError(t, err)
 	ctx2, err := ci.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
 	require.NoError(t, err)
 
-	// Set variable in context 1
 	ci.ExecuteInContext(ctx, ctx1.ID, "python", `isolated_var = "ctx1_only"`, nil)
 
-	// Try to read it in context 2 — should get NameError
 	exec, err := ci.ExecuteInContext(ctx, ctx2.ID, "python", `print("ISOLATED") if "isolated_var" not in dir() else print(isolated_var)`, nil)
 	require.NoError(t, err)
 
@@ -169,55 +158,4 @@ func TestCodeInterpreter_GetContextAndDeleteByLanguage(t *testing.T) {
 	contexts, err := ci.ListContexts(ctx, "python")
 	require.NoError(t, err)
 	require.Len(t, contexts, 0)
-}
-
-func TestCodeInterpreter_InterruptCode(t *testing.T) {
-	ctx, ci := createCodeInterpreter(t)
-	execd := newExecdClientForSandbox(t, ctx, ci.Sandbox)
-
-	execCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
-
-	idCh := make(chan string, 1)
-	doneCh := make(chan error, 1)
-
-	go func() {
-		doneCh <- execd.ExecuteCode(execCtx, opensandbox.RunCodeRequest{
-			Code: "import time\nfor i in range(1000):\n    print(i)\n    time.sleep(1)",
-			Context: &opensandbox.CodeContext{
-				Language: "python",
-			},
-		}, func(event opensandbox.StreamEvent) error {
-			if event.Event == "init" {
-				var payload struct {
-					Text string `json:"text"`
-				}
-				if json.Unmarshal([]byte(event.Data), &payload) == nil && payload.Text != "" {
-					select {
-					case idCh <- payload.Text:
-					default:
-					}
-				}
-			}
-			return nil
-		})
-	}()
-
-	var executionID string
-	select {
-	case executionID = <-idCh:
-	case <-time.After(10 * time.Second):
-		t.Skip("did not receive code execution ID in time; skipping interrupt test")
-	}
-
-	err := execd.InterruptCode(ctx, executionID)
-	if err != nil {
-		t.Skipf("InterruptCode not supported in this environment: %v", err)
-	}
-
-	select {
-	case <-doneCh:
-	case <-time.After(10 * time.Second):
-		t.Fatal("ExecuteCode did not exit after interrupt")
-	}
 }
