@@ -95,6 +95,30 @@ spec:
                   If a time in the past is provided, the batch-sandbox will be deleted immediately.
                 format: date-time
                 type: string
+              pausePolicy:
+                description: PausePolicy defines the pause/resume policy for this
+                  sandbox.
+                properties:
+                  resumeImagePullSecretName:
+                    description: ResumeImagePullSecretName is the Secret name for
+                      pulling snapshots during resume.
+                    type: string
+                  snapshotPushSecretName:
+                    description: SnapshotPushSecretName is the Secret name for pushing
+                      snapshots.
+                    type: string
+                  snapshotRegistry:
+                    description: SnapshotRegistry is the OCI registry for snapshot
+                      images.
+                    type: string
+                  snapshotType:
+                    default: Rootfs
+                    description: 'SnapshotType indicates the type of snapshot (default:
+                      Rootfs).'
+                    type: string
+                required:
+                - snapshotRegistry
+                type: object
               poolRef:
                 description: |-
                   PoolRef references the Pool resource name for pooled sandbox creation.

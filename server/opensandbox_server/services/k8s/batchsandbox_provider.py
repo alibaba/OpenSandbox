@@ -87,6 +87,7 @@ class BatchSandboxProvider(WorkloadProvider):
         if template_file_path:
             logger.info("Using BatchSandbox template file: %s", template_file_path)
         self.execd_init_resources = k8s_config.execd_init_resources if k8s_config else None
+        self.image_pull_policy = k8s_config.image_pull_policy if k8s_config else "IfNotPresent"
 
         # Initialize secure runtime resolver
         self.resolver = SecureRuntimeResolver(app_config) if app_config else None
@@ -131,6 +132,7 @@ class BatchSandboxProvider(WorkloadProvider):
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
+        pause_policy: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Create a BatchSandbox workload.
@@ -196,6 +198,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 entrypoint=entrypoint,
                 env=env,
                 annotations=annotations,
+                pause_policy=pause_policy,
             )
         
         # Extract extra pod spec fragments from template (volumes/volumeMounts only).
@@ -265,6 +268,10 @@ class BatchSandboxProvider(WorkloadProvider):
                 "spec": pod_spec,
             },
         }
+
+        # Add pausePolicy if provided
+        if pause_policy:
+            spec["pausePolicy"] = pause_policy
         runtime_manifest = {
             "apiVersion": f"{self.group}/{self.version}",
             "kind": "BatchSandbox",
@@ -362,6 +369,7 @@ class BatchSandboxProvider(WorkloadProvider):
         entrypoint: List[str],
         env: Dict[str, str],
         annotations: Optional[Dict[str, str]] = None,
+        pause_policy: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Create BatchSandbox workload from a pre-warmed resource pool.
@@ -378,7 +386,8 @@ class BatchSandboxProvider(WorkloadProvider):
             expires_at: Expiration time
             entrypoint: Container entrypoint command (can be customized)
             env: Environment variables (can be customized)
-            
+            pause_policy: Optional pause/resume policy configuration
+
         Returns:
             Dict with 'name' and 'uid' of created BatchSandbox
             
@@ -392,6 +401,8 @@ class BatchSandboxProvider(WorkloadProvider):
         }
         if expires_at is not None:
             spec["expireTime"] = expires_at.isoformat()
+        if pause_policy is not None:
+            spec["pausePolicy"] = pause_policy
         runtime_manifest = {
             "apiVersion": f"{self.group}/{self.version}",
             "kind": "BatchSandbox",
@@ -651,6 +662,7 @@ class BatchSandboxProvider(WorkloadProvider):
         return V1Container(
             name="sandbox",
             image=image_spec.uri,
+            image_pull_policy= self.image_pull_policy,
             command=wrapped_command,
             env=env_vars if env_vars else None,
             resources=resources,
@@ -677,7 +689,10 @@ class BatchSandboxProvider(WorkloadProvider):
             "name": container.name,
             "image": container.image,
         }
-        
+
+        if container.image_pull_policy:
+            result["imagePullPolicy"] = container.image_pull_policy
+
         if container.command:
             result["command"] = container.command
         

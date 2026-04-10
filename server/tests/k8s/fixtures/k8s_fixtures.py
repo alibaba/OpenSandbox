@@ -293,8 +293,9 @@ def k8s_service(k8s_app_config):
     from unittest.mock import patch, MagicMock
     
     with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client_cls, \
-         patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
-        
+         patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider, \
+         patch('opensandbox_server.services.k8s.kubernetes_service.SandboxSnapshotProvider') as mock_snapshot_provider_cls:
+
         # Mock K8sClient instance
         mock_k8s_client = MagicMock()
         mock_k8s_client_cls.return_value = mock_k8s_client
@@ -302,14 +303,19 @@ def k8s_service(k8s_app_config):
         # Mock WorkloadProvider instance
         mock_provider = MagicMock()
         mock_create_provider.return_value = mock_provider
-        
+
+        # Mock SnapshotProvider instance
+        mock_snapshot_provider = MagicMock()
+        mock_snapshot_provider_cls.return_value = mock_snapshot_provider
+
         from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
         service = KubernetesSandboxService(k8s_app_config)
         
         # Save mock objects for access in tests
         service.k8s_client = mock_k8s_client
         service.workload_provider = mock_provider
-        
+        service.snapshot_provider = mock_snapshot_provider
+
         yield service
 
 

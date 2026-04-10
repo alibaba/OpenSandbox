@@ -19,6 +19,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -104,6 +105,14 @@ func main() {
 	flag.BoolVar(&logCompress, "log-compress", true, "Compress determines if the rotated log files should be compressed using gzip")
 	flag.Float64Var(&kubeClientQPS, "kube-client-qps", 100, "QPS for Kubernetes client rate limiter.")
 	flag.IntVar(&kubeClientBurst, "kube-client-burst", 200, "Burst for Kubernetes client rate limiter.")
+
+	// Image committer
+	var imageCommitterImage string
+	flag.StringVar(&imageCommitterImage, "image-committer-image", "image-committer:dev", "The image used for commit operations (contains ctr/crictl tools).")
+
+	// Commit job timeout
+	var commitJobTimeout time.Duration
+	flag.DurationVar(&commitJobTimeout, "commit-job-timeout", 10*time.Minute, "The timeout duration for commit jobs.")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
@@ -266,6 +275,16 @@ func main() {
 		Allocator: controller.NewDefaultAllocator(mgr.GetClient()),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pool")
+		os.Exit(1)
+	}
+	if err := (&controller.SandboxSnapshotReconciler{
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		Recorder:            mgr.GetEventRecorderFor("sandboxsnapshot-controller"),
+		ImageCommitterImage: imageCommitterImage,
+		CommitJobTimeout:    commitJobTimeout,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SandboxSnapshot")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
