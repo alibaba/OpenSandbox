@@ -1,7 +1,9 @@
 package tests
 
 import (
+	"context"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
@@ -108,4 +110,37 @@ func TestFilesystem_DownloadFile(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, data, "downloaded file is empty")
 	t.Logf("Downloaded %d bytes", len(data))
+}
+
+func TestFilesystem_UploadAndDownloadFile(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+
+	tmp, err := os.CreateTemp("", "opensandbox-upload-*")
+	require.NoError(t, err)
+	defer os.Remove(tmp.Name())
+
+	content := []byte("go-e2e-upload-download")
+	_, err = tmp.Write(content)
+	require.NoError(t, err)
+	require.NoError(t, tmp.Close())
+
+	remotePath := "/tmp/go-e2e-upload-download.txt"
+	up, err := os.Open(tmp.Name())
+	require.NoError(t, err)
+	defer up.Close()
+	require.NoError(t, sb.UploadFile(ctx, up, opensandbox.UploadFileOptions{
+		FileName: "go-e2e-upload-download.txt",
+		Metadata: opensandbox.FileMetadata{Path: remotePath},
+	}))
+	t.Cleanup(func() {
+		_ = sb.DeleteFiles(context.Background(), []string{remotePath})
+	})
+
+	rc, err := sb.DownloadFile(ctx, remotePath, "")
+	require.NoError(t, err)
+	defer rc.Close()
+
+	downloaded, err := io.ReadAll(rc)
+	require.NoError(t, err)
+	require.Equal(t, string(content), string(downloaded))
 }

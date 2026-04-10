@@ -167,7 +167,7 @@ Created with `NewExecdClient(baseURL, accessToken string, opts ...Option)`.
 | `MoveFiles(ctx, req)` | Move/rename files |
 | `SearchFiles(ctx, dir, pattern)` | Search files by glob pattern |
 | `ReplaceInFiles(ctx, req)` | Text replacement in files |
-| `UploadFile(ctx, localPath, remotePath)` | Upload a file to the sandbox |
+| `UploadFile(ctx, file, opts)` | Upload a file to the sandbox |
 | `DownloadFile(ctx, remotePath, rangeHeader)` | Download a file from the sandbox |
 
 **Directory Operations:**

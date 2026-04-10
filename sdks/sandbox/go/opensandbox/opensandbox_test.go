@@ -538,11 +538,16 @@ func TestUploadFile(t *testing.T) {
 			assert.Fail(t, fmt.Sprintf("expected multipart content type, got %s", r.Header.Get("Content-Type")))
 		}
 
-		// Verify metadata part exists.
+		// Verify metadata file part exists.
 		r.ParseMultipartForm(1 << 20)
-		metaStr := r.FormValue("metadata")
+		metaFile, _, mfErr := r.FormFile("metadata")
+		require.NoErrorf(t, mfErr, "expected metadata file part")
+		metaBytes, rdErr := io.ReadAll(metaFile)
+		require.NoErrorf(t, rdErr, "read metadata part")
+		require.NoError(t, metaFile.Close())
+		metaStr := string(metaBytes)
 		if metaStr == "" {
-			assert.Fail(t, "expected metadata form field")
+			assert.Fail(t, "expected metadata content")
 		}
 		var meta FileMetadata
 		json.Unmarshal([]byte(metaStr), &meta)
@@ -565,7 +570,13 @@ func TestUploadFile(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	err = client.UploadFile(context.Background(), tmpFile.Name(), "/sandbox/upload.txt")
+	up, err := os.Open(tmpFile.Name())
+	require.NoError(t, err)
+	defer up.Close()
+	err = client.UploadFile(context.Background(), up, UploadFileOptions{
+		FileName: "upload.txt",
+		Metadata: FileMetadata{Path: "/sandbox/upload.txt"},
+	})
 	require.NoErrorf(t, err, "UploadFile")
 }
 
@@ -589,8 +600,48 @@ func TestUploadFile_WithCustomHeaders(t *testing.T) {
 		"X-Test-Header": "upload-ok",
 	}))
 
-	err = client.UploadFile(context.Background(), tmpFile.Name(), "/tmp/upload.txt")
+	up, err := os.Open(tmpFile.Name())
+	require.NoError(t, err)
+	defer up.Close()
+	err = client.UploadFile(context.Background(), up, UploadFileOptions{
+		FileName: "upload.txt",
+		Metadata: FileMetadata{Path: "/tmp/upload.txt"},
+	})
 	require.NoErrorf(t, err, "UploadFile with custom headers")
+}
+
+func TestUploadFile_WithReader(t *testing.T) {
+	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/files/upload", r.URL.Path)
+
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		metaFile, _, err := r.FormFile("metadata")
+		require.NoError(t, err)
+		metaBytes, err := io.ReadAll(metaFile)
+		require.NoError(t, err)
+		require.NoError(t, metaFile.Close())
+
+		var meta FileMetadata
+		require.NoError(t, json.Unmarshal(metaBytes, &meta))
+		require.Equal(t, "/sandbox/reader.txt", meta.Path)
+
+		filePart, fileHeader, err := r.FormFile("file")
+		require.NoError(t, err)
+		require.Equal(t, "reader.txt", fileHeader.Filename)
+		data, err := io.ReadAll(filePart)
+		require.NoError(t, err)
+		require.NoError(t, filePart.Close())
+		require.Equal(t, "reader-content", string(data))
+
+		w.WriteHeader(http.StatusOK)
+	})
+
+	err := client.UploadFile(context.Background(), strings.NewReader("reader-content"), UploadFileOptions{
+		FileName: "reader.txt",
+		Metadata: FileMetadata{Path: "/sandbox/reader.txt"},
+	})
+	require.NoError(t, err)
 }
 
 func TestGetMetrics(t *testing.T) {

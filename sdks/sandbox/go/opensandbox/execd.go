@@ -1,17 +1,14 @@
 package opensandbox
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/textproto"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 )
 
@@ -254,76 +251,90 @@ func (e *ExecdClient) ReplaceInFiles(ctx context.Context, req ReplaceRequest) er
 	return e.client.doRequest(ctx, http.MethodPost, "/files/replace", req, nil)
 }
 
-// UploadFile uploads a local file to the sandbox at the specified remote path.
-// The file is sent as a multipart form with metadata and file content parts.
-func (e *ExecdClient) UploadFile(ctx context.Context, localPath, remotePath string) error {
-	f, err := os.Open(localPath)
+type UploadFileOptions struct {
+	FileName string
+	Metadata FileMetadata
+}
+
+func (e *ExecdClient) UploadFile(ctx context.Context, file io.Reader, opts UploadFileOptions) error {
+	req, bodyCloser, err := e.newUploadRequest(ctx, file, opts)
 	if err != nil {
-		return fmt.Errorf("opensandbox: open file: %w", err)
+		return err
 	}
-	defer f.Close()
+	defer bodyCloser.Close()
 
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
+	for k, v := range e.client.headers {
+		req.Header.Set(k, v)
+	}
+	if e.client.apiKey != "" {
+		req.Header.Set(e.client.authHeader, e.client.apiKey)
+	}
 
-	// Write metadata part.
-	meta := FileMetadata{Path: remotePath}
-	metaJSON, err := json.Marshal(meta)
+	resp, err := e.client.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("opensandbox: marshal metadata: %w", err)
+		return fmt.Errorf("opensandbox: do request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return handleError(resp)
+	}
+	return nil
+}
+
+func (e *ExecdClient) newUploadRequest(ctx context.Context, file io.Reader, opts UploadFileOptions) (*http.Request, io.Closer, error) {
+	if file == nil {
+		return nil, nil, &InvalidArgumentError{Field: "file", Message: "file reader is required"}
+	}
+	if opts.Metadata.Path == "" {
+		return nil, nil, &InvalidArgumentError{Field: "metadata.path", Message: "path is required"}
+	}
+	fileName := opts.FileName
+	if fileName == "" {
+		fileName = "file"
 	}
 
-	metaHeader := make(textproto.MIMEHeader)
-	metaHeader.Set("Content-Disposition", `form-data; name="metadata"`)
-	metaHeader.Set("Content-Type", "application/json")
-	metaPart, err := writer.CreatePart(metaHeader)
-	if err != nil {
-		return fmt.Errorf("opensandbox: create metadata part: %w", err)
-	}
-	if _, err := metaPart.Write(metaJSON); err != nil {
-		return fmt.Errorf("opensandbox: write metadata: %w", err)
-	}
-
-	// Write file part.
-	filePart, err := writer.CreateFormFile("file", filepath.Base(localPath))
-	if err != nil {
-		return fmt.Errorf("opensandbox: create file part: %w", err)
-	}
-	if _, err := io.Copy(filePart, f); err != nil {
-		return fmt.Errorf("opensandbox: write file: %w", err)
-	}
-
-	if err := writer.Close(); err != nil {
-		return fmt.Errorf("opensandbox: close multipart: %w", err)
-	}
-
-	payload := append([]byte(nil), body.Bytes()...)
+	pr, pw := io.Pipe()
+	writer := multipart.NewWriter(pw)
 	contentType := writer.FormDataContentType()
 
-	return e.client.withRetry(ctx, func() error {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.client.baseURL+"/files/upload", bytes.NewReader(payload))
+	go func() {
+		metaJSON, err := json.Marshal(opts.Metadata)
 		if err != nil {
-			return fmt.Errorf("opensandbox: create request: %w", err)
+			_ = pw.CloseWithError(fmt.Errorf("opensandbox: marshal metadata: %w", err))
+			return
 		}
-		for k, v := range e.client.headers {
-			req.Header.Set(k, v)
-		}
-		if e.client.apiKey != "" {
-			req.Header.Set(e.client.authHeader, e.client.apiKey)
-		}
-		req.Header.Set("Content-Type", contentType)
-
-		resp, err := e.client.httpClient.Do(req)
+		metaPart, err := writer.CreateFormFile("metadata", "metadata")
 		if err != nil {
-			return fmt.Errorf("opensandbox: do request: %w", err)
+			_ = pw.CloseWithError(fmt.Errorf("opensandbox: create metadata part: %w", err))
+			return
 		}
-		defer resp.Body.Close()
+		if _, err := metaPart.Write(metaJSON); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("opensandbox: write metadata: %w", err))
+			return
+		}
+		filePart, err := writer.CreateFormFile("file", fileName)
+		if err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("opensandbox: create file part: %w", err))
+			return
+		}
+		if _, err := io.Copy(filePart, file); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("opensandbox: write file: %w", err))
+			return
+		}
+		if err := writer.Close(); err != nil {
+			_ = pw.CloseWithError(fmt.Errorf("opensandbox: close multipart: %w", err))
+			return
+		}
+		_ = pw.Close()
+	}()
 
-		if resp.StatusCode >= 400 {
-			return handleError(resp)
-		}
-		return nil
-	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.client.baseURL+"/files/upload", pr)
+	if err != nil {
+		_ = pr.Close()
+		return nil, nil, fmt.Errorf("opensandbox: create request: %w", err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	return req, pr, nil
 }
 
 // DownloadFile downloads a file from the sandbox. The caller must close the
@@ -383,7 +394,6 @@ func (e *ExecdClient) CreateDirectory(ctx context.Context, path string, mode int
 // OctalMode converts a Go os.FileMode to the octal-digits-as-int format
 // expected by the OpenSandbox server (e.g. os.FileMode(0755) -> 755).
 func OctalMode(m os.FileMode) int {
-	// The formatted value contains only octal digits, so Atoi should never fail.
 	v, _ := strconv.Atoi(fmt.Sprintf("%o", m))
 	return v
 }
