@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/alibaba/OpenSandbox/sdks/sandbox/go"
 	"github.com/stretchr/testify/require"
 )
 

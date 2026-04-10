@@ -3,9 +3,9 @@
 all: build vet test
 
 generate:
-	cd opensandbox/api/lifecycle && oapi-codegen --config cfg.yaml ../specs/sandbox-lifecycle.yml
-	cd opensandbox/api/execd    && oapi-codegen --config cfg.yaml ../specs/execd-api.yaml
-	cd opensandbox/api/egress   && oapi-codegen --config cfg.yaml ../specs/egress-api.yaml
+	cd api/lifecycle && oapi-codegen --config cfg.yaml ../specs/sandbox-lifecycle.yml
+	cd api/execd    && oapi-codegen --config cfg.yaml ../specs/execd-api.yaml
+	cd api/egress   && oapi-codegen --config cfg.yaml ../specs/egress-api.yaml
 	@echo "Generated all API clients from OpenAPI specs"
 
 build:

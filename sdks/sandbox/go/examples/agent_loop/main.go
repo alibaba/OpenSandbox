@@ -26,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
+	"github.com/alibaba/OpenSandbox/sdks/sandbox/go"
 )
 
 func main() {
