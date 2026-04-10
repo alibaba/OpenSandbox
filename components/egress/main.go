@@ -23,12 +23,14 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/alibaba/opensandbox/egress/hooks"
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
 	"github.com/alibaba/opensandbox/egress/pkg/events"
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
+	"github.com/alibaba/opensandbox/egress/pkg/startup"
 	"github.com/alibaba/opensandbox/egress/pkg/telemetry"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
 	"github.com/alibaba/opensandbox/internal/version"
@@ -54,6 +56,10 @@ func main() {
 			defer shutdownCancel()
 			_ = otelShutdown(shutdownCtx)
 		}()
+	}
+
+	if err = startup.RunPhasePrePolicy(ctx); err != nil {
+		log.Fatalf("startup hooks: %v", err)
 	}
 
 	initialRules, _, err := policy.LoadInitialPolicyDetailed(os.Getenv(constants.EnvEgressPolicyFile), constants.EnvEgressRules)
@@ -107,7 +113,12 @@ func main() {
 	}
 	log.Infof("policy server listening on %s (POST /policy)", httpAddr)
 
-	waitForShutdown(ctx, proxy, policySrv, exemptDst, nftMgr)
+	mitm, err := startMitmproxyTransparentIfEnabled()
+	if err != nil {
+		log.Fatalf("mitmproxy transparent: %v", err)
+	}
+
+	waitForShutdown(ctx, proxy, policySrv, exemptDst, nftMgr, mitm)
 }
 
 func withLogger(ctx context.Context) context.Context {
@@ -129,15 +140,6 @@ func envOrDefault(key, defaultVal string) string {
 	return defaultVal
 }
 
-func isTruthy(v string) bool {
-	switch strings.ToLower(strings.TrimSpace(v)) {
-	case "1", "true", "yes", "y", "on":
-		return true
-	default:
-		return false
-	}
-}
-
 func containsAddr(addrs []netip.Addr, a netip.Addr) bool {
 	for _, x := range addrs {
 		if x == a {
@@ -148,14 +150,11 @@ func containsAddr(addrs []netip.Addr, a netip.Addr) bool {
 }
 
 func parseMode() string {
-	mode := strings.ToLower(strings.TrimSpace(os.Getenv(constants.EnvEgressMode)))
-	switch mode {
-	case "", constants.PolicyDnsOnly:
-		return constants.PolicyDnsOnly
-	case constants.PolicyDnsNft:
-		return constants.PolicyDnsNft
-	default:
-		log.Warnf("invalid %s=%s, falling back to dns", constants.EnvEgressMode, mode)
+	raw := os.Getenv(constants.EnvEgressMode)
+	normalized, err := constants.ParseEgressMode(raw)
+	if err != nil {
+		log.Warnf("invalid %s=%q: %v; falling back to %s", constants.EnvEgressMode, raw, err, constants.PolicyDnsOnly)
 		return constants.PolicyDnsOnly
 	}
+	return normalized
 }

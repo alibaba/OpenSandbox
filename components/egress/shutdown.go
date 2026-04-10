@@ -25,14 +25,16 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
+	"github.com/alibaba/opensandbox/egress/pkg/mitmproxy"
 )
 
 const (
 	defaultPolicyShutdownTimeout = 5 * time.Second
 	defaultNftTeardownTimeout    = 5 * time.Second
+	defaultMitmShutdownTimeout   = 5 * time.Second
 )
 
-func waitForShutdown(ctx context.Context, proxy *dnsproxy.Proxy, policySrv *http.Server, exemptDst []netip.Addr, applier nftApplier) {
+func waitForShutdown(ctx context.Context, proxy *dnsproxy.Proxy, policySrv *http.Server, exemptDst []netip.Addr, applier nftApplier, mitm *mitmTransparent) {
 	<-ctx.Done()
 	log.Infof("received shutdown signal; beginning graceful shutdown")
 
@@ -46,6 +48,11 @@ func waitForShutdown(ctx context.Context, proxy *dnsproxy.Proxy, policySrv *http
 	}
 	if err := proxy.Shutdown(); err != nil {
 		log.Errorf("dns proxy shutdown error: %v", err)
+	}
+
+	if mitm != nil {
+		iptables.RemoveTransparentHTTP(mitm.port, mitm.uid)
+		mitmproxy.GracefulShutdown(mitm.running, defaultMitmShutdownTimeout)
 	}
 
 	proxy.SetOnResolved(nil)

@@ -14,23 +14,33 @@
 
 package constants
 
-const (
-	EnvBlockDoH443      = "OPENSANDBOX_EGRESS_BLOCK_DOH_443"
-	EnvDoHBlocklist     = "OPENSANDBOX_EGRESS_DOH_BLOCKLIST" // comma-separated IP/CIDR
-	EnvEgressMode       = "OPENSANDBOX_EGRESS_MODE"          // dns | dns+nft
-	EnvEgressHTTPAddr   = "OPENSANDBOX_EGRESS_HTTP_ADDR"
-	EnvEgressToken      = "OPENSANDBOX_EGRESS_TOKEN"
-	EnvEgressRules      = "OPENSANDBOX_EGRESS_RULES"
-	EnvEgressPolicyFile = "OPENSANDBOX_EGRESS_POLICY_FILE" // optional JSON snapshot; if present and valid, overrides EnvEgressRules at startup
-	EnvEgressLogLevel   = "OPENSANDBOX_EGRESS_LOG_LEVEL"
-	EnvMaxEgressRules   = "OPENSANDBOX_EGRESS_MAX_RULES" // max egress rules for POST/PATCH; 0 = unlimited; empty = default
-	EnvBlockedWebhook   = "OPENSANDBOX_EGRESS_DENY_WEBHOOK"
-	ENVSandboxID        = "OPENSANDBOX_EGRESS_SANDBOX_ID"
-	// EnvEgressMetricsExtraAttrs optional comma-separated key=value pairs appended to every egress OTLP metric datapoint (first '=' splits key/value per segment).
-	EnvEgressMetricsExtraAttrs = "OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS"
+import (
+	"os"
+	"strconv"
+	"strings"
+)
 
-	// EnvNameserverExempt comma-separated IPs; proxy upstream to these is not marked and is allowed in nft allow set
-	EnvNameserverExempt = "OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT"
+const (
+	EnvBlockDoH443             = "OPENSANDBOX_EGRESS_BLOCK_DOH_443"
+	EnvDoHBlocklist            = "OPENSANDBOX_EGRESS_DOH_BLOCKLIST"
+	EnvEgressMode              = "OPENSANDBOX_EGRESS_MODE"
+	EnvEgressHTTPAddr          = "OPENSANDBOX_EGRESS_HTTP_ADDR"
+	EnvEgressToken             = "OPENSANDBOX_EGRESS_TOKEN"
+	EnvEgressRules             = "OPENSANDBOX_EGRESS_RULES"
+	EnvEgressPolicyFile        = "OPENSANDBOX_EGRESS_POLICY_FILE"
+	EnvEgressLogLevel          = "OPENSANDBOX_EGRESS_LOG_LEVEL"
+	EnvMaxEgressRules          = "OPENSANDBOX_EGRESS_MAX_RULES"
+	EnvBlockedWebhook          = "OPENSANDBOX_EGRESS_DENY_WEBHOOK"
+	EnvSandboxID               = "OPENSANDBOX_EGRESS_SANDBOX_ID"
+	EnvEgressMetricsExtraAttrs = "OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS"
+	EnvNameserverExempt        = "OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT"
+
+	// Python mitmproxy (mitmdump) transparent mode — Linux + CAP_NET_ADMIN only.
+	EnvMitmproxyTransparent      = "OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT"
+	EnvMitmproxyPort             = "OPENSANDBOX_EGRESS_MITMPROXY_PORT"
+	EnvMitmproxyConfDir          = "OPENSANDBOX_EGRESS_MITMPROXY_CONFDIR"
+	EnvMitmproxyScript           = "OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT"
+	EnvMitmproxyUpstreamTrustDir = "OPENSANDBOX_EGRESS_MITMPROXY_UPSTREAM_TRUST_DIR"
 
 	// EnvDNSUpstream comma-separated upstream resolvers; each address must be a literal IPv4/IPv6 (optional :port). Hostnames are rejected (DNS recursion via REDIRECT).
 	EnvDNSUpstream                 = "OPENSANDBOX_EGRESS_DNS_UPSTREAM"
@@ -46,7 +56,31 @@ const (
 
 const (
 	DefaultEgressServerAddr      = ":18080"
+	DefaultMitmproxyPort         = 18081
 	ResolvNameserverCap          = 10
 	DefaultMaxEgressRules        = 4096
 	DefaultDNSUpstreamTimeoutSec = 5
+
+	OpenSandboxRootDir = "/opt/opensandbox"
 )
+
+func EnvIntOrDefault(key string, defaultVal int) int {
+	s := strings.TrimSpace(os.Getenv(key))
+	if s == "" {
+		return defaultVal
+	}
+	v, err := strconv.Atoi(s)
+	if err != nil {
+		return defaultVal
+	}
+	return v
+}
+
+func IsTruthy(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
+	}
+}

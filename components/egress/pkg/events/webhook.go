@@ -63,7 +63,7 @@ func NewWebhookSubscriber(url string) *WebhookSubscriber {
 		timeout:    defaultWebhookTimeout,
 		maxRetries: defaultWebhookRetries,
 		backoff:    defaultWebhookBackoff,
-		sandboxID:  os.Getenv(constants.ENVSandboxID),
+		sandboxID:  os.Getenv(constants.EnvSandboxID),
 	}
 }
 
