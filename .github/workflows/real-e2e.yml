@@ -366,6 +366,9 @@ jobs:
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
+      HOME: /home/admin/actions-runner
+      GOCACHE: /home/admin/actions-runner/_temp/go-build
+      GOMODCACHE: /home/admin/actions-runner/_temp/go-mod-cache
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -378,9 +381,10 @@ jobs:
           uv run python --version
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.24"
+          cache: false
 
       - name: Clean up previous E2E resources
         run: |

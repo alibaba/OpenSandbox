@@ -1,5 +1,3 @@
-//go:build e2e
-
 package tests
 
 import (
@@ -8,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,7 +30,7 @@ func createCodeInterpreter(t *testing.T) (context.Context, *opensandbox.CodeInte
 func TestCodeInterpreter_CreateAndPing(t *testing.T) {
 	ctx, ci := createCodeInterpreter(t)
 
-	assert.True(t, ci.IsHealthy(ctx), "code interpreter should be healthy")
+	require.True(t, ci.IsHealthy(ctx), "code interpreter should be healthy")
 
 	metrics, err := ci.GetMetrics(ctx)
 	require.NoError(t, err)
@@ -47,7 +44,7 @@ func TestCodeInterpreter_PythonExecution(t *testing.T) {
 	require.NoError(t, err)
 
 	text := exec.Text()
-	assert.Contains(t, text, "hello from python")
+	require.Contains(t, text, "hello from python")
 	t.Logf("Python output: %s", text)
 }
 
@@ -69,7 +66,7 @@ func TestCodeInterpreter_PythonContextPersistence(t *testing.T) {
 	require.NoError(t, err)
 
 	text := exec.Text()
-	assert.Contains(t, text, "x is 42")
+	require.Contains(t, text, "x is 42")
 	t.Logf("Context persistence: %s", text)
 
 	// Cleanup
@@ -89,7 +86,7 @@ func TestCodeInterpreter_ContextManagement(t *testing.T) {
 	// List contexts
 	contexts, err := ci.ListContexts(ctx, "python")
 	require.NoError(t, err)
-	assert.NotEmpty(t, contexts, "expected at least one context")
+	require.NotEmpty(t, contexts, "expected at least one context")
 	t.Logf("Listed %d python contexts", len(contexts))
 
 	// Delete context
@@ -124,7 +121,7 @@ func TestCodeInterpreter_ContextIsolation(t *testing.T) {
 	require.NoError(t, err)
 
 	text := exec.Text()
-	assert.Contains(t, text, "ISOLATED")
+	require.Contains(t, text, "ISOLATED")
 	t.Log("Context isolation verified")
 
 	ci.DeleteContext(ctx, ctx1.ID)
@@ -148,6 +145,6 @@ for i in range(3):
 `, handlers)
 	require.NoError(t, err)
 
-	assert.NotEmpty(t, stdoutLines, "expected handler to receive stdout")
+	require.NotEmpty(t, stdoutLines, "expected handler to receive stdout")
 	t.Logf("Handler received %d stdout events", len(stdoutLines))
 }

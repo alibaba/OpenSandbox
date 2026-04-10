@@ -1,5 +1,3 @@
-//go:build e2e
-
 package tests
 
 import (
@@ -15,7 +13,6 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -164,13 +161,15 @@ func TestScenario_SimpleAgentLoop(t *testing.T) {
 	t.Logf("Execution output: %s", output)
 
 	if exec.ExitCode != nil {
-		assert.Equal(t, 0, *exec.ExitCode, "code execution exit code")
+		require.Equal(t, 0, *exec.ExitCode, "code execution exit code")
 	}
 
-	// Step 4: Verify result contains Fibonacci numbers (sequence includes 0,1,1,2,3,5,8,13,21,34)
-	assert.Contains(t, output, "1")
-	assert.Contains(t, output, "8")
-	assert.Contains(t, output, "34")
+	// Step 4: Verify result looks like first 10 Fibonacci numbers (avoid lone "1" — too weak).
+	// 0,1,1,2,3,5,8,13,21,34 — require distinctive substrings.
+	require.Contains(t, output, "34", "expected Fibonacci output")
+	require.Contains(t, output, "8")
+	require.True(t, strings.Contains(output, "13") || strings.Contains(output, "21") || strings.Contains(output, "5"),
+		"expected mid-sequence Fibonacci digits (5/13/21), got: %q", output)
 	t.Log("Agent loop completed successfully: task → LLM → code → execute → result")
 }
 
@@ -245,7 +244,7 @@ func TestScenario_CodeInterpreterAgent(t *testing.T) {
 	t.Logf("Turn 2 output: %s", output2)
 
 	// Verify the analysis used the persisted state
-	assert.NotEmpty(t, output2, "turn 2 produced no output — context persistence may have failed")
+	require.NotEmpty(t, output2, "turn 2 produced no output — context persistence may have failed")
 	// The total is 2170, so "exceed 2000" should be True/Yes
 	if !strings.Contains(strings.ToLower(output2), "true") && !strings.Contains(strings.ToLower(output2), "yes") && !strings.Contains(output2, "2170") {
 		t.Logf("Warning: output may not confirm total > 2000: %q", output2)
@@ -305,6 +304,6 @@ func TestScenario_SandboxToolUse(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("LLM interpretation: %s", interpretation)
 
-	assert.NotEmpty(t, interpretation, "LLM produced no interpretation")
+	require.NotEmpty(t, interpretation, "LLM produced no interpretation")
 	t.Log("Tool-use agent completed: task → LLM → shell → LLM → answer")
 }

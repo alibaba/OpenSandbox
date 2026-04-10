@@ -1,5 +1,3 @@
-//go:build e2e
-
 package tests
 
 import (
@@ -8,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -27,7 +24,8 @@ func TestError_XRequestIDPassthrough(t *testing.T) {
 	var apiErr *opensandbox.APIError
 	require.ErrorAs(t, err, &apiErr)
 
-	assert.Equal(t, 404, apiErr.StatusCode)
+	// Primary contract of this test: missing sandbox maps to HTTP 404.
+	require.Equal(t, 404, apiErr.StatusCode)
 
 	// x-request-id should be present on server errors
 	if apiErr.RequestID != "" {

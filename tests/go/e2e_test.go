@@ -1,5 +1,3 @@
-//go:build e2e
-
 package e2e
 
 import (
@@ -11,7 +9,6 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -266,7 +263,7 @@ func TestE2E_ManualCleanup(t *testing.T) {
 	info, err := sb.GetInfo(ctx)
 	require.NoError(t, err)
 
-	assert.Nil(t, info.ExpiresAt, "expected nil ExpiresAt for ManualCleanup sandbox")
+	require.Nil(t, info.ExpiresAt, "ManualCleanup sandbox must omit ExpiresAt")
 	if info.ExpiresAt == nil {
 		t.Log("Confirmed: ExpiresAt is nil (no auto-expiration)")
 	}

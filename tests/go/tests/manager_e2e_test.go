@@ -1,5 +1,3 @@
-//go:build e2e
-
 package tests
 
 import (
@@ -8,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,11 +51,11 @@ func TestManager_ListByState(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	assert.NotEmpty(t, result.Items, "expected at least one Running sandbox")
+	require.NotEmpty(t, result.Items, "expected at least one Running sandbox")
 
 	// Verify all returned sandboxes are Running
 	for _, item := range result.Items {
-		assert.Equal(t, opensandbox.StateRunning, item.Status.State, "sandbox %s", item.ID)
+		require.Equal(t, opensandbox.StateRunning, item.Status.State, "sandbox %s", item.ID)
 	}
 	t.Logf("Found %d Running sandboxes", len(result.Items))
 }
@@ -80,7 +77,7 @@ func TestManager_GetAndKill(t *testing.T) {
 	// Get via manager
 	info, err := mgr.GetSandboxInfo(ctx, sb.ID())
 	require.NoError(t, err)
-	assert.Equal(t, sb.ID(), info.ID)
+	require.Equal(t, sb.ID(), info.ID)
 	t.Logf("Got sandbox %s via manager (state=%s)", info.ID, info.Status.State)
 
 	// Kill via manager

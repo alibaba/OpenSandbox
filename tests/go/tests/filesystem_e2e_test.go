@@ -1,5 +1,3 @@
-//go:build e2e
-
 package tests
 
 import (
@@ -7,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +16,7 @@ func TestFilesystem_GetFileInfo(t *testing.T) {
 
 	fi, ok := info["/etc/os-release"]
 	require.True(t, ok, "expected /etc/os-release in result")
-	assert.NotZero(t, fi.Size, "expected non-zero file size")
+	require.NotZero(t, fi.Size, "expected non-zero file size")
 	t.Logf("File info: path=%s size=%d owner=%s", fi.Path, fi.Size, fi.Owner)
 }
 
@@ -36,7 +33,7 @@ func TestFilesystem_WriteReadDelete(t *testing.T) {
 	// Read back via command
 	exec, err = sb.RunCommand(ctx, "cat /tmp/test-rw.txt", nil)
 	require.NoError(t, err)
-	assert.Contains(t, exec.Text(), "go-e2e-content")
+	require.Contains(t, exec.Text(), "go-e2e-content")
 
 	// GetFileInfo
 	info, err := sb.GetFileInfo(ctx, "/tmp/test-rw.txt")
@@ -51,7 +48,7 @@ func TestFilesystem_WriteReadDelete(t *testing.T) {
 	// Verify deleted
 	exec, err = sb.RunCommand(ctx, "test -f /tmp/test-rw.txt && echo exists || echo gone", nil)
 	require.NoError(t, err)
-	assert.Contains(t, exec.Text(), "gone")
+	require.Contains(t, exec.Text(), "gone")
 	t.Log("Write/Read/Delete cycle passed")
 }
 
@@ -70,7 +67,7 @@ func TestFilesystem_MoveFiles(t *testing.T) {
 	// Verify destination exists
 	exec, err := sb.RunCommand(ctx, "cat /tmp/move-dst.txt", nil)
 	require.NoError(t, err)
-	assert.Contains(t, exec.Text(), "move-me")
+	require.Contains(t, exec.Text(), "move-me")
 	t.Log("MoveFiles passed")
 }
 
@@ -84,7 +81,7 @@ func TestFilesystem_Directories(t *testing.T) {
 	// Verify exists
 	exec, err := sb.RunCommand(ctx, "test -d /tmp/test-dir-e2e && echo yes || echo no", nil)
 	require.NoError(t, err)
-	assert.Contains(t, exec.Text(), "yes")
+	require.Contains(t, exec.Text(), "yes")
 
 	// Delete directory
 	err = sb.DeleteDirectory(ctx, "/tmp/test-dir-e2e")
@@ -109,6 +106,6 @@ func TestFilesystem_DownloadFile(t *testing.T) {
 
 	data, err := io.ReadAll(rc)
 	require.NoError(t, err)
-	assert.NotEmpty(t, data, "downloaded file is empty")
+	require.NotEmpty(t, data, "downloaded file is empty")
 	t.Logf("Downloaded %d bytes", len(data))
 }

@@ -1,12 +1,9 @@
-//go:build e2e
-
 package tests
 
 import (
 	"testing"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,10 +14,10 @@ func TestCommand_RunSimple(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotNil(t, exec.ExitCode)
-	assert.Equal(t, 0, *exec.ExitCode)
+	require.Equal(t, 0, *exec.ExitCode)
 
 	text := exec.Text()
-	assert.Contains(t, text, "hello-from-go-e2e")
+	require.Contains(t, text, "hello-from-go-e2e")
 	t.Logf("Output: %s", text)
 }
 
@@ -38,7 +35,7 @@ func TestCommand_RunWithHandlers(t *testing.T) {
 	exec, err := sb.RunCommand(ctx, "echo line1 && echo line2", handlers)
 	require.NoError(t, err)
 
-	assert.NotEmpty(t, stdoutLines, "expected handler to receive stdout events")
+	require.NotEmpty(t, stdoutLines, "expected handler to receive stdout events")
 	t.Logf("Handler received %d stdout events", len(stdoutLines))
 	t.Logf("Execution stdout count: %d", len(exec.Stdout))
 }
@@ -49,7 +46,7 @@ func TestCommand_ExitCode(t *testing.T) {
 	exec, err := sb.RunCommand(ctx, "true", nil)
 	require.NoError(t, err)
 	require.NotNil(t, exec.ExitCode)
-	assert.Equal(t, 0, *exec.ExitCode)
+	require.Equal(t, 0, *exec.ExitCode)
 	t.Log("Exit code tests passed")
 }
 
@@ -60,8 +57,8 @@ func TestCommand_MultiLine(t *testing.T) {
 	require.NoError(t, err)
 
 	text := exec.Text()
-	assert.Contains(t, text, "hello")
-	assert.Contains(t, text, "world")
+	require.Contains(t, text, "hello")
+	require.Contains(t, text, "world")
 	t.Logf("Multi-line output (%d bytes): %s", len(text), text)
 }
 
@@ -77,7 +74,7 @@ func TestCommand_EnvInjection(t *testing.T) {
 	require.NoError(t, err)
 
 	text := exec.Text()
-	assert.Contains(t, text, "injected-from-go-e2e")
+	require.Contains(t, text, "injected-from-go-e2e")
 	t.Logf("Env injection: %s", text)
 }
 
@@ -116,6 +113,6 @@ func TestCommand_Interrupt(t *testing.T) {
 	// Verify it's running — try a quick command to confirm sandbox is responsive
 	pingExec, err := sb.RunCommand(ctx, "echo still-alive", nil)
 	require.NoError(t, err)
-	assert.Contains(t, pingExec.Text(), "still-alive")
+	require.Contains(t, pingExec.Text(), "still-alive")
 	t.Log("Interrupt test: sandbox responsive during background command")
 }

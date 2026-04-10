@@ -1,5 +1,3 @@
-//go:build e2e
-
 package tests
 
 import (
@@ -8,7 +6,6 @@ import (
 	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,17 +34,17 @@ func TestSandbox_CreateAndKill(t *testing.T) {
 		}
 	}()
 
-	assert.True(t, sb.IsHealthy(ctx), "sandbox should be healthy after creation")
+	require.True(t, sb.IsHealthy(ctx), "sandbox should be healthy after creation")
 
 	info, err := sb.GetInfo(ctx)
 	require.NoError(t, err)
-	assert.Equal(t, sb.ID(), info.ID)
-	assert.Equal(t, opensandbox.StateRunning, info.Status.State)
+	require.Equal(t, sb.ID(), info.ID)
+	require.Equal(t, opensandbox.StateRunning, info.Status.State)
 	t.Logf("Info: state=%s, created=%s", info.Status.State, info.CreatedAt)
 
 	metrics, err := sb.GetMetrics(ctx)
 	require.NoError(t, err)
-	assert.NotZero(t, metrics.CPUCount, "expected non-zero CPU count")
+	require.NotZero(t, metrics.CPUCount, "expected non-zero CPU count")
 	t.Logf("Metrics: cpu=%.0f, mem=%.0fMiB", metrics.CPUCount, metrics.MemTotalMB)
 
 	require.NoError(t, sb.Kill(ctx))
@@ -70,7 +67,7 @@ func TestSandbox_GetEndpoint(t *testing.T) {
 
 	endpoint, err := sb.GetEndpoint(ctx, opensandbox.DefaultExecdPort)
 	require.NoError(t, err)
-	assert.NotEmpty(t, endpoint.Endpoint)
+	require.NotEmpty(t, endpoint.Endpoint)
 	t.Logf("Endpoint: %s", endpoint.Endpoint)
 }
 
@@ -88,11 +85,11 @@ func TestSandbox_ConnectToExisting(t *testing.T) {
 	sb2, err := opensandbox.ConnectSandbox(ctx, config, sb1.ID(), opensandbox.ReadyOptions{})
 	require.NoError(t, err)
 
-	assert.Equal(t, sb1.ID(), sb2.ID())
+	require.Equal(t, sb1.ID(), sb2.ID())
 
 	exec, err := sb2.RunCommand(ctx, "echo connected", nil)
 	require.NoError(t, err)
-	assert.Contains(t, exec.Text(), "connected")
+	require.Contains(t, exec.Text(), "connected")
 	t.Log("ConnectSandbox works")
 }
 
@@ -111,7 +108,7 @@ func TestSandbox_Session(t *testing.T) {
 		Command: "echo $MY_VAR",
 	}, nil)
 	require.NoError(t, err)
-	assert.Contains(t, exec.Text(), "hello_session")
+	require.Contains(t, exec.Text(), "hello_session")
 	t.Log("Session state persists across commands")
 
 	err = sb.DeleteSession(ctx, session.ID)
@@ -158,7 +155,7 @@ func TestSandbox_NetworkPolicyCreate(t *testing.T) {
 	defer sb.Kill(context.Background())
 
 	// Verify sandbox is running
-	assert.True(t, sb.IsHealthy(ctx), "sandbox with network policy should be healthy")
+	require.True(t, sb.IsHealthy(ctx), "sandbox with network policy should be healthy")
 	t.Log("Sandbox created with deny-default network policy + 2 allow rules")
 }
 
@@ -201,12 +198,14 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 	t.Log("Pause requested")
 
 	// Poll until Paused
+	reachedPaused := false
 	for i := 0; i < 30; i++ {
 		info, err := sb.GetInfo(ctx)
 		require.NoError(t, err)
 		t.Logf("  Poll %d: state=%s", i+1, info.Status.State)
 		if info.Status.State == opensandbox.StatePaused {
 			t.Log("Sandbox is Paused")
+			reachedPaused = true
 			break
 		}
 		if info.Status.State == opensandbox.StateFailed {
@@ -214,6 +213,7 @@ func TestSandbox_PauseAndResume(t *testing.T) {
 		}
 		time.Sleep(2 * time.Second)
 	}
+	require.True(t, reachedPaused, "sandbox did not reach Paused state within timeout")
 
 	// Resume — need to use manager since Sandbox doesn't have Resume yet
 	mgr := opensandbox.NewSandboxManager(config)
