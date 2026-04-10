@@ -22,7 +22,24 @@ import (
 
 var Logger slogger.Logger
 
+type loggerContextKey struct{}
+
+var loggerKey = loggerContextKey{}
+
 func WithLogger(ctx context.Context, logger slogger.Logger) context.Context {
-	Logger = logger
-	return ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, loggerKey, logger)
+}
+
+func LoggerFromContext(ctx context.Context) slogger.Logger {
+	if ctx == nil {
+		return Logger
+	}
+	logger, ok := ctx.Value(loggerKey).(slogger.Logger)
+	if ok {
+		return logger
+	}
+	return Logger
 }
