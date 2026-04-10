@@ -1,0 +1,88 @@
+package opensandbox
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func TestWaitForRunning_TimesOutWithoutContextDeadline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(SandboxInfo{
+			ID:     "sbx-timeout",
+			Status: SandboxStatus{State: StatePending},
+		})
+	}))
+	defer srv.Close()
+
+	sb := &Sandbox{
+		id:        "sbx-timeout",
+		lifecycle: NewLifecycleClient(srv.URL, ""),
+	}
+
+	err := sb.waitForRunning(context.Background(), 100*time.Millisecond)
+	require.Error(t, err)
+
+	var timeoutErr *SandboxRunningTimeoutError
+	assert.ErrorAs(t, err, &timeoutErr)
+}
+
+func TestWaitForRunning_SucceedsWhenRunning(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(SandboxInfo{
+			ID:     "sbx-running",
+			Status: SandboxStatus{State: StateRunning},
+		})
+	}))
+	defer srv.Close()
+
+	sb := &Sandbox{
+		id:        "sbx-running",
+		lifecycle: NewLifecycleClient(srv.URL, ""),
+	}
+
+	require.NoError(t, sb.waitForRunning(context.Background(), 100*time.Millisecond))
+}
+
+func TestConnectSandbox_MultipleReadyOptionsReturnsError(t *testing.T) {
+	_, err := ConnectSandbox(
+		context.Background(),
+		ConnectionConfig{},
+		"sbx-1",
+		ReadyOptions{Timeout: time.Second},
+		ReadyOptions{Timeout: 2 * time.Second},
+	)
+	require.Error(t, err)
+
+	var argErr *InvalidArgumentError
+	require.ErrorAs(t, err, &argErr)
+	require.Equal(t, "opts", argErr.Field)
+}
+
+func TestWaitUntilReady_RespectsContextCancellationDuringBackoff(t *testing.T) {
+	sb := &Sandbox{id: "sbx-ready-cancel"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	err := sb.WaitUntilReady(ctx, ReadyOptions{
+		Timeout:         5 * time.Second,
+		PollingInterval: 2 * time.Second,
+		HealthCheck: func(context.Context, *Sandbox) (bool, error) {
+			return false, nil
+		},
+	})
+	elapsed := time.Since(start)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.LessOrEqual(t, elapsed, 500*time.Millisecond, "WaitUntilReady should stop quickly on ctx cancel")
+}

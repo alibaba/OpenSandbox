@@ -2,6 +2,7 @@ package opensandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -124,7 +125,7 @@ func CreateSandbox(ctx context.Context, config ConnectionConfig, opts SandboxCre
 	}
 
 	// Poll until Running
-	if err := sb.waitForRunning(ctx); err != nil {
+	if err := sb.waitForRunning(ctx, opts.ReadyTimeout); err != nil {
 		// Best-effort cleanup
 		_ = lc.DeleteSandbox(context.Background(), created.ID)
 		return nil, err
@@ -156,6 +157,12 @@ func CreateSandbox(ctx context.Context, config ConnectionConfig, opts SandboxCre
 func ConnectSandbox(ctx context.Context, config ConnectionConfig, sandboxID string, opts ...ReadyOptions) (*Sandbox, error) {
 	if sandboxID == "" {
 		return nil, &InvalidArgumentError{Field: "sandboxID", Message: "sandbox ID is required"}
+	}
+	if len(opts) > 1 {
+		return nil, &InvalidArgumentError{
+			Field:   "opts",
+			Message: "at most one ReadyOptions is supported",
+		}
 	}
 
 	lc := config.lifecycleClient()
@@ -287,7 +294,11 @@ func (s *Sandbox) WaitUntilReady(ctx context.Context, opts ReadyOptions) error {
 			return nil
 		}
 
-		time.Sleep(interval)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
 	}
 
 	return &SandboxReadyTimeoutError{
@@ -298,12 +309,32 @@ func (s *Sandbox) WaitUntilReady(ctx context.Context, opts ReadyOptions) error {
 }
 
 // waitForRunning polls the lifecycle API until the sandbox reaches Running state.
-func (s *Sandbox) waitForRunning(ctx context.Context) error {
+func (s *Sandbox) waitForRunning(ctx context.Context, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = time.Duration(DefaultReadyTimeoutSeconds) * time.Second
+	}
+
+	waitCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		waitCtx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	start := time.Now()
 	for {
-		if ctx.Err() != nil {
-			return fmt.Errorf("opensandbox: sandbox %s did not reach Running state: %w", s.id, ctx.Err())
+		if err := waitCtx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return &SandboxRunningTimeoutError{
+					SandboxID: s.id,
+					Elapsed:   time.Since(start).String(),
+					LastErr:   err,
+				}
+			}
+			return fmt.Errorf("opensandbox: sandbox %s did not reach Running state: %w", s.id, err)
 		}
-		info, err := s.lifecycle.GetSandbox(ctx, s.id)
+
+		info, err := s.lifecycle.GetSandbox(waitCtx, s.id)
 		if err != nil {
 			return fmt.Errorf("opensandbox: get sandbox status: %w", err)
 		}
@@ -314,12 +345,15 @@ func (s *Sandbox) waitForRunning(ctx context.Context) error {
 			return fmt.Errorf("opensandbox: sandbox %s entered terminal state: %s (%s)",
 				s.id, info.Status.State, info.Status.Reason)
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-waitCtx.Done():
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
 
 // resolveExecd resolves the execd endpoint and creates the ExecdClient.
-// Safe for concurrent use — uses mutex with retry on failure.
+// Safe for concurrent use — uses mutex for one-time lazy initialization.
 func (s *Sandbox) resolveExecd(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -359,7 +393,7 @@ func (s *Sandbox) resolveExecd(ctx context.Context) error {
 }
 
 // resolveEgress resolves the egress endpoint and creates the EgressClient.
-// Safe for concurrent use — uses mutex with retry on failure.
+// Safe for concurrent use — uses mutex for one-time lazy initialization.
 func (s *Sandbox) resolveEgress(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

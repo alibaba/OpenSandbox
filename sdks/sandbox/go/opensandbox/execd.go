@@ -156,42 +156,51 @@ func (e *ExecdClient) GetCommandLogs(ctx context.Context, commandID string, curs
 		path += "?cursor=" + strconv.FormatInt(*cursor, 10)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.client.baseURL+path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("opensandbox: create request: %w", err)
-	}
-	if e.client.apiKey != "" {
-		req.Header.Set(e.client.authHeader, e.client.apiKey)
-	}
-	req.Header.Set("Accept", "text/plain")
-
-	resp, err := e.client.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("opensandbox: do request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return nil, handleError(resp)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("opensandbox: read response: %w", err)
-	}
-
-	result := &CommandLogsResponse{
-		Output: string(body),
-	}
-
-	if cursorStr := resp.Header.Get("EXECD-COMMANDS-TAIL-CURSOR"); cursorStr != "" {
-		parsed, parseErr := strconv.ParseInt(cursorStr, 10, 64)
-		if parseErr != nil {
-			return nil, fmt.Errorf("opensandbox: invalid EXECD-COMMANDS-TAIL-CURSOR header %q: %w", cursorStr, parseErr)
+	var result *CommandLogsResponse
+	err := e.client.withRetry(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.client.baseURL+path, nil)
+		if err != nil {
+			return fmt.Errorf("opensandbox: create request: %w", err)
 		}
-		result.Cursor = parsed
-	}
+		for k, v := range e.client.headers {
+			req.Header.Set(k, v)
+		}
+		if e.client.apiKey != "" {
+			req.Header.Set(e.client.authHeader, e.client.apiKey)
+		}
+		req.Header.Set("Accept", "text/plain")
 
+		resp, err := e.client.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("opensandbox: do request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			return handleError(resp)
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("opensandbox: read response: %w", err)
+		}
+
+		logResp := &CommandLogsResponse{
+			Output: string(body),
+		}
+		if cursorStr := resp.Header.Get("EXECD-COMMANDS-TAIL-CURSOR"); cursorStr != "" {
+			parsed, parseErr := strconv.ParseInt(cursorStr, 10, 64)
+			if parseErr != nil {
+				return fmt.Errorf("opensandbox: invalid EXECD-COMMANDS-TAIL-CURSOR header %q: %w", cursorStr, parseErr)
+			}
+			logResp.Cursor = parsed
+		}
+		result = logResp
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -288,25 +297,33 @@ func (e *ExecdClient) UploadFile(ctx context.Context, localPath, remotePath stri
 		return fmt.Errorf("opensandbox: close multipart: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.client.baseURL+"/files/upload", &body)
-	if err != nil {
-		return fmt.Errorf("opensandbox: create request: %w", err)
-	}
-	if e.client.apiKey != "" {
-		req.Header.Set(e.client.authHeader, e.client.apiKey)
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	payload := append([]byte(nil), body.Bytes()...)
+	contentType := writer.FormDataContentType()
 
-	resp, err := e.client.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("opensandbox: do request: %w", err)
-	}
-	defer resp.Body.Close()
+	return e.client.withRetry(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.client.baseURL+"/files/upload", bytes.NewReader(payload))
+		if err != nil {
+			return fmt.Errorf("opensandbox: create request: %w", err)
+		}
+		for k, v := range e.client.headers {
+			req.Header.Set(k, v)
+		}
+		if e.client.apiKey != "" {
+			req.Header.Set(e.client.authHeader, e.client.apiKey)
+		}
+		req.Header.Set("Content-Type", contentType)
 
-	if resp.StatusCode >= 400 {
-		return handleError(resp)
-	}
-	return nil
+		resp, err := e.client.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("opensandbox: do request: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			return handleError(resp)
+		}
+		return nil
+	})
 }
 
 // DownloadFile downloads a file from the sandbox. The caller must close the
@@ -315,27 +332,36 @@ func (e *ExecdClient) UploadFile(ctx context.Context, localPath, remotePath stri
 func (e *ExecdClient) DownloadFile(ctx context.Context, remotePath string, rangeHeader string) (io.ReadCloser, error) {
 	reqPath := "/files/download?path=" + url.QueryEscape(remotePath)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.client.baseURL+reqPath, nil)
+	var resp *http.Response
+	err := e.client.withRetry(ctx, func() error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.client.baseURL+reqPath, nil)
+		if err != nil {
+			return fmt.Errorf("opensandbox: create request: %w", err)
+		}
+		for k, v := range e.client.headers {
+			req.Header.Set(k, v)
+		}
+		if e.client.apiKey != "" {
+			req.Header.Set(e.client.authHeader, e.client.apiKey)
+		}
+		if rangeHeader != "" {
+			req.Header.Set("Range", rangeHeader)
+		}
+
+		r, err := e.client.httpClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("opensandbox: do request: %w", err)
+		}
+		if r.StatusCode >= 400 {
+			defer r.Body.Close()
+			return handleError(r)
+		}
+		resp = r
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("opensandbox: create request: %w", err)
+		return nil, err
 	}
-	if e.client.apiKey != "" {
-		req.Header.Set(e.client.authHeader, e.client.apiKey)
-	}
-	if rangeHeader != "" {
-		req.Header.Set("Range", rangeHeader)
-	}
-
-	resp, err := e.client.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("opensandbox: do request: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		defer resp.Body.Close()
-		return nil, handleError(resp)
-	}
-
 	return resp.Body, nil
 }
 
@@ -355,13 +381,10 @@ func (e *ExecdClient) CreateDirectory(ctx context.Context, path string, mode int
 }
 
 // OctalMode converts a Go os.FileMode to the octal-digits-as-int format
-// expected by the OpenSandbox server (e.g. os.FileMode(0755) → 755).
-// Panics if the conversion fails (should never happen for valid FileMode values).
+// expected by the OpenSandbox server (e.g. os.FileMode(0755) -> 755).
 func OctalMode(m os.FileMode) int {
-	v, err := strconv.Atoi(fmt.Sprintf("%o", m))
-	if err != nil {
-		panic(fmt.Sprintf("opensandbox: invalid FileMode %v: %v", m, err))
-	}
+	// The formatted value contains only octal digits, so Atoi should never fail.
+	v, _ := strconv.Atoi(fmt.Sprintf("%o", m))
 	return v
 }
 

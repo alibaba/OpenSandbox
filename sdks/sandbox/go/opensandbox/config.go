@@ -41,7 +41,9 @@ type ConnectionConfig struct {
 	AuthHeader string
 
 	// Retry enables automatic retry with exponential backoff for transient
-	// errors (429, 502, 503, 504). If nil, requests are not retried.
+	// errors. Defaults to retrying 429/502/503/504; override
+	// RetryConfig.RetryableStatusCodes for custom policies. If nil, requests
+	// are not retried.
 	// Use DefaultRetryConfig() for sensible defaults.
 	Retry *RetryConfig
 
@@ -63,7 +65,7 @@ type ConnectionConfig struct {
 // "host.docker.internal" being unreachable from the host machine.
 func (c *ConnectionConfig) RewriteEndpointURL(endpointURL string) string {
 	for from, to := range c.EndpointHostRewrite {
-		endpointURL = strings.Replace(endpointURL, from, to, 1)
+		endpointURL = strings.ReplaceAll(endpointURL, from, to)
 	}
 	return endpointURL
 }

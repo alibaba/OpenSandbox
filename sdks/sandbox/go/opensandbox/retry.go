@@ -30,6 +30,11 @@ type RetryConfig struct {
 	// Jitter adds randomness to avoid thundering herd. Expressed as a
 	// fraction of the computed delay: 0.0 = no jitter, 0.25 = +/-25%.
 	Jitter float64
+
+	// RetryableStatusCodes optionally overrides which HTTP status codes are
+	// treated as transient for retry decisions. When empty, SDK defaults are
+	// used (429, 502, 503, 504).
+	RetryableStatusCodes []int
 }
 
 // DefaultRetryConfig returns a retry configuration suitable for most SDK
@@ -41,11 +46,18 @@ func DefaultRetryConfig() RetryConfig {
 		MaxBackoff:     30 * time.Second,
 		Multiplier:     2.0,
 		Jitter:         0.25,
+		RetryableStatusCodes: []int{
+			http.StatusTooManyRequests,
+			http.StatusBadGateway,
+			http.StatusServiceUnavailable,
+			http.StatusGatewayTimeout,
+		},
 	}
 }
 
 // WithRetry enables automatic retry with exponential backoff for transient
-// errors (429, 502, 503, 504 and network errors).
+// errors and network failures. By default, transient status codes are
+// 429/502/503/504; override RetryConfig.RetryableStatusCodes to customize.
 func WithRetry(cfg RetryConfig) Option {
 	return func(c *Client) {
 		c.retry = &cfg
@@ -74,14 +86,30 @@ func isTransientStatus(code int) bool {
 	}
 }
 
+func (r *RetryConfig) isRetryableStatus(code int) bool {
+	codes := r.RetryableStatusCodes
+	if len(codes) == 0 {
+		return isTransientStatus(code)
+	}
+	for _, c := range codes {
+		if c == code {
+			return true
+		}
+	}
+	return false
+}
+
 // isTransientError checks whether err should trigger a retry. It handles
 // *APIError (HTTP status classification) and net.Error (network-level).
-func isTransientError(err error) bool {
+func isTransientError(err error, cfg *RetryConfig) bool {
 	if err == nil {
 		return false
 	}
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
+		if cfg != nil {
+			return cfg.isRetryableStatus(apiErr.StatusCode)
+		}
 		return apiErr.IsTransient()
 	}
 	var netErr net.Error
@@ -160,7 +188,7 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 		if lastErr == nil {
 			return nil
 		}
-		if !isTransientError(lastErr) {
+		if !isTransientError(lastErr, c.retry) {
 			return lastErr
 		}
 		if attempt == c.retry.MaxRetries {

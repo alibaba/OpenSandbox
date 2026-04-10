@@ -3,11 +3,15 @@ package opensandbox
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -35,7 +39,7 @@ func TestIsTransient(t *testing.T) {
 	for _, tt := range tests {
 		apiErr := &APIError{StatusCode: tt.status}
 		if got := apiErr.IsTransient(); got != tt.transient {
-			t.Errorf("status %d: IsTransient() = %v, want %v", tt.status, got, tt.transient)
+			assert.Fail(t, fmt.Sprintf("status %d: IsTransient() = %v, want %v", tt.status, got, tt.transient))
 		}
 	}
 }
@@ -66,14 +70,12 @@ func TestRetry_TransientThenSuccess(t *testing.T) {
 	}))
 
 	got, err := client.GetSandbox(context.Background(), "sbx-ok")
-	if err != nil {
-		t.Fatalf("expected success after retries, got: %v", err)
-	}
+	require.NoErrorf(t, err, "expected success after retries, got")
 	if got.ID != "sbx-ok" {
-		t.Errorf("ID = %q, want %q", got.ID, "sbx-ok")
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.ID, "sbx-ok"))
 	}
 	if attempts.Load() != 3 {
-		t.Errorf("attempts = %d, want 3", attempts.Load())
+		assert.Fail(t, fmt.Sprintf("attempts = %d, want 3", attempts.Load()))
 	}
 }
 
@@ -97,10 +99,10 @@ func TestRetry_PermanentError(t *testing.T) {
 
 	_, err := client.GetSandbox(context.Background(), "sbx-missing")
 	if err == nil {
-		t.Fatal("expected error, got nil")
+		require.FailNow(t, "expected error, got nil")
 	}
 	if attempts.Load() != 1 {
-		t.Errorf("attempts = %d, want 1 (no retry on 404)", attempts.Load())
+		assert.Fail(t, fmt.Sprintf("attempts = %d, want 1 (no retry on 404)", attempts.Load()))
 	}
 }
 
@@ -126,19 +128,15 @@ func TestRetry_Exhausted(t *testing.T) {
 	}))
 
 	_, err := client.GetSandbox(context.Background(), "sbx-fail")
-	if err == nil {
-		t.Fatal("expected error after retry exhaustion")
-	}
+	require.Error(t, err)
 	apiErr, ok := err.(*APIError)
-	if !ok {
-		t.Fatalf("expected *APIError, got %T", err)
-	}
+	require.True(t, ok, "expected *APIError, got %T", err)
 	if apiErr.StatusCode != http.StatusServiceUnavailable {
-		t.Errorf("StatusCode = %d, want 503", apiErr.StatusCode)
+		assert.Fail(t, fmt.Sprintf("StatusCode = %d, want 503", apiErr.StatusCode))
 	}
 	// 1 initial + 2 retries = 3
 	if attempts.Load() != 3 {
-		t.Errorf("attempts = %d, want 3", attempts.Load())
+		assert.Fail(t, fmt.Sprintf("attempts = %d, want 3", attempts.Load()))
 	}
 }
 
@@ -168,14 +166,14 @@ func TestRetry_ContextCancelled(t *testing.T) {
 
 	_, err := client.GetSandbox(ctx, "sbx-slow")
 	if err == nil {
-		t.Fatal("expected error from context cancellation")
+		require.FailNow(t, "expected error from context cancellation")
 	}
 	// Should have attempted at least once but not all 10 retries.
 	if attempts.Load() < 1 {
-		t.Error("expected at least 1 attempt")
+		assert.Fail(t, "expected at least 1 attempt")
 	}
 	if attempts.Load() > 5 {
-		t.Errorf("too many attempts (%d) — context should have cancelled", attempts.Load())
+		assert.Fail(t, fmt.Sprintf("too many attempts (%d) — context should have cancelled", attempts.Load()))
 	}
 }
 
@@ -197,10 +195,10 @@ func TestRetry_Disabled(t *testing.T) {
 
 	_, err := client.GetSandbox(context.Background(), "sbx-noretry")
 	if err == nil {
-		t.Fatal("expected error")
+		require.FailNow(t, "expected error")
 	}
 	if attempts.Load() != 1 {
-		t.Errorf("attempts = %d, want 1 (retry disabled)", attempts.Load())
+		assert.Fail(t, fmt.Sprintf("attempts = %d, want 1 (retry disabled)", attempts.Load()))
 	}
 }
 
@@ -234,15 +232,13 @@ func TestRetry_RetryAfterHeader(t *testing.T) {
 	got, err := client.GetSandbox(context.Background(), "sbx-rate")
 	elapsed := time.Since(start)
 
-	if err != nil {
-		t.Fatalf("expected success, got: %v", err)
-	}
+	require.NoErrorf(t, err, "expected success, got")
 	if got.ID != "sbx-rate" {
-		t.Errorf("ID = %q, want %q", got.ID, "sbx-rate")
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.ID, "sbx-rate"))
 	}
 	// Retry-After: 1 means 1 second. The delay should be at least ~1s.
 	if elapsed < 900*time.Millisecond {
-		t.Errorf("elapsed = %v, expected >= ~1s from Retry-After header", elapsed)
+		assert.Fail(t, fmt.Sprintf("elapsed = %v, expected >= ~1s from Retry-After header", elapsed))
 	}
 }
 
@@ -272,14 +268,12 @@ func TestRetry_RateLimit429(t *testing.T) {
 	}))
 
 	got, err := client.GetSandbox(context.Background(), "sbx-429")
-	if err != nil {
-		t.Fatalf("expected success after 429 retry, got: %v", err)
-	}
+	require.NoErrorf(t, err, "expected success after 429 retry, got")
 	if got.ID != "sbx-429" {
-		t.Errorf("ID = %q, want %q", got.ID, "sbx-429")
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.ID, "sbx-429"))
 	}
 	if attempts.Load() != 2 {
-		t.Errorf("attempts = %d, want 2", attempts.Load())
+		assert.Fail(t, fmt.Sprintf("attempts = %d, want 2", attempts.Load()))
 	}
 }
 
@@ -315,14 +309,12 @@ func TestRetry_StreamingConnection(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("expected success after stream retry, got: %v", err)
-	}
+	require.NoErrorf(t, err, "expected success after stream retry, got")
 	if len(events) != 1 || events[0].Data != "hello" {
-		t.Errorf("events = %+v, want [{Event:stdout Data:hello}]", events)
+		assert.Fail(t, fmt.Sprintf("events = %+v, want [{Event:stdout Data:hello}]", events))
 	}
 	if attempts.Load() != 2 {
-		t.Errorf("attempts = %d, want 2", attempts.Load())
+		assert.Fail(t, fmt.Sprintf("attempts = %d, want 2", attempts.Load()))
 	}
 }
 
@@ -352,7 +344,7 @@ func TestBackoff(t *testing.T) {
 	for _, tt := range tests {
 		got := cfg.backoff(tt.attempt)
 		if got != tt.expected {
-			t.Errorf("backoff(%d) = %v, want %v", tt.attempt, got, tt.expected)
+			assert.Fail(t, fmt.Sprintf("backoff(%d) = %v, want %v", tt.attempt, got, tt.expected))
 		}
 	}
 }
@@ -369,7 +361,7 @@ func TestBackoff_WithJitter(t *testing.T) {
 	for range 20 {
 		got := cfg.backoff(0)
 		if got < 50*time.Millisecond || got > 150*time.Millisecond {
-			t.Errorf("backoff(0) with 50%% jitter = %v, expected [50ms, 150ms]", got)
+			assert.Fail(t, fmt.Sprintf("backoff(0) with 50%% jitter = %v, expected [50ms, 150ms]", got))
 		}
 	}
 }
@@ -381,16 +373,16 @@ func TestBackoff_WithJitter(t *testing.T) {
 func TestDefaultTransport(t *testing.T) {
 	tr := DefaultTransport()
 	if tr.MaxIdleConns != 100 {
-		t.Errorf("MaxIdleConns = %d, want 100", tr.MaxIdleConns)
+		assert.Fail(t, fmt.Sprintf("MaxIdleConns = %d, want 100", tr.MaxIdleConns))
 	}
 	if tr.MaxIdleConnsPerHost != 10 {
-		t.Errorf("MaxIdleConnsPerHost = %d, want 10", tr.MaxIdleConnsPerHost)
+		assert.Fail(t, fmt.Sprintf("MaxIdleConnsPerHost = %d, want 10", tr.MaxIdleConnsPerHost))
 	}
 	if tr.IdleConnTimeout != 90*time.Second {
-		t.Errorf("IdleConnTimeout = %v, want 90s", tr.IdleConnTimeout)
+		assert.Fail(t, fmt.Sprintf("IdleConnTimeout = %v, want 90s", tr.IdleConnTimeout))
 	}
 	if tr.TLSHandshakeTimeout != 10*time.Second {
-		t.Errorf("TLSHandshakeTimeout = %v, want 10s", tr.TLSHandshakeTimeout)
+		assert.Fail(t, fmt.Sprintf("TLSHandshakeTimeout = %v, want 10s", tr.TLSHandshakeTimeout))
 	}
 }
 
@@ -405,10 +397,10 @@ func TestTransportConfig_NewTransport(t *testing.T) {
 	}
 	tr := cfg.NewTransport()
 	if tr.MaxIdleConns != 50 {
-		t.Errorf("MaxIdleConns = %d, want 50", tr.MaxIdleConns)
+		assert.Fail(t, fmt.Sprintf("MaxIdleConns = %d, want 50", tr.MaxIdleConns))
 	}
 	if tr.MaxIdleConnsPerHost != 5 {
-		t.Errorf("MaxIdleConnsPerHost = %d, want 5", tr.MaxIdleConnsPerHost)
+		assert.Fail(t, fmt.Sprintf("MaxIdleConnsPerHost = %d, want 5", tr.MaxIdleConnsPerHost))
 	}
 }
 
@@ -443,14 +435,12 @@ func TestConnectionConfig_RetryAndTransport(t *testing.T) {
 
 	lc := config.lifecycleClient()
 	got, err := lc.GetSandbox(context.Background(), "sbx-cfg")
-	if err != nil {
-		t.Fatalf("expected success with ConnectionConfig retry, got: %v", err)
-	}
+	require.NoErrorf(t, err, "expected success with ConnectionConfig retry, got")
 	if got.ID != "sbx-cfg" {
-		t.Errorf("ID = %q, want %q", got.ID, "sbx-cfg")
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.ID, "sbx-cfg"))
 	}
 	if attempts.Load() != 2 {
-		t.Errorf("attempts = %d, want 2", attempts.Load())
+		assert.Fail(t, fmt.Sprintf("attempts = %d, want 2", attempts.Load()))
 	}
 }
 
@@ -470,21 +460,17 @@ func TestAPIError_ErrorWithRequestID(t *testing.T) {
 
 	client := NewLifecycleClient(srv.URL, "key")
 	_, err := client.GetSandbox(context.Background(), "sbx-missing")
-	if err == nil {
-		t.Fatal("expected error")
-	}
+	require.Error(t, err)
 
 	apiErr, ok := err.(*APIError)
-	if !ok {
-		t.Fatalf("expected *APIError, got %T", err)
-	}
+	require.True(t, ok, "expected *APIError, got %T", err)
 	if apiErr.RequestID != "req-abc-123" {
-		t.Errorf("RequestID = %q, want %q", apiErr.RequestID, "req-abc-123")
+		assert.Fail(t, fmt.Sprintf("RequestID = %q, want %q", apiErr.RequestID, "req-abc-123"))
 	}
 
 	errMsg := apiErr.Error()
 	if got, want := errMsg, "NOT_FOUND: sandbox not found (request_id: req-abc-123)"; got != want {
-		t.Errorf("Error() = %q, want %q", got, want)
+		assert.Fail(t, fmt.Sprintf("Error() = %q, want %q", got, want))
 	}
 }
 
@@ -512,7 +498,7 @@ func TestParseRetryAfter(t *testing.T) {
 			}
 			got := parseRetryAfter(resp)
 			if got != tt.expected {
-				t.Errorf("parseRetryAfter(%q) = %v, want %v", tt.header, got, tt.expected)
+				assert.Fail(t, fmt.Sprintf("parseRetryAfter(%q) = %v, want %v", tt.header, got, tt.expected))
 			}
 		})
 	}
@@ -521,7 +507,7 @@ func TestParseRetryAfter(t *testing.T) {
 func TestParseRetryAfter_NilResponse(t *testing.T) {
 	got := parseRetryAfter(nil)
 	if got != 0 {
-		t.Errorf("parseRetryAfter(nil) = %v, want 0", got)
+		assert.Fail(t, fmt.Sprintf("parseRetryAfter(nil) = %v, want 0", got))
 	}
 }
 
@@ -546,11 +532,39 @@ func TestIsTransientError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isTransientError(tt.err); got != tt.transient {
-				t.Errorf("isTransientError(%v) = %v, want %v", tt.err, got, tt.transient)
+			if got := isTransientError(tt.err, nil); got != tt.transient {
+				assert.Fail(t, fmt.Sprintf("isTransientError(%v) = %v, want %v", tt.err, got, tt.transient))
 			}
 		})
 	}
+}
+
+func TestRetry_CustomRetryableStatusCodes(t *testing.T) {
+	var attempts atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		if n == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"code":"INTERNAL","message":"temporary 500"}`))
+			return
+		}
+		jsonResponse(w, http.StatusOK, SandboxInfo{ID: "sbx-500-retried", CreatedAt: time.Now()})
+	}))
+	defer srv.Close()
+
+	client := NewLifecycleClient(srv.URL, "key", WithRetry(RetryConfig{
+		MaxRetries:           2,
+		InitialBackoff:       5 * time.Millisecond,
+		MaxBackoff:           20 * time.Millisecond,
+		Multiplier:           2.0,
+		RetryableStatusCodes: []int{http.StatusInternalServerError},
+	}))
+
+	got, err := client.GetSandbox(context.Background(), "sbx-500-retried")
+	require.NoErrorf(t, err, "expected success with custom retryable status codes")
+	require.Equal(t, "sbx-500-retried", got.ID)
+	require.Equal(t, int32(2), attempts.Load())
 }
 
 // suppress unused import warning

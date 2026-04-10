@@ -204,12 +204,18 @@ func (c *Client) doStreamRequest(ctx context.Context, method, path string, body 
 // handleError reads the response body and returns an *APIError.
 // It captures the Retry-After header for use by the retry loop.
 func handleError(resp *http.Response) error {
-	data, _ := io.ReadAll(resp.Body)
-
 	apiErr := &APIError{
 		StatusCode: resp.StatusCode,
 		RequestID:  resp.Header.Get("X-Request-Id"),
 		RetryAfter: parseRetryAfter(resp),
+	}
+	data, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		apiErr.Response = ErrorResponse{
+			Code:    http.StatusText(resp.StatusCode),
+			Message: fmt.Sprintf("failed to read error response body: %v", readErr),
+		}
+		return apiErr
 	}
 
 	// Try to decode as JSON ErrorResponse; fall back to raw body.

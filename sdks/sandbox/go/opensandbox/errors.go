@@ -19,6 +19,24 @@ func (e *SandboxReadyTimeoutError) Error() string {
 
 func (e *SandboxReadyTimeoutError) Unwrap() error { return e.LastErr }
 
+// SandboxRunningTimeoutError is returned when waiting for a sandbox to enter
+// Running state exceeds the deadline.
+type SandboxRunningTimeoutError struct {
+	SandboxID string
+	Elapsed   string
+	LastErr   error
+}
+
+func (e *SandboxRunningTimeoutError) Error() string {
+	msg := fmt.Sprintf("sandbox %s did not reach Running state within %s", e.SandboxID, e.Elapsed)
+	if e.LastErr != nil {
+		msg += fmt.Sprintf(": last error: %v", e.LastErr)
+	}
+	return msg
+}
+
+func (e *SandboxRunningTimeoutError) Unwrap() error { return e.LastErr }
+
 // SandboxUnhealthyError is returned when a sandbox is determined to be unhealthy.
 type SandboxUnhealthyError struct {
 	SandboxID string

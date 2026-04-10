@@ -12,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // ---------------------------------------------------------------------------
@@ -67,16 +70,16 @@ func TestCreateSandbox(t *testing.T) {
 
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes" {
-			t.Errorf("expected /sandboxes, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes, got %s", r.URL.Path))
 		}
 
 		var req CreateSandboxRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.Image.URI != "python:3.12" {
-			t.Errorf("expected image python:3.12, got %s", req.Image.URI)
+			assert.Fail(t, fmt.Sprintf("expected image python:3.12, got %s", req.Image.URI))
 		}
 
 		jsonResponse(w, http.StatusCreated, want)
@@ -90,14 +93,12 @@ func TestCreateSandbox(t *testing.T) {
 			"memory": "512Mi",
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "CreateSandbox")
 	if got.ID != want.ID {
-		t.Errorf("ID = %q, want %q", got.ID, want.ID)
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.ID, want.ID))
 	}
 	if got.Status.State != StatePending {
-		t.Errorf("State = %q, want %q", got.Status.State, StatePending)
+		assert.Fail(t, fmt.Sprintf("State = %q, want %q", got.Status.State, StatePending))
 	}
 }
 
@@ -107,13 +108,13 @@ func TestCreateSandbox_ImageAuth(t *testing.T) {
 		json.NewDecoder(r.Body).Decode(&req)
 
 		if req.Image.Auth == nil {
-			t.Fatal("expected ImageAuth to be set")
+			require.FailNow(t, "expected ImageAuth to be set")
 		}
 		if req.Image.Auth.Username != "user" {
-			t.Errorf("Username = %q, want %q", req.Image.Auth.Username, "user")
+			assert.Fail(t, fmt.Sprintf("Username = %q, want %q", req.Image.Auth.Username, "user"))
 		}
 		if req.Image.Auth.Password != "pass" {
-			t.Errorf("Password = %q, want %q", req.Image.Auth.Password, "pass")
+			assert.Fail(t, fmt.Sprintf("Password = %q, want %q", req.Image.Auth.Password, "pass"))
 		}
 
 		jsonResponse(w, http.StatusCreated, SandboxInfo{
@@ -131,9 +132,7 @@ func TestCreateSandbox_ImageAuth(t *testing.T) {
 		Entrypoint:     []string{"/bin/sh"},
 		ResourceLimits: ResourceLimits{"cpu": "500m"},
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox with ImageAuth: %v", err)
-	}
+	require.NoErrorf(t, err, "CreateSandbox with ImageAuth")
 }
 
 func TestCreateSandbox_ManualCleanup(t *testing.T) {
@@ -143,7 +142,7 @@ func TestCreateSandbox_ManualCleanup(t *testing.T) {
 		json.Unmarshal(body, &raw)
 
 		if _, exists := raw["timeout"]; exists {
-			t.Error("expected timeout to be omitted from request when ManualCleanup is true")
+			assert.Fail(t, "expected timeout to be omitted from request when ManualCleanup is true")
 		}
 
 		jsonResponse(w, http.StatusCreated, SandboxInfo{
@@ -159,9 +158,7 @@ func TestCreateSandbox_ManualCleanup(t *testing.T) {
 		ResourceLimits: ResourceLimits{"cpu": "500m"},
 		// Timeout is nil — simulates ManualCleanup (no timeout sent)
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox with ManualCleanup: %v", err)
-	}
+	require.NoErrorf(t, err, "CreateSandbox with ManualCleanup")
 }
 
 func TestGetSandbox(t *testing.T) {
@@ -175,23 +172,21 @@ func TestGetSandbox(t *testing.T) {
 
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes/sbx-456" {
-			t.Errorf("expected /sandboxes/sbx-456, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-456, got %s", r.URL.Path))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	got, err := client.GetSandbox(context.Background(), "sbx-456")
-	if err != nil {
-		t.Fatalf("GetSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "GetSandbox")
 	if got.ID != want.ID {
-		t.Errorf("ID = %q, want %q", got.ID, want.ID)
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.ID, want.ID))
 	}
 	if got.Status.State != StateRunning {
-		t.Errorf("State = %q, want %q", got.Status.State, StateRunning)
+		assert.Fail(t, fmt.Sprintf("State = %q, want %q", got.Status.State, StateRunning))
 	}
 }
 
@@ -212,16 +207,16 @@ func TestListSandboxes(t *testing.T) {
 
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/sandboxes") {
-			t.Errorf("expected /sandboxes prefix, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes prefix, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("page") != "1" {
-			t.Errorf("expected page=1, got %s", r.URL.Query().Get("page"))
+			assert.Fail(t, fmt.Sprintf("expected page=1, got %s", r.URL.Query().Get("page")))
 		}
 		if r.URL.Query().Get("pageSize") != "20" {
-			t.Errorf("expected pageSize=20, got %s", r.URL.Query().Get("pageSize"))
+			assert.Fail(t, fmt.Sprintf("expected pageSize=20, got %s", r.URL.Query().Get("pageSize")))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
@@ -230,32 +225,26 @@ func TestListSandboxes(t *testing.T) {
 		Page:     1,
 		PageSize: 20,
 	})
-	if err != nil {
-		t.Fatalf("ListSandboxes: %v", err)
-	}
-	if len(got.Items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(got.Items))
-	}
+	require.NoErrorf(t, err, "ListSandboxes")
+	require.Len(t, got.Items, 2)
 	if got.Pagination.TotalItems != 2 {
-		t.Errorf("TotalItems = %d, want 2", got.Pagination.TotalItems)
+		assert.Fail(t, fmt.Sprintf("TotalItems = %d, want 2", got.Pagination.TotalItems))
 	}
 }
 
 func TestDeleteSandbox(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes/sbx-789" {
-			t.Errorf("expected /sandboxes/sbx-789, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-789, got %s", r.URL.Path))
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 
 	err := client.DeleteSandbox(context.Background(), "sbx-789")
-	if err != nil {
-		t.Fatalf("DeleteSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "DeleteSandbox")
 }
 
 func TestResumeSandbox(t *testing.T) {
@@ -266,16 +255,14 @@ func TestResumeSandbox(t *testing.T) {
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		assert.Fail(t, fmt.Sprintf("unexpected request: %s %s", r.Method, r.URL.Path))
 		w.WriteHeader(http.StatusNotFound)
 	})
 
 	err := client.ResumeSandbox(context.Background(), "sbx-paused")
-	if err != nil {
-		t.Fatalf("ResumeSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "ResumeSandbox")
 	if !resumed {
-		t.Error("expected resume endpoint to be called")
+		assert.Fail(t, "expected resume endpoint to be called")
 	}
 }
 
@@ -304,32 +291,28 @@ func TestSandbox_Resume(t *testing.T) {
 	}
 
 	got, err := sb.Resume(context.Background())
-	if err != nil {
-		t.Fatalf("Resume: %v", err)
-	}
+	require.NoErrorf(t, err, "Resume")
 	if !resumeCalled {
-		t.Error("expected resume endpoint to be called")
+		assert.Fail(t, "expected resume endpoint to be called")
 	}
 	if got.ID() != "sbx-resume-test" {
-		t.Errorf("ID = %q, want %q", got.ID(), "sbx-resume-test")
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.ID(), "sbx-resume-test"))
 	}
 }
 
 func TestPauseSandbox(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes/sbx-pause/pause" {
-			t.Errorf("expected /sandboxes/sbx-pause/pause, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-pause/pause, got %s", r.URL.Path))
 		}
 		w.WriteHeader(http.StatusAccepted)
 	})
 
 	err := client.PauseSandbox(context.Background(), "sbx-pause")
-	if err != nil {
-		t.Fatalf("PauseSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "PauseSandbox")
 }
 
 func TestAPIError(t *testing.T) {
@@ -341,22 +324,18 @@ func TestAPIError(t *testing.T) {
 	})
 
 	_, err := client.GetSandbox(context.Background(), "sbx-missing")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
+	require.Error(t, err)
 
 	apiErr, ok := err.(*APIError)
-	if !ok {
-		t.Fatalf("expected *APIError, got %T", err)
-	}
+	require.True(t, ok, "expected *APIError, got %T", err)
 	if apiErr.StatusCode != http.StatusNotFound {
-		t.Errorf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusNotFound)
+		assert.Fail(t, fmt.Sprintf("StatusCode = %d, want %d", apiErr.StatusCode, http.StatusNotFound))
 	}
 	if apiErr.Response.Code != "SANDBOX_NOT_FOUND" {
-		t.Errorf("Code = %q, want %q", apiErr.Response.Code, "SANDBOX_NOT_FOUND")
+		assert.Fail(t, fmt.Sprintf("Code = %q, want %q", apiErr.Response.Code, "SANDBOX_NOT_FOUND"))
 	}
 	if !strings.Contains(apiErr.Error(), "SANDBOX_NOT_FOUND") {
-		t.Errorf("Error() = %q, expected to contain SANDBOX_NOT_FOUND", apiErr.Error())
+		assert.Fail(t, fmt.Sprintf("Error() = %q, expected to contain SANDBOX_NOT_FOUND", apiErr.Error()))
 	}
 }
 
@@ -379,26 +358,24 @@ func TestGetPolicy(t *testing.T) {
 
 	_, client := newEgressServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/policy" {
-			t.Errorf("expected /policy, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /policy, got %s", r.URL.Path))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	got, err := client.GetPolicy(context.Background())
-	if err != nil {
-		t.Fatalf("GetPolicy: %v", err)
-	}
+	require.NoErrorf(t, err, "GetPolicy")
 	if got.Status != "active" {
-		t.Errorf("Status = %q, want %q", got.Status, "active")
+		assert.Fail(t, fmt.Sprintf("Status = %q, want %q", got.Status, "active"))
 	}
 	if got.Policy == nil || len(got.Policy.Egress) != 1 {
-		t.Fatal("expected 1 egress rule")
+		require.FailNow(t, "expected 1 egress rule")
 	}
 	if got.Policy.Egress[0].Target != "api.example.com" {
-		t.Errorf("Target = %q, want %q", got.Policy.Egress[0].Target, "api.example.com")
+		assert.Fail(t, fmt.Sprintf("Target = %q, want %q", got.Policy.Egress[0].Target, "api.example.com"))
 	}
 }
 
@@ -417,13 +394,13 @@ func TestPatchPolicy(t *testing.T) {
 
 	_, client := newEgressServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch {
-			t.Errorf("expected PATCH, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected PATCH, got %s", r.Method))
 		}
 
 		var rules []NetworkRule
 		json.NewDecoder(r.Body).Decode(&rules)
 		if len(rules) != 1 {
-			t.Errorf("expected 1 rule in request, got %d", len(rules))
+			assert.Fail(t, fmt.Sprintf("expected 1 rule in request, got %d", len(rules)))
 		}
 
 		jsonResponse(w, http.StatusOK, want)
@@ -432,12 +409,9 @@ func TestPatchPolicy(t *testing.T) {
 	got, err := client.PatchPolicy(context.Background(), []NetworkRule{
 		{Action: "allow", Target: "cdn.example.com"},
 	})
-	if err != nil {
-		t.Fatalf("PatchPolicy: %v", err)
-	}
-	if got.Policy == nil || len(got.Policy.Egress) != 2 {
-		t.Fatalf("expected 2 egress rules, got %v", got.Policy)
-	}
+	require.NoErrorf(t, err, "PatchPolicy")
+	require.NotNil(t, got.Policy)
+	require.Len(t, got.Policy.Egress, 2)
 }
 
 // ---------------------------------------------------------------------------
@@ -447,18 +421,16 @@ func TestPatchPolicy(t *testing.T) {
 func TestPing(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/ping" {
-			t.Errorf("expected /ping, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /ping, got %s", r.URL.Path))
 		}
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.Ping(context.Background())
-	if err != nil {
-		t.Fatalf("Ping: %v", err)
-	}
+	require.NoErrorf(t, err, "Ping")
 }
 
 func TestRunCommand_SSE(t *testing.T) {
@@ -466,16 +438,16 @@ func TestRunCommand_SSE(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/command" {
-			t.Errorf("expected /command, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /command, got %s", r.URL.Path))
 		}
 
 		var req RunCommandRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.Command != "echo hello" {
-			t.Errorf("Command = %q, want %q", req.Command, "echo hello")
+			assert.Fail(t, fmt.Sprintf("Command = %q, want %q", req.Command, "echo hello"))
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -493,21 +465,17 @@ func TestRunCommand_SSE(t *testing.T) {
 		mu.Unlock()
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("RunCommand: %v", err)
-	}
+	require.NoErrorf(t, err, "RunCommand")
 
-	if len(events) != 3 {
-		t.Fatalf("expected 3 events, got %d", len(events))
-	}
+	require.Len(t, events, 3)
 	if events[0].Event != "stdout" || events[0].Data != "hello world" {
-		t.Errorf("event[0] = %+v, want stdout/hello world", events[0])
+		assert.Fail(t, fmt.Sprintf("event[0] = %+v, want stdout/hello world", events[0]))
 	}
 	if events[1].Event != "stderr" || events[1].Data != "warning" {
-		t.Errorf("event[1] = %+v, want stderr/warning", events[1])
+		assert.Fail(t, fmt.Sprintf("event[1] = %+v, want stderr/warning", events[1]))
 	}
 	if events[2].Event != "result" {
-		t.Errorf("event[2].Event = %q, want result", events[2].Event)
+		assert.Fail(t, fmt.Sprintf("event[2].Event = %q, want result", events[2].Event))
 	}
 }
 
@@ -526,74 +494,70 @@ func TestGetFileInfo(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/files/info") {
-			t.Errorf("expected /files/info, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /files/info, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("path") != "/tmp/test.txt" {
-			t.Errorf("expected path=/tmp/test.txt, got %s", r.URL.Query().Get("path"))
+			assert.Fail(t, fmt.Sprintf("expected path=/tmp/test.txt, got %s", r.URL.Query().Get("path")))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	got, err := client.GetFileInfo(context.Background(), "/tmp/test.txt")
-	if err != nil {
-		t.Fatalf("GetFileInfo: %v", err)
-	}
+	require.NoErrorf(t, err, "GetFileInfo")
 	info, ok := got["/tmp/test.txt"]
 	if !ok {
-		t.Fatal("expected /tmp/test.txt in result")
+		require.FailNow(t, "expected /tmp/test.txt in result")
 	}
 	if info.Size != 1024 {
-		t.Errorf("Size = %d, want 1024", info.Size)
+		assert.Fail(t, fmt.Sprintf("Size = %d, want 1024", info.Size))
 	}
 	if info.Owner != "root" {
-		t.Errorf("Owner = %q, want root", info.Owner)
+		assert.Fail(t, fmt.Sprintf("Owner = %q, want root", info.Owner))
 	}
 }
 
 func TestUploadFile(t *testing.T) {
 	// Create a temp file to upload.
 	tmpFile, err := os.CreateTemp("", "opensandbox-test-*")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer os.Remove(tmpFile.Name())
 	tmpFile.WriteString("file contents here")
 	tmpFile.Close()
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/files/upload" {
-			t.Errorf("expected /files/upload, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /files/upload, got %s", r.URL.Path))
 		}
 		if !strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
-			t.Errorf("expected multipart content type, got %s", r.Header.Get("Content-Type"))
+			assert.Fail(t, fmt.Sprintf("expected multipart content type, got %s", r.Header.Get("Content-Type")))
 		}
 
 		// Verify metadata part exists.
 		r.ParseMultipartForm(1 << 20)
 		metaStr := r.FormValue("metadata")
 		if metaStr == "" {
-			t.Error("expected metadata form field")
+			assert.Fail(t, "expected metadata form field")
 		}
 		var meta FileMetadata
 		json.Unmarshal([]byte(metaStr), &meta)
 		if meta.Path != "/sandbox/upload.txt" {
-			t.Errorf("metadata path = %q, want /sandbox/upload.txt", meta.Path)
+			assert.Fail(t, fmt.Sprintf("metadata path = %q, want /sandbox/upload.txt", meta.Path))
 		}
 
 		// Verify file part exists.
 		file, _, fErr := r.FormFile("file")
 		if fErr != nil {
-			t.Errorf("expected file part: %v", fErr)
+			assert.Fail(t, fmt.Sprintf("expected file part: %v", fErr))
 		} else {
 			data, _ := io.ReadAll(file)
 			if string(data) != "file contents here" {
-				t.Errorf("file content = %q, want %q", string(data), "file contents here")
+				assert.Fail(t, fmt.Sprintf("file content = %q, want %q", string(data), "file contents here"))
 			}
 			file.Close()
 		}
@@ -602,9 +566,31 @@ func TestUploadFile(t *testing.T) {
 	})
 
 	err = client.UploadFile(context.Background(), tmpFile.Name(), "/sandbox/upload.txt")
-	if err != nil {
-		t.Fatalf("UploadFile: %v", err)
-	}
+	require.NoErrorf(t, err, "UploadFile")
+}
+
+func TestUploadFile_WithCustomHeaders(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "opensandbox-upload-headers-*")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	_, werr := tmpFile.WriteString("header-check")
+	require.NoError(t, werr)
+	require.NoError(t, tmpFile.Close())
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Header") != "upload-ok" {
+			assert.Fail(t, fmt.Sprintf("X-Test-Header = %q, want %q", r.Header.Get("X-Test-Header"), "upload-ok"))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := NewExecdClient(srv.URL, "token", WithHeaders(map[string]string{
+		"X-Test-Header": "upload-ok",
+	}))
+
+	err = client.UploadFile(context.Background(), tmpFile.Name(), "/tmp/upload.txt")
+	require.NoErrorf(t, err, "UploadFile with custom headers")
 }
 
 func TestGetMetrics(t *testing.T) {
@@ -618,23 +604,21 @@ func TestGetMetrics(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/metrics" {
-			t.Errorf("expected /metrics, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /metrics, got %s", r.URL.Path))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	got, err := client.GetMetrics(context.Background())
-	if err != nil {
-		t.Fatalf("GetMetrics: %v", err)
-	}
+	require.NoErrorf(t, err, "GetMetrics")
 	if got.CPUCount != 4 {
-		t.Errorf("CPUCount = %f, want 4", got.CPUCount)
+		assert.Fail(t, fmt.Sprintf("CPUCount = %f, want 4", got.CPUCount))
 	}
 	if got.MemTotalMB != 8192 {
-		t.Errorf("MemTotalMB = %f, want 8192", got.MemTotalMB)
+		assert.Fail(t, fmt.Sprintf("MemTotalMB = %f, want 8192", got.MemTotalMB))
 	}
 }
 
@@ -677,32 +661,28 @@ func TestStreamSSE(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("stream: %v", err)
-	}
+	require.NoErrorf(t, err, "stream")
 
-	if len(events) != 4 {
-		t.Fatalf("expected 4 events, got %d: %+v", len(events), events)
-	}
+	require.Len(t, events, 4)
 
 	// Event 1: start
 	if events[0].Event != "start" || events[0].Data != "initializing" {
-		t.Errorf("event[0] = %+v", events[0])
+		assert.Fail(t, fmt.Sprintf("event[0] = %+v", events[0]))
 	}
 
 	// Event 2: progress with multi-line data
 	if events[1].Event != "progress" || events[1].Data != "step 1\nstep 2" {
-		t.Errorf("event[1] = %+v, want progress/step 1\\nstep 2", events[1])
+		assert.Fail(t, fmt.Sprintf("event[1] = %+v, want progress/step 1\\nstep 2", events[1]))
 	}
 
 	// Event 3: done with ID
 	if events[2].Event != "done" || events[2].Data != "complete" || events[2].ID != "evt-3" {
-		t.Errorf("event[2] = %+v", events[2])
+		assert.Fail(t, fmt.Sprintf("event[2] = %+v", events[2]))
 	}
 
 	// Event 4: final (comment should be skipped)
 	if events[3].Event != "final" || events[3].Data != "goodbye" {
-		t.Errorf("event[3] = %+v", events[3])
+		assert.Fail(t, fmt.Sprintf("event[3] = %+v", events[3]))
 	}
 }
 
@@ -730,26 +710,22 @@ func TestStreamSSE_NDJSON(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("stream: %v", err)
-	}
+	require.NoErrorf(t, err, "stream")
 
-	if len(events) != 2 {
-		t.Fatalf("expected 2 events, got %d: %+v", len(events), events)
-	}
+	require.Len(t, events, 2)
 
 	// NDJSON events with a "type" field should have Event populated.
 	if events[0].Event != "stdout" {
-		t.Errorf("event[0].Event = %q, want %q", events[0].Event, "stdout")
+		assert.Fail(t, fmt.Sprintf("event[0].Event = %q, want %q", events[0].Event, "stdout"))
 	}
 	if events[0].Data != `{"type":"stdout","data":"hello"}` {
-		t.Errorf("event[0].Data = %q", events[0].Data)
+		assert.Fail(t, fmt.Sprintf("event[0].Data = %q", events[0].Data))
 	}
 	if events[1].Event != "result" {
-		t.Errorf("event[1].Event = %q, want %q", events[1].Event, "result")
+		assert.Fail(t, fmt.Sprintf("event[1].Event = %q, want %q", events[1].Event, "result"))
 	}
 	if events[1].Data != `{"type":"result","exit_code":0}` {
-		t.Errorf("event[1].Data = %q", events[1].Data)
+		assert.Fail(t, fmt.Sprintf("event[1].Data = %q", events[1].Data))
 	}
 }
 
@@ -761,7 +737,7 @@ func TestLifecycleAuthHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("OPEN-SANDBOX-API-KEY")
 		if got != "my-lifecycle-key" {
-			t.Errorf("OPEN-SANDBOX-API-KEY = %q, want %q", got, "my-lifecycle-key")
+			assert.Fail(t, fmt.Sprintf("OPEN-SANDBOX-API-KEY = %q, want %q", got, "my-lifecycle-key"))
 		}
 		jsonResponse(w, http.StatusOK, SandboxInfo{ID: "sbx-1", CreatedAt: time.Now()})
 	}))
@@ -769,16 +745,14 @@ func TestLifecycleAuthHeader(t *testing.T) {
 
 	client := NewLifecycleClient(srv.URL, "my-lifecycle-key")
 	_, err := client.GetSandbox(context.Background(), "sbx-1")
-	if err != nil {
-		t.Fatalf("GetSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "GetSandbox")
 }
 
 func TestExecdAuthHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.Header.Get("X-EXECD-ACCESS-TOKEN")
 		if got != "my-execd-token" {
-			t.Errorf("X-EXECD-ACCESS-TOKEN = %q, want %q", got, "my-execd-token")
+			assert.Fail(t, fmt.Sprintf("X-EXECD-ACCESS-TOKEN = %q, want %q", got, "my-execd-token"))
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -786,9 +760,7 @@ func TestExecdAuthHeader(t *testing.T) {
 
 	client := NewExecdClient(srv.URL, "my-execd-token")
 	err := client.Ping(context.Background())
-	if err != nil {
-		t.Fatalf("Ping: %v", err)
-	}
+	require.NoErrorf(t, err, "Ping")
 }
 
 // ---------------------------------------------------------------------------
@@ -810,31 +782,31 @@ func TestSandboxManager_ListFilter(t *testing.T) {
 
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 
 		q := r.URL.Query()
 		// Verify state filter
 		states := q["state"]
 		if len(states) != 1 || states[0] != "Running" {
-			t.Errorf("expected state=[Running], got %v", states)
+			assert.Fail(t, fmt.Sprintf("expected state=[Running], got %v", states))
 		}
 
 		// Verify metadata filter
 		meta := q.Get("metadata")
 		if meta == "" {
-			t.Error("expected metadata query param")
+			assert.Fail(t, "expected metadata query param")
 		}
 		if !strings.Contains(meta, "env=prod") {
-			t.Errorf("expected metadata to contain env=prod, got %q", meta)
+			assert.Fail(t, fmt.Sprintf("expected metadata to contain env=prod, got %q", meta))
 		}
 
 		// Verify pagination
 		if q.Get("page") != "1" {
-			t.Errorf("expected page=1, got %s", q.Get("page"))
+			assert.Fail(t, fmt.Sprintf("expected page=1, got %s", q.Get("page")))
 		}
 		if q.Get("pageSize") != "10" {
-			t.Errorf("expected pageSize=10, got %s", q.Get("pageSize"))
+			assert.Fail(t, fmt.Sprintf("expected pageSize=10, got %s", q.Get("pageSize")))
 		}
 
 		jsonResponse(w, http.StatusOK, want)
@@ -847,17 +819,13 @@ func TestSandboxManager_ListFilter(t *testing.T) {
 		Page:     1,
 		PageSize: 10,
 	})
-	if err != nil {
-		t.Fatalf("ListSandboxInfos: %v", err)
-	}
-	if len(got.Items) != 1 {
-		t.Fatalf("expected 1 item, got %d", len(got.Items))
-	}
+	require.NoErrorf(t, err, "ListSandboxInfos")
+	require.Len(t, got.Items, 1)
 	if got.Items[0].ID != "sbx-a" {
-		t.Errorf("ID = %q, want %q", got.Items[0].ID, "sbx-a")
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.Items[0].ID, "sbx-a"))
 	}
 	if got.Items[0].Metadata["env"] != "prod" {
-		t.Errorf("Metadata[env] = %q, want %q", got.Items[0].Metadata["env"], "prod")
+		assert.Fail(t, fmt.Sprintf("Metadata[env] = %q, want %q", got.Items[0].Metadata["env"], "prod"))
 	}
 }
 
@@ -873,7 +841,7 @@ func TestSandboxManager_ListMultipleStates(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		states := r.URL.Query()["state"]
 		if len(states) != 2 {
-			t.Errorf("expected 2 state params, got %d: %v", len(states), states)
+			assert.Fail(t, fmt.Sprintf("expected 2 state params, got %d: %v", len(states), states))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
@@ -882,12 +850,8 @@ func TestSandboxManager_ListMultipleStates(t *testing.T) {
 	got, err := mgr.ListSandboxInfos(context.Background(), ListOptions{
 		States: []SandboxState{StateRunning, StatePaused},
 	})
-	if err != nil {
-		t.Fatalf("ListSandboxInfos: %v", err)
-	}
-	if len(got.Items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(got.Items))
-	}
+	require.NoErrorf(t, err, "ListSandboxInfos")
+	require.Len(t, got.Items, 2)
 }
 
 func TestSandboxManager_GetSandboxInfo(t *testing.T) {
@@ -899,21 +863,19 @@ func TestSandboxManager_GetSandboxInfo(t *testing.T) {
 
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes/sbx-get" {
-			t.Errorf("expected /sandboxes/sbx-get, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-get, got %s", r.URL.Path))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	mgr := &SandboxManager{lifecycle: client}
 	got, err := mgr.GetSandboxInfo(context.Background(), "sbx-get")
-	if err != nil {
-		t.Fatalf("GetSandboxInfo: %v", err)
-	}
+	require.NoErrorf(t, err, "GetSandboxInfo")
 	if got.ID != "sbx-get" {
-		t.Errorf("ID = %q, want %q", got.ID, "sbx-get")
+		assert.Fail(t, fmt.Sprintf("ID = %q, want %q", got.ID, "sbx-get"))
 	}
 }
 
@@ -921,10 +883,10 @@ func TestSandboxManager_KillSandbox(t *testing.T) {
 	var called bool
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes/sbx-kill" {
-			t.Errorf("expected /sandboxes/sbx-kill, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-kill, got %s", r.URL.Path))
 		}
 		called = true
 		w.WriteHeader(http.StatusNoContent)
@@ -932,11 +894,9 @@ func TestSandboxManager_KillSandbox(t *testing.T) {
 
 	mgr := &SandboxManager{lifecycle: client}
 	err := mgr.KillSandbox(context.Background(), "sbx-kill")
-	if err != nil {
-		t.Fatalf("KillSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "KillSandbox")
 	if !called {
-		t.Error("expected DELETE to be called")
+		assert.Fail(t, "expected DELETE to be called")
 	}
 }
 
@@ -944,10 +904,10 @@ func TestSandboxManager_PauseSandbox(t *testing.T) {
 	var called bool
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes/sbx-mgr-pause/pause" {
-			t.Errorf("expected /sandboxes/sbx-mgr-pause/pause, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-mgr-pause/pause, got %s", r.URL.Path))
 		}
 		called = true
 		w.WriteHeader(http.StatusAccepted)
@@ -955,11 +915,9 @@ func TestSandboxManager_PauseSandbox(t *testing.T) {
 
 	mgr := &SandboxManager{lifecycle: client}
 	err := mgr.PauseSandbox(context.Background(), "sbx-mgr-pause")
-	if err != nil {
-		t.Fatalf("PauseSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "PauseSandbox")
 	if !called {
-		t.Error("expected pause endpoint to be called")
+		assert.Fail(t, "expected pause endpoint to be called")
 	}
 }
 
@@ -967,10 +925,10 @@ func TestSandboxManager_ResumeSandbox(t *testing.T) {
 	var called bool
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes/sbx-mgr-resume/resume" {
-			t.Errorf("expected /sandboxes/sbx-mgr-resume/resume, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-mgr-resume/resume, got %s", r.URL.Path))
 		}
 		called = true
 		w.WriteHeader(http.StatusAccepted)
@@ -978,11 +936,9 @@ func TestSandboxManager_ResumeSandbox(t *testing.T) {
 
 	mgr := &SandboxManager{lifecycle: client}
 	err := mgr.ResumeSandbox(context.Background(), "sbx-mgr-resume")
-	if err != nil {
-		t.Fatalf("ResumeSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "ResumeSandbox")
 	if !called {
-		t.Error("expected resume endpoint to be called")
+		assert.Fail(t, "expected resume endpoint to be called")
 	}
 }
 
@@ -991,16 +947,16 @@ func TestSandboxManager_RenewSandbox(t *testing.T) {
 
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/sandboxes/sbx-renew/renew-expiration" {
-			t.Errorf("expected /sandboxes/sbx-renew/renew-expiration, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-renew/renew-expiration, got %s", r.URL.Path))
 		}
 
 		var req RenewExpirationRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.ExpiresAt.IsZero() {
-			t.Error("expected non-zero ExpiresAt")
+			assert.Fail(t, "expected non-zero ExpiresAt")
 		}
 
 		jsonResponse(w, http.StatusOK, RenewExpirationResponse{ExpiresAt: wantExpiry})
@@ -1008,11 +964,9 @@ func TestSandboxManager_RenewSandbox(t *testing.T) {
 
 	mgr := &SandboxManager{lifecycle: client}
 	got, err := mgr.RenewSandbox(context.Background(), "sbx-renew", 1*time.Hour)
-	if err != nil {
-		t.Fatalf("RenewSandbox: %v", err)
-	}
+	require.NoErrorf(t, err, "RenewSandbox")
 	if got.ExpiresAt.IsZero() {
-		t.Error("expected non-zero ExpiresAt in response")
+		assert.Fail(t, "expected non-zero ExpiresAt in response")
 	}
 }
 
@@ -1023,90 +977,82 @@ func TestSandboxManager_RenewSandbox(t *testing.T) {
 func TestCreateDirectory(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/directories" {
-			t.Errorf("expected /directories, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /directories, got %s", r.URL.Path))
 		}
 
 		var body map[string]map[string]int
 		json.NewDecoder(r.Body).Decode(&body)
 		dirEntry, ok := body["/sandbox/mydir"]
 		if !ok {
-			t.Error("expected /sandbox/mydir key in request body")
+			assert.Fail(t, "expected /sandbox/mydir key in request body")
 		}
 		if dirEntry["mode"] != 755 {
-			t.Errorf("mode = %d, want 755", dirEntry["mode"])
+			assert.Fail(t, fmt.Sprintf("mode = %d, want 755", dirEntry["mode"]))
 		}
 
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.CreateDirectory(context.Background(), "/sandbox/mydir", 755)
-	if err != nil {
-		t.Fatalf("CreateDirectory: %v", err)
-	}
+	require.NoErrorf(t, err, "CreateDirectory")
 }
 
 func TestDeleteDirectory(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/directories") {
-			t.Errorf("expected /directories path, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /directories path, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("path") != "/sandbox/mydir" {
-			t.Errorf("expected path=/sandbox/mydir, got %s", r.URL.Query().Get("path"))
+			assert.Fail(t, fmt.Sprintf("expected path=/sandbox/mydir, got %s", r.URL.Query().Get("path")))
 		}
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.DeleteDirectory(context.Background(), "/sandbox/mydir")
-	if err != nil {
-		t.Fatalf("DeleteDirectory: %v", err)
-	}
+	require.NoErrorf(t, err, "DeleteDirectory")
 }
 
 func TestDeleteFiles(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/files") {
-			t.Errorf("expected /files path, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /files path, got %s", r.URL.Path))
 		}
 
 		paths := r.URL.Query()["path"]
 		if len(paths) != 2 {
-			t.Errorf("expected 2 path params, got %d: %v", len(paths), paths)
+			assert.Fail(t, fmt.Sprintf("expected 2 path params, got %d: %v", len(paths), paths))
 		}
 
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.DeleteFiles(context.Background(), []string{"/tmp/a.txt", "/tmp/b.txt"})
-	if err != nil {
-		t.Fatalf("DeleteFiles: %v", err)
-	}
+	require.NoErrorf(t, err, "DeleteFiles")
 }
 
 func TestMoveFiles(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/files/mv" {
-			t.Errorf("expected /files/mv, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /files/mv, got %s", r.URL.Path))
 		}
 
 		var req MoveRequest
 		json.NewDecoder(r.Body).Decode(&req)
-		if len(req) != 1 {
-			t.Fatalf("expected 1 move item, got %d", len(req))
-		}
+		require.Len(t, req, 1)
 		if req[0].Src != "/tmp/old.txt" || req[0].Dest != "/tmp/new.txt" {
-			t.Errorf("move item = %+v, want src=/tmp/old.txt dest=/tmp/new.txt", req[0])
+			assert.Fail(t, fmt.Sprintf("move item = %+v, want src=/tmp/old.txt dest=/tmp/new.txt", req[0]))
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -1115,9 +1061,7 @@ func TestMoveFiles(t *testing.T) {
 	err := client.MoveFiles(context.Background(), MoveRequest{
 		{Src: "/tmp/old.txt", Dest: "/tmp/new.txt"},
 	})
-	if err != nil {
-		t.Fatalf("MoveFiles: %v", err)
-	}
+	require.NoErrorf(t, err, "MoveFiles")
 }
 
 func TestSearchFiles(t *testing.T) {
@@ -1128,53 +1072,49 @@ func TestSearchFiles(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/files/search") {
-			t.Errorf("expected /files/search, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /files/search, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("path") != "/sandbox" {
-			t.Errorf("expected path=/sandbox, got %s", r.URL.Query().Get("path"))
+			assert.Fail(t, fmt.Sprintf("expected path=/sandbox, got %s", r.URL.Query().Get("path")))
 		}
 		if r.URL.Query().Get("pattern") != "*.py" {
-			t.Errorf("expected pattern=*.py, got %s", r.URL.Query().Get("pattern"))
+			assert.Fail(t, fmt.Sprintf("expected pattern=*.py, got %s", r.URL.Query().Get("pattern")))
 		}
 
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	got, err := client.SearchFiles(context.Background(), "/sandbox", "*.py")
-	if err != nil {
-		t.Fatalf("SearchFiles: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 files, got %d", len(got))
-	}
+	require.NoErrorf(t, err, "SearchFiles")
+	require.Len(t, got, 2)
 	if got[0].Path != "/sandbox/test.py" {
-		t.Errorf("Path[0] = %q, want /sandbox/test.py", got[0].Path)
+		assert.Fail(t, fmt.Sprintf("Path[0] = %q, want /sandbox/test.py", got[0].Path))
 	}
 }
 
 func TestSetPermissions(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/files/permissions" {
-			t.Errorf("expected /files/permissions, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /files/permissions, got %s", r.URL.Path))
 		}
 
 		var req PermissionsRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		perm, ok := req["/tmp/script.sh"]
 		if !ok {
-			t.Error("expected /tmp/script.sh key in request")
+			assert.Fail(t, "expected /tmp/script.sh key in request")
 		}
 		if perm.Mode != 755 {
-			t.Errorf("Mode = %d, want 755", perm.Mode)
+			assert.Fail(t, fmt.Sprintf("Mode = %d, want 755", perm.Mode))
 		}
 		if perm.Owner != "root" {
-			t.Errorf("Owner = %q, want root", perm.Owner)
+			assert.Fail(t, fmt.Sprintf("Owner = %q, want root", perm.Owner))
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -1183,28 +1123,26 @@ func TestSetPermissions(t *testing.T) {
 	err := client.SetPermissions(context.Background(), PermissionsRequest{
 		"/tmp/script.sh": {Owner: "root", Group: "root", Mode: 755},
 	})
-	if err != nil {
-		t.Fatalf("SetPermissions: %v", err)
-	}
+	require.NoErrorf(t, err, "SetPermissions")
 }
 
 func TestReplaceInFiles(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/files/replace" {
-			t.Errorf("expected /files/replace, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /files/replace, got %s", r.URL.Path))
 		}
 
 		var req ReplaceRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		item, ok := req["/tmp/config.txt"]
 		if !ok {
-			t.Error("expected /tmp/config.txt key in request")
+			assert.Fail(t, "expected /tmp/config.txt key in request")
 		}
 		if item.Old != "localhost" || item.New != "production.example.com" {
-			t.Errorf("replace item = %+v", item)
+			assert.Fail(t, fmt.Sprintf("replace item = %+v", item))
 		}
 
 		w.WriteHeader(http.StatusOK)
@@ -1213,9 +1151,7 @@ func TestReplaceInFiles(t *testing.T) {
 	err := client.ReplaceInFiles(context.Background(), ReplaceRequest{
 		"/tmp/config.txt": {Old: "localhost", New: "production.example.com"},
 	})
-	if err != nil {
-		t.Fatalf("ReplaceInFiles: %v", err)
-	}
+	require.NoErrorf(t, err, "ReplaceInFiles")
 }
 
 func TestDownloadFile(t *testing.T) {
@@ -1223,13 +1159,13 @@ func TestDownloadFile(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/files/download") {
-			t.Errorf("expected /files/download, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /files/download, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("path") != "/sandbox/output.txt" {
-			t.Errorf("expected path=/sandbox/output.txt, got %s", r.URL.Query().Get("path"))
+			assert.Fail(t, fmt.Sprintf("expected path=/sandbox/output.txt, got %s", r.URL.Query().Get("path")))
 		}
 
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -1238,17 +1174,13 @@ func TestDownloadFile(t *testing.T) {
 	})
 
 	rc, err := client.DownloadFile(context.Background(), "/sandbox/output.txt", "")
-	if err != nil {
-		t.Fatalf("DownloadFile: %v", err)
-	}
+	require.NoErrorf(t, err, "DownloadFile")
 	defer rc.Close()
 
 	data, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
+	require.NoErrorf(t, err, "ReadAll")
 	if string(data) != fileContent {
-		t.Errorf("content = %q, want %q", string(data), fileContent)
+		assert.Fail(t, fmt.Sprintf("content = %q, want %q", string(data), fileContent))
 	}
 }
 
@@ -1256,7 +1188,7 @@ func TestDownloadFile_Range(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		rangeHdr := r.Header.Get("Range")
 		if rangeHdr != "bytes=0-4" {
-			t.Errorf("Range = %q, want %q", rangeHdr, "bytes=0-4")
+			assert.Fail(t, fmt.Sprintf("Range = %q, want %q", rangeHdr, "bytes=0-4"))
 		}
 
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -1265,18 +1197,33 @@ func TestDownloadFile_Range(t *testing.T) {
 	})
 
 	rc, err := client.DownloadFile(context.Background(), "/sandbox/big.bin", "bytes=0-4")
-	if err != nil {
-		t.Fatalf("DownloadFile range: %v", err)
-	}
+	require.NoErrorf(t, err, "DownloadFile range")
 	defer rc.Close()
 
 	data, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
+	require.NoErrorf(t, err, "ReadAll")
 	if string(data) != "hello" {
-		t.Errorf("content = %q, want %q", string(data), "hello")
+		assert.Fail(t, fmt.Sprintf("content = %q, want %q", string(data), "hello"))
 	}
+}
+
+func TestDownloadFile_WithCustomHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Header") != "download-ok" {
+			assert.Fail(t, fmt.Sprintf("X-Test-Header = %q, want %q", r.Header.Get("X-Test-Header"), "download-ok"))
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	client := NewExecdClient(srv.URL, "token", WithHeaders(map[string]string{
+		"X-Test-Header": "download-ok",
+	}))
+
+	rc, err := client.DownloadFile(context.Background(), "/tmp/data.txt", "")
+	require.NoErrorf(t, err, "DownloadFile with custom headers")
+	defer rc.Close()
 }
 
 // ---------------------------------------------------------------------------
@@ -1288,30 +1235,28 @@ func TestCreateContext(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/code/context" {
-			t.Errorf("expected /code/context, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /code/context, got %s", r.URL.Path))
 		}
 
 		var req CreateContextRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.Language != "python" {
-			t.Errorf("Language = %q, want python", req.Language)
+			assert.Fail(t, fmt.Sprintf("Language = %q, want python", req.Language))
 		}
 
 		jsonResponse(w, http.StatusCreated, want)
 	})
 
 	got, err := client.CreateContext(context.Background(), CreateContextRequest{Language: "python"})
-	if err != nil {
-		t.Fatalf("CreateContext: %v", err)
-	}
+	require.NoErrorf(t, err, "CreateContext")
 	if got.ID != "ctx-123" {
-		t.Errorf("ID = %q, want ctx-123", got.ID)
+		assert.Fail(t, fmt.Sprintf("ID = %q, want ctx-123", got.ID))
 	}
 	if got.Language != "python" {
-		t.Errorf("Language = %q, want python", got.Language)
+		assert.Fail(t, fmt.Sprintf("Language = %q, want python", got.Language))
 	}
 }
 
@@ -1320,20 +1265,18 @@ func TestGetContext(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/code/contexts/ctx-456" {
-			t.Errorf("expected /code/contexts/ctx-456, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /code/contexts/ctx-456, got %s", r.URL.Path))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	got, err := client.GetContext(context.Background(), "ctx-456")
-	if err != nil {
-		t.Fatalf("GetContext: %v", err)
-	}
+	require.NoErrorf(t, err, "GetContext")
 	if got.ID != "ctx-456" {
-		t.Errorf("ID = %q, want ctx-456", got.ID)
+		assert.Fail(t, fmt.Sprintf("ID = %q, want ctx-456", got.ID))
 	}
 }
 
@@ -1345,26 +1288,22 @@ func TestListContexts(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/code/contexts") {
-			t.Errorf("expected /code/contexts, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /code/contexts, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("language") != "python" {
-			t.Errorf("expected language=python, got %s", r.URL.Query().Get("language"))
+			assert.Fail(t, fmt.Sprintf("expected language=python, got %s", r.URL.Query().Get("language")))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	got, err := client.ListContexts(context.Background(), "python")
-	if err != nil {
-		t.Fatalf("ListContexts: %v", err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("expected 2 contexts, got %d", len(got))
-	}
+	require.NoErrorf(t, err, "ListContexts")
+	require.Len(t, got, 2)
 	if got[0].ID != "ctx-1" {
-		t.Errorf("ID[0] = %q, want ctx-1", got[0].ID)
+		assert.Fail(t, fmt.Sprintf("ID[0] = %q, want ctx-1", got[0].ID))
 	}
 }
 
@@ -1372,42 +1311,38 @@ func TestDeleteContext(t *testing.T) {
 	var called bool
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if r.URL.Path != "/code/contexts/ctx-del" {
-			t.Errorf("expected /code/contexts/ctx-del, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /code/contexts/ctx-del, got %s", r.URL.Path))
 		}
 		called = true
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.DeleteContext(context.Background(), "ctx-del")
-	if err != nil {
-		t.Fatalf("DeleteContext: %v", err)
-	}
+	require.NoErrorf(t, err, "DeleteContext")
 	if !called {
-		t.Error("expected DELETE to be called")
+		assert.Fail(t, "expected DELETE to be called")
 	}
 }
 
 func TestDeleteContextsByLanguage(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/code/contexts") {
-			t.Errorf("expected /code/contexts path, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /code/contexts path, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("language") != "python" {
-			t.Errorf("expected language=python, got %s", r.URL.Query().Get("language"))
+			assert.Fail(t, fmt.Sprintf("expected language=python, got %s", r.URL.Query().Get("language")))
 		}
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.DeleteContextsByLanguage(context.Background(), "python")
-	if err != nil {
-		t.Fatalf("DeleteContextsByLanguage: %v", err)
-	}
+	require.NoErrorf(t, err, "DeleteContextsByLanguage")
 }
 
 func TestExecuteCode_SSE(t *testing.T) {
@@ -1425,19 +1360,19 @@ func TestExecuteCode_SSE(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/code" {
-			t.Errorf("expected /code, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /code, got %s", r.URL.Path))
 		}
 
 		var req RunCodeRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.Code != "2+2" {
-			t.Errorf("Code = %q, want 2+2", req.Code)
+			assert.Fail(t, fmt.Sprintf("Code = %q, want 2+2", req.Code))
 		}
 		if req.Context == nil || req.Context.Language != "python" {
-			t.Errorf("expected context with language python, got %+v", req.Context)
+			assert.Fail(t, fmt.Sprintf("expected context with language python, got %+v", req.Context))
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1453,24 +1388,20 @@ func TestExecuteCode_SSE(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("ExecuteCode: %v", err)
-	}
+	require.NoErrorf(t, err, "ExecuteCode")
 
-	if len(events) != 4 {
-		t.Fatalf("expected 4 events, got %d", len(events))
-	}
+	require.Len(t, events, 4)
 	if events[0].Event != "init" {
-		t.Errorf("event[0].Event = %q, want init", events[0].Event)
+		assert.Fail(t, fmt.Sprintf("event[0].Event = %q, want init", events[0].Event))
 	}
 	if events[1].Event != "stdout" {
-		t.Errorf("event[1].Event = %q, want stdout", events[1].Event)
+		assert.Fail(t, fmt.Sprintf("event[1].Event = %q, want stdout", events[1].Event))
 	}
 	if events[2].Event != "result" {
-		t.Errorf("event[2].Event = %q, want result", events[2].Event)
+		assert.Fail(t, fmt.Sprintf("event[2].Event = %q, want result", events[2].Event))
 	}
 	if events[3].Event != "execution_complete" {
-		t.Errorf("event[3].Event = %q, want execution_complete", events[3].Event)
+		assert.Fail(t, fmt.Sprintf("event[3].Event = %q, want execution_complete", events[3].Event))
 	}
 }
 
@@ -1482,13 +1413,13 @@ func TestExecuteCode_InContext(t *testing.T) {
 		var req RunCodeRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.Context == nil {
-			t.Fatal("expected context in request")
+			require.FailNow(t, "expected context in request")
 		}
 		if req.Context.ID != "ctx-persist" {
-			t.Errorf("Context.ID = %q, want ctx-persist", req.Context.ID)
+			assert.Fail(t, fmt.Sprintf("Context.ID = %q, want ctx-persist", req.Context.ID))
 		}
 		if req.Context.Language != "python" {
-			t.Errorf("Context.Language = %q, want python", req.Context.Language)
+			assert.Fail(t, fmt.Sprintf("Context.Language = %q, want python", req.Context.Language))
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1504,32 +1435,26 @@ func TestExecuteCode_InContext(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("ExecuteCode in context: %v", err)
-	}
-	if len(events) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(events))
-	}
+	require.NoErrorf(t, err, "ExecuteCode in context")
+	require.Len(t, events, 2)
 }
 
 func TestInterruptCode(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/code") {
-			t.Errorf("expected /code path, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /code path, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("id") != "session-interrupt" {
-			t.Errorf("expected id=session-interrupt, got %s", r.URL.Query().Get("id"))
+			assert.Fail(t, fmt.Sprintf("expected id=session-interrupt, got %s", r.URL.Query().Get("id")))
 		}
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.InterruptCode(context.Background(), "session-interrupt")
-	if err != nil {
-		t.Fatalf("InterruptCode: %v", err)
-	}
+	require.NoErrorf(t, err, "InterruptCode")
 }
 
 // ---------------------------------------------------------------------------
@@ -1541,20 +1466,18 @@ func TestCreateSession(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/session" {
-			t.Errorf("expected /session, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /session, got %s", r.URL.Path))
 		}
 		jsonResponse(w, http.StatusCreated, want)
 	})
 
 	got, err := client.CreateSession(context.Background())
-	if err != nil {
-		t.Fatalf("CreateSession: %v", err)
-	}
+	require.NoErrorf(t, err, "CreateSession")
 	if got.ID != "sess-abc" {
-		t.Errorf("ID = %q, want sess-abc", got.ID)
+		assert.Fail(t, fmt.Sprintf("ID = %q, want sess-abc", got.ID))
 	}
 }
 
@@ -1564,16 +1487,16 @@ func TestRunInSession_SSE(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Errorf("expected POST, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
 		}
 		if r.URL.Path != "/session/sess-run/run" {
-			t.Errorf("expected /session/sess-run/run, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /session/sess-run/run, got %s", r.URL.Path))
 		}
 
 		var req RunInSessionRequest
 		json.NewDecoder(r.Body).Decode(&req)
 		if req.Command != "echo $FOO" {
-			t.Errorf("Command = %q, want echo $FOO", req.Command)
+			assert.Fail(t, fmt.Sprintf("Command = %q, want echo $FOO", req.Command))
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1588,14 +1511,10 @@ func TestRunInSession_SSE(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("RunInSession: %v", err)
-	}
-	if len(events) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(events))
-	}
+	require.NoErrorf(t, err, "RunInSession")
+	require.Len(t, events, 2)
 	if events[0].Event != "stdout" {
-		t.Errorf("event[0].Event = %q, want stdout", events[0].Event)
+		assert.Fail(t, fmt.Sprintf("event[0].Event = %q, want stdout", events[0].Event))
 	}
 }
 
@@ -1603,21 +1522,19 @@ func TestDeleteSession(t *testing.T) {
 	var called bool
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if r.URL.Path != "/session/sess-del" {
-			t.Errorf("expected /session/sess-del, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /session/sess-del, got %s", r.URL.Path))
 		}
 		called = true
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.DeleteSession(context.Background(), "sess-del")
-	if err != nil {
-		t.Fatalf("DeleteSession: %v", err)
-	}
+	require.NoErrorf(t, err, "DeleteSession")
 	if !called {
-		t.Error("expected DELETE to be called")
+		assert.Fail(t, "expected DELETE to be called")
 	}
 }
 
@@ -1640,29 +1557,27 @@ func TestGetCommandStatus(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/command/status/cmd-status-1" {
-			t.Errorf("expected /command/status/cmd-status-1, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /command/status/cmd-status-1, got %s", r.URL.Path))
 		}
 		jsonResponse(w, http.StatusOK, want)
 	})
 
 	got, err := client.GetCommandStatus(context.Background(), "cmd-status-1")
-	if err != nil {
-		t.Fatalf("GetCommandStatus: %v", err)
-	}
+	require.NoErrorf(t, err, "GetCommandStatus")
 	if got.ID != "cmd-status-1" {
-		t.Errorf("ID = %q, want cmd-status-1", got.ID)
+		assert.Fail(t, fmt.Sprintf("ID = %q, want cmd-status-1", got.ID))
 	}
 	if got.Running {
-		t.Error("expected Running=false")
+		assert.Fail(t, "expected Running=false")
 	}
 	if got.ExitCode == nil || *got.ExitCode != 0 {
-		t.Errorf("ExitCode = %v, want 0", got.ExitCode)
+		assert.Fail(t, fmt.Sprintf("ExitCode = %v, want 0", got.ExitCode))
 	}
 	if got.Content != "hello\n" {
-		t.Errorf("Content = %q, want %q", got.Content, "hello\n")
+		assert.Fail(t, fmt.Sprintf("Content = %q, want %q", got.Content, "hello\n"))
 	}
 }
 
@@ -1678,29 +1593,27 @@ func TestGetCommandStatus_Running(t *testing.T) {
 	})
 
 	got, err := client.GetCommandStatus(context.Background(), "cmd-running")
-	if err != nil {
-		t.Fatalf("GetCommandStatus: %v", err)
-	}
+	require.NoErrorf(t, err, "GetCommandStatus")
 	if !got.Running {
-		t.Error("expected Running=true")
+		assert.Fail(t, "expected Running=true")
 	}
 	if got.ExitCode != nil {
-		t.Errorf("expected nil ExitCode for running command, got %d", *got.ExitCode)
+		assert.Fail(t, fmt.Sprintf("expected nil ExitCode for running command, got %d", *got.ExitCode))
 	}
 }
 
 func TestGetCommandLogs(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/command/cmd-logs-1/logs" {
-			t.Errorf("expected /command/cmd-logs-1/logs, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /command/cmd-logs-1/logs, got %s", r.URL.Path))
 		}
 
 		// Verify Accept header
 		if r.Header.Get("Accept") != "text/plain" {
-			t.Errorf("Accept = %q, want text/plain", r.Header.Get("Accept"))
+			assert.Fail(t, fmt.Sprintf("Accept = %q, want text/plain", r.Header.Get("Accept")))
 		}
 
 		w.Header().Set("Content-Type", "text/plain")
@@ -1710,14 +1623,12 @@ func TestGetCommandLogs(t *testing.T) {
 	})
 
 	got, err := client.GetCommandLogs(context.Background(), "cmd-logs-1", nil)
-	if err != nil {
-		t.Fatalf("GetCommandLogs: %v", err)
-	}
+	require.NoErrorf(t, err, "GetCommandLogs")
 	if got.Output != "line1\nline2\n" {
-		t.Errorf("Output = %q, want %q", got.Output, "line1\nline2\n")
+		assert.Fail(t, fmt.Sprintf("Output = %q, want %q", got.Output, "line1\nline2\n"))
 	}
 	if got.Cursor != 42 {
-		t.Errorf("Cursor = %d, want 42", got.Cursor)
+		assert.Fail(t, fmt.Sprintf("Cursor = %d, want 42", got.Cursor))
 	}
 }
 
@@ -1725,7 +1636,7 @@ func TestGetCommandLogs_WithCursor(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		cursor := r.URL.Query().Get("cursor")
 		if cursor != "42" {
-			t.Errorf("expected cursor=42, got %s", cursor)
+			assert.Fail(t, fmt.Sprintf("expected cursor=42, got %s", cursor))
 		}
 
 		w.Header().Set("EXECD-COMMANDS-TAIL-CURSOR", "99")
@@ -1735,35 +1646,52 @@ func TestGetCommandLogs_WithCursor(t *testing.T) {
 
 	cursor := int64(42)
 	got, err := client.GetCommandLogs(context.Background(), "cmd-logs-2", &cursor)
-	if err != nil {
-		t.Fatalf("GetCommandLogs with cursor: %v", err)
-	}
+	require.NoErrorf(t, err, "GetCommandLogs with cursor")
 	if got.Output != "line3\n" {
-		t.Errorf("Output = %q, want %q", got.Output, "line3\n")
+		assert.Fail(t, fmt.Sprintf("Output = %q, want %q", got.Output, "line3\n"))
 	}
 	if got.Cursor != 99 {
-		t.Errorf("Cursor = %d, want 99", got.Cursor)
+		assert.Fail(t, fmt.Sprintf("Cursor = %d, want 99", got.Cursor))
+	}
+}
+
+func TestGetCommandLogs_WithCustomHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Test-Header") != "logs-ok" {
+			assert.Fail(t, fmt.Sprintf("X-Test-Header = %q, want %q", r.Header.Get("X-Test-Header"), "logs-ok"))
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("line\n"))
+	}))
+	defer srv.Close()
+
+	client := NewExecdClient(srv.URL, "token", WithHeaders(map[string]string{
+		"X-Test-Header": "logs-ok",
+	}))
+
+	got, err := client.GetCommandLogs(context.Background(), "cmd-1", nil)
+	require.NoErrorf(t, err, "GetCommandLogs with custom headers")
+	if got.Output != "line\n" {
+		assert.Fail(t, fmt.Sprintf("Output = %q, want %q", got.Output, "line\n"))
 	}
 }
 
 func TestInterruptCommand(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
-			t.Errorf("expected DELETE, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
 		if !strings.HasPrefix(r.URL.Path, "/command") {
-			t.Errorf("expected /command path, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /command path, got %s", r.URL.Path))
 		}
 		if r.URL.Query().Get("id") != "cmd-int" {
-			t.Errorf("expected id=cmd-int, got %s", r.URL.Query().Get("id"))
+			assert.Fail(t, fmt.Sprintf("expected id=cmd-int, got %s", r.URL.Query().Get("id")))
 		}
 		w.WriteHeader(http.StatusOK)
 	})
 
 	err := client.InterruptCommand(context.Background(), "cmd-int")
-	if err != nil {
-		t.Fatalf("InterruptCommand: %v", err)
-	}
+	require.NoErrorf(t, err, "InterruptCommand")
 }
 
 // ---------------------------------------------------------------------------
@@ -1783,10 +1711,10 @@ func TestWatchMetrics_SSE(t *testing.T) {
 
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
-			t.Errorf("expected GET, got %s", r.Method)
+			assert.Fail(t, fmt.Sprintf("expected GET, got %s", r.Method))
 		}
 		if r.URL.Path != "/metrics/watch" {
-			t.Errorf("expected /metrics/watch, got %s", r.URL.Path)
+			assert.Fail(t, fmt.Sprintf("expected /metrics/watch, got %s", r.URL.Path))
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1799,27 +1727,23 @@ func TestWatchMetrics_SSE(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("WatchMetrics: %v", err)
-	}
+	require.NoErrorf(t, err, "WatchMetrics")
 
-	if len(events) != 3 {
-		t.Fatalf("expected 3 metric events, got %d", len(events))
-	}
+	require.Len(t, events, 3)
 	if events[0].Event != "metrics" {
-		t.Errorf("event[0].Event = %q, want metrics", events[0].Event)
+		assert.Fail(t, fmt.Sprintf("event[0].Event = %q, want metrics", events[0].Event))
 	}
 
 	// Verify we can parse the metric data from events
 	var m Metrics
 	if err := json.Unmarshal([]byte(events[0].Data), &m); err != nil {
-		t.Fatalf("unmarshal metric: %v", err)
+		require.NoErrorf(t, err, "unmarshal metric")
 	}
 	if m.CPUCount != 4 {
-		t.Errorf("CPUCount = %f, want 4", m.CPUCount)
+		assert.Fail(t, fmt.Sprintf("CPUCount = %f, want 4", m.CPUCount))
 	}
 	if m.CPUUsedPct != 10.5 {
-		t.Errorf("CPUUsedPct = %f, want 10.5", m.CPUUsedPct)
+		assert.Fail(t, fmt.Sprintf("CPUUsedPct = %f, want 10.5", m.CPUUsedPct))
 	}
 }
 
@@ -1857,10 +1781,10 @@ func TestWatchMetrics_ContextCancel(t *testing.T) {
 
 	// Should get context cancelled error
 	if err == nil {
-		t.Error("expected error from cancelled context")
+		assert.Fail(t, "expected error from cancelled context")
 	}
 	if eventCount < 1 {
-		t.Errorf("expected at least 1 event before cancel, got %d", eventCount)
+		assert.Fail(t, fmt.Sprintf("expected at least 1 event before cancel, got %d", eventCount))
 	}
 }
 
@@ -1880,31 +1804,30 @@ func TestExecution_ProcessStreamEvents(t *testing.T) {
 	}
 
 	for _, ev := range events {
-		if err := processStreamEvent(exec, ev, nil); err != nil {
-			t.Fatalf("processStreamEvent(%s): %v", ev.Event, err)
-		}
+		err := processStreamEvent(exec, ev, nil)
+		require.NoErrorf(t, err, "processStreamEvent(%s)", ev.Event)
 	}
 
 	if exec.ID != "exec-42" {
-		t.Errorf("ID = %q, want exec-42", exec.ID)
+		assert.Fail(t, fmt.Sprintf("ID = %q, want exec-42", exec.ID))
 	}
 	if len(exec.Stdout) != 1 || exec.Stdout[0].Text != "hello" {
-		t.Errorf("Stdout = %+v, want [hello]", exec.Stdout)
+		assert.Fail(t, fmt.Sprintf("Stdout = %+v, want [hello]", exec.Stdout))
 	}
 	if len(exec.Stderr) != 1 || exec.Stderr[0].Text != "warn: something" {
-		t.Errorf("Stderr = %+v", exec.Stderr)
+		assert.Fail(t, fmt.Sprintf("Stderr = %+v", exec.Stderr))
 	}
 	if len(exec.Results) != 1 || exec.Results[0].Text() != "42" {
-		t.Errorf("Results = %+v", exec.Results)
+		assert.Fail(t, fmt.Sprintf("Results = %+v", exec.Results))
 	}
 	if exec.Complete == nil {
-		t.Error("expected Complete to be set")
+		assert.Fail(t, "expected Complete to be set")
 	}
 	if exec.ExitCode == nil || *exec.ExitCode != 0 {
-		t.Errorf("ExitCode = %v, want 0", exec.ExitCode)
+		assert.Fail(t, fmt.Sprintf("ExitCode = %v, want 0", exec.ExitCode))
 	}
 	if exec.Text() != "hello" {
-		t.Errorf("Text() = %q, want hello", exec.Text())
+		assert.Fail(t, fmt.Sprintf("Text() = %q, want hello", exec.Text()))
 	}
 }
 
@@ -1916,20 +1839,20 @@ func TestExecution_ErrorEvent(t *testing.T) {
 	}
 
 	if err := processStreamEvent(exec, event, nil); err != nil {
-		t.Fatalf("processStreamEvent: %v", err)
+		require.NoErrorf(t, err, "processStreamEvent")
 	}
 
 	if exec.Error == nil {
-		t.Fatal("expected Error to be set")
+		require.FailNow(t, "expected Error to be set")
 	}
 	if exec.Error.Name != "NameError" {
-		t.Errorf("Error.Name = %q, want NameError", exec.Error.Name)
+		assert.Fail(t, fmt.Sprintf("Error.Name = %q, want NameError", exec.Error.Name))
 	}
 	if exec.Error.Value != "name 'x' is not defined" {
-		t.Errorf("Error.Value = %q", exec.Error.Value)
+		assert.Fail(t, fmt.Sprintf("Error.Value = %q", exec.Error.Value))
 	}
 	if len(exec.Error.Traceback) != 1 {
-		t.Errorf("Traceback len = %d, want 1", len(exec.Error.Traceback))
+		assert.Fail(t, fmt.Sprintf("Traceback len = %d, want 1", len(exec.Error.Traceback)))
 	}
 }
 
@@ -1955,24 +1878,24 @@ func TestExecution_HandlersInvoked(t *testing.T) {
 
 	for _, ev := range events {
 		if err := processStreamEvent(exec, ev, handlers); err != nil {
-			t.Fatalf("processStreamEvent: %v", err)
+			require.NoErrorf(t, err, "processStreamEvent")
 		}
 	}
 
 	if !initCalled {
-		t.Error("OnInit not called")
+		assert.Fail(t, "OnInit not called")
 	}
 	if !stdoutCalled {
-		t.Error("OnStdout not called")
+		assert.Fail(t, "OnStdout not called")
 	}
 	if !stderrCalled {
-		t.Error("OnStderr not called")
+		assert.Fail(t, "OnStderr not called")
 	}
 	if !resultCalled {
-		t.Error("OnResult not called")
+		assert.Fail(t, "OnResult not called")
 	}
 	if !completeCalled {
-		t.Error("OnComplete not called")
+		assert.Fail(t, "OnComplete not called")
 	}
 }
 
@@ -1993,7 +1916,7 @@ func TestOctalMode(t *testing.T) {
 	for _, tc := range tests {
 		got := OctalMode(tc.mode)
 		if got != tc.want {
-			t.Errorf("OctalMode(%o) = %d, want %d", tc.mode, got, tc.want)
+			assert.Fail(t, fmt.Sprintf("OctalMode(%o) = %d, want %d", tc.mode, got, tc.want))
 		}
 	}
 }
@@ -2024,10 +1947,10 @@ func TestStreamSSE_HandlerError(t *testing.T) {
 		return nil
 	})
 	if err != stopErr {
-		t.Errorf("expected stopErr, got %v", err)
+		assert.Fail(t, fmt.Sprintf("expected stopErr, got %v", err))
 	}
 	if count != 1 {
-		t.Errorf("handler called %d times, want 1", count)
+		assert.Fail(t, fmt.Sprintf("handler called %d times, want 1", count))
 	}
 }
 
@@ -2044,13 +1967,13 @@ func TestRunCommand_WithEnvs(t *testing.T) {
 		json.NewDecoder(r.Body).Decode(&req)
 
 		if req.Envs == nil {
-			t.Fatal("expected Envs to be set")
+			require.FailNow(t, "expected Envs to be set")
 		}
 		if req.Envs["FOO"] != "bar" {
-			t.Errorf("Envs[FOO] = %q, want bar", req.Envs["FOO"])
+			assert.Fail(t, fmt.Sprintf("Envs[FOO] = %q, want bar", req.Envs["FOO"]))
 		}
 		if req.Envs["BAZ"] != "qux" {
-			t.Errorf("Envs[BAZ] = %q, want qux", req.Envs["BAZ"])
+			assert.Fail(t, fmt.Sprintf("Envs[BAZ] = %q, want qux", req.Envs["BAZ"]))
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -2062,9 +1985,7 @@ func TestRunCommand_WithEnvs(t *testing.T) {
 		Command: "echo $FOO",
 		Envs:    map[string]string{"FOO": "bar", "BAZ": "qux"},
 	}, func(event StreamEvent) error { return nil })
-	if err != nil {
-		t.Fatalf("RunCommand with Envs: %v", err)
-	}
+	require.NoErrorf(t, err, "RunCommand with Envs")
 }
 
 // ---------------------------------------------------------------------------
@@ -2080,7 +2001,7 @@ func TestRunCommand_Background(t *testing.T) {
 		json.NewDecoder(r.Body).Decode(&req)
 
 		if !req.Background {
-			t.Error("expected Background=true")
+			assert.Fail(t, "expected Background=true")
 		}
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -2096,12 +2017,8 @@ func TestRunCommand_Background(t *testing.T) {
 		events = append(events, event)
 		return nil
 	})
-	if err != nil {
-		t.Fatalf("RunCommand background: %v", err)
-	}
-	if len(events) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(events))
-	}
+	require.NoErrorf(t, err, "RunCommand background")
+	require.Len(t, events, 2)
 }
 
 // ---------------------------------------------------------------------------
@@ -2118,19 +2035,15 @@ func TestAPIError_RequestID(t *testing.T) {
 	})
 
 	_, err := client.GetSandbox(context.Background(), "sbx-missing")
-	if err == nil {
-		t.Fatal("expected error")
-	}
+	require.Error(t, err)
 
 	apiErr, ok := err.(*APIError)
-	if !ok {
-		t.Fatalf("expected *APIError, got %T", err)
-	}
+	require.True(t, ok, "expected *APIError, got %T", err)
 	if apiErr.RequestID != "req-abc-123" {
-		t.Errorf("RequestID = %q, want req-abc-123", apiErr.RequestID)
+		assert.Fail(t, fmt.Sprintf("RequestID = %q, want req-abc-123", apiErr.RequestID))
 	}
 	if !strings.Contains(apiErr.Error(), "req-abc-123") {
-		t.Errorf("Error() = %q, expected to contain request ID", apiErr.Error())
+		assert.Fail(t, fmt.Sprintf("Error() = %q, expected to contain request ID", apiErr.Error()))
 	}
 }
 
@@ -2144,16 +2057,14 @@ func TestCreateSandbox_WithNetworkPolicy(t *testing.T) {
 		json.NewDecoder(r.Body).Decode(&req)
 
 		if req.NetworkPolicy == nil {
-			t.Fatal("expected NetworkPolicy to be set")
+			require.FailNow(t, "expected NetworkPolicy to be set")
 		}
 		if req.NetworkPolicy.DefaultAction != "deny" {
-			t.Errorf("DefaultAction = %q, want deny", req.NetworkPolicy.DefaultAction)
+			assert.Fail(t, fmt.Sprintf("DefaultAction = %q, want deny", req.NetworkPolicy.DefaultAction))
 		}
-		if len(req.NetworkPolicy.Egress) != 1 {
-			t.Fatalf("expected 1 egress rule, got %d", len(req.NetworkPolicy.Egress))
-		}
+		require.Len(t, req.NetworkPolicy.Egress, 1)
 		if req.NetworkPolicy.Egress[0].Target != "api.example.com" {
-			t.Errorf("Target = %q, want api.example.com", req.NetworkPolicy.Egress[0].Target)
+			assert.Fail(t, fmt.Sprintf("Target = %q, want api.example.com", req.NetworkPolicy.Egress[0].Target))
 		}
 
 		jsonResponse(w, http.StatusCreated, SandboxInfo{
@@ -2174,9 +2085,7 @@ func TestCreateSandbox_WithNetworkPolicy(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox with NetworkPolicy: %v", err)
-	}
+	require.NoErrorf(t, err, "CreateSandbox with NetworkPolicy")
 }
 
 // ---------------------------------------------------------------------------
@@ -2188,35 +2097,33 @@ func TestCreateSandbox_WithVolumes(t *testing.T) {
 		var req CreateSandboxRequest
 		json.NewDecoder(r.Body).Decode(&req)
 
-		if len(req.Volumes) != 2 {
-			t.Fatalf("expected 2 volumes, got %d", len(req.Volumes))
-		}
+		require.Len(t, req.Volumes, 2)
 
 		// Host volume
 		v0 := req.Volumes[0]
 		if v0.Name != "data" {
-			t.Errorf("Volume[0].Name = %q, want data", v0.Name)
+			assert.Fail(t, fmt.Sprintf("Volume[0].Name = %q, want data", v0.Name))
 		}
 		if v0.Host == nil || v0.Host.Path != "/host/data" {
-			t.Errorf("Volume[0].Host = %+v, want /host/data", v0.Host)
+			assert.Fail(t, fmt.Sprintf("Volume[0].Host = %+v, want /host/data", v0.Host))
 		}
 		if v0.MountPath != "/mnt/data" {
-			t.Errorf("Volume[0].MountPath = %q, want /mnt/data", v0.MountPath)
+			assert.Fail(t, fmt.Sprintf("Volume[0].MountPath = %q, want /mnt/data", v0.MountPath))
 		}
 		if v0.ReadOnly {
-			t.Error("Volume[0] should not be ReadOnly")
+			assert.Fail(t, "Volume[0] should not be ReadOnly")
 		}
 
 		// PVC volume with subPath and readOnly
 		v1 := req.Volumes[1]
 		if v1.PVC == nil || v1.PVC.ClaimName != "my-pvc" {
-			t.Errorf("Volume[1].PVC = %+v, want my-pvc", v1.PVC)
+			assert.Fail(t, fmt.Sprintf("Volume[1].PVC = %+v, want my-pvc", v1.PVC))
 		}
 		if !v1.ReadOnly {
-			t.Error("Volume[1] should be ReadOnly")
+			assert.Fail(t, "Volume[1] should be ReadOnly")
 		}
 		if v1.SubPath != "subdir" {
-			t.Errorf("Volume[1].SubPath = %q, want subdir", v1.SubPath)
+			assert.Fail(t, fmt.Sprintf("Volume[1].SubPath = %q, want subdir", v1.SubPath))
 		}
 
 		jsonResponse(w, http.StatusCreated, SandboxInfo{
@@ -2245,7 +2152,5 @@ func TestCreateSandbox_WithVolumes(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		t.Fatalf("CreateSandbox with Volumes: %v", err)
-	}
+	require.NoErrorf(t, err, "CreateSandbox with Volumes")
 }
