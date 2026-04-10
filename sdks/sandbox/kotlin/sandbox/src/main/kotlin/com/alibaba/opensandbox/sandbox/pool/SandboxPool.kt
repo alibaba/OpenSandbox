@@ -88,8 +88,6 @@ class SandboxPool internal constructor(
 ) {
     private val logger = LoggerFactory.getLogger(SandboxPool::class.java)
 
-    private val idleTtl = Duration.ofHours(24)
-
     private val config: PoolConfig = config
     private val stateStore: PoolStateStore = config.stateStore
     private val connectionConfig: ConnectionConfig = config.connectionConfig
@@ -471,7 +469,7 @@ class SandboxPool internal constructor(
         val builder =
             creationSpec.applyToBuilder(
                 Sandbox.builder()
-                    .timeout(idleTtl)
+                    .timeout(config.idleTimeout)
                     .readyTimeout(config.warmupReadyTimeout)
                     .healthCheckPollingInterval(config.warmupHealthCheckPollingInterval)
                     .skipHealthCheck(config.warmupSkipHealthCheck)
@@ -485,7 +483,7 @@ class SandboxPool internal constructor(
         val builder =
             creationSpec.applyToBuilder(
                 Sandbox.builder()
-                    .timeout(idleTtl)
+                    .timeout(config.idleTimeout)
                     .readyTimeout(config.acquireReadyTimeout)
                     .healthCheckPollingInterval(config.acquireHealthCheckPollingInterval)
                     .skipHealthCheck(config.acquireSkipHealthCheck)
@@ -734,6 +732,11 @@ class SandboxPool internal constructor(
 
         fun drainTimeout(drainTimeout: Duration): Builder {
             configBuilder.drainTimeout(drainTimeout)
+            return this
+        }
+
+        fun idleTimeout(idleTimeout: Duration): Builder {
+            configBuilder.idleTimeout(idleTimeout)
             return this
         }
 

@@ -47,6 +47,7 @@ import kotlin.math.ceil
  * @property warmupHealthCheck Optional custom health check for pool-created sandboxes.
  * @property warmupSandboxPreparer Optional callback invoked after a warmup sandbox is ready and before it is put idle.
  * @property warmupSkipHealthCheck When true, skip readiness checks for pool-created sandboxes (default: false).
+ * @property idleTimeout Timeout applied to pool-created sandboxes when they are initialized (default: 24h).
  * @property drainTimeout Max wait during graceful shutdown for in-flight ops (default: 30s).
  */
 class PoolConfig private constructor(
@@ -69,6 +70,7 @@ class PoolConfig private constructor(
     val warmupHealthCheck: ((Sandbox) -> Boolean)?,
     val warmupSandboxPreparer: SandboxPreparer?,
     val warmupSkipHealthCheck: Boolean,
+    val idleTimeout: Duration,
     val drainTimeout: Duration,
 ) {
     init {
@@ -89,6 +91,7 @@ class PoolConfig private constructor(
         require(!warmupHealthCheckPollingInterval.isNegative && !warmupHealthCheckPollingInterval.isZero) {
             "warmupHealthCheckPollingInterval must be positive"
         }
+        require(!idleTimeout.isNegative && !idleTimeout.isZero) { "idleTimeout must be positive" }
         require(!drainTimeout.isNegative) { "drainTimeout must be non-negative" }
     }
 
@@ -100,6 +103,7 @@ class PoolConfig private constructor(
         private val DEFAULT_ACQUIRE_HEALTH_CHECK_POLLING_INTERVAL = Duration.ofMillis(200)
         private val DEFAULT_WARMUP_READY_TIMEOUT = Duration.ofSeconds(30)
         private val DEFAULT_WARMUP_HEALTH_CHECK_POLLING_INTERVAL = Duration.ofMillis(200)
+        private val DEFAULT_IDLE_TIMEOUT = Duration.ofHours(24)
         private val DEFAULT_DRAIN_TIMEOUT = Duration.ofSeconds(30)
 
         @JvmStatic
@@ -127,6 +131,7 @@ class PoolConfig private constructor(
             warmupHealthCheck = warmupHealthCheck,
             warmupSandboxPreparer = warmupSandboxPreparer,
             warmupSkipHealthCheck = warmupSkipHealthCheck,
+            idleTimeout = idleTimeout,
             drainTimeout = drainTimeout,
         )
     }
@@ -151,6 +156,7 @@ class PoolConfig private constructor(
         private var warmupHealthCheck: ((Sandbox) -> Boolean)? = null
         private var warmupSandboxPreparer: SandboxPreparer? = null
         private var warmupSkipHealthCheck: Boolean = false
+        private var idleTimeout: Duration = DEFAULT_IDLE_TIMEOUT
         private var drainTimeout: Duration = DEFAULT_DRAIN_TIMEOUT
 
         fun poolName(poolName: String): Builder {
@@ -248,6 +254,11 @@ class PoolConfig private constructor(
             return this
         }
 
+        fun idleTimeout(idleTimeout: Duration): Builder {
+            this.idleTimeout = idleTimeout
+            return this
+        }
+
         fun drainTimeout(drainTimeout: Duration): Builder {
             this.drainTimeout = drainTimeout
             return this
@@ -287,6 +298,7 @@ class PoolConfig private constructor(
                 warmupHealthCheck = warmupHealthCheck,
                 warmupSandboxPreparer = warmupSandboxPreparer,
                 warmupSkipHealthCheck = warmupSkipHealthCheck,
+                idleTimeout = idleTimeout,
                 drainTimeout = drainTimeout,
             )
         }

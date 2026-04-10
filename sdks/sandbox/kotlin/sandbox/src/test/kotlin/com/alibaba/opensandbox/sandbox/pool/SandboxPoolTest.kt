@@ -436,6 +436,7 @@ class SandboxPoolTest {
                 .acquireHealthCheckPollingInterval(Duration.ofMillis(50))
                 .acquireHealthCheck(healthCheck)
                 .acquireSkipHealthCheck()
+                .idleTimeout(Duration.ofMinutes(15))
                 .build()
 
         val configField = pool.javaClass.getDeclaredField("config")
@@ -446,6 +447,7 @@ class SandboxPoolTest {
         assertEquals(Duration.ofMillis(50), config.acquireHealthCheckPollingInterval)
         assertSame(healthCheck, config.acquireHealthCheck)
         assertEquals(true, config.acquireSkipHealthCheck)
+        assertEquals(Duration.ofMinutes(15), config.idleTimeout)
     }
 
     private fun buildPool(): SandboxPool {
