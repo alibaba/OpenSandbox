@@ -82,6 +82,9 @@ import java.util.concurrent.locks.ReentrantLock
  */
 class SandboxPool internal constructor(
     config: PoolConfig,
+    private val sandboxManagerFactory: (ConnectionConfig) -> SandboxManager = { cfg ->
+        SandboxManager.builder().connectionConfig(cfg).build()
+    },
 ) {
     private val logger = LoggerFactory.getLogger(SandboxPool::class.java)
 
@@ -116,7 +119,7 @@ class SandboxPool internal constructor(
         }
         lifecycleState.set(LifecycleState.STARTING)
         try {
-            sandboxManager = SandboxManager.builder().connectionConfig(connectionConfig.copyWithoutConnectionPool()).build()
+            sandboxManager = createSandboxManager()
             if (stateStore.getMaxIdle(config.poolName) == null) {
                 stateStore.setMaxIdle(config.poolName, config.maxIdle)
             }
@@ -282,26 +285,51 @@ class SandboxPool internal constructor(
      * Takes all idle sandbox IDs from the store and terminates each sandbox (best-effort).
      * Use this to release held resources, e.g. before process exit on single-node, or to reset the idle buffer.
      * In distributed mode this is best-effort: concurrent putIdle on other nodes may add new idle during the loop.
-     * If the pool is not running, [sandboxManager] may be null and kill is skipped; the store is still drained.
+     * If the pool is not running, a temporary [SandboxManager] is created on demand so remote idle sandboxes can
+     * still be killed. Failure to create that manager does not prevent draining idle IDs from the store.
      *
-     * @return Number of idle sandboxes that were taken and (when possible) killed.
+     * @return Number of idle sandboxes that were taken from the store and scheduled for best-effort kill.
      */
     fun releaseAllIdle(): Int {
         val poolName = config.poolName
         var count = 0
-        while (true) {
-            val sandboxId = stateStore.tryTakeIdle(poolName) ?: break
-            count++
-            try {
-                sandboxManager?.killSandbox(sandboxId)
-            } catch (e: Exception) {
-                logger.warn(
-                    "releaseAllIdle: failed to kill sandbox (best-effort): pool_name={} sandbox_id={} error={}",
-                    poolName,
-                    sandboxId,
-                    e.message,
-                )
+        var temporaryManager: SandboxManager? = null
+        var killUnavailableLogged = false
+        try {
+            while (true) {
+                val sandboxId = stateStore.tryTakeIdle(poolName) ?: break
+                count++
+                try {
+                    val manager =
+                        sandboxManager ?: temporaryManager ?: try {
+                            createSandboxManager().also { temporaryManager = it }
+                        } catch (e: Exception) {
+                            if (!killUnavailableLogged) {
+                                logger.warn(
+                                    "releaseAllIdle: failed to create sandbox manager; draining idle ids without remote kill: " +
+                                        "pool_name={} error={}",
+                                    poolName,
+                                    e.message,
+                                )
+                                killUnavailableLogged = true
+                            }
+                            null
+                        }
+                    if (manager == null) {
+                        continue
+                    }
+                    manager.killSandbox(sandboxId)
+                } catch (e: Exception) {
+                    logger.warn(
+                        "releaseAllIdle: failed to kill sandbox (best-effort): pool_name={} sandbox_id={} error={}",
+                        poolName,
+                        sandboxId,
+                        e.message,
+                    )
+                }
             }
+        } finally {
+            temporaryManager?.close()
         }
         if (count > 0) {
             logger.info("releaseAllIdle: released {} idle sandbox(es): pool_name={}", count, poolName)
@@ -380,6 +408,8 @@ class SandboxPool internal constructor(
     }
 
     private fun resolveMaxIdle(): Int = stateStore.getMaxIdle(config.poolName) ?: currentMaxIdle
+
+    private fun createSandboxManager(): SandboxManager = sandboxManagerFactory(connectionConfig.copyWithoutConnectionPool())
 
     private fun runReconcileTick() {
         if (lifecycleState.get() != LifecycleState.RUNNING) return
