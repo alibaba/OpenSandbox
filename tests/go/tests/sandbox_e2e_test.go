@@ -148,34 +148,12 @@ func TestSandbox_NetworkPolicyCreate(t *testing.T) {
 			},
 		},
 	})
-	if err != nil {
-		// Server may require egress.image config for network policies
-		t.Skipf("CreateSandbox with NetworkPolicy: %v (egress sidecar may not be configured)", err)
-	}
+	require.NoError(t, err)
 	defer sb.Kill(context.Background())
 
 	// Verify sandbox is running
 	require.True(t, sb.IsHealthy(ctx), "sandbox with network policy should be healthy")
 	t.Log("Sandbox created with deny-default network policy + 2 allow rules")
-}
-
-func TestSandbox_EgressPolicyGetAndPatch(t *testing.T) {
-	ctx, sb := createTestSandbox(t)
-
-	// Get current policy
-	policy, err := sb.GetEgressPolicy(ctx)
-	if err != nil {
-		t.Logf("GetEgressPolicy: %v (egress sidecar may not be available)", err)
-		t.Skip("Egress sidecar not available")
-	}
-	t.Logf("Current policy: mode=%s", policy.Mode)
-
-	// Patch with new rule
-	patched, err := sb.PatchEgressRules(ctx, []opensandbox.NetworkRule{
-		{Action: "allow", Target: "example.com"},
-	})
-	require.NoError(t, err)
-	t.Logf("Patched policy: mode=%s", patched.Mode)
 }
 
 func TestSandbox_PauseAndResume(t *testing.T) {

@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,4 +73,24 @@ func createTestSandbox(t *testing.T) (context.Context, *opensandbox.Sandbox) {
 	require.NoError(t, err)
 	t.Cleanup(func() { sb.Kill(context.Background()) })
 	return ctx, sb
+}
+
+func newExecdClientForSandbox(t *testing.T, ctx context.Context, sb *opensandbox.Sandbox) *opensandbox.ExecdClient {
+	t.Helper()
+
+	endpoint, err := sb.GetEndpoint(ctx, opensandbox.DefaultExecdPort)
+	require.NoError(t, err)
+	require.NotEmpty(t, endpoint.Endpoint)
+
+	execdURL := endpoint.Endpoint
+	if !strings.HasPrefix(execdURL, "http") {
+		execdURL = "http://" + execdURL
+	}
+	execdURL = strings.Replace(execdURL, "host.docker.internal", "localhost", 1)
+
+	token := ""
+	if endpoint.Headers != nil {
+		token = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
+	}
+	return opensandbox.NewExecdClient(execdURL, token)
 }

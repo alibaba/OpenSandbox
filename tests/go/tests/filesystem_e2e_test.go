@@ -144,3 +144,37 @@ func TestFilesystem_UploadAndDownloadFile(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, string(content), string(downloaded))
 }
+
+func TestFilesystem_SetPermissions(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+
+	_, err := sb.RunCommand(ctx, `echo "perm-test" > /tmp/perm-e2e.txt`, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sb.DeleteFiles(context.Background(), []string{"/tmp/perm-e2e.txt"}) })
+
+	err = sb.SetPermissions(ctx, opensandbox.PermissionsRequest{
+		"/tmp/perm-e2e.txt": {Mode: 644},
+	})
+	require.NoError(t, err)
+
+	exec, err := sb.RunCommand(ctx, `stat -c "%a" /tmp/perm-e2e.txt || stat -f "%Lp" /tmp/perm-e2e.txt`, nil)
+	require.NoError(t, err)
+	require.Contains(t, exec.Text(), "644")
+}
+
+func TestFilesystem_ReplaceInFiles(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+
+	_, err := sb.RunCommand(ctx, `echo "hello localhost" > /tmp/replace-e2e.txt`, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sb.DeleteFiles(context.Background(), []string{"/tmp/replace-e2e.txt"}) })
+
+	err = sb.ReplaceInFiles(ctx, opensandbox.ReplaceRequest{
+		"/tmp/replace-e2e.txt": {Old: "localhost", New: "example.com"},
+	})
+	require.NoError(t, err)
+
+	exec, err := sb.RunCommand(ctx, "cat /tmp/replace-e2e.txt", nil)
+	require.NoError(t, err)
+	require.Contains(t, exec.Text(), "example.com")
+}

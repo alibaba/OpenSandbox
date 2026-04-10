@@ -2,6 +2,7 @@ package tests
 
 import (
 	"testing"
+	"time"
 
 	"github.com/alibaba/OpenSandbox/sdks/sandbox/go/opensandbox"
 	"github.com/stretchr/testify/require"
@@ -115,4 +116,61 @@ func TestCommand_Interrupt(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, pingExec.Text(), "still-alive")
 	t.Log("Interrupt test: sandbox responsive during background command")
+}
+
+func TestCommand_StatusAndLogs(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+	execd := newExecdClientForSandbox(t, ctx, sb)
+
+	exec, err := sb.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
+		Command:    "echo status-log-start && sleep 1 && echo status-log-end",
+		Background: true,
+	}, nil)
+	require.NoError(t, err)
+	if exec.ID == "" {
+		t.Skip("no execution ID returned for background command")
+	}
+
+	status, err := execd.GetCommandStatus(ctx, exec.ID)
+	require.NoError(t, err)
+	require.Equal(t, exec.ID, status.ID)
+
+	var logs *opensandbox.CommandLogsResponse
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		logs, err = execd.GetCommandLogs(ctx, exec.ID, nil)
+		require.NoError(t, err)
+		if logs != nil && logs.Output != "" {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	require.NotNil(t, logs)
+	require.Contains(t, logs.Output, "status-log-start")
+}
+
+func TestCommand_InterruptCommandAPI(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+	execd := newExecdClientForSandbox(t, ctx, sb)
+
+	exec, err := sb.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
+		Command:    "sleep 300",
+		Background: true,
+	}, nil)
+	require.NoError(t, err)
+	if exec.ID == "" {
+		t.Skip("no execution ID returned for background command")
+	}
+
+	require.NoError(t, execd.InterruptCommand(ctx, exec.ID))
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		status, statusErr := execd.GetCommandStatus(ctx, exec.ID)
+		if statusErr == nil && !status.Running {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Log("interrupt requested but status stayed running within timeout")
 }

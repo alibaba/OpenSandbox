@@ -84,3 +84,70 @@ func TestManager_GetAndKill(t *testing.T) {
 	require.NoError(t, mgr.KillSandbox(ctx, sb.ID()))
 	t.Log("Killed sandbox via manager")
 }
+
+func TestManager_PauseAndResume(t *testing.T) {
+	config := getConnectionConfig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image: getSandboxImage(),
+	})
+	require.NoError(t, err)
+	defer sb.Kill(context.Background())
+
+	mgr := opensandbox.NewSandboxManager(config)
+	defer mgr.Close()
+
+	if err := mgr.PauseSandbox(ctx, sb.ID()); err != nil {
+		t.Skipf("PauseSandbox not supported in this environment: %v", err)
+	}
+
+	paused := false
+	for i := 0; i < 20; i++ {
+		info, infoErr := mgr.GetSandboxInfo(ctx, sb.ID())
+		require.NoError(t, infoErr)
+		if info.Status.State == opensandbox.StatePaused {
+			paused = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.True(t, paused, "sandbox did not reach Paused state")
+
+	require.NoError(t, mgr.ResumeSandbox(ctx, sb.ID()))
+
+	resumed := false
+	for i := 0; i < 20; i++ {
+		info, infoErr := mgr.GetSandboxInfo(ctx, sb.ID())
+		require.NoError(t, infoErr)
+		if info.Status.State == opensandbox.StateRunning {
+			resumed = true
+			break
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	require.True(t, resumed, "sandbox did not return to Running state")
+}
+
+func TestManager_RenewSandbox(t *testing.T) {
+	config := getConnectionConfig(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
+		Image: getSandboxImage(),
+	})
+	require.NoError(t, err)
+	defer sb.Kill(context.Background())
+
+	mgr := opensandbox.NewSandboxManager(config)
+	defer mgr.Close()
+
+	resp, err := mgr.RenewSandbox(ctx, sb.ID(), 30*time.Minute)
+	if err != nil {
+		t.Skipf("RenewSandbox not supported in this environment: %v", err)
+	}
+	require.NotNil(t, resp)
+	require.False(t, resp.ExpiresAt.IsZero(), "renew response should include expiresAt")
+}

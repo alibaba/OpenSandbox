@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -147,4 +148,76 @@ for i in range(3):
 
 	require.NotEmpty(t, stdoutLines, "expected handler to receive stdout")
 	t.Logf("Handler received %d stdout events", len(stdoutLines))
+}
+
+func TestCodeInterpreter_GetContextAndDeleteByLanguage(t *testing.T) {
+	ctx, ci := createCodeInterpreter(t)
+	execd := newExecdClientForSandbox(t, ctx, ci.Sandbox)
+
+	codeCtx, err := ci.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
+	require.NoError(t, err)
+
+	got, err := execd.GetContext(ctx, codeCtx.ID)
+	require.NoError(t, err)
+	require.Equal(t, codeCtx.ID, got.ID)
+
+	_, err = ci.CreateContext(ctx, opensandbox.CreateContextRequest{Language: "python"})
+	require.NoError(t, err)
+
+	require.NoError(t, execd.DeleteContextsByLanguage(ctx, "python"))
+
+	contexts, err := ci.ListContexts(ctx, "python")
+	require.NoError(t, err)
+	require.Len(t, contexts, 0)
+}
+
+func TestCodeInterpreter_InterruptCode(t *testing.T) {
+	ctx, ci := createCodeInterpreter(t)
+	execd := newExecdClientForSandbox(t, ctx, ci.Sandbox)
+
+	execCtx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	idCh := make(chan string, 1)
+	doneCh := make(chan error, 1)
+
+	go func() {
+		doneCh <- execd.ExecuteCode(execCtx, opensandbox.RunCodeRequest{
+			Code: "import time\nfor i in range(1000):\n    print(i)\n    time.sleep(1)",
+			Context: &opensandbox.CodeContext{
+				Language: "python",
+			},
+		}, func(event opensandbox.StreamEvent) error {
+			if event.Event == "init" {
+				var payload struct {
+					Text string `json:"text"`
+				}
+				if json.Unmarshal([]byte(event.Data), &payload) == nil && payload.Text != "" {
+					select {
+					case idCh <- payload.Text:
+					default:
+					}
+				}
+			}
+			return nil
+		})
+	}()
+
+	var executionID string
+	select {
+	case executionID = <-idCh:
+	case <-time.After(10 * time.Second):
+		t.Skip("did not receive code execution ID in time; skipping interrupt test")
+	}
+
+	err := execd.InterruptCode(ctx, executionID)
+	if err != nil {
+		t.Skipf("InterruptCode not supported in this environment: %v", err)
+	}
+
+	select {
+	case <-doneCh:
+	case <-time.After(10 * time.Second):
+		t.Fatal("ExecuteCode did not exit after interrupt")
+	}
 }
