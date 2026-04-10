@@ -148,6 +148,7 @@ class SandboxModelConverter:
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
         volumes: list[Volume] | None,
+        resource_requests: dict[str, str] | None = None,
     ) -> CreateSandboxRequest:
         """Convert domain parameters to API CreateSandboxRequest."""
         from opensandbox.api.lifecycle.models.create_sandbox_request import (
@@ -243,6 +244,11 @@ class SandboxModelConverter:
                 SandboxModelConverter.to_api_volume(v) for v in volumes
             ]
 
+        # Convert resource requests dict to API model
+        api_resource_requests = UNSET
+        if resource_requests is not None:
+            api_resource_requests = ResourceLimits.from_dict(resource_requests)
+
         request = CreateSandboxRequest(
             image=SandboxModelConverter.to_api_image_spec(spec),
             entrypoint=entrypoint,
@@ -253,6 +259,7 @@ class SandboxModelConverter:
             network_policy=api_network_policy,
             extensions=api_extensions,
             volumes=api_volumes,
+            resource_requests=api_resource_requests,
         )
         if timeout is not None:
             request.timeout = int(timeout.total_seconds())
