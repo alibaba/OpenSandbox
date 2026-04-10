@@ -74,6 +74,7 @@ from opensandbox_server.services.constants import (
     SANDBOX_EXPIRES_AT_LABEL,
     SANDBOX_HTTP_PORT_LABEL,
     SANDBOX_ID_LABEL,
+    SANDBOX_MANAGED_VOLUMES_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SANDBOX_OSSFS_MOUNTS_LABEL,
     SANDBOX_PLATFORM_ARCH_LABEL,
@@ -912,9 +913,11 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         )
         self._ensure_network_policy_support(request)
         self._validate_network_exists()
-        pvc_inspect_cache = self._validate_volumes(request)
+        pvc_inspect_cache, auto_created_volumes = self._validate_volumes(request)
         sandbox_id, created_at, expires_at = self._prepare_creation_context(request)
-        return self._provision_sandbox(sandbox_id, request, created_at, expires_at, pvc_inspect_cache)
+        return self._provision_sandbox(
+            sandbox_id, request, created_at, expires_at, pvc_inspect_cache, auto_created_volumes,
+        )
 
     def _async_provision_worker(
         self,
@@ -1152,8 +1155,13 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         created_at: datetime,
         expires_at: Optional[datetime],
         pvc_inspect_cache: Optional[dict[str, dict]] = None,
+        auto_created_volumes: Optional[list[str]] = None,
     ) -> CreateSandboxResponse:
         labels, environment = self._build_labels_and_env(sandbox_id, request, expires_at)
+        if auto_created_volumes:
+            labels[SANDBOX_MANAGED_VOLUMES_LABEL] = json.dumps(
+                auto_created_volumes, separators=(",", ":"),
+            )
         image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
         mem_limit, nano_cpus = self._resolve_resource_limits(request)
         egress_token: Optional[str] = None
@@ -1329,7 +1337,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         # Common validation: egress.image must be configured
         ensure_egress_configured(request.network_policy, self.app_config.egress)
 
-    def _validate_volumes(self, request: CreateSandboxRequest) -> dict[str, dict]:
+    def _validate_volumes(
+        self, request: CreateSandboxRequest
+    ) -> tuple[dict[str, dict], list[str]]:
         """
         Validate volume definitions for Docker runtime.
 
@@ -1341,32 +1351,39 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             request: Sandbox creation request.
 
         Returns:
-            A dict mapping PVC volume names (``pvc.claimName``) to their
-            ``docker volume inspect`` results.  Empty when there are no PVC
-            volumes.  This data is passed to ``_build_volume_binds`` so that
-            bind generation does not need a second API call.
+            A tuple of:
+            - A dict mapping PVC volume names (``pvc.claimName``) to their
+              ``docker volume inspect`` results.  Empty when there are no PVC
+              volumes.  This data is passed to ``_build_volume_binds`` so that
+              bind generation does not need a second API call.
+            - A list of Docker named volume names that were auto-created during
+              validation (empty when ``volume_auto_create`` is disabled or all
+              volumes already existed).
 
         Raises:
             HTTPException: When any validation fails.
         """
         if not request.volumes:
-            return {}
+            return {}, []
 
         # Shared validation: names, mount paths, sub paths, backend count, host path allowlist
         allowed_prefixes = self.app_config.storage.allowed_host_paths or None
         ensure_volumes_valid(request.volumes, allowed_host_prefixes=allowed_prefixes)
 
         pvc_inspect_cache: dict[str, dict] = {}
+        auto_created_volumes: list[str] = []
         for volume in request.volumes:
             if volume.host is not None:
                 self._validate_host_volume(volume, allowed_prefixes)
             elif volume.pvc is not None:
-                vol_info = self._validate_pvc_volume(volume)
+                vol_info, was_created = self._validate_pvc_volume(volume)
                 pvc_inspect_cache[volume.pvc.claim_name] = vol_info
+                if was_created:
+                    auto_created_volumes.append(volume.pvc.claim_name)
             elif volume.ossfs is not None:
                 self._validate_ossfs_volume(volume)
 
-        return pvc_inspect_cache
+        return pvc_inspect_cache, auto_created_volumes
 
     @staticmethod
     def _validate_host_volume(volume, allowed_prefixes: Optional[list[str]]) -> None:
@@ -1409,7 +1426,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 },
             )
 
-    def _validate_pvc_volume(self, volume) -> dict:
+    def _validate_pvc_volume(self, volume) -> tuple[dict, bool]:
         """
         Docker-specific validation for PVC (named volume) backend.
 
@@ -1427,27 +1444,52 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             volume: Volume with pvc backend.
 
         Returns:
-            The ``docker volume inspect`` result dict for the named volume.
+            A tuple of:
+            - The ``docker volume inspect`` result dict for the named volume.
+            - Whether the volume was auto-created by this call.
 
         Raises:
             HTTPException: When the named volume does not exist, inspection
                 fails, or subPath constraints are violated.
         """
         volume_name = volume.pvc.claim_name
+        auto_created = False
         try:
             vol_info = self.docker_client.api.inspect_volume(volume_name)
         except DockerNotFound:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": SandboxErrorCodes.PVC_VOLUME_NOT_FOUND,
-                    "message": (
-                        f"Volume '{volume.name}': Docker named volume '{volume_name}' "
-                        "does not exist. Named volumes must be created before sandbox "
-                        "creation (e.g., 'docker volume create <name>')."
-                    ),
-                },
-            )
+            if self.app_config.storage.volume_auto_create:
+                # Auto-create the Docker named volume
+                try:
+                    self.docker_client.api.create_volume(
+                        name=volume_name,
+                        labels={SANDBOX_MANAGED_VOLUMES_LABEL: "server"},
+                    )
+                    logger.info("Auto-created Docker named volume '%s'", volume_name)
+                    vol_info = self.docker_client.api.inspect_volume(volume_name)
+                    auto_created = True
+                except DockerException as create_exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "code": SandboxErrorCodes.PVC_VOLUME_INSPECT_FAILED,
+                            "message": (
+                                f"Volume '{volume.name}': failed to auto-create Docker "
+                                f"named volume '{volume_name}': {create_exc}"
+                            ),
+                        },
+                    ) from create_exc
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.PVC_VOLUME_NOT_FOUND,
+                        "message": (
+                            f"Volume '{volume.name}': Docker named volume '{volume_name}' "
+                            "does not exist. Named volumes must be created before sandbox "
+                            "creation (e.g., 'docker volume create <name>')."
+                        ),
+                    },
+                )
         except DockerException as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1567,7 +1609,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             # false-negative rejections.  If the subPath does not actually
             # exist, Docker will report the error at container creation time.
 
-        return vol_info
+        return vol_info, auto_created
 
     def _build_volume_binds(
         self,
@@ -1753,6 +1795,11 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             mount_keys: list[str] = json.loads(mount_keys_raw)
         except (TypeError, json.JSONDecodeError):
             mount_keys = []
+        managed_volumes_raw = labels.get(SANDBOX_MANAGED_VOLUMES_LABEL, "[]")
+        try:
+            managed_volumes: list[str] = json.loads(managed_volumes_raw)
+        except (TypeError, json.JSONDecodeError):
+            managed_volumes = []
         try:
             try:
                 with self._docker_operation("kill sandbox container", sandbox_id):
@@ -1775,6 +1822,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             self._remove_expiration_tracking(sandbox_id)
             self._cleanup_egress_sidecar(sandbox_id)
             self._release_ossfs_mounts(mount_keys)
+            if self.app_config.storage.volume_auto_delete:
+                self._cleanup_managed_volumes(sandbox_id, managed_volumes)
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
@@ -2167,6 +2216,36 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     },
                 )
         return host_execd_port, host_http_port
+
+    def _cleanup_managed_volumes(self, sandbox_id: str, volume_names: list[str]) -> None:
+        """
+        Remove Docker named volumes that were auto-created for this sandbox.
+
+        Only volumes whose ``opensandbox.io/volume-managed-by`` label equals
+        ``"server"`` are removed.  Pre-existing volumes are never touched.
+        Errors are logged but do not propagate — volume cleanup is best-effort.
+        """
+        for name in volume_names:
+            try:
+                vol_info = self.docker_client.api.inspect_volume(name)
+                vol_labels = vol_info.get("Labels") or {}
+                if vol_labels.get(SANDBOX_MANAGED_VOLUMES_LABEL) != "server":
+                    logger.debug(
+                        "sandbox=%s | volume '%s' not managed by server, skipping removal",
+                        sandbox_id, name,
+                    )
+                    continue
+                self.docker_client.api.remove_volume(name)
+                logger.info("sandbox=%s | removed managed volume '%s'", sandbox_id, name)
+            except DockerNotFound:
+                logger.debug(
+                    "sandbox=%s | managed volume '%s' already removed", sandbox_id, name,
+                )
+            except DockerException as exc:
+                logger.warning(
+                    "sandbox=%s | failed to remove managed volume '%s': %s",
+                    sandbox_id, name, exc,
+                )
 
     def _cleanup_egress_sidecar(self, sandbox_id: str) -> None:
         """

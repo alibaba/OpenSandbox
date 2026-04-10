@@ -66,6 +66,18 @@ mode = "dns"
 # Example: allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
 allowed_host_paths = []
 
+# Auto-create PVC (Kubernetes) or named volumes (Docker) when they don't exist.
+# Set to false to require volumes to be pre-created before sandbox creation.
+volume_auto_create = true
+
+# Default storage size for auto-created Kubernetes PVCs (when caller omits size).
+volume_default_size = "1Gi"
+
+# (Docker only) Remove auto-created named volumes when the sandbox is deleted.
+# Pre-existing volumes are never removed. Has no effect on Kubernetes PVCs,
+# whose lifecycle is managed by the StorageClass reclaim policy (Retain/Delete).
+volume_auto_delete = false
+
 [docker]
 # Docker-specific knobs
 # -----------------------------------------------------------------

@@ -286,10 +286,94 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             },
         )
 
+    def _ensure_pvc_volumes(self, volumes: list) -> None:
+        """
+        Ensure that PVC volumes exist before creating the workload.
+
+        For each volume with a ``pvc`` backend, check whether the
+        PersistentVolumeClaim already exists in the target namespace.
+        If not, create it using the provisioning hints from the PVC model.
+
+        Degrades gracefully: if the service account lacks RBAC permissions
+        for PVC operations (403), the check is skipped and volume resolution
+        is left to the kubelet at pod scheduling time.
+        """
+        from kubernetes.client import V1PersistentVolumeClaim, V1ObjectMeta
+        from kubernetes.client import ApiException
+
+        default_size = self.app_config.storage.volume_default_size
+
+        seen_claims: set[str] = set()
+        for vol in volumes:
+            if vol.pvc is None:
+                continue
+            claim_name = vol.pvc.claim_name
+            if claim_name in seen_claims:
+                continue
+            seen_claims.add(claim_name)
+
+            try:
+                existing = self.k8s_client.get_pvc(self.namespace, claim_name)
+            except ApiException as e:
+                if e.status == 403:
+                    logger.warning(
+                        "No RBAC permission to read PVC '%s', skipping auto-create. "
+                        "Grant 'get' and 'create' on 'persistentvolumeclaims' to enable.",
+                        claim_name,
+                    )
+                    return  # Skip all remaining PVCs — same SA, same permissions
+                raise
+            if existing is not None:
+                logger.debug("PVC '%s' already exists in namespace '%s'", claim_name, self.namespace)
+                continue
+
+            storage = vol.pvc.storage or default_size
+            access_modes = vol.pvc.access_modes or ["ReadWriteOnce"]
+            storage_class = vol.pvc.storage_class  # None = cluster default
+
+            pvc_body = V1PersistentVolumeClaim(
+                metadata=V1ObjectMeta(
+                    name=claim_name,
+                    namespace=self.namespace,
+                ),
+                spec={
+                    "accessModes": access_modes,
+                    "resources": {"requests": {"storage": storage}},
+                },
+            )
+            if storage_class is not None:
+                pvc_body.spec["storageClassName"] = storage_class
+
+            try:
+                self.k8s_client.create_pvc(self.namespace, pvc_body)
+                logger.info(
+                    "Auto-created PVC '%s' (size=%s, class=%s) in namespace '%s'",
+                    claim_name, storage, storage_class or "<default>", self.namespace,
+                )
+            except ApiException as e:
+                if e.status == 409:
+                    # Race condition: another request created it between our check and create
+                    logger.info("PVC '%s' was created concurrently, proceeding", claim_name)
+                elif e.status == 403:
+                    logger.warning(
+                        "No RBAC permission to create PVC '%s', skipping. "
+                        "The PVC must be pre-created or RBAC must be updated.",
+                        claim_name,
+                    )
+                else:
+                    logger.error("Failed to create PVC '%s': %s", claim_name, e)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "code": SandboxErrorCodes.INTERNAL_ERROR,
+                            "message": f"Failed to auto-create PVC '{claim_name}': {e.reason}",
+                        },
+                    ) from e
+
     async def create_sandbox(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
         """
         Create a new sandbox using Kubernetes Pod.
-        
+
         Wait for the Pod to be Running and have an IP address before returning.
         
         Args:
@@ -359,7 +443,11 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 request.volumes,
                 self.app_config.storage.allowed_host_paths or None,
             )
-            
+
+            # Auto-create PVCs that don't exist yet
+            if request.volumes and self.app_config.storage.volume_auto_create:
+                self._ensure_pvc_volumes(request.volumes)
+
             # Create workload
             workload_info = self.workload_provider.create_workload(
                 sandbox_id=sandbox_id,

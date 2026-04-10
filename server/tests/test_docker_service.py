@@ -1546,13 +1546,15 @@ class TestDockerVolumeValidation:
 
     @pytest.mark.asyncio
     async def test_pvc_volume_not_found_rejected(self, mock_docker):
-        """PVC backend with non-existent Docker named volume should be rejected."""
+        """PVC backend with non-existent Docker named volume should be rejected when auto-create is disabled."""
         mock_client = MagicMock()
         mock_client.containers.list.return_value = []
         mock_client.api.inspect_volume.side_effect = DockerNotFound("volume not found")
         mock_docker.from_env.return_value = mock_client
 
-        service = DockerSandboxService(config=_app_config())
+        cfg = _app_config()
+        cfg.storage = StorageConfig(volume_auto_create=False)
+        service = DockerSandboxService(config=cfg)
 
         request = CreateSandboxRequest(
             image=ImageSpec(uri="python:3.11"),
@@ -1576,6 +1578,37 @@ class TestDockerVolumeValidation:
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert exc_info.value.detail["code"] == SandboxErrorCodes.PVC_VOLUME_NOT_FOUND
+
+    def test_pvc_volume_auto_created_when_not_found(self, mock_docker):
+        """PVC backend auto-creates Docker named volume when volume_auto_create is enabled."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        # First inspect fails (not found), then succeeds after create
+        mock_client.api.inspect_volume.side_effect = [
+            DockerNotFound("volume not found"),
+            {"Name": "my-volume", "Driver": "local", "Mountpoint": "/var/lib/docker/volumes/my-volume/_data"},
+        ]
+        mock_client.api.create_volume.return_value = {}
+        mock_docker.from_env.return_value = mock_client
+
+        cfg = _app_config()
+        cfg.storage = StorageConfig(volume_auto_create=True)
+        service = DockerSandboxService(config=cfg)
+
+        volume = Volume(
+            name="data",
+            pvc=PVC(claim_name="my-volume"),
+            mount_path="/mnt/data",
+            read_only=False,
+        )
+        vol_info, auto_created = service._validate_pvc_volume(volume)
+
+        mock_client.api.create_volume.assert_called_once_with(
+            name="my-volume",
+            labels={"opensandbox.io/volume-managed-by": "server"},
+        )
+        assert vol_info["Name"] == "my-volume"
+        assert auto_created is True
 
     def test_ossfs_inline_credentials_missing_rejected(self, mock_docker):
         """OSSFS with missing inline credentials should be rejected at schema validation."""

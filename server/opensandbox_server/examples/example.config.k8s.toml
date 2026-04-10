@@ -56,6 +56,13 @@ execd_image = "opensandbox/execd:v1.0.10"
 # Example: allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
 allowed_host_paths = []
 
+# Auto-create PVC (Kubernetes) or named volumes (Docker) when they don't exist.
+# Set to false to require volumes to be pre-created before sandbox creation.
+volume_auto_create = true
+
+# Default storage size for auto-created Kubernetes PVCs (when caller omits size).
+volume_default_size = "1Gi"
+
 [kubernetes]
 # Path to kubeconfig file. Leave as null to use in-cluster configuration
 # Replace with your path

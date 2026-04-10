@@ -1018,13 +1018,12 @@ components:
       type: object
       description: |
         Platform-managed named volume backend. A runtime-neutral abstraction
-        for referencing a pre-existing, platform-managed named volume.
+        for referencing a platform-managed named volume. If the volume does
+        not yet exist and `volume_auto_create` is enabled on the server, it
+        will be created automatically using the provisioning hints below.
 
         - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
         - Docker: maps to a Docker named volume (created via `docker volume create`).
-
-        The volume must already exist on the target platform before sandbox
-        creation.
       required: [claimName]
       properties:
         claimName:
@@ -1035,6 +1034,29 @@ components:
             volume name. Must be a valid DNS label.
           pattern: "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
           maxLength: 253
+        storageClass:
+          type: string
+          nullable: true
+          description: |
+            Kubernetes StorageClass name for auto-created PVCs. Null means
+            use the cluster default. Ignored for Docker volumes.
+        storage:
+          type: string
+          nullable: true
+          description: |
+            Storage capacity request for auto-created PVCs (e.g. "1Gi",
+            "10Gi"). Defaults to the server-configured `volume_default_size`
+            when omitted. Ignored for Docker volumes.
+          pattern: "^\\d+(\\.\\d+)?(Ki|Mi|Gi|Ti|Pi|Ei)?$"
+        accessModes:
+          type: array
+          nullable: true
+          items:
+            type: string
+          description: |
+            Access modes for auto-created PVCs (e.g. ["ReadWriteOnce"]).
+            Defaults to ["ReadWriteOnce"] when omitted. Ignored for Docker
+            volumes.
       additionalProperties: false
 
     OSSFS:

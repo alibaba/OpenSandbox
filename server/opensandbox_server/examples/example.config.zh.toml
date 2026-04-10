@@ -64,6 +64,18 @@ mode = "dns"
 # 示例：allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
 allowed_host_paths = []
 
+# 当沙箱请求的 PVC/Docker named volume 不存在时，是否自动创建。
+# 设为 false 则引用不存在的卷会返回错误。
+volume_auto_create = true
+
+# 自动创建 Kubernetes PVC 时的默认存储大小（当调用方未指定时使用）。
+volume_default_size = "1Gi"
+
+# （仅 Docker）删除沙箱时自动移除由服务器创建的 named volume。
+# 已存在的 volume 不会被移除。对 Kubernetes PVC 无影响，
+# 因为 PVC 的生命周期由 StorageClass 的回收策略（Retain/Delete）管理。
+volume_auto_delete = false
+
 [docker]
 # Docker-specific knobs
 # -----------------------------------------------------------------
