@@ -133,4 +133,4 @@ Supports flexible resource configuration (similar to Kubernetes):
 Supports Unix-style file permission management:
 - Owner
 - Group
-- Permission mode (octal format, e.g., 755)
+- Permission mode values such as 644 or 755

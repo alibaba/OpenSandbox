@@ -40,6 +40,26 @@ jobs:
         with:
           version: "latest"
 
+      - name: Install dependencies
+        working-directory: cli
+        run: |
+          uv sync --frozen
+
+      - name: Run lint
+        working-directory: cli
+        run: |
+          uv run ruff check
+
+      - name: Run type checks
+        working-directory: cli
+        run: |
+          uv run pyright
+
+      - name: Run tests
+        working-directory: cli
+        run: |
+          uv run pytest
+
       - name: Build package
         working-directory: cli
         run: |
