@@ -15,13 +15,7 @@ vet:
 	go vet ./...
 
 test:
-	go test ./opensandbox/ -v
-
-test-integration:
-	go test -tags=integration ./opensandbox/ -v -timeout 3m
-
-test-staging:
-	go test -tags=staging ./opensandbox/ -v -timeout 3m
+	go test -v ./...
 
 lint:
 	@which staticcheck >/dev/null 2>&1 && staticcheck ./... || echo "staticcheck not installed — skipping lint"
