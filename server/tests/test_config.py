@@ -428,11 +428,6 @@ def test_docker_runtime_rejects_gateway_ingress():
     assert app_cfg.ingress.mode == "direct"
 
 
-# ============================================================================
-# StorageConfig Tests
-# ============================================================================
-
-
 def test_storage_config_defaults():
     """StorageConfig should default to empty allowed_host_paths list."""
     cfg = StorageConfig()
@@ -505,11 +500,6 @@ def test_load_config_without_storage_block_uses_defaults(tmp_path, monkeypatch):
     loaded = config_module.load_config(config_path)
     assert loaded.storage is not None
     assert loaded.storage.allowed_host_paths == []
-
-
-# ============================================================================
-# SecureRuntimeConfig Tests
-# ============================================================================
 
 
 def test_secure_runtime_empty_type_is_valid():
@@ -700,11 +690,6 @@ def test_egress_config_mode_literal():
     assert base.disable_ipv6 is True
     cfg = EgressConfig(image="opensandbox/egress:v1", mode=EGRESS_MODE_DNS_NFT)
     assert cfg.mode == EGRESS_MODE_DNS_NFT
-
-
-# ============================================================================
-# LogConfig Tests
-# ============================================================================
 
 
 def test_log_config_defaults():

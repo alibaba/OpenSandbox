@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Unit tests for image_pull_secret_helper.
-"""
-
 import base64
 import json
 
