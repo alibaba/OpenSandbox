@@ -15,3 +15,4 @@ This is the complete list of OpenSandbox Enhancement Proposals:
 |     [OSEP-0007](0007-fast-sandbox-runtime-support.md)      |        Fast Sandbox Runtime Support        |  provisional  |  2026-02-08  |
 |   [OSEP-0008](0008-pause-resume-rootfs-snapshot.md)        |     Pause and Resume via Rootfs Snapshot   |     draft     |  2026-03-13  |
 | [OSEP-0009](0009-auto-renew-sandbox-on-ingress-access.md)  |    Auto-Renew Sandbox on Ingress Access    | implemented  |  2026-03-23  |
+| [OSEP-0011](0011-runtime-driver-plugin-interface.md)       |     Runtime Driver Plugin Interface        |     draft     |  2026-03-30  |
