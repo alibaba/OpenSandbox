@@ -106,7 +106,7 @@ class CodesAdapter(
 
     override fun deleteContexts(language: String) {
         try {
-            deleteContexts(language)
+            api.deleteContextsByLanguage(language)
         } catch (e: Exception) {
             logger.error("Failed to delete contexts", e)
             throw e.toSandboxException()
