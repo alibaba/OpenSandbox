@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for TokenBucketRateLimiter."""
-
 import time
 import threading
 from unittest.mock import patch
@@ -22,13 +20,7 @@ import pytest
 
 from opensandbox_server.services.k8s.rate_limiter import TokenBucketRateLimiter
 
-
 class TestTokenBucketRateLimiter:
-    """Tests for the token-bucket rate limiter."""
-
-    # ------------------------------------------------------------------
-    # Construction
-    # ------------------------------------------------------------------
 
     def test_invalid_qps_raises_value_error(self):
         """qps <= 0 must raise ValueError."""
@@ -60,10 +52,6 @@ class TestTokenBucketRateLimiter:
         limiter = TokenBucketRateLimiter(qps=0.5)
         assert limiter.try_acquire() is True
 
-    # ------------------------------------------------------------------
-    # try_acquire
-    # ------------------------------------------------------------------
-
     def test_try_acquire_succeeds_when_bucket_full(self):
         """try_acquire returns True when tokens are available."""
         limiter = TokenBucketRateLimiter(qps=10.0, burst=10)
@@ -82,10 +70,6 @@ class TestTokenBucketRateLimiter:
         assert limiter.try_acquire() is True
         assert limiter.try_acquire() is True
         assert limiter.try_acquire() is False
-
-    # ------------------------------------------------------------------
-    # acquire (blocking)
-    # ------------------------------------------------------------------
 
     def test_acquire_succeeds_immediately_when_tokens_available(self):
         """acquire completes without sleeping when the bucket has tokens."""
@@ -120,10 +104,6 @@ class TestTokenBucketRateLimiter:
             for call in mock_sleep.call_args_list:
                 assert call.args[0] >= 0.001
 
-    # ------------------------------------------------------------------
-    # Token refill
-    # ------------------------------------------------------------------
-
     def test_tokens_refill_over_time(self):
         """Tokens are replenished proportional to elapsed time."""
         limiter = TokenBucketRateLimiter(qps=100.0, burst=10)
@@ -144,10 +124,6 @@ class TestTokenBucketRateLimiter:
         with limiter._lock:
             limiter._refill()
         assert limiter._tokens <= 5.0
-
-    # ------------------------------------------------------------------
-    # Thread safety
-    # ------------------------------------------------------------------
 
     def test_concurrent_acquires_do_not_exceed_burst(self):
         """Concurrent threads must not collectively acquire more than burst tokens."""

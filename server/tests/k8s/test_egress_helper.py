@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Unit tests for egress helper functions.
-"""
-
 import json
 from typing import Optional
 
@@ -27,7 +23,6 @@ from opensandbox_server.services.k8s.egress_helper import (
     build_security_context_for_sandbox_container,
     prep_execd_init_for_egress,
 )
-
 
 def _egress_container(
     egress_image: str,
@@ -46,7 +41,6 @@ def _egress_container(
         egress_mode=egress_mode,
     )
     return containers[0]
-
 
 class TestEgressSidecarViaApply:
     """Egress sidecar shape (via ``apply_egress_to_spec``)."""
@@ -236,9 +230,7 @@ class TestEgressSidecarViaApply:
         assert policy_dict["egress"][0]["target"] == "*.python.org"
         assert policy_dict["egress"][1]["target"] == "pypi.org"
 
-
 class TestBuildSecurityContextForMainContainer:
-    """Tests for build_security_context_for_sandbox_container function."""
 
     def test_returns_empty_dict_when_no_network_policy(self):
         """Test that empty dict is returned when network policy is disabled."""
@@ -253,9 +245,7 @@ class TestBuildSecurityContextForMainContainer:
         assert "drop" in result["capabilities"]
         assert "NET_ADMIN" in result["capabilities"]["drop"]
 
-
 class TestApplyEgressToSpec:
-    """Tests for apply_egress_to_spec function."""
 
     def test_adds_egress_sidecar_container(self):
         """Test that egress sidecar container is added to containers list."""
@@ -350,7 +340,6 @@ class TestApplyEgressToSpec:
         )
 
         assert len(containers) == 0
-
 
 class TestPrepExecdInitForEgress:
     def test_returns_privileged_security_dict_and_prefixed_script(self):

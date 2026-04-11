@@ -34,10 +34,6 @@ from opensandbox_server.api.schema import (
 from opensandbox_server.services.constants import SandboxErrorCodes
 
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
 _POOL_SERVICE_PATCH = "opensandbox_server.api.pool._get_pool_service"
 
 
@@ -93,10 +89,6 @@ def _create_request_body(name: str = "test-pool") -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Authentication
-# ---------------------------------------------------------------------------
-
 class TestPoolAuthentication:
     def test_list_pools_without_api_key_returns_401(self, client: TestClient):
         response = client.get("/pools")
@@ -132,10 +124,6 @@ class TestPoolAuthentication:
         assert response.status_code == 501
 
 
-# ---------------------------------------------------------------------------
-# 501 – non-Kubernetes runtime
-# ---------------------------------------------------------------------------
-
 class TestPoolNotSupportedOnDockerRuntime:
     """Pool endpoints return 501 when PoolService raises 501 (non-k8s runtime)."""
 
@@ -167,10 +155,6 @@ class TestPoolNotSupportedOnDockerRuntime:
             response = client.post("/pools", json=_create_request_body(), headers=auth_headers)
         assert response.status_code == 501
 
-
-# ---------------------------------------------------------------------------
-# POST /pools
-# ---------------------------------------------------------------------------
 
 class TestCreatePoolRoute:
     def test_create_pool_success_returns_201(self, client: TestClient, auth_headers: dict):
@@ -264,10 +248,6 @@ class TestCreatePoolRoute:
         assert req.capacity_spec.pool_max == 10
 
 
-# ---------------------------------------------------------------------------
-# GET /pools
-# ---------------------------------------------------------------------------
-
 class TestListPoolsRoute:
     def test_list_pools_returns_200_and_items(self, client: TestClient, auth_headers: dict):
         mock_svc = MagicMock()
@@ -319,10 +299,6 @@ class TestListPoolsRoute:
         assert pool["status"]["available"] == 2
 
 
-# ---------------------------------------------------------------------------
-# GET /pools/{pool_name}
-# ---------------------------------------------------------------------------
-
 class TestGetPoolRoute:
     def test_get_pool_success_returns_200(self, client: TestClient, auth_headers: dict):
         mock_svc = MagicMock()
@@ -369,10 +345,6 @@ class TestGetPoolRoute:
         assert cap["bufferMax"] == 7
         assert cap["poolMax"] == 50
 
-
-# ---------------------------------------------------------------------------
-# PUT /pools/{pool_name}
-# ---------------------------------------------------------------------------
 
 class TestUpdatePoolRoute:
     def _update_body(self, buffer_max=5, pool_max=20) -> dict:
@@ -441,10 +413,6 @@ class TestUpdatePoolRoute:
             )
         assert response.status_code == 422
 
-
-# ---------------------------------------------------------------------------
-# DELETE /pools/{pool_name}
-# ---------------------------------------------------------------------------
 
 class TestDeletePoolRoute:
     def test_delete_pool_success_returns_204(self, client: TestClient, auth_headers: dict):
