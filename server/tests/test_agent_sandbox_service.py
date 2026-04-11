@@ -174,14 +174,16 @@ class TestAgentSandboxServiceInit:
 
 
 class TestAgentSandboxServiceBuildSandbox:
-    """KubernetesSandboxService _build_sandbox_from_workload tests for agent-sandbox CRD"""
+    """KubernetesSandboxService public API mapping tests for agent-sandbox CRD"""
 
-    def test_build_sandbox_from_workload_dict(self):
+    def test_get_sandbox_maps_workload_dict(self):
         """
         Test case: Verify sandbox fields are built from dict workload
         """
         service = object.__new__(KubernetesSandboxService)
+        service.namespace = "test-namespace"
         service.workload_provider = MagicMock(
+            get_workload=MagicMock(),
             get_expiration=MagicMock(return_value=datetime(2025, 12, 31, tzinfo=timezone.utc)),
             get_status=MagicMock(
                 return_value={
@@ -214,8 +216,9 @@ class TestAgentSandboxServiceBuildSandbox:
                 }
             },
         }
+        service.workload_provider.get_workload.return_value = workload
 
-        sandbox = service._build_sandbox_from_workload(workload)
+        sandbox = service.get_sandbox("sandbox-id")
 
         assert sandbox.id == "sandbox-id"
         assert sandbox.image.uri == "python:3.11"
