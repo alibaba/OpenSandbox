@@ -12,12 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Kubernetes Pool service for managing pre-warmed sandbox resource pools.
-
-This module provides CRUD operations for Pool CRD resources, which represent
-pre-warmed sets of pods that reduce sandbox cold-start latency.
-"""
+"""Kubernetes Pool service for pre-warmed sandbox resource pools."""
 
 import logging
 from typing import Any, Dict, List, Optional
@@ -38,34 +33,18 @@ from opensandbox_server.services.k8s.client import K8sClient
 
 logger = logging.getLogger(__name__)
 
-# Pool CRD constants
 _GROUP = "sandbox.opensandbox.io"
 _VERSION = "v1alpha1"
 _PLURAL = "pools"
 
 
 class PoolService:
-    """
-    Service for managing Pool CRD resources in Kubernetes.
-
-    Provides CRUD operations that mirror the Pool CRD schema defined in
-    kubernetes/apis/sandbox/v1alpha1/pool_types.go.
-    """
+    """Service for managing Pool CRD resources in Kubernetes."""
 
     def __init__(self, k8s_client: K8sClient, namespace: str) -> None:
-        """
-        Initialize PoolService.
-
-        Args:
-            k8s_client: Kubernetes client wrapper.
-            namespace: Kubernetes namespace where pools are managed.
-        """
+        """Initialize PoolService."""
         self._custom_api = k8s_client.get_custom_objects_api()
         self._namespace = namespace
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
 
     def _build_pool_manifest(
         self,
@@ -123,24 +102,8 @@ class PoolService:
             createdAt=metadata.get("creationTimestamp"),
         )
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def create_pool(self, request: CreatePoolRequest) -> PoolResponse:
-        """
-        Create a new Pool resource.
-
-        Args:
-            request: Pool creation request.
-
-        Returns:
-            PoolResponse representing the newly created pool.
-
-        Raises:
-            HTTPException 409: If a pool with the same name already exists.
-            HTTPException 500: On unexpected Kubernetes API errors.
-        """
+        """Create a new Pool resource."""
         manifest = self._build_pool_manifest(
             name=request.name,
             namespace=self._namespace,
@@ -187,19 +150,7 @@ class PoolService:
             ) from e
 
     def get_pool(self, pool_name: str) -> PoolResponse:
-        """
-        Retrieve a Pool by name.
-
-        Args:
-            pool_name: Name of the pool to retrieve.
-
-        Returns:
-            PoolResponse for the requested pool.
-
-        Raises:
-            HTTPException 404: If the pool does not exist.
-            HTTPException 500: On unexpected Kubernetes API errors.
-        """
+        """Retrieve a Pool by name."""
         try:
             raw = self._custom_api.get_namespaced_custom_object(
                 group=_GROUP,
@@ -240,15 +191,7 @@ class PoolService:
             ) from e
 
     def list_pools(self) -> ListPoolsResponse:
-        """
-        List all Pools in the configured namespace.
-
-        Returns:
-            ListPoolsResponse containing all pools.
-
-        Raises:
-            HTTPException 500: On unexpected Kubernetes API errors.
-        """
+        """List all Pools in the configured namespace."""
         try:
             result = self._custom_api.list_namespaced_custom_object(
                 group=_GROUP,
@@ -285,23 +228,7 @@ class PoolService:
             ) from e
 
     def update_pool(self, pool_name: str, request: UpdatePoolRequest) -> PoolResponse:
-        """
-        Update the capacity configuration of an existing Pool.
-
-        Only ``capacitySpec`` can be updated; pod template changes require
-        recreating the pool.
-
-        Args:
-            pool_name: Name of the pool to update.
-            request: Update request containing the new capacity spec.
-
-        Returns:
-            PoolResponse reflecting the updated state.
-
-        Raises:
-            HTTPException 404: If the pool does not exist.
-            HTTPException 500: On unexpected Kubernetes API errors.
-        """
+        """Update the capacity configuration of an existing Pool."""
         patch_body = {
             "spec": {
                 "capacitySpec": {
@@ -355,16 +282,7 @@ class PoolService:
             ) from e
 
     def delete_pool(self, pool_name: str) -> None:
-        """
-        Delete a Pool resource.
-
-        Args:
-            pool_name: Name of the pool to delete.
-
-        Raises:
-            HTTPException 404: If the pool does not exist.
-            HTTPException 500: On unexpected Kubernetes API errors.
-        """
+        """Delete a Pool resource."""
         try:
             self._custom_api.delete_namespaced_custom_object(
                 group=_GROUP,
