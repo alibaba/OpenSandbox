@@ -141,7 +141,11 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		close(done)
 		wg.Wait()
 		request.Hooks.OnExecuteInit(session)
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "CommandExecError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{
+			EName:     "CommandExecError",
+			EValue:    err.Error(),
+			Traceback: []string{err.Error()},
+		})
 		log.Error("CommandExecError: error starting commands: %v", err)
 		return nil
 	}
