@@ -90,10 +90,17 @@ func (p *BatchSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
 	// Global watch mode with informer index lookup.
 	matches := make([]string, 0, 1)
 	indexed := []any{}
+	needScanFallback := p.informer == nil
 	if p.informer != nil {
-		indexed, _ = p.informer.GetIndexer().ByIndex(sandboxNameIndex, sandboxId)
+		var err error
+		indexed, err = p.informer.GetIndexer().ByIndex(sandboxNameIndex, sandboxId)
+		if err != nil {
+			// Fallback only when index query is unavailable/broken, not on normal miss.
+			needScanFallback = true
+		}
 	}
-	if len(indexed) == 0 {
+
+	if needScanFallback {
 		all, err := p.lister.List(labels.Everything())
 		if err != nil {
 			return "", fmt.Errorf("failed to list BatchSandboxes: %w", err)
