@@ -31,6 +31,9 @@ rules:
   - apiGroups: ["sandbox.opensandbox.io"]
     resources: ["pools", "pools/status", "pools/finalizers"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["sandbox.opensandbox.io"]
+    resources: ["sandboxsnapshots", "sandboxsnapshots/status", "sandboxsnapshots/finalizers"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
 ---
 apiVersion: {{ include "opensandbox-server.rbac.apiVersion" . }}
 kind: ClusterRoleBinding

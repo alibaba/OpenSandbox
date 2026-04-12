@@ -707,3 +707,43 @@ class TestDeriveSandboxState:
         # we should return the workload state, not Failed
         assert state == "Running"
         assert reason == "POD_RUNNING"
+
+    def test_derive_state_resumed_workload_failed(self, k8s_service):
+        """P1: Resumed sandbox with Failed workload should return Failed, not Resuming."""
+        batchsandbox = {
+            "metadata": {
+                "name": "test",
+                "annotations": {"sandbox.opensandbox.io/resumed-from-snapshot": "true"},
+            },
+            "status": {},
+        }
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Failed",
+            "reason": "POD_PLATFORM_UNSCHEDULABLE",
+            "message": "Pod is unschedulable",
+        }
+
+        state, reason, message = k8s_service._derive_sandbox_state(batchsandbox, None)
+
+        assert state == "Failed"
+        assert reason == "POD_PLATFORM_UNSCHEDULABLE"
+
+    def test_derive_state_resumed_workload_pending(self, k8s_service):
+        """Resumed sandbox with Pending workload should return Resuming."""
+        batchsandbox = {
+            "metadata": {
+                "name": "test",
+                "annotations": {"sandbox.opensandbox.io/resumed-from-snapshot": "true"},
+            },
+            "status": {},
+        }
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Pending",
+            "reason": "BATCHSANDBOX_PENDING",
+            "message": "BatchSandbox is pending allocation",
+        }
+
+        state, reason, message = k8s_service._derive_sandbox_state(batchsandbox, None)
+
+        assert state == "Resuming"
+        assert reason == "RESUMING"

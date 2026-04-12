@@ -1119,8 +1119,8 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             status = self.workload_provider.get_status(batchsandbox)
             workload_state = status["state"]
 
-            # Resumed sandbox in transient state
-            if is_resumed and workload_state != "Running":
+            # Resumed sandbox in transient state (only Pending/Allocated, not terminal Failed)
+            if is_resumed and workload_state in ("Pending", "Allocated"):
                 return ("Resuming", "RESUMING", "Restoring from snapshot")
 
             # Snapshot in progress → Pausing (but workload still active)

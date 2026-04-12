@@ -31,11 +31,9 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils"
@@ -1123,7 +1121,7 @@ func convertToRawExtension(data interface{}) (runtime.RawExtension, error) {
 // SetupWithManager sets up the controller with the Manager
 func (r *SandboxSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&sandboxv1alpha1.SandboxSnapshot{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&sandboxv1alpha1.SandboxSnapshot{}).
 		Owns(&batchv1.Job{}).
 		Named("sandboxsnapshot").
 		Complete(r)
