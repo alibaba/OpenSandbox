@@ -4,7 +4,7 @@ authors:
   - "@fengcone"
 creation-date: 2026-03-11
 last-updated: 2026-03-13
-status: implementing
+status: implemented
 ---
 
 # OSEP-0008: Pause and Resume via Rootfs Snapshot
@@ -563,15 +563,18 @@ Add a new server config section:
 
 ```toml
 [pause]
-default_snapshot_registry = ""
-committer_image = "containerd/containerd:1.7"
+snapshot_registry = ""
+snapshot_push_secret = ""
+resume_pull_secret = ""
+snapshot_type = "Rootfs"
 ```
 
 Semantics:
 
-- `default_snapshot_registry` is used when `pausePolicy.snapshotRegistry` is not
-  explicitly set.
-- `committer_image` is the image used by the commit Job Pod.
+- `snapshot_registry` is the registry for storing snapshot images (e.g., `registry.example.com/snapshots`).
+- `snapshot_push_secret` is the Kubernetes Secret name used for pushing snapshots to the registry.
+- `resume_pull_secret` is the Kubernetes Secret name used for pulling snapshot images during resume.
+- `snapshot_type` is the snapshot type, currently only `Rootfs` is supported (reserved for future expansion).
 
 ### 12. Security considerations
 
@@ -581,10 +584,10 @@ node-level runtime access.
 
 Operational constraints for this design:
 
-- `committer_image` is selected by server or operator configuration, not by the
+- the commit Job image is determined by the snapshot controller, not by the
   public sandbox API
 - the commit Job spec is not user-extensible in this revision
-- operators should treat the snapshot controller and committer image as trusted
+- operators should treat the snapshot controller and commit Job as trusted
   infrastructure components, with tighter RBAC and supply-chain controls than
   ordinary sandbox workloads
 

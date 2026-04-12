@@ -1,6 +1,6 @@
 # OpenSandbox Controller Helm Chart
 
-A Helm chart for deploying the OpenSandbox Kubernetes Controller, which manages sandbox environments with resource pooling and batch delivery capabilities.
+A Helm chart for deploying the OpenSandbox Kubernetes Controller, which manages sandbox environments with resource pooling, batch delivery, and pause/resume capabilities.
 
 ## Introduction
 
@@ -9,6 +9,7 @@ This chart bootstraps an OpenSandbox Controller deployment on a Kubernetes clust
 - **Batch Sandbox Management**: Create and manage multiple identical sandbox environments
 - **Resource Pooling**: Maintain pre-warmed resource pools for rapid sandbox provisioning
 - **Task Orchestration**: Optional task execution within sandboxes
+- **Pause and Resume**: Persist sandbox filesystem state via rootfs snapshot, releasing cluster resources between sessions
 - **High Performance**: O(1) time complexity for batch sandbox delivery
 
 ## Prerequisites
@@ -46,6 +47,7 @@ To also remove the CRDs:
 ```bash
 kubectl delete crd batchsandboxes.sandbox.opensandbox.io
 kubectl delete crd pools.sandbox.opensandbox.io
+kubectl delete crd sandboxsnapshots.sandbox.opensandbox.io
 ```
 
 ## Parameters
@@ -234,6 +236,8 @@ kubectl auth can-i --as=system:serviceaccount:opensandbox-system:opensandbox-con
 
 - [OpenSandbox GitHub](https://github.com/alibaba/OpenSandbox)
 - [Documentation](https://github.com/alibaba/OpenSandbox/blob/main/kubernetes/README.md)
+- [Pause and Resume Guide](https://github.com/alibaba/OpenSandbox/blob/main/docs/pause-resume.md)
+- [Server Configuration Reference](https://github.com/alibaba/OpenSandbox/blob/main/server/configuration.md)
 - [Examples](https://github.com/alibaba/OpenSandbox/tree/main/kubernetes/config/samples)
 
 ## License

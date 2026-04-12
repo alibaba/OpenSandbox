@@ -10,6 +10,7 @@ OpenSandbox Kubernetes Controller is a Kubernetes operator that manages sandbox 
 - **Batch and Individual Delivery**: Support both single sandbox (for real-user interactions) and batch sandbox delivery (for high-throughput agentic-RL scenarios)
 - **Optional Task Scheduling**: Integrated task orchestration with optional shard task templates for heterogeneous task distribution and customized sandbox delivery (e.g., process injection)
 - **Resource Pooling**: Maintain pre-warmed resource pools for rapid sandbox provisioning
+- **Pause and Resume**: Persist sandbox filesystem state via rootfs snapshots, releasing cluster resources between sessions
 - **Comprehensive Monitoring**: Real-time status tracking of sandboxes and tasks
 
 ## Features
@@ -57,11 +58,115 @@ Intelligent resource management features:
 - Pool-wide capacity limits to prevent resource exhaustion
 - Automatic scaling based on demand
 
+## Pause and Resume (Rootfs Snapshot)
+
+OpenSandbox supports **pause and resume** for Kubernetes sandboxes by persisting the container root filesystem as an OCI image.
+
+```text
+Time ---------------------------------------------------------------->
+
+Sandbox lifecycle:   [Running]--[Pausing]--[Paused]--[Resuming]--[Running]
+                         |                     |
+                  commit rootfs          create new BatchSandbox
+                  push to registry       from snapshot image
+                  delete BatchSandbox
+```
+
+### How it works
+
+1. **Pause**: The server creates a `SandboxSnapshot` CR. The controller creates a commit Job on the same node, commits the container rootfs, and pushes it to the configured OCI registry. After the snapshot is ready, the source `BatchSandbox` (and its Pod) is deleted to release cluster resources.
+2. **Resume**: The server sets `action: Resume` on the `SandboxSnapshot`. The controller creates a new `BatchSandbox` from the snapshot image, restoring the filesystem state. The public `sandboxId` remains stable across pause/resume cycles.
+
+### The SandboxSnapshot CRD
+
+The `SandboxSnapshot` CR is the central resource for pause/resume lifecycle:
+
+| Field | Location | Description |
+|-------|----------|-------------|
+| `spec.sandboxId` | Spec | Target sandbox identifier |
+| `spec.sourceBatchSandboxName` | Spec | Source BatchSandbox to snapshot |
+| `spec.action` | Spec | `Pause` or `Resume` |
+| `spec.snapshotRegistry` | Spec | OCI registry prefix (filled by Server from `[pause]` config) |
+| `spec.snapshotPushSecret` | Spec | Secret name for pushing (filled by Server) |
+| `spec.resumeImagePullSecret` | Spec | Secret name for pulling on resume (filled by Server) |
+| `status.phase` | Status | `Pending` → `Committing` → `Ready` / `Failed` |
+| `status.containerSnapshots` | Status | Committed image URIs per container |
+| `status.sourcePodName` | Status | Pod name resolved by controller |
+| `status.history` | Status | Audit log of pause/resume actions (last 10) |
+
+### Prerequisites
+
+1. **OCI Registry**: An accessible container registry for storing snapshot images.
+2. **Kubernetes Secrets**: Docker config secrets for push and pull access.
+3. **Server configuration**: Set `[pause]` section in `~/.sandbox.toml` (see [Server configuration](../server/configuration.md#pause--kubernetes-only)).
+4. **Controller RBAC**: The controller requires `secrets: get` permission (included in the Helm chart and `make manifests` output).
+
+### Controller Configuration
+
+The snapshot controller supports the following command-line flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--image-committer-image` | `image-committer:dev` | Image used for commit operations (must contain `ctr` or `crictl` tools) |
+| `--commit-job-timeout` | `10m` | Timeout duration for commit jobs |
+
+These flags are configured at controller startup. The `image-committer-image` must be a container image with container runtime tools (e.g., `ctr`, `crictl`) to perform rootfs commit and push operations.
+
+**Helm configuration:**
+
+```sh
+helm install opensandbox-controller ./charts/opensandbox-controller \
+  --set controller.snapshot.imageCommitterImage=<your-registry>/image-committer:v1.0.0 \
+  --set controller.snapshot.commitJobTimeout=15m
+```
+
+**Kustomize configuration:**
+
+```sh
+make deploy CONTROLLER_IMG=<controller-image> \
+  IMAGE_COMMITTER_IMAGE=<your-registry>/image-committer:v1.0.0 \
+  COMMIT_JOB_TIMEOUT=15m
+```
+
+### Quick setup
+
+```bash
+# Create push secret
+kubectl create secret docker-registry registry-push-secret \
+  --docker-server=<your-registry> \
+  --docker-username=<user> \
+  --docker-password=<token>
+
+# Create pull secret (can reuse push secret)
+kubectl create secret docker-registry registry-pull-secret \
+  --docker-server=<your-registry> \
+  --docker-username=<user> \
+  --docker-password=<token>
+```
+
+Server config (`~/.sandbox.toml`):
+
+```toml
+[pause]
+snapshot_registry = "<your-registry>/sandboxes"
+snapshot_push_secret = "registry-push-secret"
+resume_pull_secret = "registry-pull-secret"
+```
+
+### CRD cleanup
+
+To remove SandboxSnapshot CRDs when uninstalling:
+
+```bash
+kubectl delete crd sandboxsnapshots.sandbox.opensandbox.io
+```
+
+For a complete guide including troubleshooting and failure scenarios, see [`docs/pause-resume.md`](../docs/pause-resume.md).
+
 ## Runtime API Support Notes
 
-- `pause` / `resume` lifecycle APIs are currently **NOT SUPPORTED** by the Kubernetes runtime.
-- Calling these APIs against Kubernetes runtime returns `501 Not Implemented`.
-- Pause/resume semantics in OpenSandbox mean preserving in-memory process state (container-level suspend/resume). Kubernetes provider currently focuses on create/get/list/delete/renew workflows.
+- `pause` / `resume` lifecycle APIs are supported on Kubernetes runtime via rootfs snapshot. See [Pause and Resume](#pause-and-resume-rootfs-snapshot) above.
+- Docker runtime supports cgroup-level freeze (`pause`/`resume`) but does not persist filesystem state across restarts.
 
 
 ## Relationship with [kubernates-sigs/agent-sandbox](kubernates-sigs/agent-sandbox)

@@ -44,6 +44,13 @@ controller:
     # -- Burst for Kubernetes client rate limiter.
     burst: 200
 
+  # -- Pause/Resume snapshot configuration
+  snapshot:
+    # -- Image used for commit operations (must contain ctr or crictl tools)
+    imageCommitterImage: "image-committer:dev"
+    # -- Timeout duration for commit jobs
+    commitJobTimeout: "10m"
+
   # -- Enable leader election for controller manager
   leaderElection:
     enabled: true

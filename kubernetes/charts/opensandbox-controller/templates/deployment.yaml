@@ -58,6 +58,12 @@ spec:
         {{- if and .Values.controller.kubeClient (gt .Values.controller.kubeClient.burst 0) }}
         - --kube-client-burst={{ .Values.controller.kubeClient.burst }}
         {{- end }}
+        {{- if .Values.controller.snapshot.imageCommitterImage }}
+        - --image-committer-image={{ .Values.controller.snapshot.imageCommitterImage }}
+        {{- end }}
+        {{- if .Values.controller.snapshot.commitJobTimeout }}
+        - --commit-job-timeout={{ .Values.controller.snapshot.commitJobTimeout }}
+        {{- end }}
         ports:
         - name: health
           containerPort: 8081
