@@ -283,10 +283,6 @@ def test_get_endpoint_bridge_uses_docker_host_ip_when_server_in_container():
     assert endpoint.endpoint == "10.57.1.91:40109/proxy/44772"
 
 
-# ---------------------------------------------------------------------------
-# User-defined network endpoint tests
-# ---------------------------------------------------------------------------
-
 def test_get_endpoint_user_defined_network_external(mock_docker_service):
     """External endpoint for a user-defined network uses host port bindings, same as bridge."""
     service, mock_client = mock_docker_service

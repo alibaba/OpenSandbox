@@ -29,26 +29,26 @@ class TestValidateCreateSandboxExtensionsAccessRenewExtendSeconds:
     """access.renew.extend.seconds in [300, 86400] when present."""
 
     def test_omitted_extensions_ok(self):
-        validate_extensions(None)
+        assert validate_extensions(None) is None
 
     def test_extensions_without_key_ok(self):
-        validate_extensions({"other": "x"})
+        assert validate_extensions({"other": "x"}) is None
 
     def test_boundary_min_ok(self):
-        validate_extensions(
+        assert validate_extensions(
             {ACCESS_RENEW_EXTEND_SECONDS_KEY: str(ACCESS_RENEW_EXTEND_SECONDS_MIN)}
-        )
+        ) is None
 
     def test_boundary_max_ok(self):
-        validate_extensions(
+        assert validate_extensions(
             {ACCESS_RENEW_EXTEND_SECONDS_KEY: str(ACCESS_RENEW_EXTEND_SECONDS_MAX)}
-        )
+        ) is None
 
     def test_typical_value_ok(self):
-        validate_extensions({ACCESS_RENEW_EXTEND_SECONDS_KEY: "1800"})
+        assert validate_extensions({ACCESS_RENEW_EXTEND_SECONDS_KEY: "1800"}) is None
 
     def test_whitespace_trimmed_ok(self):
-        validate_extensions({ACCESS_RENEW_EXTEND_SECONDS_KEY: "  1800  "})
+        assert validate_extensions({ACCESS_RENEW_EXTEND_SECONDS_KEY: "  1800  "}) is None
 
     def test_below_min_rejected(self):
         with pytest.raises(HTTPException) as exc:
@@ -93,5 +93,5 @@ class TestAccessRenewExtendSecondsStorage:
 
     def test_apply_to_mapping_noop_when_key_absent(self):
         m: dict[str, str] = {"x": "1"}
-        apply_access_renew_extend_seconds_to_mapping(m, {"poolRef": "p"})
+        assert apply_access_renew_extend_seconds_to_mapping(m, {"poolRef": "p"}) is None
         assert m == {"x": "1"}

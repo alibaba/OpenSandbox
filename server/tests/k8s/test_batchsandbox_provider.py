@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Unit tests for BatchSandboxProvider.
-"""
-
 import pytest
 from types import SimpleNamespace
 from datetime import datetime, timezone
@@ -38,7 +34,6 @@ from opensandbox_server.services.constants import OPENSANDBOX_EGRESS_TOKEN
 from opensandbox_server.services.k8s.image_pull_secret_helper import IMAGE_AUTH_SECRET_PREFIX
 from opensandbox_server.services.k8s.volume_helper import apply_volumes_to_pod_spec
 
-
 def _app_config_with_template(template_file_path: str) -> AppConfig:
     """Build an AppConfig with a batchsandbox_template_file set."""
     return AppConfig(
@@ -48,7 +43,6 @@ def _app_config_with_template(template_file_path: str) -> AppConfig:
             batchsandbox_template_file=template_file_path,
         ),
     )
-
 
 def _app_config_with_execd_resources(execd_init_resources: ExecdInitResources) -> AppConfig:
     """Build an AppConfig with execd_init_resources set."""
@@ -60,7 +54,6 @@ def _app_config_with_execd_resources(execd_init_resources: ExecdInitResources) -
         ),
     )
 
-
 def _app_config_with_egress_disable_ipv6(disable_ipv6: bool = True) -> AppConfig:
     """Build an AppConfig with ``egress.disable_ipv6`` set (privileged execd init when egress is used)."""
     return AppConfig(
@@ -69,16 +62,11 @@ def _app_config_with_egress_disable_ipv6(disable_ipv6: bool = True) -> AppConfig
         egress=EgressConfig(disable_ipv6=disable_ipv6),
     )
 
-
 class TestBatchSandboxProvider:
-    """BatchSandboxProvider unit tests"""
     
     # ===== Initialization Tests =====
     
     def test_init_without_template_creates_provider(self, mock_k8s_client):
-        """
-        Test case: Verify normal initialization without template
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         
         assert provider.k8s_client == mock_k8s_client
@@ -88,9 +76,6 @@ class TestBatchSandboxProvider:
         assert provider.plural == "batchsandboxes"
     
     def test_init_with_template_loads_template(self, mock_k8s_client, tmp_path):
-        """
-        Test case: Verify correct loading with template
-        """
         template_file = tmp_path / "template.yaml"
         template_file.write_text("spec:\n  replicas: 1")
         
@@ -99,9 +84,6 @@ class TestBatchSandboxProvider:
         assert provider.template_manager._template is not None
     
     def test_init_sets_crd_constants_correctly(self, mock_k8s_client):
-        """
-        Test case: Verify CRD constants set correctly
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         
         assert provider.group == "sandbox.opensandbox.io"
@@ -111,9 +93,6 @@ class TestBatchSandboxProvider:
     # ===== Workload Creation Tests =====
     
     def test_create_workload_builds_correct_manifest(self, mock_k8s_client):
-        """
-        Test case: Verify created manifest structure is correct
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -238,9 +217,6 @@ spec:
             )
     
     def test_create_workload_builds_execd_init_container(self, mock_k8s_client):
-        """
-        Test case: Verify execd init container built correctly without resources when not configured
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test", "uid": "uid"}
@@ -270,9 +246,6 @@ spec:
         assert "resources" not in init_container
 
     def test_create_workload_init_container_with_configured_resources(self, mock_k8s_client):
-        """
-        Test case: Verify init container applies resources when execd_init_resources is configured
-        """
         provider = BatchSandboxProvider(
             mock_k8s_client,
             _app_config_with_execd_resources(ExecdInitResources(
@@ -302,9 +275,6 @@ spec:
         assert init_container["resources"]["requests"] == {"cpu": "50m", "memory": "64Mi"}
     
     def test_create_workload_wraps_entrypoint_with_bootstrap(self, mock_k8s_client):
-        """
-        Test case: Verify user entrypoint is wrapped with bootstrap
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -332,10 +302,6 @@ spec:
         ]
     
     def test_create_workload_converts_env_to_list(self, mock_k8s_client):
-        """
-        Test case: Verify environment variable dict converted to list.
-        Also verifies EXECD environment variable is automatically injected.
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -365,9 +331,6 @@ spec:
         assert env_dict["EXECD"] == "/opt/opensandbox/bin/execd"
 
     def test_create_workload_merges_template_volumes_and_mounts(self, mock_k8s_client, tmp_path):
-        """
-        Test case: Verify template volumes/volumeMounts are merged into runtime manifest
-        """
         template_file = tmp_path / "template.yaml"
         template_file.write_text(
             """
@@ -419,9 +382,6 @@ spec:
         assert "opensandbox-bin" in mount_names
 
     def test_create_workload_dedupes_template_volume_and_mount_names(self, mock_k8s_client, tmp_path):
-        """
-        Test case: Verify template entries do not duplicate runtime volumes/volumeMounts
-        """
         template_file = tmp_path / "template.yaml"
         template_file.write_text(
             """
@@ -471,9 +431,6 @@ spec:
         assert "sandbox-shared-data" in mount_names
     
     def test_create_workload_sets_resource_limits_and_requests(self, mock_k8s_client):
-        """
-        Test case: Verify resource limits set correctly
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -498,9 +455,6 @@ spec:
         assert resources["requests"] == {"cpu": "1", "memory": "1Gi"}
     
     def test_create_workload_handles_empty_resource_limits(self, mock_k8s_client):
-        """
-        Test case: Verify resources not set when resource limits are empty
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -528,9 +482,6 @@ spec:
     def test_get_workload_finds_existing_sandbox(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify successfully querying existing sandbox
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
@@ -540,9 +491,6 @@ spec:
         assert result["metadata"]["name"] == "test-id"
     
     def test_get_workload_returns_none_when_not_found(self, mock_k8s_client):
-        """
-        Test case: Verify None returned when not found
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = None
         
@@ -551,9 +499,6 @@ spec:
         assert result is None
 
     def test_get_workload_falls_back_to_legacy_name(self, mock_k8s_client):
-        """
-        Test case: Verify legacy sandbox-<id> name is used when primary lookup returns None
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.side_effect = [
             None,
@@ -567,9 +512,6 @@ spec:
         assert mock_k8s_client.get_custom_object.call_args_list[1].kwargs["name"] == "sandbox-test-id"
     
     def test_get_workload_handles_404_gracefully(self, mock_k8s_client):
-        """
-        Test case: Verify None returned when not found
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         
         mock_k8s_client.get_custom_object.return_value = None
@@ -579,9 +521,6 @@ spec:
         assert result is None
     
     def test_get_workload_reraises_non_404_exceptions(self, mock_k8s_client):
-        """
-        Test case: Verify non-404 exceptions are re-raised
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         
         # Mock 500 exception
@@ -594,9 +533,6 @@ spec:
         assert exc_info.value.status == 500
 
     def test_get_workload_prefers_informer_cache(self, mock_k8s_client):
-        """
-        Test case: get_workload calls k8s_client.get_custom_object and returns result
-        """
         cached = {"metadata": {"name": "test-id"}}
         mock_k8s_client.get_custom_object.return_value = cached
 
@@ -608,9 +544,6 @@ spec:
         mock_k8s_client.get_custom_object.assert_called()
     
     def test_get_workload_logs_unexpected_errors(self, mock_k8s_client):
-        """
-        Test case: Verify unexpected errors are re-raised
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.side_effect = RuntimeError("Unexpected")
         
@@ -618,9 +551,6 @@ spec:
             provider.get_workload("test-id", "test-ns")
 
     def test_create_workload_updates_informer_cache(self, mock_k8s_client):
-        """
-        Test case: create_workload returns name and uid from created resource
-        """
         created_body = {"metadata": {"name": "test-id", "uid": "test-uid"}}
         mock_k8s_client.create_custom_object.return_value = created_body
 
@@ -647,9 +577,6 @@ spec:
     def test_list_workloads_returns_items(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify list query returns results
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.list_custom_objects.return_value = mock_batchsandbox_list_response["items"]
         
@@ -659,9 +586,6 @@ spec:
         assert result[0]["metadata"]["name"] == "test-id"
     
     def test_list_workloads_returns_empty_on_404(self, mock_k8s_client):
-        """
-        Test case: Verify empty list returned when no items
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.list_custom_objects.return_value = []
         
@@ -674,9 +598,6 @@ spec:
     def test_delete_workload_deletes_existing_sandbox(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify successfully deleting existing sandbox
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
@@ -692,9 +613,6 @@ spec:
         )
     
     def test_delete_workload_raises_when_not_found(self, mock_k8s_client):
-        """
-        Test case: Verify exception raised when not found
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = None
         
@@ -706,9 +624,6 @@ spec:
     def test_delete_workload_sets_grace_period_zero(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify immediate deletion (grace period = 0)
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
@@ -722,9 +637,6 @@ spec:
     def test_update_expiration_patches_spec(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify expiration time update
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
@@ -737,9 +649,6 @@ spec:
         }
     
     def test_get_expiration_parses_iso_format(self):
-        """
-        Test case: Verify parsing ISO format time
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "spec": {"expireTime": "2025-12-31T10:00:00+00:00"}
@@ -750,9 +659,6 @@ spec:
         assert result == datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
     
     def test_get_expiration_handles_z_suffix(self):
-        """
-        Test case: Verify handling time with Z suffix
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "spec": {"expireTime": "2025-12-31T10:00:00Z"}
@@ -763,9 +669,6 @@ spec:
         assert result == datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
     
     def test_get_expiration_returns_none_on_invalid_format(self):
-        """
-        Test case: Verify None returned on invalid format
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "spec": {"expireTime": "invalid-date"}
@@ -777,9 +680,6 @@ spec:
         assert result is None
     
     def test_get_expiration_returns_none_when_missing(self):
-        """
-        Test case: Verify None returned when missing
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {"spec": {}}
         
@@ -790,9 +690,6 @@ spec:
     # ===== Status Retrieval Tests =====
     
     def test_get_status_running_with_ip(self):
-        """
-        Test case: Verify status when Pod is Ready and has IP
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 1, "allocated": 1},
@@ -811,9 +708,6 @@ spec:
         assert "IP" in result["message"]
     
     def test_get_status_allocated_with_ip_not_ready(self):
-        """
-        Test case: Verify status when IP is assigned but Pod is not Ready (Allocated state)
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 1},
@@ -831,9 +725,6 @@ spec:
         assert result["reason"] == "IP_ASSIGNED"
     
     def test_get_status_pending_scheduled(self):
-        """
-        Test case: Verify Pod is scheduled but not Ready
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 1},
@@ -846,9 +737,6 @@ spec:
         assert result["reason"] == "POD_SCHEDULED"
     
     def test_get_status_pending_when_endpoints_invalid_json(self):
-        """
-        Test case: Verify Pending when endpoints annotation contains invalid JSON
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 1},
@@ -866,9 +754,6 @@ spec:
         assert result["reason"] == "POD_SCHEDULED"
 
     def test_get_status_pending_when_endpoints_empty_array(self):
-        """
-        Test case: Verify Pending when endpoints annotation is empty array
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 1},
@@ -886,9 +771,6 @@ spec:
         assert result["reason"] == "POD_SCHEDULED"
     
     def test_get_status_pending_unallocated(self):
-        """
-        Test case: Verify Pod is not scheduled
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 0},
@@ -1086,9 +968,6 @@ spec:
     # ===== Endpoint Information Tests =====
     
     def test_get_endpoint_info_parses_json_annotation(self):
-        """
-        Test case: Verify parsing IP from annotation
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "metadata": {
@@ -1104,9 +983,6 @@ spec:
         assert result.headers is None
     
     def test_get_endpoint_info_uses_first_ip(self):
-        """
-        Test case: Verify using first IP when multiple IPs exist
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "metadata": {
@@ -1122,9 +998,6 @@ spec:
         assert result.headers is None
     
     def test_get_endpoint_info_returns_none_when_missing(self):
-        """
-        Test case: Verify None returned when annotation is missing
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {"metadata": {"annotations": {}}}
         
@@ -1133,9 +1006,6 @@ spec:
         assert result is None
     
     def test_get_endpoint_info_returns_none_on_invalid_json(self):
-        """
-        Test case: Verify None returned on invalid JSON
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "metadata": {
@@ -1150,9 +1020,6 @@ spec:
         assert result is None
     
     def test_get_endpoint_info_returns_none_on_empty_array(self):
-        """
-        Test case: Verify None returned on empty array
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "metadata": {
@@ -1441,14 +1308,10 @@ spec:
         # Verify no template field (pool-based doesn't use template)
         assert "template" not in body["spec"]
 
-
 class TestBatchSandboxProviderEgress:
     """BatchSandboxProvider egress sidecar tests"""
 
     def test_create_workload_without_network_policy_no_sidecar(self, mock_k8s_client):
-        """
-        Test case: Verify no sidecar is added when network_policy is None
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1481,9 +1344,6 @@ class TestBatchSandboxProviderEgress:
         assert "securityContext" not in pod_spec or "sysctls" not in pod_spec.get("securityContext", {})
 
     def test_create_workload_with_network_policy_adds_sidecar(self, mock_k8s_client):
-        """
-        Test case: Verify egress sidecar is added when network_policy is provided
-        """
         provider = BatchSandboxProvider(
             mock_k8s_client,
             _app_config_with_egress_disable_ipv6(),
@@ -1680,9 +1540,6 @@ class TestBatchSandboxProviderEgress:
         assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" not in execd_init["args"][0]
 
     def test_create_workload_with_network_policy_drops_net_admin_from_main_container(self, mock_k8s_client):
-        """
-        Test case: Verify main container drops NET_ADMIN when network_policy is enabled
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1723,9 +1580,6 @@ class TestBatchSandboxProviderEgress:
         assert "NET_ADMIN" in main_container["securityContext"]["capabilities"]["drop"]
 
     def test_create_workload_without_egress_image_no_sidecar(self, mock_k8s_client):
-        """
-        Test case: Verify no sidecar is added when egress_image is None even if network_policy exists
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1760,9 +1614,6 @@ class TestBatchSandboxProviderEgress:
         assert containers[0]["name"] == "sandbox"
 
     def test_egress_sidecar_contains_network_policy_in_env(self, mock_k8s_client):
-        """
-        Test case: Verify sidecar environment variable contains serialized network policy
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1810,9 +1661,6 @@ class TestBatchSandboxProviderEgress:
         assert policy_json["egress"][0]["target"] == "pypi.org"
 
     def test_main_container_no_security_context_without_network_policy(self, mock_k8s_client):
-        """
-        Test case: Verify main container has no securityContext when network_policy is None
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1843,9 +1691,6 @@ class TestBatchSandboxProviderEgress:
         assert "securityContext" not in main_container
 
     def test_create_workload_with_network_policy_works_with_template(self, mock_k8s_client, tmp_path):
-        """
-        Test case: Verify egress sidecar works correctly when template is provided
-        """
         template_file = tmp_path / "template.yaml"
         template_file.write_text(
             """
@@ -1904,16 +1749,10 @@ spec:
     # ===== Image Auth Tests =====
 
     def test_supports_image_auth_returns_true(self, mock_k8s_client):
-        """
-        Test case: BatchSandboxProvider declares image auth support
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         assert provider.supports_image_auth() is True
 
     def test_create_workload_with_image_auth_injects_image_pull_secrets(self, mock_k8s_client):
-        """
-        Test case: imagePullSecrets is injected into pod spec when image auth is provided
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
@@ -1939,9 +1778,6 @@ spec:
         assert pull_secrets == [{"name": f"{IMAGE_AUTH_SECRET_PREFIX}-test-id"}]
 
     def test_create_workload_with_image_auth_creates_secret(self, mock_k8s_client):
-        """
-        Test case: a kubernetes.io/dockerconfigjson Secret is created with correct ownerReference
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-abc"}
@@ -1973,9 +1809,6 @@ spec:
         assert ref.name == "test-id"
 
     def test_create_workload_without_image_auth_skips_secret(self, mock_k8s_client):
-        """
-        Test case: no Secret is created when image auth is absent
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
@@ -1998,9 +1831,6 @@ spec:
         assert "imagePullSecrets" not in body["spec"]["template"]["spec"]
 
     def test_create_workload_with_image_auth_secret_failure_rolls_back_batchsandbox(self, mock_k8s_client):
-        """
-        Test case: BatchSandbox is deleted when Secret creation fails
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
