@@ -73,6 +73,19 @@ func (t *taskNode) IsResourceReleased() bool {
 	return t.sState == stateReleased
 }
 
+// GetTerminatedMessage returns the failure message from the task status, including
+// lifecycle hook stderr output. It is used by the controller to populate
+// BatchSandboxStatus.TaskLastErrorMessage.
+func (t *taskNode) GetTerminatedMessage() string {
+	if t.Status == nil {
+		return ""
+	}
+	if t.Status.ProcessStatus != nil && t.Status.ProcessStatus.Terminated != nil {
+		return t.Status.ProcessStatus.Terminated.Message
+	}
+	return ""
+}
+
 func (t *taskNode) isTaskCompleted() bool {
 	return t.tState == SucceedTaskState || t.tState == FailedTaskState
 }

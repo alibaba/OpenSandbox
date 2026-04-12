@@ -30,6 +30,7 @@ import (
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/config"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/types"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/task-executor/utils"
+	api "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
 
 const (
@@ -54,6 +55,19 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 	if task == nil {
 		return fmt.Errorf("task cannot be nil")
 	}
+
+	// Execute preStart lifecycle hook if present
+	if task.Process != nil && task.Process.Lifecycle != nil && task.Process.Lifecycle.PreStart != nil {
+		klog.InfoS("Executing preStart lifecycle hook", "task", task.Name)
+		if err := e.execLifecycleHook(ctx, task, task.Process.Lifecycle.PreStart); err != nil {
+			return &types.StartError{
+				Reason:  types.ReasonPreStartHookFailed,
+				Message: fmt.Sprintf("preStart hook failed: %v", err),
+			}
+		}
+		klog.InfoS("preStart lifecycle hook completed", "task", task.Name)
+	}
+
 	taskDir, err := utils.SafeJoin(e.rootDir, task.Name)
 	if err != nil {
 		return fmt.Errorf("invalid task name: %w", err)
@@ -77,7 +91,15 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 
 	var cmd *exec.Cmd
 
-	if e.config.EnableSidecarMode {
+	// Determine if we should use nsenter based on ExecMode or global config
+	useNsenter := e.config.EnableSidecarMode
+	if task.Process != nil && task.Process.ExecMode == api.ExecModeLocal {
+		useNsenter = false
+	} else if task.Process != nil && task.Process.ExecMode == api.ExecModeRemote {
+		useNsenter = true
+	}
+
+	if useNsenter {
 		targetPID, err := e.findPidByEnvVar("SANDBOX_MAIN_CONTAINER", e.config.MainContainerName)
 		if err != nil {
 			return fmt.Errorf("failed to resolve target PID: %w", err)
@@ -112,7 +134,8 @@ func (e *processExecutor) Start(ctx context.Context, task *types.Task) error {
 	return e.executeCommand(task, cmd, pidPath)
 }
 
-// executeCommand handles log setup and process starting
+// executeCommand handles log setup and process starting.
+// Returns *types.StartError with ReasonProcessStartFailed on failure.
 func (e *processExecutor) executeCommand(task *types.Task, cmd *exec.Cmd, pidPath string) error {
 	if task == nil || cmd == nil {
 		return fmt.Errorf("task and cmd cannot be nil")
@@ -157,7 +180,10 @@ func (e *processExecutor) executeCommand(task *types.Task, cmd *exec.Cmd, pidPat
 		klog.ErrorS(err, "failed to start command", "name", task.Name)
 		stdoutFile.Close()
 		stderrFile.Close()
-		return fmt.Errorf("failed to start cmd: %w", err)
+		return &types.StartError{
+			Reason:  types.ReasonProcessStartFailed,
+			Message: fmt.Sprintf("failed to start cmd: %v", err),
+		}
 	}
 
 	// Write PID to file immediately (Host-side PID)
@@ -286,6 +312,39 @@ func (e *processExecutor) Inspect(ctx context.Context, task *types.Task) (*types
 }
 
 func (e *processExecutor) Stop(ctx context.Context, task *types.Task) error {
+	var processErr, postStopErr error
+
+	// Stop main process first
+	if err := e.stopMainProcess(ctx, task); err != nil {
+		klog.ErrorS(err, "Failed to stop main process", "task", task.Name)
+		processErr = &types.StopError{
+			Reason:  types.ReasonProcessStopFailed,
+			Message: fmt.Sprintf("failed to stop main process: %v", err),
+		}
+	}
+
+	// Execute postStop lifecycle hook if present
+	if task.Process != nil && task.Process.Lifecycle != nil && task.Process.Lifecycle.PostStop != nil {
+		klog.InfoS("Executing postStop lifecycle hook", "task", task.Name)
+		if err := e.execLifecycleHook(ctx, task, task.Process.Lifecycle.PostStop); err != nil {
+			klog.ErrorS(err, "postStop hook failed", "task", task.Name)
+			postStopErr = &types.StopError{
+				Reason:  types.ReasonPostStopHookFailed,
+				Message: fmt.Sprintf("postStop hook failed: %v", err),
+			}
+		} else {
+			klog.InfoS("postStop lifecycle hook completed", "task", task.Name)
+		}
+	}
+
+	// Return the first error encountered (process stop takes priority)
+	if processErr != nil {
+		return processErr
+	}
+	return postStopErr
+}
+
+func (e *processExecutor) stopMainProcess(ctx context.Context, task *types.Task) error {
 	taskDir, err := utils.SafeJoin(e.rootDir, task.Name)
 	if err != nil {
 		return fmt.Errorf("invalid task name: %w", err)
@@ -371,6 +430,91 @@ func isProcessRunning(pid int) bool {
 		return false
 	}
 	return process.Signal(syscall.Signal(0)) == nil
+}
+
+// execLifecycleHook executes a lifecycle hook (preStart or postStop).
+// It returns a descriptive error that includes the stderr output on failure.
+func (e *processExecutor) execLifecycleHook(ctx context.Context, task *types.Task, hook *api.LifecycleHandler) error {
+	if hook == nil || hook.Exec == nil {
+		return nil
+	}
+
+	cmdList := hook.Exec.Command
+	if len(cmdList) == 0 {
+		return fmt.Errorf("empty command in lifecycle hook")
+	}
+
+	safeCmdStr := shellEscape(cmdList)
+
+	// Apply per-hook timeout when specified.
+	hookCtx := ctx
+	if hook.TimeoutSeconds != nil && *hook.TimeoutSeconds > 0 {
+		var cancel context.CancelFunc
+		hookCtx, cancel = context.WithTimeout(ctx, time.Duration(*hook.TimeoutSeconds)*time.Second)
+		defer cancel()
+	}
+
+	// Determine execution mode
+	useNsenter := e.config.EnableSidecarMode
+	if hook.ExecMode == api.ExecModeLocal {
+		useNsenter = false
+	} else if hook.ExecMode == api.ExecModeRemote {
+		useNsenter = true
+	}
+
+	var cmd *exec.Cmd
+	if useNsenter {
+		targetPID, err := e.findPidByEnvVar("SANDBOX_MAIN_CONTAINER", e.config.MainContainerName)
+		if err != nil {
+			return fmt.Errorf("failed to resolve target PID for lifecycle hook: %w", err)
+		}
+
+		targetEnv, err := getProcEnviron(targetPID)
+		if err != nil {
+			return fmt.Errorf("failed to read target process environment: %w", err)
+		}
+
+		nsenterArgs := []string{
+			"-t", strconv.Itoa(targetPID),
+			"--mount", "--uts", "--ipc", "--net", "--pid",
+			"--",
+			"/bin/sh", "-c", safeCmdStr,
+		}
+		cmd = exec.CommandContext(hookCtx, "nsenter", nsenterArgs...)
+		cmd.Env = targetEnv
+		klog.InfoS("Executing lifecycle hook via nsenter", "task", task.Name, "targetPID", targetPID, "cmd", safeCmdStr)
+	} else {
+		cmd = exec.CommandContext(hookCtx, "/bin/sh", "-c", safeCmdStr)
+		cmd.Env = os.Environ()
+		klog.InfoS("Executing lifecycle hook locally", "task", task.Name, "cmd", safeCmdStr)
+	}
+
+	// Create a new process group so that on timeout cancellation we can kill
+	// the entire tree (shell + children like sleep). Without this,
+	// CombinedOutput blocks waiting for orphaned child I/O pipes to close.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
+	cmd.WaitDelay = 3 * time.Second
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		stderr := strings.TrimSpace(string(output))
+		// When a per-hook timeout is configured and the hook context has been
+		// canceled (either DeadlineExceeded or Canceled propagated from the
+		// timeout), treat it as a timeout error.  We avoid comparing with
+		// context.DeadlineExceeded directly because the Go exec package may
+		// wrap or race with the context error after cmd.Cancel fires.
+		if hook.TimeoutSeconds != nil && *hook.TimeoutSeconds > 0 && hookCtx.Err() != nil {
+			return fmt.Errorf("lifecycle hook timed out after %ds: %w; output: %s",
+				*hook.TimeoutSeconds, context.DeadlineExceeded, stderr)
+		}
+		return fmt.Errorf("lifecycle hook failed: %w; output: %s", err, stderr)
+	}
+
+	klog.InfoS("Lifecycle hook executed successfully", "task", task.Name, "output", strings.TrimSpace(string(output)))
+	return nil
 }
 
 // shellEscape quotes arguments for safe shell execution
