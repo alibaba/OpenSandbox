@@ -216,6 +216,50 @@ func TestRunCommand_Error(t *testing.T) {
 	require.Equal(t, "3", gotErr.EValue)
 }
 
+func TestRunCommand_StartErrorIncludesTraceback(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("bash not available on windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found in PATH")
+	}
+
+	c := NewController("", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		sessionID      string
+		gotErr         *execute.ErrorOutput
+		completeCalled bool
+	)
+
+	req := &ExecuteCodeRequest{
+		Code:    `echo "hello"`,
+		Cwd:     filepath.Join(t.TempDir(), "missing"),
+		Timeout: 5 * time.Second,
+		Hooks: ExecuteResultHook{
+			OnExecuteInit: func(s string) { sessionID = s },
+			OnExecuteError: func(err *execute.ErrorOutput) {
+				gotErr = err
+			},
+			OnExecuteComplete: func(_ time.Duration) {
+				completeCalled = true
+			},
+		},
+	}
+
+	require.NoError(t, c.runCommand(ctx, req))
+
+	require.NotEmpty(t, sessionID, "expected session id to be set")
+	require.NotNil(t, gotErr, "expected error hook to be called")
+	require.Equal(t, "CommandExecError", gotErr.EName)
+	require.NotEmpty(t, gotErr.Traceback, "expected traceback to be populated")
+	require.Equal(t, gotErr.EValue, gotErr.Traceback[0])
+	require.False(t, completeCalled, "did not expect completion hook on start failure")
+}
+
 // TestStdLogDescriptor_AutoCreatesTempDir verifies that stdLogDescriptor
 // recreates the temp directory when it has been deleted, rather than failing.
 // Regression test for https://github.com/alibaba/OpenSandbox/issues/400.
