@@ -64,6 +64,15 @@ from opensandbox_server.api.schema import (
 )
 from opensandbox_server.config import AppConfig, get_config
 from opensandbox_server.services.docker_diagnostics import DockerDiagnosticsMixin
+from opensandbox_server.services.docker_windows_profile import (
+    apply_windows_runtime_host_config_defaults,
+    fetch_execd_install_bat,
+    install_windows_oem_scripts,
+    is_windows_platform,
+    normalize_bootstrap_command,
+    resolve_windows_execd_download_url,
+    validate_windows_runtime_prerequisites,
+)
 from opensandbox_server.services.extension_service import ExtensionService
 from opensandbox_server.services.constants import (
     EGRESS_MODE_ENV,
@@ -161,6 +170,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         self.execd_image = runtime_config.execd_image
         self.network_mode = (self.app_config.docker.network_mode or HOST_NETWORK_MODE).lower()
         self._execd_archive_cache: Dict[str, bytes] = {}
+        self._windows_profile_cache: Dict[str, bytes] = {}
         self._daemon_platform: Optional[PlatformSpec] = None
         self._api_timeout = self._resolve_api_timeout()
         try:
@@ -1157,6 +1167,16 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
         mem_limit, nano_cpus = self._resolve_resource_limits(request)
         egress_token: Optional[str] = None
+        requested_windows_profile = is_windows_platform(request.platform)
+        windows_execd_download_url: Optional[str] = None
+
+        if requested_windows_profile:
+            validate_windows_runtime_prerequisites()
+            windows_execd_download_url = resolve_windows_execd_download_url(
+                request.env,
+                self.execd_image,
+                request.platform.arch if request.platform is not None else None,
+            )
 
         # Prepare OSSFS mounts first so binds can reference mounted host paths.
         ossfs_mount_keys = self._prepare_ossfs_mounts(request.volumes)
@@ -1215,6 +1235,11 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             # Inject volume bind mounts into Docker host config
             if volume_binds:
                 host_config_kwargs["binds"] = volume_binds
+            if requested_windows_profile:
+                host_config_kwargs = apply_windows_runtime_host_config_defaults(
+                    host_config_kwargs,
+                    sandbox_id,
+                )
 
             created_container = self._create_and_start_container(
                 sandbox_id,
@@ -1225,6 +1250,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 host_config_kwargs,
                 exposed_ports,
                 request.platform,
+                windows_execd_download_url=windows_execd_download_url,
             )
         except Exception:
             if sidecar_container is not None:
@@ -2307,12 +2333,13 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         host_config_kwargs: Dict[str, Any],
         exposed_ports: Optional[list[str]],
         platform: Optional[PlatformSpec],
+        windows_execd_download_url: Optional[str] = None,
     ):
-        # Normalize single-string entrypoint containing spaces to avoid shell path issues in bootstrap.
-        if len(bootstrap_command) == 1 and " " in bootstrap_command[0]:
-            import shlex
-
-            bootstrap_command = shlex.split(bootstrap_command[0])
+        requested_windows_platform = is_windows_platform(platform)
+        bootstrap_command = normalize_bootstrap_command(
+            bootstrap_command,
+            requested_windows_platform,
+        )
 
         host_config = self.docker_client.api.create_host_config(**host_config_kwargs)
         container = None
@@ -2321,7 +2348,6 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             with self._docker_operation("create sandbox container", sandbox_id):
                 container_kwargs = {
                     "image": image_uri,
-                    "entrypoint": [BOOTSTRAP_PATH],
                     "command": bootstrap_command,
                     "ports": exposed_ports,
                     "name": f"sandbox-{sandbox_id}",
@@ -2329,6 +2355,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     "labels": labels,
                     "host_config": host_config,
                 }
+                if not requested_windows_platform:
+                    container_kwargs["entrypoint"] = [BOOTSTRAP_PATH]
                 if platform is not None:
                     container_kwargs["platform"] = f"{platform.os}/{platform.arch}"
 
@@ -2348,7 +2376,29 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 labels,
                 include_runtime_metadata=True,
             )
-            self._prepare_sandbox_runtime(container, sandbox_id, runtime_platform)
+            if is_windows_platform(runtime_platform):
+                install_bat_bytes = fetch_execd_install_bat(
+                    docker_client=self.docker_client,
+                    execd_image=self.execd_image,
+                    cache=self._windows_profile_cache,
+                    cache_lock=self._execd_archive_lock,
+                    docker_operation=self._docker_operation,
+                    logger=logger,
+                )
+                install_windows_oem_scripts(
+                    container=container,
+                    sandbox_id=sandbox_id,
+                    windows_execd_download_url=windows_execd_download_url,
+                    install_bat_bytes=install_bat_bytes,
+                    ensure_directory=self._ensure_directory,
+                    docker_operation=self._docker_operation,
+                )
+                logger.info(
+                    "sandbox=%s | skip linux bootstrap/runtime injection for windows profile",
+                    sandbox_id,
+                )
+            else:
+                self._prepare_sandbox_runtime(container, sandbox_id, runtime_platform)
             with self._docker_operation("start sandbox container", sandbox_id):
                 container.start()
             return container

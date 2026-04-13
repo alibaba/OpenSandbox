@@ -29,12 +29,18 @@ from opensandbox_server.services.validators import (
     ensure_volumes_valid,
 )
 
-def test_ensure_platform_valid_rejects_windows_until_runtime_support_ready():
+def test_ensure_platform_valid_accepts_windows_amd64():
     platform = PlatformSpec(os="windows", arch="amd64")
-    with pytest.raises(HTTPException) as exc_info:
-        assert ensure_platform_valid(platform) is None
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert ensure_platform_valid(platform) is None
+    assert platform.os == "windows"
+    assert platform.arch == "amd64"
+
+
+def test_ensure_platform_valid_accepts_windows_arm64():
+    platform = PlatformSpec(os="windows", arch="arm64")
+    assert ensure_platform_valid(platform) is None
+    assert platform.os == "windows"
+    assert platform.arch == "arm64"
 
 def test_ensure_platform_valid_rejects_unsupported_os():
     platform = PlatformSpec(os="darwin", arch="amd64")
