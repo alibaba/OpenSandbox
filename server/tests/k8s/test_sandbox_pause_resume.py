@@ -134,6 +134,8 @@ class TestPauseSandbox:
 
         # Mock no BatchSandbox
         k8s_service.workload_provider.get_workload.return_value = None
+        # Mock no snapshot either
+        k8s_service.snapshot_provider.get_snapshot.return_value = None
 
         # Execute and verify
         with pytest.raises(HTTPException) as exc_info:
@@ -141,6 +143,31 @@ class TestPauseSandbox:
 
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail["code"] == SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND
+
+    def test_pause_sandbox_already_paused(self, k8s_service):
+        """
+        Test case: Pause sandbox that is already paused (no BatchSandbox but has Snapshot)
+
+        Purpose: Verify that 409 is returned when sandbox is already paused,
+        not 404. This ensures idempotent pause flows work correctly.
+        """
+        sandbox_id = "already-paused-sandbox"
+
+        # Mock no BatchSandbox (deleted by controller after pause)
+        k8s_service.workload_provider.get_workload.return_value = None
+        # Mock existing snapshot in Ready phase (pause completed)
+        k8s_service.snapshot_provider.get_snapshot.return_value = {
+            "metadata": {"name": sandbox_id},
+            "status": {"phase": "Ready"},
+        }
+
+        # Execute and verify
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service.pause_sandbox(sandbox_id)
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_STATE
+        assert "already paused" in exc_info.value.detail["message"]
 
     def test_pause_sandbox_invalid_state(self, k8s_service):
         """

@@ -728,6 +728,21 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         """
         # 1. Get BatchSandbox
         batchsandbox = self.workload_provider.get_workload(sandbox_id, self.namespace)
+        
+        # 2. Check for existing snapshot (for already paused sandboxes)
+        existing_snapshot = self.snapshot_provider.get_snapshot(sandbox_id, self.namespace)
+        
+        # If no BatchSandbox but snapshot exists, sandbox is already paused
+        if not batchsandbox and existing_snapshot:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_STATE,
+                    "message": f"Sandbox '{sandbox_id}' is already paused",
+                },
+            )
+        
+        # If neither BatchSandbox nor snapshot exists, sandbox not found
         if not batchsandbox:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -737,7 +752,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 },
             )
 
-        # 2. Validate state
+        # 3. Validate state
         workload_status = self._normalize_create_status(
             self.workload_provider.get_status(batchsandbox)
         )
@@ -760,7 +775,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 },
             )
 
-        # 3. Get pause config from server config (not from BatchSandbox.pausePolicy which is removed)
+        # 4. Get pause config from server config (not from BatchSandbox.pausePolicy which is removed)
         pause_config = self.app_config.pause if self.app_config.pause else None
         snapshot_registry = pause_config.snapshot_registry if pause_config else ""
         if not snapshot_registry:
@@ -772,8 +787,8 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 },
             )
 
-        # 4. Check for existing snapshot
-        existing_snapshot = self.snapshot_provider.get_snapshot(sandbox_id, self.namespace)
+        # 5. Handle existing snapshot (re-pause or in-progress)
+        # Reuse existing_snapshot from step 2
 
         if existing_snapshot:
             # Phase-based conflict detection
@@ -817,7 +832,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 )
             return
 
-        # 5. First pause: create SandboxSnapshot CR with pause config from server
+        # 6. First pause: create SandboxSnapshot CR with pause config from server
         batch_sandbox_name = batchsandbox["metadata"]["name"]
         snapshot_spec = {
             "sandboxId": sandbox_id,
