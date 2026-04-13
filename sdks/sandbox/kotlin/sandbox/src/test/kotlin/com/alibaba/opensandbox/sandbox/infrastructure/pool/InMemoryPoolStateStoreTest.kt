@@ -19,10 +19,12 @@ package com.alibaba.opensandbox.sandbox.infrastructure.pool
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolStateStore
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Duration
+import java.time.Instant
 
 /**
  * Contract and behavior tests for [InMemoryPoolStateStore].
@@ -144,8 +146,25 @@ class InMemoryPoolStateStoreTest {
     @Test
     fun `reapExpiredIdle removes expired entries`() {
         store.putIdle(poolName, "id-1")
-        store.reapExpiredIdle(poolName, java.time.Instant.now().plus(java.time.Duration.ofHours(25)))
+        store.reapExpiredIdle(poolName, Instant.now().plus(Duration.ofHours(25)))
         assertEquals(0, store.snapshotCounters(poolName).idleCount)
+    }
+
+    @Test
+    fun `custom idle ttl expires entries accordingly`() {
+        val inMemoryStore = InMemoryPoolStateStore()
+        inMemoryStore.setIdleEntryTtl(poolName, Duration.ofSeconds(10))
+        inMemoryStore.putIdle(poolName, "id-1")
+        inMemoryStore.reapExpiredIdle(poolName, Instant.now().plus(Duration.ofSeconds(11)))
+        assertEquals(0, inMemoryStore.snapshotCounters(poolName).idleCount)
+    }
+
+    @Test
+    fun `setIdleEntryTtl validates positive duration`() {
+        val inMemoryStore = InMemoryPoolStateStore()
+        assertThrows(IllegalArgumentException::class.java) {
+            inMemoryStore.setIdleEntryTtl(poolName, Duration.ZERO)
+        }
     }
 
     @Test
