@@ -108,7 +108,7 @@ func main() {
 
 	// Image committer
 	var imageCommitterImage string
-	flag.StringVar(&imageCommitterImage, "image-committer-image", "image-committer:dev", "The image used for commit operations (contains ctr/crictl tools).")
+	flag.StringVar(&imageCommitterImage, "image-committer-image", "image-committer:dev", "The image used for commit operations (contains nerdctl tool).")
 
 	// Commit job timeout
 	var commitJobTimeout time.Duration

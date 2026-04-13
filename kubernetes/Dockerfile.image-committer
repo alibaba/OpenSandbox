@@ -36,11 +36,10 @@ FROM alpine:3.19
 # Use Aliyun mirror for faster downloads in China
 RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
-# Install containerd CLI tools
-# nerdctl is used to find containers via label filters and commit/push images.
-# cri-tools (crictl) is NOT needed - we use nerdctl directly to avoid CRI API version issues.
+# Install nerdctl for container operations
+# nerdctl is used to find containers, commit rootfs, and push images.
+# We use nerdctl directly (not crictl or ctr) to avoid CRI API version issues.
 RUN apk add --no-cache \
-    containerd-ctr \
     curl \
     jq \
     nerdctl

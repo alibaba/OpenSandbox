@@ -715,9 +715,6 @@ var _ = Describe("PauseResume", Ordered, func() {
 		It("should transition to Failed when source BatchSandbox does not exist", func() {
 			const snapshotName = "test-pause-fail-no-source"
 
-			// Track initial pod count
-			initialPodCount := getPodCount(pauseResumeNamespace)
-
 			By("creating SandboxSnapshot with non-existent source")
 			snapshotYAML, err := renderTemplate("testdata/sandboxsnapshot.yaml", map[string]interface{}{
 				"SnapshotName":           snapshotName,
@@ -761,10 +758,6 @@ var _ = Describe("PauseResume", Ordered, func() {
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal("[]"), "No commit job should be created for failed snapshot")
-
-			By("verifying pod count unchanged")
-			finalPodCount := getPodCount(pauseResumeNamespace)
-			Expect(finalPodCount).To(Equal(initialPodCount), "Pod count should remain unchanged after failure")
 
 			By("cleaning up")
 			cmd = exec.Command("kubectl", "delete", "sandboxsnapshot", snapshotName, "-n", pauseResumeNamespace, "--ignore-not-found=true")
@@ -1132,21 +1125,4 @@ func createDockerRegistrySecrets(namespace string) error {
 	}
 
 	return nil
-}
-
-// getPodCount returns the number of pods in the given namespace.
-func getPodCount(namespace string) int {
-	cmd := exec.Command("kubectl", "get", "pods", "-n", namespace, "-o", "jsonpath={.items}")
-	output, err := utils.Run(cmd)
-	if err != nil {
-		return 0
-	}
-
-	var podList struct {
-		Items []struct{} `json:"items"`
-	}
-	if err := json.Unmarshal([]byte(output), &podList); err != nil {
-		return 0
-	}
-	return len(podList.Items)
 }

@@ -763,7 +763,7 @@ func (r *SandboxSnapshotReconciler) handleDeletion(ctx context.Context, snapshot
 func (r *SandboxSnapshotReconciler) buildCommitJob(snapshot *sandboxv1alpha1.SandboxSnapshot) (*batchv1.Job, error) {
 	jobName := r.getJobName(snapshot)
 
-	// Use image-committer image (contains ctr and crictl tools)
+	// Use image-committer image (contains nerdctl tool)
 	imageCommitterImage := r.ImageCommitterImage
 	if imageCommitterImage == "" {
 		imageCommitterImage = "image-committer:dev" // Default fallback
