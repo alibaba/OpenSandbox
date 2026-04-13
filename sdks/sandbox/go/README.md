@@ -10,6 +10,7 @@ Covers all three OpenAPI specs:
 ## Installation
 
 ```bash
+# go 1.20+
 go get github.com/alibaba/OpenSandbox/sdks/sandbox/go
 ```
 

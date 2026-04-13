@@ -329,7 +329,7 @@ func TestBackoff_WithJitter(t *testing.T) {
 	}
 
 	// With 50% jitter, attempt 0 should be in [50ms, 150ms].
-	for range 20 {
+	for i := 0; i < 20; i++ {
 		got := cfg.backoff(0)
 		if got < 50*time.Millisecond || got > 150*time.Millisecond {
 			assert.Fail(t, fmt.Sprintf("backoff(0) with 50%% jitter = %v, expected [50ms, 150ms]", got))
