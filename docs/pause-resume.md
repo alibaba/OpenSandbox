@@ -42,6 +42,38 @@ Sandbox lifecycle:   [Running]--[Pausing]--[Paused]--[Resuming]--[Running]
                   delete BatchSandbox
 ```
 
+### State Machine Details
+
+The sandbox transitions through both stable and intermediate states:
+
+| State | Type | Description |
+|-------|------|-------------|
+| `Running` | Stable | Sandbox is active and processing requests |
+| `Pausing` | Intermediate | Pause operation in progress. See [Pausing Substates](#pausing-substates) for details. |
+| `Paused` | Stable | Sandbox is paused, rootfs committed as OCI image, cluster resources released |
+| `Resuming` | Intermediate | Resume operation in progress, new BatchSandbox being created from snapshot |
+| `Failed` | Stable | Operation failed (check `reason` and `message` for details) |
+
+#### Pausing Substates
+
+The `Pausing` state has multiple substates exposed via the `reason` field:
+
+| Reason | Phase | Description |
+|--------|-------|-------------|
+| `SNAPSHOT_PENDING` | Pending | Snapshot CR created, waiting for controller to start commit |
+| `SNAPSHOT_COMMITTING` | Committing | Commit Job is running, container rootfs being committed and pushed |
+| `SNAPSHOT_READY_CLEANUP` | Ready | Snapshot is ready, BatchSandbox is being deleted to release resources |
+
+#### Resuming State
+
+The `Resuming` state occurs when:
+- A paused sandbox is being restored
+- The controller has created a new `BatchSandbox` from the snapshot image
+- The BatchSandbox is in `Pending` or `Allocated` phase
+- Marked by annotation `sandbox.opensandbox.io/resumed-from-snapshot=true`
+
+Once the resumed BatchSandbox transitions to `Running`, the sandbox state becomes `Running`.
+
 ### What Is Preserved
 
 | | Preserved? |
@@ -68,8 +100,8 @@ SandboxSnapshot Controller (Kubernetes)
     │ creates commit Job on the same node
     ▼
 commit Job Pod (image-committer)
-    │ ctr/crictl: commit container rootfs → OCI image
-    │ push to registry
+    │ nerdctl: commit container rootfs → OCI image
+    │ nerdctl: push to registry
     ▼
 SandboxSnapshot.status.phase = Ready
     │ controller deletes source BatchSandbox
@@ -281,6 +313,34 @@ Key fields to watch:
 - `status.message`: Human-readable status or error message
 - `status.containerSnapshots`: Image URIs for each committed container
 - `status.history`: Audit log of last 10 pause/resume events
+
+#### Monitoring Sandbox State Transitions
+
+When checking sandbox state via the Lifecycle API, you'll see intermediate states:
+
+**Pause flow:**
+```bash
+curl http://localhost:8080/v1/sandboxes/{sandbox_id}
+# Response during pause:
+{
+  "id": "my-sandbox",
+  "status": "pausing",
+  "reason": "SNAPSHOT_COMMITTING",
+  "message": "Snapshot is committing"
+}
+```
+
+**Resume flow:**
+```bash
+curl http://localhost:8080/v1/sandboxes/{sandbox_id}
+# Response during resume:
+{
+  "id": "my-sandbox",
+  "status": "resuming",
+  "reason": "RESUMING",
+  "message": "Restoring from snapshot"
+}
+```
 
 ---
 

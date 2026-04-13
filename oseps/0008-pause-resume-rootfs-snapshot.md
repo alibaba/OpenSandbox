@@ -361,21 +361,30 @@ Key rules:
 
 ### 4. Pause state model
 
-State is derived from resource presence:
+State is derived from resource presence with intermediate states exposed via `reason`:
+
+#### Stable States
 
 - `BatchSandbox` exists and is ready, and no matching pause cleanup is pending
   -> `Running`
-- `BatchSandbox` exists and snapshot phase is
-  `Pending|Committing|Pushing|Ready`, and the live workload still matches
-  `snapshot.spec.sourceBatchSandboxName` -> `Pausing`
 - `BatchSandbox` is absent and snapshot phase is `Ready` -> `Paused`
-- `BatchSandbox` exists and was created from snapshot but is not ready yet ->
-  `Resuming`
 - `SandboxSnapshot.status.phase == Failed` and no live replacement workload ->
   `Failed`
 
+#### Intermediate States
+
+**Pausing** (with substates exposed via `reason` field):
+
+- `BatchSandbox` exists and snapshot phase is `Pending` -> `Pausing` with reason `SNAPSHOT_PENDING`
+- `BatchSandbox` exists and snapshot phase is `Committing` -> `Pausing` with reason `SNAPSHOT_COMMITTING`
+- `BatchSandbox` exists and snapshot phase is `Ready`, but not yet resumed -> `Pausing` with reason `SNAPSHOT_READY_CLEANUP`
+
+**Resuming**:
+
+- `BatchSandbox` exists and was created from snapshot (annotation `sandbox.opensandbox.io/resumed-from-snapshot=true`) but is in `Pending` or `Allocated` phase -> `Resuming` with reason `RESUMING`
+
 This means `GET /sandboxes/{sandboxId}` must consult both `BatchSandbox` and
-`SandboxSnapshot`.
+`SandboxSnapshot` and return `(state, reason, message)` tuple.
 
 ### 5. Pause flow
 
@@ -600,10 +609,12 @@ Operational constraints for this design:
   `sourceNodeName` from the live workload.
 - Snapshot controller creates a Job pinned to the correct node.
 - Server returns `Paused` when `BatchSandbox` is absent and snapshot is `Ready`.
-- Server returns `Pausing` when snapshot is `Ready` but the source
+- Server returns `Pausing` with reason `SNAPSHOT_PENDING` when snapshot phase is `Pending`.
+- Server returns `Pausing` with reason `SNAPSHOT_COMMITTING` when snapshot phase is `Committing`.
+- Server returns `Pausing` with reason `SNAPSHOT_READY_CLEANUP` when snapshot is `Ready` but the source
   `BatchSandbox` still exists.
-- Server returns `Resuming` after new `BatchSandbox` is created from snapshot but
-  before readiness.
+- Server returns `Resuming` with reason `RESUMING` after new `BatchSandbox` is created from snapshot but
+  before readiness (in `Pending` or `Allocated` phase).
 - Pause returns `409` when another pause is already in progress for the same
   `sandboxId`.
 - Resume fails with `409` when snapshot is absent or not `Ready`.

@@ -107,10 +107,10 @@ The snapshot controller supports the following command-line flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--image-committer-image` | `image-committer:dev` | Image used for commit operations (must contain `ctr` or `crictl` tools) |
+| `--image-committer-image` | `image-committer:dev` | Image used for commit operations (must contain `nerdctl` tool) |
 | `--commit-job-timeout` | `10m` | Timeout duration for commit jobs |
 
-These flags are configured at controller startup. The `image-committer-image` must be a container image with container runtime tools (e.g., `ctr`, `crictl`) to perform rootfs commit and push operations.
+These flags are configured at controller startup. The `image-committer-image` must be a container image with `nerdctl` to perform rootfs commit and push operations.
 
 **Helm configuration:**
 
