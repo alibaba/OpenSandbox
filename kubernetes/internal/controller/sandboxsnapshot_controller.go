@@ -352,6 +352,20 @@ func (r *SandboxSnapshotReconciler) ensureResolved(ctx context.Context, snapshot
 		resumeTemplateData["expireTime"] = bs.Spec.ExpireTime
 	}
 
+	// Preserve user-defined labels from BatchSandbox metadata so they survive the
+	userLabels := make(map[string]string)
+	for k, v := range bs.Labels {
+		if strings.HasPrefix(k, "opensandbox.io/") || strings.HasPrefix(k, "sandbox.opensandbox.io/") {
+			continue
+		}
+		userLabels[k] = v
+	}
+	if len(userLabels) > 0 {
+		resumeTemplateData["metadata"] = map[string]interface{}{
+			"labels": userLabels,
+		}
+	}
+
 	// Convert the entire resume template to RawExtension
 	resumeTemplateRaw, err := convertToRawExtension(resumeTemplateData)
 	if err != nil {
@@ -1003,17 +1017,32 @@ func (r *SandboxSnapshotReconciler) handleResume(ctx context.Context, snapshot *
 		bsSpec["expireTime"] = expireTime
 	}
 
+	// Merge user labels from resumeTemplate.metadata.labels (saved at pause time) into
+	// the new BatchSandbox so metadata is stable across running→paused→resumed transitions.
+	bsLabels := map[string]interface{}{}
+	if metadataRaw, ok := resumeTemplate["metadata"]; ok {
+		if metadataMap, ok := metadataRaw.(map[string]interface{}); ok {
+			if labelsRaw, ok := metadataMap["labels"]; ok {
+				if labelsMap, ok := labelsRaw.(map[string]interface{}); ok {
+					for k, v := range labelsMap {
+						bsLabels[k] = v
+					}
+				}
+			}
+		}
+	}
+	// System labels override any user labels with the same key.
+	bsLabels["sandbox.opensandbox.io/sandbox-id"] = snapshot.Spec.SandboxID
+	bsLabels["sandbox.opensandbox.io/resumed-from-snapshot"] = "true"
+	bsLabels[LabelBatchSandboxNameKey] = snapshot.Spec.SandboxID
+
 	batchsandboxManifest := map[string]interface{}{
 		"apiVersion": fmt.Sprintf("%s/%s", sandboxv1alpha1.GroupVersion.Group, sandboxv1alpha1.GroupVersion.Version),
 		"kind":       "BatchSandbox",
 		"metadata": map[string]interface{}{
 			"name":      snapshot.Spec.SandboxID,
 			"namespace": snapshot.Namespace,
-			"labels": map[string]interface{}{
-				"sandbox.opensandbox.io/sandbox-id":            snapshot.Spec.SandboxID,
-				"sandbox.opensandbox.io/resumed-from-snapshot": "true",
-				LabelBatchSandboxNameKey:                       snapshot.Spec.SandboxID,
-			},
+			"labels":    bsLabels,
 			"annotations": map[string]interface{}{
 				"sandbox.opensandbox.io/resumed-from-snapshot": "true",
 			},

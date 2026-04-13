@@ -502,9 +502,10 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 labels = metadata.get("labels", {})
                 creation_timestamp = metadata.get("creationTimestamp")
 
-                # Extract user metadata
+                # Extract user metadata; exclude both opensandbox system label namespaces
                 user_metadata = {
-                    k: v for k, v in labels.items() if not k.startswith("opensandbox.io/")
+                    k: v for k, v in labels.items()
+                    if not k.startswith("opensandbox.io/") and not k.startswith("sandbox.opensandbox.io/")
                 }
 
                 # Get image URI from snapshot status.containerSnapshots (written by controller after push)
@@ -601,7 +602,8 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                         else:
                             image_uri = "unknown"
                         user_metadata = {
-                            k: v for k, v in labels.items() if not k.startswith("opensandbox.io/")
+                            k: v for k, v in labels.items()
+                            if not k.startswith("opensandbox.io/") and not k.startswith("sandbox.opensandbox.io/")
                         }
 
                         paused_sandbox = Sandbox(
@@ -794,12 +796,10 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     "action": "Pause",
                     "snapshotType": pause_config.snapshot_type if pause_config else "Rootfs",
                     "snapshotRegistry": snapshot_registry,
+                    # removes stale values from the existing CR (null → field deleted).
+                    "snapshotPushSecret": (pause_config.snapshot_push_secret or None) if pause_config else None,
+                    "resumeImagePullSecret": (pause_config.resume_pull_secret or None) if pause_config else None,
                 }
-                if pause_config:
-                    if pause_config.snapshot_push_secret:
-                        spec_patch["snapshotPushSecret"] = pause_config.snapshot_push_secret
-                    if pause_config.resume_pull_secret:
-                        spec_patch["resumeImagePullSecret"] = pause_config.resume_pull_secret
                 self.snapshot_provider.patch_snapshot_spec(
                     snapshot_name=sandbox_id,
                     namespace=self.namespace,
@@ -841,6 +841,12 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 "namespace": self.namespace,
                 "labels": {
                     "sandbox.opensandbox.io/sandbox-id": sandbox_id,
+                    # Copy user metadata labels from BatchSandbox so paused sandbox reads
+                    **{
+                        k: v
+                        for k, v in batchsandbox.get("metadata", {}).get("labels", {}).items()
+                        if not k.startswith("opensandbox.io/") and not k.startswith("sandbox.opensandbox.io/")
+                    },
                 },
             },
             "spec": snapshot_spec,

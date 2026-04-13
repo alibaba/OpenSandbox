@@ -206,7 +206,14 @@ var _ = Describe("PauseResume", Ordered, func() {
 			}
 			Expect(podName).NotTo(BeEmpty(), "Should find a pod owned by BatchSandbox")
 
-			// --- Step 2.5: Write marker file for rootfs verification ---
+			// --- Step 2.5: Add user labels to BatchSandbox for metadata persistence verification ---
+			By("adding user labels to BatchSandbox")
+			cmd = exec.Command("kubectl", "label", "batchsandbox", sandboxName,
+				"-n", pauseResumeNamespace, "team=e2e", "env=test")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			// --- Step 2.6: Write marker file for rootfs verification ---
 			markerValue := fmt.Sprintf("pause-test-%d", time.Now().UnixNano())
 			By("writing marker file into container for rootfs verification")
 			cmd = exec.Command("kubectl", "exec", podName, "-n", pauseResumeNamespace,
@@ -261,6 +268,20 @@ var _ = Describe("PauseResume", Ordered, func() {
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).NotTo(BeEmpty(), "Snapshot status should contain containerSnapshots with imageUri")
+
+			// --- Step 6.5: Verify user labels are preserved across pause ---
+			By("verifying user labels are saved into status.resumeTemplate.metadata.labels (controller side)")
+			cmd = exec.Command("kubectl", "get", "sandboxsnapshot", snapshotName,
+				"-n", pauseResumeNamespace, "-o", "jsonpath={.status.resumeTemplate.metadata.labels.team}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("e2e"), "User label 'team' should be saved in resumeTemplate.metadata.labels")
+
+			cmd = exec.Command("kubectl", "get", "sandboxsnapshot", snapshotName,
+				"-n", pauseResumeNamespace, "-o", "jsonpath={.status.resumeTemplate.metadata.labels.env}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("test"), "User label 'env' should be saved in resumeTemplate.metadata.labels")
 
 			// --- Step 7: Verify source BatchSandbox was auto-deleted by handleReady ---
 			By("verifying source BatchSandbox was auto-deleted after snapshot Ready")
@@ -345,6 +366,20 @@ var _ = Describe("PauseResume", Ordered, func() {
 			output, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal("true"))
+
+			// --- Verify user labels are restored on resumed BatchSandbox ---
+			By("verifying user labels are restored on resumed BatchSandbox")
+			cmd = exec.Command("kubectl", "get", "batchsandbox", sandboxName,
+				"-n", pauseResumeNamespace, "-o", "jsonpath={.metadata.labels.team}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("e2e"), "User label 'team' should be restored on resumed BatchSandbox")
+
+			cmd = exec.Command("kubectl", "get", "batchsandbox", sandboxName,
+				"-n", pauseResumeNamespace, "-o", "jsonpath={.metadata.labels.env}")
+			output, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal("test"), "User label 'env' should be restored on resumed BatchSandbox")
 
 			By("verifying snapshot history has Pause and Resume records")
 			cmd = exec.Command("kubectl", "get", "sandboxsnapshot", snapshotName,
