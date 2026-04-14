@@ -890,7 +890,8 @@ def test_egress_sidecar_host_config_sysctls_only_when_egress_disable_ipv6(mock_d
 def test_expire_cleans_sidecar():
     service = DockerSandboxService(config=_app_config())
     mock_container = MagicMock()
-    mock_container.attrs = {"State": {"Running": False}, "Config": {"Labels": {}}}
+    labels = {SANDBOX_PLATFORM_OS_LABEL: "windows"}
+    mock_container.attrs = {"State": {"Running": False}, "Config": {"Labels": labels}}
     mock_container.kill = MagicMock()
     mock_container.remove = MagicMock()
 
@@ -898,6 +899,7 @@ def test_expire_cleans_sidecar():
         patch.object(service, "_get_container_by_sandbox_id", return_value=mock_container),
         patch.object(service, "_remove_expiration_tracking") as mock_remove,
         patch.object(service, "_cleanup_egress_sidecar") as mock_cleanup,
+        patch.object(service, "_cleanup_windows_oem_volume") as mock_cleanup_oem,
         patch.object(service, "_docker_operation") as mock_op,
     ):
         mock_op.return_value.__enter__.return_value = None
@@ -905,6 +907,7 @@ def test_expire_cleans_sidecar():
         service._expire_sandbox("sandbox-id")
 
     mock_cleanup.assert_called_once_with("sandbox-id")
+    mock_cleanup_oem.assert_called_once_with("sandbox-id", labels)
     mock_remove.assert_called_once()
 
 def test_restore_cleans_orphan_sidecar():
@@ -925,6 +928,23 @@ def test_restore_cleans_orphan_sidecar():
         service._restore_existing_sandboxes()
 
     mock_cleanup.assert_called_once_with("orphan-id")
+
+def test_expire_not_found_attempts_windows_oem_volume_cleanup():
+    service = DockerSandboxService(config=_app_config())
+
+    with (
+        patch.object(
+            service,
+            "_get_container_by_sandbox_id",
+            side_effect=HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={}),
+        ),
+        patch.object(service, "_remove_expiration_tracking") as mock_remove,
+        patch.object(service, "_cleanup_windows_oem_volume") as mock_cleanup_oem,
+    ):
+        service._expire_sandbox("sandbox-missing")
+
+    mock_remove.assert_called_once_with("sandbox-missing")
+    mock_cleanup_oem.assert_called_once_with("sandbox-missing", None)
 
 def test_prepare_creation_context_allows_manual_cleanup():
     service = DockerSandboxService(config=_app_config())
@@ -1422,6 +1442,51 @@ def test_restore_existing_sandboxes_ignores_manual_cleanup_without_warning():
 
     mock_schedule.assert_not_called()
     mock_warning.assert_not_called()
+
+@patch("opensandbox_server.services.docker.docker")
+def test_delete_sandbox_removes_windows_oem_volume(mock_docker):
+    mock_container = MagicMock()
+    mock_container.attrs = {
+        "Config": {
+            "Labels": {
+                SANDBOX_ID_LABEL: "sandbox-win-1",
+                SANDBOX_PLATFORM_OS_LABEL: "windows",
+            }
+        },
+        "State": {"Running": True},
+    }
+
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = [mock_container]
+    mock_docker.from_env.return_value = mock_client
+    service = DockerSandboxService(config=_app_config())
+
+    service.delete_sandbox("sandbox-win-1")
+
+    mock_client.api.remove_volume.assert_called_once_with("opensandbox-win-oem-sandbox-win-1")
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_delete_sandbox_skips_oem_volume_cleanup_for_linux(mock_docker):
+    mock_container = MagicMock()
+    mock_container.attrs = {
+        "Config": {
+            "Labels": {
+                SANDBOX_ID_LABEL: "sandbox-linux-1",
+                SANDBOX_PLATFORM_OS_LABEL: "linux",
+            }
+        },
+        "State": {"Running": True},
+    }
+
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = [mock_container]
+    mock_docker.from_env.return_value = mock_client
+    service = DockerSandboxService(config=_app_config())
+
+    service.delete_sandbox("sandbox-linux-1")
+
+    mock_client.api.remove_volume.assert_not_called()
 
 def test_renew_expiration_rejects_manual_cleanup_sandbox():
     service = DockerSandboxService(config=_app_config())

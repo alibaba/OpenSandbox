@@ -75,7 +75,7 @@ from opensandbox_server.services.docker_windows_profile import (
     normalize_bootstrap_command,
     resolve_docker_platform,
     validate_windows_resource_limits,
-    validate_windows_runtime_prerequisites,
+    validate_windows_runtime_prerequisites, WINDOWS_OEM_VOLUME_PREFIX,
 )
 from opensandbox_server.services.extension_service import ExtensionService
 from opensandbox_server.services.constants import (
@@ -358,6 +358,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         except HTTPException as exc:
             if exc.status_code == status.HTTP_404_NOT_FOUND:
                 self._remove_expiration_tracking(sandbox_id)
+                self._cleanup_windows_oem_volume(sandbox_id, None)
                 if fallback_mount_keys:
                     self._release_ossfs_mounts(fallback_mount_keys)
             else:
@@ -419,6 +420,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         self._remove_expiration_tracking(sandbox_id)
         # Ensure sidecar is also cleaned up on expiration
         self._cleanup_egress_sidecar(sandbox_id)
+        self._cleanup_windows_oem_volume(sandbox_id, labels)
         self._release_ossfs_mounts(mount_keys)
 
     def _restore_existing_sandboxes(self) -> None:
@@ -1803,7 +1805,31 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         finally:
             self._remove_expiration_tracking(sandbox_id)
             self._cleanup_egress_sidecar(sandbox_id)
+            self._cleanup_windows_oem_volume(sandbox_id, labels)
             self._release_ossfs_mounts(mount_keys)
+
+    def _cleanup_windows_oem_volume(
+        self,
+        sandbox_id: str,
+        labels: Optional[dict[str, str]],
+    ) -> None:
+        """Best-effort cleanup for windows profile OEM named volume."""
+        if labels is not None and labels.get(SANDBOX_PLATFORM_OS_LABEL) != "windows":
+            return
+
+        volume_name = f"{WINDOWS_OEM_VOLUME_PREFIX}-{sandbox_id}"
+        try:
+            with self._docker_operation("remove windows oem volume", sandbox_id):
+                self.docker_client.api.remove_volume(volume_name)
+        except DockerNotFound:
+            return
+        except DockerException as exc:
+            logger.warning(
+                "sandbox=%s | failed to remove windows OEM volume %s: %s",
+                sandbox_id,
+                volume_name,
+                exc,
+            )
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         """

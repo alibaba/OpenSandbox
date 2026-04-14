@@ -51,6 +51,7 @@ _WINDOWS_SIZE_PATTERN = re.compile(r"^\s*(\d+)\s*([a-zA-Z]*)\s*$")
 WINDOWS_MIN_CPU_NANO_CPUS = 2_000_000_000
 WINDOWS_MIN_MEMORY_GB = 4
 WINDOWS_MIN_DISK_GB = 64
+WINDOWS_OEM_VOLUME_PREFIX = "opensandbox-win-oem"
 
 
 def is_windows_platform(platform: Optional["PlatformSpec"]) -> bool:
@@ -275,7 +276,7 @@ def apply_windows_runtime_host_config_defaults(
     """
     updated = dict(host_config_kwargs)
 
-    default_binds = [f"opensandbox-win-oem-{sandbox_id}:/oem:rw"]
+    default_binds = [f"{WINDOWS_OEM_VOLUME_PREFIX}-{sandbox_id}:/oem:rw"]
     existing_binds = list(updated.get("binds") or [])
     updated["binds"] = existing_binds + default_binds
 
