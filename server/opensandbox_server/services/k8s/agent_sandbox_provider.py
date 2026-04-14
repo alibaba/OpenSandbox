@@ -147,6 +147,7 @@ class AgentSandboxProvider(WorkloadProvider):
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
+        resource_requests: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Create an agent-sandbox Sandbox CRD workload."""
         if self.runtime_class:
@@ -166,6 +167,7 @@ class AgentSandboxProvider(WorkloadProvider):
             egress_image=egress_image,
             egress_auth_token=egress_auth_token,
             egress_mode=egress_mode,
+            resource_requests=resource_requests,
         )
 
         # Add user-specified volumes if provided
@@ -254,6 +256,7 @@ class AgentSandboxProvider(WorkloadProvider):
         egress_image: Optional[str] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
+        resource_requests: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """Build pod spec dict for the Sandbox CRD."""
         disable_ipv6_for_egress = (
@@ -271,6 +274,7 @@ class AgentSandboxProvider(WorkloadProvider):
             resource_limits=resource_limits,
             include_execd_volume=True,
             has_network_policy=network_policy is not None,
+            resource_requests=resource_requests,
         )
         
         containers = [self._container_to_dict(main_container)]
@@ -353,15 +357,17 @@ class AgentSandboxProvider(WorkloadProvider):
         resource_limits: Dict[str, str],
         include_execd_volume: bool,
         has_network_policy: bool = False,
+        resource_requests: Optional[Dict[str, str]] = None,
     ) -> V1Container:
         env_vars = [V1EnvVar(name=k, value=v) for k, v in env.items()]
         env_vars.append(V1EnvVar(name="EXECD", value="/opt/opensandbox/bin/execd"))
 
         resources = None
         if resource_limits:
+            requests = resource_requests if resource_requests else resource_limits
             resources = V1ResourceRequirements(
                 limits=resource_limits,
-                requests=resource_limits,
+                requests=requests,
             )
 
         wrapped_command = ["/opt/opensandbox/bin/bootstrap.sh"] + entrypoint

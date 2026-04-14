@@ -353,6 +353,15 @@ class CreateSandboxRequest(BaseModel):
         alias="resourceLimits",
         description="Runtime resource constraints for the sandbox instance",
     )
+    resource_requests: Optional[ResourceLimits] = Field(
+        None,
+        alias="resourceRequests",
+        description=(
+            "Optional resource requests (guaranteed resources). "
+            "Defaults to resourceLimits if omitted (Guaranteed QoS). "
+            "When specified, enables Burstable QoS with requests < limits."
+        ),
+    )
     env: Optional[Dict[str, Optional[str]]] = Field(
         None,
         description="Environment variables to inject into the sandbox runtime",

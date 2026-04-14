@@ -52,6 +52,7 @@ class WorkloadProvider(ABC):
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
+        resource_requests: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Create a new workload resource.
@@ -73,6 +74,8 @@ class WorkloadProvider(ABC):
             egress_image: Optional egress sidecar image. Required when network_policy is provided.
             egress_mode: Sidecar ``OPENSANDBOX_EGRESS_MODE`` (from app ``[egress].mode`` when using network policy).
             volumes: Optional list of volume mounts for the sandbox.
+            resource_requests: Optional resource requests (guaranteed resources).
+                If None, defaults to resource_limits (Guaranteed QoS).
 
         Returns:
             Dict containing workload metadata (name, uid, etc.)

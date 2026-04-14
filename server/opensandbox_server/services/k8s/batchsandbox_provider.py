@@ -131,6 +131,7 @@ class BatchSandboxProvider(WorkloadProvider):
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
+        resource_requests: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Create a BatchSandbox workload.
@@ -218,6 +219,7 @@ class BatchSandboxProvider(WorkloadProvider):
             env=env,
             resource_limits=resource_limits,
             has_network_policy=network_policy is not None,
+            resource_requests=resource_requests,
         )
         
         # Build containers list
@@ -609,20 +611,22 @@ class BatchSandboxProvider(WorkloadProvider):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         has_network_policy: bool = False,
+        resource_requests: Optional[Dict[str, str]] = None,
     ) -> V1Container:
         """
         Build main container spec with execd support.
-        
+
         The container will use bootstrap script to start execd in background,
         then execute user's command.
-        
+
         Args:
             image_spec: Container image specification
             entrypoint: Container entrypoint command
             env: Environment variables
             resource_limits: Resource limits
             has_network_policy: Whether network policy is enabled for this sandbox
-            
+            resource_requests: Optional resource requests. If None, defaults to resource_limits.
+
         Returns:
             V1Container: Main container spec
         """
@@ -630,13 +634,14 @@ class BatchSandboxProvider(WorkloadProvider):
         env_vars = [V1EnvVar(name=k, value=v) for k, v in env.items()]
         # Add EXECD environment variable to specify execd binary path
         env_vars.append(V1EnvVar(name="EXECD", value="/opt/opensandbox/bin/execd"))
-        
+
         # Build resource requirements
         resources = None
         if resource_limits:
+            requests = resource_requests if resource_requests else resource_limits
             resources = V1ResourceRequirements(
                 limits=resource_limits,
-                requests=resource_limits,  # Set requests = limits for guaranteed QoS
+                requests=requests,
             )
         
         # Wrap entrypoint with bootstrap script to start execd

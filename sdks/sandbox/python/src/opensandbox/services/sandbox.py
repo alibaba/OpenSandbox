@@ -56,6 +56,7 @@ class Sandboxes(Protocol):
         extensions: dict[str, str],
         volumes: list[Volume] | None,
         platform: PlatformSpec | None = None,
+        resource_requests: dict[str, str] | None = None,
     ) -> SandboxCreateResponse:
         """
         Create a new sandbox with the specified configuration.
@@ -71,6 +72,8 @@ class Sandboxes(Protocol):
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
             volumes: Optional list of volume mounts for persistent storage.
+            resource_requests: Optional resource requests (guaranteed resources).
+                If omitted, defaults to resource limits (Guaranteed QoS).
 
         Returns:
             Sandbox create response

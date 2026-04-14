@@ -337,6 +337,11 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         resource_limits = {}
         if request.resource_limits and request.resource_limits.root:
             resource_limits = request.resource_limits.root
+
+        # Extract resource requests (optional, defaults to limits for Guaranteed QoS)
+        resource_requests = None
+        if request.resource_requests and request.resource_requests.root:
+            resource_requests = request.resource_requests.root
         
         try:
             egress_mode = (
@@ -361,6 +366,9 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             )
             
             # Create workload
+            create_kwargs: dict = {}
+            if resource_requests is not None:
+                create_kwargs["resource_requests"] = resource_requests
             workload_info = self.workload_provider.create_workload(
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
@@ -379,6 +387,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 egress_mode=egress_mode,
                 volumes=request.volumes,
                 platform=request.platform,
+                **create_kwargs,
             )
             
             logger.info(
