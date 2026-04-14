@@ -1,0 +1,264 @@
+openapi: 3.1.0
+info:
+  title: OpenSandbox Diagnostics API
+  version: 0.1.0
+  description: |
+    The OpenSandbox Diagnostics API exposes best-effort plain-text diagnostic
+    snapshots for a sandbox. It is intended for humans and troubleshooting agents
+    that need to collect runtime troubleshooting material without depending on a
+    stable structured observability model.
+
+    This API is not an audit log API and does not define the canonical
+    observability schema for OpenSandbox. Structured telemetry, long-term
+    retention, filtering, pagination, and streaming may be provided separately.
+
+    Successful responses are display-oriented `text/plain` output. Clients should
+    not parse individual lines as a stable schema. Servers may impose
+    implementation-defined retention and response size limits.
+
+    ## Authentication
+
+    API Key authentication is required for all operations:
+
+    1. **HTTP Header**
+       ```
+       OPEN-SANDBOX-API-KEY: your-api-key
+       ```
+
+    2. **Environment Variable** (for SDK clients)
+       ```
+       OPEN_SANDBOX_API_KEY=your-api-key
+       ```
+
+       SDK clients will automatically pick up this environment variable.
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development
+security:
+  - apiKeyAuth: []
+tags:
+  - name: Diagnostics
+    description: Plain-text sandbox troubleshooting snapshots
+paths:
+  /sandboxes/{sandboxId}/diagnostics/logs:
+    get:
+      tags: [Diagnostics]
+      summary: Get diagnostic logs
+      description: |
+        Retrieve a best-effort plain-text snapshot of sandbox diagnostic logs.
+
+        Logs are not limited to a structured observability model. Depending on the
+        selected `scope` and server configuration, log text may include sandbox
+        container stdout/stderr, lifecycle diagnostic text, network diagnostic text,
+        or other implementation-defined diagnostic material.
+
+        This endpoint does not provide streaming, pagination, or a stable line-level
+        schema in this version. The server returns currently available diagnostic
+        text for the requested scope, subject to implementation-defined retention
+        and response size limits.
+
+        This version only supports `text/plain` successful responses. Clients should
+        send `Accept: text/plain`. If `Accept` is omitted or includes `*/*`, the
+        server returns `text/plain`. Requests whose `Accept` header does not allow
+        `text/plain` return `406 Not Acceptable`.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - $ref: '#/components/parameters/DiagnosticScope'
+      responses:
+        '200':
+          description: Diagnostic log text snapshot
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                container:
+                  summary: Container log text
+                  value: |
+                    2026-03-25T10:01:13Z execd started
+                    2026-03-25T10:01:14Z sandbox process ready
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /sandboxes/{sandboxId}/diagnostics/events:
+    get:
+      tags: [Diagnostics]
+      summary: Get diagnostic events
+      description: |
+        Retrieve a best-effort plain-text snapshot of sandbox diagnostic events.
+
+        Events are rendered as diagnostic text rather than exposed as a stable
+        structured event model. Depending on the selected `scope` and runtime, event
+        text may include lifecycle transitions, runtime or platform events such as
+        Kubernetes Events, network diagnostic events, process activity events, or
+        other implementation-defined event material.
+
+        This endpoint does not provide streaming, pagination, or a stable line-level
+        schema in this version. The server returns currently available diagnostic
+        event text for the requested scope, subject to implementation-defined
+        retention and response size limits.
+
+        This version only supports `text/plain` successful responses. Clients should
+        send `Accept: text/plain`. If `Accept` is omitted or includes `*/*`, the
+        server returns `text/plain`. Requests whose `Accept` header does not allow
+        `text/plain` return `406 Not Acceptable`.
+      parameters:
+        - $ref: '#/components/parameters/SandboxId'
+        - $ref: '#/components/parameters/DiagnosticScope'
+      responses:
+        '200':
+          description: Diagnostic event text snapshot
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                runtime:
+                  summary: Runtime event text
+                  value: |
+                    2026-03-25T10:01:13Z runtime Normal Scheduled Successfully assigned sandbox pod
+                    2026-03-25T10:01:14Z runtime Normal Pulled Container image pulled
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '406':
+          $ref: '#/components/responses/NotAcceptable'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+components:
+  securitySchemes:
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: OPEN-SANDBOX-API-KEY
+      description: |
+        API Key for authentication. Can be provided via:
+        1. HTTP Header: OPEN-SANDBOX-API-KEY: your-api-key
+        2. Environment variable: OPEN_SANDBOX_API_KEY (for SDK clients)
+  parameters:
+    SandboxId:
+      name: sandboxId
+      in: path
+      required: true
+      description: Unique sandbox identifier
+      schema:
+        type: string
+    DiagnosticScope:
+      name: scope
+      in: query
+      required: false
+      description: |
+        Optional diagnostic scope selector. Known scopes may include `container`,
+        `lifecycle`, `runtime`, `network`, `process`, and `all`. Supported scopes
+        and defaults are implementation-defined; servers may add new scopes over
+        time.
+      schema:
+        type: string
+      examples:
+        container:
+          summary: Sandbox container diagnostics
+          value: container
+        runtime:
+          summary: Runtime or platform diagnostics
+          value: runtime
+        all:
+          summary: Best-effort aggregate across supported scopes
+          value: all
+  headers:
+    XRequestId:
+      description: Unique request identifier for tracing
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequest:
+      description: The request was invalid or malformed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Unauthorized:
+      description: Authentication credentials are missing or invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    Forbidden:
+      description: The authenticated user lacks permission for this operation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    NotFound:
+      description: The requested sandbox does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    NotAcceptable:
+      description: |
+        Requested media type is not supported by this operation. This version only
+        supports `text/plain` successful responses.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    InternalServerError:
+      description: An unexpected server error occurred
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+  schemas:
+    ErrorResponse:
+      type: object
+      description: |
+        Standard error response for all non-2xx HTTP responses.
+        HTTP status code indicates the error category; code and message provide details.
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code.
+        message:
+          type: string
+          description: Human-readable error message describing what went wrong.
+      required: [code, message]
+      additionalProperties: false

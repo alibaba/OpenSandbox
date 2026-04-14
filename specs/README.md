@@ -35,7 +35,21 @@ Defines the complete lifecycle interfaces for creating, managing, and destroying
 - HTTP Header: `OPEN-SANDBOX-API-KEY: your-api-key`
 - Environment Variable: `OPEN_SANDBOX_API_KEY` (for SDK clients)
 
-### 2. execd-api.yaml
+### 2. diagnostic-api.yml
+
+**Sandbox Diagnostics API**
+
+Defines best-effort plain-text troubleshooting snapshots for sandbox diagnostic logs and events. This spec does not define a structured audit or observability model.
+
+**Main Endpoints (base path `/v1`):**
+- `GET /sandboxes/{sandboxId}/diagnostics/logs` - Retrieve diagnostic log text for an optional scope
+- `GET /sandboxes/{sandboxId}/diagnostics/events` - Retrieve diagnostic event text for an optional scope
+
+**Authentication:**
+- HTTP Header: `OPEN-SANDBOX-API-KEY: your-api-key`
+- Environment Variable: `OPEN_SANDBOX_API_KEY` (for SDK clients)
+
+### 3. execd-api.yaml
 
 **Code Execution API Inside Sandbox**
 
@@ -86,7 +100,7 @@ Defines interfaces for executing code, commands, and file operations within sand
 - `GET /metrics` - Get system resource metrics
 - `GET /metrics/watch` - Watch system metrics in real-time (SSE stream)
 
-### 3. egress-api.yaml
+### 4. egress-api.yaml
 
 **Sandbox Egress Runtime API**
 
