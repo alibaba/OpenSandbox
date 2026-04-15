@@ -101,6 +101,10 @@ type PoolReconciler struct {
 
 func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
+	start := time.Now()
+	defer func() {
+		log.Info("Reconcile finished", "latencyMs", time.Since(start).Milliseconds())
+	}()
 	// Fetch the Pool instance
 	pool := &sandboxv1alpha1.Pool{}
 	if err := r.Get(ctx, req.NamespacedName, pool); err != nil {
@@ -319,7 +323,10 @@ func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alp
 		Pool:      pool,
 		Pods:      pods,
 	}
+	start := time.Now()
 	allocStatus, pendingSyncs, poolDirty, err := r.Allocator.Schedule(ctx, spec)
+	schLatency := time.Since(start).Milliseconds()
+	allocatorScheduleDurationSummary.WithLabelValues(pool.Namespace, pool.Name, strconv.FormatBool(err == nil)).Observe(float64(schLatency))
 	if err != nil {
 		return nil, err
 	}
@@ -329,8 +336,9 @@ func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alp
 			idlePods = append(idlePods, pod.Name)
 		}
 	}
-	log.Info("Schedule result", "pool", pool.Name, "allocated", len(allocStatus.PodAllocation),
-		"idlePods", len(idlePods), "supplement", allocStatus.PodSupplement, "pendingSyncs", len(pendingSyncs), "poolDirty", poolDirty)
+	log.Info("Allocator schedule result", "pool", pool.Name, "sandboxSize", len(batchSandboxes), "podSize", len(pods),
+		"allocated", len(allocStatus.PodAllocation), "idlePods", len(idlePods), "supplement", allocStatus.PodSupplement, "pendingSyncs", len(pendingSyncs), "poolDirty", poolDirty,
+		"latencyMs", schLatency)
 
 	schedResult := &ScheduleResult{
 		PodAllocation: allocStatus.PodAllocation,
@@ -341,10 +349,14 @@ func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alp
 
 	// Persist allocation to memory store
 	if poolDirty {
-		if err := r.Allocator.PersistPoolAllocation(ctx, pool, &AllocStatus{PodAllocation: allocStatus.PodAllocation}); err != nil {
-			log.Error(err, "Failed to persist pool allocation")
-			return nil, err
+		start = time.Now()
+		err := r.Allocator.PersistPoolAllocation(ctx, pool, &AllocStatus{PodAllocation: allocStatus.PodAllocation})
+		persistLatency := time.Since(start).Milliseconds()
+		allocatorPersistAllocationStateDurationSummary.WithLabelValues(pool.Namespace, pool.Name, strconv.FormatBool(err == nil)).Observe(float64(persistLatency))
+		if err != nil {
+			return nil, fmt.Errorf("Failed to persist pool allocation, err %w", err)
 		}
+		log.Info("Allocator persist allocation state", "pool", pool.Name, "allocation", len(allocStatus.PodAllocation), "latencyMs", persistLatency)
 	}
 
 	// Sync to each BatchSandbox concurrently
@@ -352,17 +364,22 @@ func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alp
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, syncSandboxAllocConcurrency)
 
+	start = time.Now()
 	for _, syncInfo := range pendingSyncs {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(info SandboxSyncInfo) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := r.Allocator.SyncSandboxAllocation(ctx, info.Sandbox, info.Pods); err != nil {
+			start0 := time.Now()
+			err := r.Allocator.SyncSandboxAllocation(ctx, info.Sandbox, info.Pods)
+			latencyMs0 := time.Since(start0).Milliseconds()
+			allocatorSyncSingleAllocResultDurationSummary.WithLabelValues(info.Sandbox.Namespace, info.Sandbox.Spec.PoolRef, info.Sandbox.Name, strconv.FormatBool(err == nil)).Observe(float64(latencyMs0))
+			if err != nil {
 				log.Error(err, "Failed to sync sandbox allocation", "sandbox", info.SandboxName)
 				errCh <- fmt.Errorf("failed to sync sandbox %s: %w", info.SandboxName, err)
 			} else {
-				log.Info("Successfully sync Sandbox allocation", "sandbox", info.SandboxName, "pods", info.Pods)
+				log.Info("Successfully sync Sandbox allocation", "sandbox", info.SandboxName, "pods", info.Pods, "latencyMs", latencyMs0)
 			}
 		}(syncInfo)
 	}
@@ -373,11 +390,13 @@ func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alp
 	for err := range errCh {
 		syncErrs = append(syncErrs, err)
 	}
-
-	if err := gerrors.Join(syncErrs...); err != nil {
-		return nil, err
+	syncAggErr := gerrors.Join(syncErrs...)
+	syncAllocLatency := time.Since(start).Milliseconds()
+	log.Info("Sync sandbox allocation", "total", len(pendingSyncs), "failed", len(syncErrs), "latencyMs", syncAllocLatency)
+	allocatorSyncAllocResultDurationSummary.WithLabelValues(pool.Namespace, pool.Name, strconv.FormatBool(syncAggErr == nil)).Observe(float64(syncAllocLatency))
+	if syncAggErr != nil {
+		return nil, syncAggErr
 	}
-
 	return schedResult, nil
 }
 
