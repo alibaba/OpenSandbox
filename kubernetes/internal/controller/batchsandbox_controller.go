@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -86,6 +87,10 @@ type BatchSandboxReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
 func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
+	start := time.Now()
+	defer func() {
+		log.Info("Reconcile finished", "latencyMs", time.Since(start).Milliseconds())
+	}()
 	var aggErrors []error
 	defer func() {
 		_ = DurationStore.Pop(req.String())
@@ -186,11 +191,16 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			"metadata": map[string]any{
 				"annotations": map[string]string{
 					AnnotationSandboxEndpoints: string(raw),
+					// example 2026-04-15T12:19:11.696+08:00, use ms precision
+					AnnotationEndpointsLastTransTime: time.Now().Format("2006-01-02T15:04:05.000Z07:00"),
 				},
 			},
 		})
 		obj := &sandboxv1alpha1.BatchSandbox{ObjectMeta: metav1.ObjectMeta{Namespace: batchSbx.Namespace, Name: batchSbx.Name}}
-		if err := r.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patchData)); err != nil {
+		start := time.Now()
+		err := r.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patchData))
+		log.Info("Sync sandbox endpoint", "sandbox", klog.KObj(batchSbx), "latencyMs", time.Since(start).Milliseconds(), "success", strconv.FormatBool(err == nil))
+		if err != nil {
 			log.Error(err, "failed to patch annotation", "annotation", AnnotationSandboxEndpoints, "body", string(patchData))
 			aggErrors = append(aggErrors, err)
 		}
@@ -226,8 +236,13 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		})
 		if err != nil {
 			aggErrors = append(aggErrors, err)
-		} else if err := r.Status().Patch(ctx, batchSbx, client.RawPatch(types.MergePatchType, patchData)); err != nil {
-			aggErrors = append(aggErrors, err)
+		} else {
+			start := time.Now()
+			err := r.Status().Patch(ctx, batchSbx, client.RawPatch(types.MergePatchType, patchData))
+			log.Info("Update sandbox status", "sandbox", klog.KObj(batchSbx), "latencyMs", time.Since(start).Milliseconds(), "success", strconv.FormatBool(err == nil))
+			if err != nil {
+				aggErrors = append(aggErrors, err)
+			}
 		}
 	}
 
