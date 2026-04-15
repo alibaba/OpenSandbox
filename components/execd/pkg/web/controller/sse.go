@@ -20,12 +20,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alibaba/opensandbox/internal/safego"
 	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
-	"github.com/alibaba/opensandbox/execd/pkg/util/safego"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 )
 

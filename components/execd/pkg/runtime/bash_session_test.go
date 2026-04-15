@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 func TestBashSession_NonZeroExitEmitsError(t *testing.T) {
@@ -519,9 +520,9 @@ func TestBashSession_CloseKillsRunningProcess(t *testing.T) {
 		Timeout: 60 * time.Second,
 		Hooks:   ExecuteResultHook{},
 	}
-	go func() {
+	safego.Go(func() {
 		runDone <- session.run(context.Background(), req)
-	}()
+	})
 
 	// Give the child process time to start.
 	time.Sleep(200 * time.Millisecond)
@@ -557,9 +558,9 @@ func TestBashSession_DeleteBashSessionKillsRunningProcess(t *testing.T) {
 		Timeout:  60 * time.Second,
 		Hooks:    ExecuteResultHook{},
 	}
-	go func() {
+	safego.Go(func() {
 		runDone <- c.RunInBashSession(context.Background(), req)
-	}()
+	})
 
 	time.Sleep(200 * time.Millisecond)
 
@@ -585,10 +586,10 @@ func TestBashSession_CloseWithNoActiveRun(t *testing.T) {
 	require.NoError(t, session.start())
 
 	done := make(chan struct{}, 1)
-	go func() {
+	safego.Go(func() {
 		_ = session.close()
 		done <- struct{}{}
-	}()
+	})
 
 	select {
 	case <-done:

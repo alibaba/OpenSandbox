@@ -17,6 +17,7 @@
 package com.alibaba.opensandbox.sandbox.pool
 
 import com.alibaba.opensandbox.sandbox.Sandbox
+import com.alibaba.opensandbox.sandbox.SandboxManager
 import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
 import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolAcquireFailedException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolEmptyException
@@ -188,6 +189,68 @@ class SandboxPoolTest {
         store.putIdle("test-pool", "id-2")
         assertEquals(2, store.snapshotCounters("test-pool").idleCount)
         val released = pool.releaseAllIdle()
+        assertEquals(2, released)
+        assertEquals(0, store.snapshotCounters("test-pool").idleCount)
+    }
+
+    @Test
+    fun `releaseAllIdle after shutdown uses temporary sandbox manager to kill remote idle sandboxes`() {
+        val store = InMemoryPoolStateStore()
+        val temporaryManager = mockk<SandboxManager>()
+        every { temporaryManager.killSandbox("id-1") } just runs
+        every { temporaryManager.killSandbox("id-2") } just runs
+        every { temporaryManager.close() } just runs
+
+        val pool =
+            SandboxPool(
+                config =
+                    com.alibaba.opensandbox.sandbox.domain.pool.PoolConfig.builder()
+                        .poolName("test-pool")
+                        .ownerId("test-owner")
+                        .maxIdle(2)
+                        .stateStore(store)
+                        .connectionConfig(ConnectionConfig.builder().build())
+                        .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                        .drainTimeout(Duration.ofMillis(50))
+                        .reconcileInterval(Duration.ofSeconds(30))
+                        .build(),
+                sandboxManagerFactory = { temporaryManager },
+            )
+        store.putIdle("test-pool", "id-1")
+        store.putIdle("test-pool", "id-2")
+
+        val released = pool.releaseAllIdle()
+
+        assertEquals(2, released)
+        assertEquals(0, store.snapshotCounters("test-pool").idleCount)
+        verify(exactly = 1) { temporaryManager.killSandbox("id-1") }
+        verify(exactly = 1) { temporaryManager.killSandbox("id-2") }
+        verify(exactly = 1) { temporaryManager.close() }
+    }
+
+    @Test
+    fun `releaseAllIdle drains store even when temporary sandbox manager creation fails`() {
+        val store = InMemoryPoolStateStore()
+        val pool =
+            SandboxPool(
+                config =
+                    com.alibaba.opensandbox.sandbox.domain.pool.PoolConfig.builder()
+                        .poolName("test-pool")
+                        .ownerId("test-owner")
+                        .maxIdle(2)
+                        .stateStore(store)
+                        .connectionConfig(ConnectionConfig.builder().build())
+                        .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                        .drainTimeout(Duration.ofMillis(50))
+                        .reconcileInterval(Duration.ofSeconds(30))
+                        .build(),
+                sandboxManagerFactory = { throw RuntimeException("manager init failed") },
+            )
+        store.putIdle("test-pool", "id-1")
+        store.putIdle("test-pool", "id-2")
+
+        val released = pool.releaseAllIdle()
+
         assertEquals(2, released)
         assertEquals(0, store.snapshotCounters("test-pool").idleCount)
     }
@@ -373,6 +436,7 @@ class SandboxPoolTest {
                 .acquireHealthCheckPollingInterval(Duration.ofMillis(50))
                 .acquireHealthCheck(healthCheck)
                 .acquireSkipHealthCheck()
+                .idleTimeout(Duration.ofMinutes(15))
                 .build()
 
         val configField = pool.javaClass.getDeclaredField("config")
@@ -383,6 +447,33 @@ class SandboxPoolTest {
         assertEquals(Duration.ofMillis(50), config.acquireHealthCheckPollingInterval)
         assertSame(healthCheck, config.acquireHealthCheck)
         assertEquals(true, config.acquireSkipHealthCheck)
+        assertEquals(Duration.ofMinutes(15), config.idleTimeout)
+    }
+
+    @Test
+    fun `start aligns state store idle ttl hook with idleTimeout`() {
+        val store = InMemoryPoolStateStore()
+        val pool =
+            SandboxPool.builder()
+                .poolName("test-pool")
+                .ownerId("test-owner")
+                .maxIdle(2)
+                .stateStore(store)
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .idleTimeout(Duration.ofMinutes(10))
+                .drainTimeout(Duration.ofMillis(50))
+                .reconcileInterval(Duration.ofSeconds(30))
+                .build()
+
+        pool.start()
+        try {
+            store.putIdle("test-pool", "id-1")
+            store.reapExpiredIdle("test-pool", java.time.Instant.now().plus(Duration.ofMinutes(11)))
+            assertEquals(0, store.snapshotCounters("test-pool").idleCount)
+        } finally {
+            pool.shutdown(graceful = false)
+        }
     }
 
     private fun buildPool(): SandboxPool {

@@ -20,6 +20,7 @@ from pydantic import ValidationError
 from opensandbox_server import config as config_module
 from opensandbox_server.config import (
     AppConfig,
+    LogConfig,
     RenewIntentRedisConfig,
     EGRESS_MODE_DNS,
     EGRESS_MODE_DNS_NFT,
@@ -45,9 +46,11 @@ def test_load_config_from_file(tmp_path, monkeypatch):
         [server]
         host = "127.0.0.1"
         port = 9000
-        log_level = "DEBUG"
         api_key = "secret"
         max_sandbox_timeout_seconds = 172800
+
+        [log]
+        level = "DEBUG"
 
         [runtime]
         type = "kubernetes"
@@ -65,7 +68,7 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     loaded = config_module.load_config(config_path)
     assert loaded.server.host == "127.0.0.1"
     assert loaded.server.port == 9000
-    assert loaded.server.log_level == "DEBUG"
+    assert loaded.log.level == "DEBUG"
     assert loaded.server.api_key == "secret"
     assert loaded.server.max_sandbox_timeout_seconds == 172800
     assert loaded.runtime.type == "kubernetes"
@@ -425,11 +428,6 @@ def test_docker_runtime_rejects_gateway_ingress():
     assert app_cfg.ingress.mode == "direct"
 
 
-# ============================================================================
-# StorageConfig Tests
-# ============================================================================
-
-
 def test_storage_config_defaults():
     """StorageConfig should default to empty allowed_host_paths list."""
     cfg = StorageConfig()
@@ -502,11 +500,6 @@ def test_load_config_without_storage_block_uses_defaults(tmp_path, monkeypatch):
     loaded = config_module.load_config(config_path)
     assert loaded.storage is not None
     assert loaded.storage.allowed_host_paths == []
-
-
-# ============================================================================
-# SecureRuntimeConfig Tests
-# ============================================================================
 
 
 def test_secure_runtime_empty_type_is_valid():
@@ -692,6 +685,249 @@ def test_kubernetes_runtime_with_firecracker_is_valid():
 
 
 def test_egress_config_mode_literal():
-    assert EgressConfig(image="opensandbox/egress:v1").mode == EGRESS_MODE_DNS
+    base = EgressConfig(image="opensandbox/egress:v1")
+    assert base.mode == EGRESS_MODE_DNS
+    assert base.disable_ipv6 is True
     cfg = EgressConfig(image="opensandbox/egress:v1", mode=EGRESS_MODE_DNS_NFT)
     assert cfg.mode == EGRESS_MODE_DNS_NFT
+
+
+def test_log_config_defaults():
+    """LogConfig should have sensible defaults."""
+    cfg = LogConfig()
+    assert cfg.level == "INFO"
+    assert cfg.file_enabled is False
+    assert cfg.file_path is None
+    assert cfg.access_file_path is None
+    assert cfg.file_max_bytes == 100 * 1024 * 1024  # 100MB
+    assert cfg.file_backup_count == 5
+
+
+def test_log_config_resolved_file_path():
+    """resolved_file_path() should return None when file_enabled=False."""
+    cfg = LogConfig(file_enabled=False)
+    assert cfg.resolved_file_path() is None
+
+    # file_enabled=True without file_path uses default
+    cfg = LogConfig(file_enabled=True)
+    assert cfg.resolved_file_path() == LogConfig.DEFAULT_FILE_PATH
+
+    # file_enabled=True with file_path uses custom path
+    cfg = LogConfig(file_enabled=True, file_path="/custom/path.log")
+    assert cfg.resolved_file_path() == "/custom/path.log"
+
+
+def test_log_config_resolved_access_file_path():
+    """resolved_access_file_path() should return default path when file_enabled."""
+    # file_enabled=False always returns None
+    cfg = LogConfig(file_enabled=False, access_file_path="/path/access.log")
+    assert cfg.resolved_access_file_path() is None
+
+    # file_enabled=True without access_file_path returns default path
+    cfg = LogConfig(file_enabled=True)
+    assert cfg.resolved_access_file_path() == LogConfig.DEFAULT_ACCESS_FILE_PATH
+
+    # file_enabled=True with access_file_path returns the custom path
+    cfg = LogConfig(file_enabled=True, access_file_path="/custom/access.log")
+    assert cfg.resolved_access_file_path() == "/custom/access.log"
+
+
+def test_log_config_level_min_length():
+    """LogConfig level must be at least 3 characters."""
+    with pytest.raises(ValidationError):
+        LogConfig(level="AB")
+    cfg = LogConfig(level="DEBUG")
+    assert cfg.level == "DEBUG"
+
+
+def test_log_config_file_max_bytes_validation():
+    """LogConfig file_max_bytes must be at least 1."""
+    with pytest.raises(ValidationError):
+        LogConfig(file_max_bytes=0)
+    cfg = LogConfig(file_max_bytes=50 * 1024 * 1024)  # 50MB
+    assert cfg.file_max_bytes == 50 * 1024 * 1024
+
+
+def test_log_config_file_backup_count_validation():
+    """LogConfig file_backup_count must be >= 0."""
+    with pytest.raises(ValidationError):
+        LogConfig(file_backup_count=-1)
+    cfg = LogConfig(file_backup_count=10)
+    assert cfg.file_backup_count == 10
+    cfg_zero = LogConfig(file_backup_count=0)
+    assert cfg_zero.file_backup_count == 0
+
+
+def test_app_config_log_defaults():
+    """AppConfig should include default LogConfig."""
+    cfg = AppConfig(
+        runtime=RuntimeConfig(type="docker", execd_image="test:latest")
+    )
+    assert cfg.log is not None
+    assert cfg.log.level == "INFO"
+    assert cfg.log.file_path is None
+
+
+def test_load_config_with_log_subsection(tmp_path, monkeypatch):
+    """LogConfig should be loaded from [log] TOML section."""
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [log]
+        level = "DEBUG"
+        file_path = "/var/log/opensandbox/server.log"
+        file_max_bytes = 52428800
+        file_backup_count = 3
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.log.level == "DEBUG"
+    assert loaded.log.file_path == "/var/log/opensandbox/server.log"
+    assert loaded.log.file_max_bytes == 52428800
+    assert loaded.log.file_backup_count == 3
+
+
+def test_load_config_without_log_subsection_uses_defaults(tmp_path, monkeypatch):
+    """AppConfig should use default LogConfig when [log] is not in TOML."""
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.log.level == "INFO"
+    assert loaded.log.file_path is None
+    assert loaded.log.file_max_bytes == 100 * 1024 * 1024
+    assert loaded.log.file_backup_count == 5
+
+
+def test_load_config_log_file_path_only(tmp_path, monkeypatch):
+    """LogConfig should accept only file_path with other defaults."""
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [log]
+        file_path = "/var/log/test.log"
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.log.level == "INFO"  # default
+    assert loaded.log.file_path == "/var/log/test.log"
+    assert loaded.log.access_file_path is None  # default
+    assert loaded.log.file_max_bytes == 100 * 1024 * 1024  # default
+    assert loaded.log.file_backup_count == 5  # default
+
+
+def test_load_config_log_access_file_path(tmp_path, monkeypatch):
+    """LogConfig should accept access_file_path for separate access log file."""
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [log]
+        file_path = "/var/log/opensandbox/server.log"
+        access_file_path = "/var/log/opensandbox/access.log"
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.log.file_path == "/var/log/opensandbox/server.log"
+    assert loaded.log.access_file_path == "/var/log/opensandbox/access.log"
+
+
+def test_load_config_log_file_enabled(tmp_path, monkeypatch):
+    """LogConfig file_enabled should enable file logging with default paths."""
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [log]
+        file_enabled = true
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.log.file_enabled is True
+    assert loaded.log.file_path is None  # not set, uses default
+    assert loaded.log.access_file_path is None
+    # resolved_* methods should return default paths
+    assert loaded.log.resolved_file_path() == LogConfig.DEFAULT_FILE_PATH
+    assert loaded.log.resolved_access_file_path() == LogConfig.DEFAULT_ACCESS_FILE_PATH
+
+
+def test_load_config_log_file_enabled_with_custom_paths(tmp_path, monkeypatch):
+    """LogConfig file_enabled with custom paths should use those paths."""
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [log]
+        file_enabled = true
+        file_path = "/custom/server.log"
+        access_file_path = "/custom/access.log"
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.log.file_enabled is True
+    assert loaded.log.resolved_file_path() == "/custom/server.log"
+    assert loaded.log.resolved_access_file_path() == "/custom/access.log"

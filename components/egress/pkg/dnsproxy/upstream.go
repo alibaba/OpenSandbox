@@ -24,6 +24,8 @@ import (
 
 	"github.com/miekg/dns"
 
+	"github.com/alibaba/opensandbox/internal/safego"
+
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 )
@@ -97,10 +99,12 @@ func (p *Proxy) probeUpstreams() {
 	var wg sync.WaitGroup
 	for i := range all {
 		wg.Add(1)
-		go func(idx int, addr string) {
+		idx := i
+		addr := all[i]
+		safego.Go(func() {
 			defer wg.Done()
 			healthy[idx] = p.probeOneUpstream(addr, timeout)
-		}(i, all[i])
+		})
 	}
 	wg.Wait()
 

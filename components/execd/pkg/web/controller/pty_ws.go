@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alibaba/opensandbox/internal/safego"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 
@@ -50,7 +51,7 @@ const (
 //  2. Acquire exclusive WS lock → 409 if already held
 //  3. Upgrade HTTP → WebSocket
 //  4. Start bash if not already running
-//  5+6. AtomicAttachOutputWithSnapshot (snapshot + attach under outMu — no loss window)
+//     5+6. AtomicAttachOutputWithSnapshot (snapshot + attach under outMu — no loss window)
 //  7. defer: detach → pumpWg.Wait → UnlockWS
 //  8. Send replay frame if snapshot non-empty
 //  9. Send connected frame
@@ -187,21 +188,25 @@ func PTYSessionWebSocket(ctx *gin.Context) {
 	}
 
 	// 10a. RFC 6455 binary ping goroutine (30 s interval).
-	go ptyPingLoop(conn, &connMu, cancelCh, cancelOnce)
+	safego.Go(func() { ptyPingLoop(conn, &connMu, cancelCh, cancelOnce) })
 
 	// 10b. Launch stdout pump.
 	pumpWg.Add(1)
-	go ptyStreamPump(stdoutR, model.BinStdout, "stdout", id, conn, &connMu, &pumpWg, cancelCh, cancelOnce)
+	safego.Go(func() {
+		ptyStreamPump(stdoutR, model.BinStdout, "stdout", id, conn, &connMu, &pumpWg, cancelCh, cancelOnce)
+	})
 
 	// 10c. Launch stderr pump (pipe mode only).
 	if stderrR != nil {
 		pumpWg.Add(1)
-		go ptyStreamPump(stderrR, model.BinStderr, "stderr", id, conn, &connMu, &pumpWg, cancelCh, cancelOnce)
+		safego.Go(func() {
+			ptyStreamPump(stderrR, model.BinStderr, "stderr", id, conn, &connMu, &pumpWg, cancelCh, cancelOnce)
+		})
 	}
 
 	// 10d. Exit watcher: waits for the process to exit, then sends exit frame
 	// and closes the WS connection immediately (unblocks ReadJSON in the read loop).
-	go ptyExitWatcher(session, writeJSON, closeConn, cancelCh, cancelOnce)
+	safego.Go(func() { ptyExitWatcher(session, writeJSON, closeConn, cancelCh, cancelOnce) })
 
 	// 11. Client read loop.
 	ptyClientReadLoop(conn, session, id, writeJSON, cancelCh, cancelOnce)

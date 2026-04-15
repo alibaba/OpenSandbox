@@ -28,7 +28,7 @@ import (
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
-	"github.com/alibaba/opensandbox/execd/pkg/util/safego"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 // runCommand executes shell commands and streams their output on Windows.

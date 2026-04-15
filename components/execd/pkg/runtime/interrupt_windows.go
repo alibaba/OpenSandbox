@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 // Interrupt stops execution in the specified session.
@@ -55,10 +56,10 @@ func (c *Controller) killPid(pid int) error {
 
 	// Best-effort wait to reduce zombies; os.Process.Wait only works for child processes.
 	done := make(chan error, 1)
-	go func() {
+	safego.Go(func() {
 		_, err := process.Wait()
 		done <- err
-	}()
+	})
 
 	select {
 	case <-done:

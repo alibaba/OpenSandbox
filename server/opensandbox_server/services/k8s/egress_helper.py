@@ -33,7 +33,7 @@ from opensandbox_server.services.constants import (
 
 def prep_execd_init_for_egress(exec_install_script: str) -> tuple[str, Dict[str, Any]]:
     """
-    Prepare execd init when an egress sidecar is used: disable IPv6 in the Pod netns, then install.
+    Prepare execd init when ``egress.disable_ipv6`` is true: disable IPv6 in the Pod netns, then install.
 
     Writes ``/proc/sys/.../disable_ipv6`` (no ``sysctl`` binary required). The returned
     security context dict must be applied to the execd init container (typically via
@@ -77,8 +77,8 @@ def apply_egress_to_spec(
     egress_mode: str = EGRESS_MODE_DNS,
 ) -> None:
     """
-    Append the egress sidecar to ``containers``. IPv6 is handled in execd init
-    (``prep_execd_init_for_egress``); Pod-level sysctls are not modified.
+    Append the egress sidecar to ``containers``. When ``egress.disable_ipv6`` is enabled,
+    IPv6 is handled in execd init (``prep_execd_init_for_egress``); Pod-level sysctls are not modified.
     """
     if not network_policy or not egress_image:
         return

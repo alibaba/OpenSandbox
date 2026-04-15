@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Unit tests for K8sClient.
-"""
-
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -24,9 +20,7 @@ from kubernetes.client import ApiException
 from opensandbox_server.config import KubernetesRuntimeConfig
 from opensandbox_server.services.k8s.client import K8sClient
 
-
 class TestK8sClient:
-    """K8sClient unit tests"""
     
     def test_init_with_kubeconfig_loads_successfully(self, k8s_runtime_config):
         """Verify successful initialization with kubeconfig path."""
@@ -109,10 +103,6 @@ class TestK8sClient:
             client.get_core_v1_api()
             assert mock_api_class.call_count == 1
 
-    # ------------------------------------------------------------------
-    # Rate limiter initialization
-    # ------------------------------------------------------------------
-
     def test_no_rate_limiters_when_qps_is_zero(self, k8s_runtime_config):
         """read_qps=0 and write_qps=0 means no rate limiters are created."""
         with patch('kubernetes.config.load_kube_config'):
@@ -135,10 +125,6 @@ class TestK8sClient:
             client = K8sClient(config)
             assert client._read_limiter is None
             assert client._write_limiter is not None
-
-    # ------------------------------------------------------------------
-    # CustomObject CRUD
-    # ------------------------------------------------------------------
 
     def _make_client(self, k8s_runtime_config):
         """Return a K8sClient with mocked kubeconfig and raw API handles."""
@@ -266,10 +252,6 @@ class TestK8sClient:
             name="foo-1", body=body
         )
 
-    # ------------------------------------------------------------------
-    # Secret / Pod / RuntimeClass
-    # ------------------------------------------------------------------
-
     def test_create_secret_delegates_to_api(self, k8s_runtime_config):
         """create_secret forwards to CoreV1Api.create_namespaced_secret."""
         c = self._make_client(k8s_runtime_config)
@@ -304,10 +286,6 @@ class TestK8sClient:
         result = c.read_runtime_class("gvisor")
         c._node_v1_api.read_runtime_class.assert_called_once_with("gvisor")
         assert result is not None
-
-    # ------------------------------------------------------------------
-    # Write limiter integration
-    # ------------------------------------------------------------------
 
     def test_write_limiter_called_on_create(self, k8s_runtime_config):
         """create_custom_object acquires the write limiter before calling the API."""

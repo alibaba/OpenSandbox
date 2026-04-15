@@ -1,4 +1,4 @@
-// Copyright 2025 Alibaba Group Holding Ltd.
+// Copyright 2026 Alibaba Group Holding Ltd.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,25 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package safego
+package execd
 
-import (
-	"context"
-	"sync"
-	"testing"
-)
-
-func Test_Go(t *testing.T) {
-	ctx, cancelFunc := context.WithCancel(context.Background())
-	defer cancelFunc()
-
-	InitPanicLogger(ctx)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	Go(func() {
-		defer wg.Done()
-		panic("I'm done")
-	})
-	wg.Wait()
-}
+//go:generate oapi-codegen --config cfg.yaml ../specs/execd-api.yaml

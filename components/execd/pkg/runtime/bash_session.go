@@ -44,6 +44,13 @@ const (
 )
 
 func (c *Controller) createBashSession(req *CreateContextRequest) (string, error) {
+	if req.Cwd != "" {
+		err := os.MkdirAll(req.Cwd, os.ModePerm)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	session := newBashSession(req.Cwd)
 	if err := session.start(); err != nil {
 		return "", fmt.Errorf("failed to start bash session: %w", err)
@@ -99,7 +106,6 @@ func (c *Controller) DeleteBashSession(sessionID string) error {
 	return c.closeBashSession(sessionID)
 }
 
-// Session implementation (pipe-based, no PTY)
 func newBashSession(cwd string) *bashSession {
 	config := &bashSessionConfig{
 		Session:        uuidString(),

@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/alibaba/opensandbox/internal/safego"
 	"github.com/creack/pty"
 
 	"github.com/alibaba/opensandbox/execd/pkg/log"
@@ -183,8 +184,8 @@ func (s *ptySession) StartPTY() error {
 	s.doneCh = make(chan struct{})
 	s.stdin = ptmx // write to the PTY master to feed stdin
 
-	go s.broadcastPTY()
-	go s.waitAndExit(cmd, ptmx)
+	safego.Go(func() { s.broadcastPTY() })
+	safego.Go(func() { s.waitAndExit(cmd, ptmx) })
 
 	return nil
 }
@@ -251,9 +252,9 @@ func (s *ptySession) StartPipe() error {
 	s.doneCh = make(chan struct{})
 	s.stdin = stdinW
 
-	go s.broadcastPipe(stdoutR, true)
-	go s.broadcastPipe(stderrR, false)
-	go s.waitAndExitPipe(cmd, stdinW, stdoutR, stderrR)
+	safego.Go(func() { s.broadcastPipe(stdoutR, true) })
+	safego.Go(func() { s.broadcastPipe(stderrR, false) })
+	safego.Go(func() { s.waitAndExitPipe(cmd, stdinW, stdoutR, stderrR) })
 
 	return nil
 }
@@ -542,11 +543,17 @@ func (s *ptySession) close() {
 }
 
 // CreatePTYSession creates a new PTY session and stores it in the map.
-func (c *Controller) CreatePTYSession(id, cwd string) PTYSession {
+func (c *Controller) CreatePTYSession(id, cwd string) (PTYSession, error) {
+	if cwd != "" {
+		err := os.MkdirAll(cwd, os.ModePerm)
+		if err != nil {
+			return nil, fmt.Errorf("error creating PTY session work directory: %w", err)
+		}
+	}
 	s := newPTYSession(id, cwd)
 	c.ptySessionMap.Store(id, s)
 	log.Info("created pty session %s", id)
-	return s
+	return s, nil
 }
 
 // getPTYSession looks up a PTY session by ID. Returns nil if not found.

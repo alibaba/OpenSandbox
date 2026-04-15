@@ -27,6 +27,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 // replayContains polls the replay buffer until it contains substr or timeout expires.
@@ -54,7 +56,7 @@ func TestPTYSession_BasicExecution(t *testing.T) {
 
 	stdoutR, _, detach := s.AttachOutput()
 	defer detach()
-	go io.Copy(io.Discard, stdoutR) //nolint:errcheck
+	safego.Go(func() { _, _ = io.Copy(io.Discard, stdoutR) }) //nolint:errcheck
 
 	_, err := s.WriteStdin([]byte("echo hello_pty\n"))
 	require.NoError(t, err)
@@ -87,7 +89,7 @@ func TestPTYSession_ResizeWinsize(t *testing.T) {
 	// Attach output so the broadcast goroutine has a sink and fills the replay buffer.
 	stdoutR, _, detach := s.AttachOutput()
 	defer detach()
-	go io.Copy(io.Discard, stdoutR) //nolint:errcheck
+	safego.Go(func() { _, _ = io.Copy(io.Discard, stdoutR) }) //nolint:errcheck
 
 	// Wait for bash to start (prompt appears).
 	time.Sleep(150 * time.Millisecond)
@@ -113,7 +115,7 @@ func TestPTYSession_ANSISequences(t *testing.T) {
 
 	stdoutR, _, detach := s.AttachOutput()
 	defer detach()
-	go io.Copy(io.Discard, stdoutR) //nolint:errcheck
+	safego.Go(func() { _, _ = io.Copy(io.Discard, stdoutR) }) //nolint:errcheck
 
 	// Send printf with explicit ESC bytes via $'\033'.
 	_, err := s.WriteStdin([]byte("printf $'\\033[1;32mGREEN\\033[0m\\n'\n"))
@@ -144,20 +146,20 @@ func TestPTYSession_PipeMode(t *testing.T) {
 	require.NotNil(t, stderrR)
 
 	stdoutCh := make(chan string, 32)
-	go func() {
+	safego.Go(func() {
 		sc := bufio.NewScanner(stdoutR)
 		for sc.Scan() {
 			stdoutCh <- sc.Text()
 		}
-	}()
+	})
 
 	stderrCh := make(chan string, 32)
-	go func() {
+	safego.Go(func() {
 		sc := bufio.NewScanner(stderrR)
 		for sc.Scan() {
 			stderrCh <- sc.Text()
 		}
-	}()
+	})
 
 	_, err := s.WriteStdin([]byte("echo hello_pipe\necho err_pipe >&2\n"))
 	require.NoError(t, err)
@@ -179,7 +181,7 @@ func TestPTYSession_ReconnectReplay(t *testing.T) {
 
 	// First connection — drain output so replay buffer fills.
 	stdoutR1, _, detach1 := s.AttachOutput()
-	go io.Copy(io.Discard, stdoutR1) //nolint:errcheck
+	safego.Go(func() { _, _ = io.Copy(io.Discard, stdoutR1) }) //nolint:errcheck
 
 	_, err := s.WriteStdin([]byte("echo first_output\n"))
 	require.NoError(t, err)
@@ -201,7 +203,7 @@ func TestPTYSession_ReconnectReplay(t *testing.T) {
 	// Second connection.
 	stdoutR2, _, detach2 := s.AttachOutput()
 	defer detach2()
-	go io.Copy(io.Discard, stdoutR2) //nolint:errcheck
+	safego.Go(func() { _, _ = io.Copy(io.Discard, stdoutR2) }) //nolint:errcheck
 
 	offsetAfterFirst := int64(len(replay))
 
@@ -228,7 +230,7 @@ func TestPTYSession_SendSIGINT(t *testing.T) {
 
 	stdoutR, _, detach := s.AttachOutput()
 	defer detach()
-	go io.Copy(io.Discard, stdoutR) //nolint:errcheck
+	safego.Go(func() { _, _ = io.Copy(io.Discard, stdoutR) }) //nolint:errcheck
 
 	// Start a sleep inside the PTY.
 	_, err := s.WriteStdin([]byte("sleep 30\n"))
@@ -274,7 +276,7 @@ func TestPTYSession_ExitCode(t *testing.T) {
 	require.NoError(t, s.StartPTY())
 
 	stdoutR, _, detach := s.AttachOutput()
-	go io.Copy(io.Discard, stdoutR) //nolint:errcheck
+	safego.Go(func() { _, _ = io.Copy(io.Discard, stdoutR) }) //nolint:errcheck
 
 	_, _ = s.WriteStdin([]byte("exit 42\n"))
 
@@ -303,7 +305,7 @@ func TestPTYSession_ControllerCRUD(t *testing.T) {
 	c := NewController("", "")
 	id := uuidString()
 
-	sess := c.CreatePTYSession(id, "")
+	sess, _ := c.CreatePTYSession(id, "")
 	require.NotNil(t, sess)
 
 	got := c.GetPTYSession(id)

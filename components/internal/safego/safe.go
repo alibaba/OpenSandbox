@@ -16,14 +16,14 @@ package safego
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"runtime"
 
+	"github.com/alibaba/opensandbox/internal/logger"
 	runtimeutil "k8s.io/apimachinery/pkg/util/runtime"
 )
 
-func InitPanicLogger(_ context.Context) {
+func InitPanicLogger(_ context.Context, log logger.Logger) {
 	runtimeutil.PanicHandlers = []func(context.Context, any){
 		func(_ context.Context, r any) {
 			if r == http.ErrAbortHandler { // nolint:errorlint
@@ -34,9 +34,9 @@ func InitPanicLogger(_ context.Context) {
 			stacktrace := make([]byte, size)
 			stacktrace = stacktrace[:runtime.Stack(stacktrace, false)]
 			if _, ok := r.(string); ok {
-				log.Printf("Observed a panic: %s\n%s", r, stacktrace)
+				log.Errorf("Observed a panic: %s\n%s", r, stacktrace)
 			} else {
-				log.Printf("Observed a panic: %#v (%v)\n%s", r, r, stacktrace)
+				log.Errorf("Observed a panic: %#v (%v)\n%s", r, r, stacktrace)
 			}
 		},
 	}

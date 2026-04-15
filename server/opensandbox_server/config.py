@@ -26,7 +26,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, ClassVar, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
@@ -226,6 +226,65 @@ class IngressConfig(BaseModel):
         return self
 
 
+class LogConfig(BaseModel):
+    """Logging configuration."""
+
+    level: str = Field(
+        default="INFO",
+        description="Python logging level for the server process.",
+        min_length=3,
+    )
+    file_enabled: bool = Field(
+        default=False,
+        description=(
+            "When true, logs are written to rotating files instead of stdout. "
+            "Uses default paths (/var/log/opensandbox/) unless file_path/access_file_path are set."
+        ),
+    )
+    file_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to the main log file. When file_enabled=true and this is unset, "
+            "defaults to ~/logs/opensandbox/server.log."
+        ),
+    )
+    access_file_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to the HTTP access log file. When file_enabled=true, access logs are written "
+            "to a separate file by default (~/logs/opensandbox/access.log). Set this to override "
+            "the path. Example: '~/logs/opensandbox/access.log'."
+        ),
+    )
+    file_max_bytes: int = Field(
+        default=100 * 1024 * 1024,  # 100MB
+        ge=1,
+        description="Maximum size of each log file in bytes before rotation (default: 100MB).",
+    )
+    file_backup_count: int = Field(
+        default=5,
+        ge=0,
+        description="Number of backup log files to keep after rotation (default: 5).",
+    )
+
+    # Default paths when file_enabled=true and user paths are not set.
+    # Uses ~/logs/opensandbox/ which is writable for non-root users.
+    DEFAULT_FILE_PATH: ClassVar[str] = str(Path.home() / "logs" / "opensandbox" / "server.log")
+    DEFAULT_ACCESS_FILE_PATH: ClassVar[str] = str(Path.home() / "logs" / "opensandbox" / "access.log")
+
+    def resolved_file_path(self) -> Optional[str]:
+        """Return the effective file path, using default if file_enabled and not overridden."""
+        if not self.file_enabled:
+            return None
+        return self.file_path or self.DEFAULT_FILE_PATH
+
+    def resolved_access_file_path(self) -> Optional[str]:
+        """Return the effective access file path (defaults to separate file when file_enabled)."""
+        if not self.file_enabled:
+            return None
+        return self.access_file_path or self.DEFAULT_ACCESS_FILE_PATH
+
+
 class ServerConfig(BaseModel):
     """FastAPI server configuration."""
 
@@ -247,11 +306,6 @@ class ServerConfig(BaseModel):
             "Idle keep-alive timeout in seconds passed to uvicorn. "
             "Connections idle longer than this may be closed by the server."
         ),
-    )
-    log_level: str = Field(
-        default="INFO",
-        description="Python logging level for the server process.",
-        min_length=3,
     )
     api_key: Optional[str] = Field(
         default=None,
@@ -417,6 +471,7 @@ class StorageConfig(BaseModel):
         ),
     )
 
+DEFAULT_EGRESS_DISABLE_IPV6 = True
 
 class EgressConfig(BaseModel):
     """Egress sidecar configuration."""
@@ -432,6 +487,14 @@ class EgressConfig(BaseModel):
     ] = Field(
         default=EGRESS_MODE_DNS,
         description="Egress enforcement passed to the sidecar as OPENSANDBOX_EGRESS_MODE (dns or dns+nft).",
+    )
+    disable_ipv6: bool = Field(
+        default=DEFAULT_EGRESS_DISABLE_IPV6,
+        description=(
+            "Default true: egress IPv6 support is incomplete, especially on Kubernetes runtime. "
+            "Set false only if you intentionally leave IPv6 enabled in the sandbox netns "
+            "(e.g. IPv4-only CNI or experimenting with IPv6 egress despite gaps)."
+        ),
     )
 
 
@@ -567,6 +630,10 @@ class AppConfig(BaseModel):
     """Root application configuration model."""
 
     server: ServerConfig = Field(default_factory=ServerConfig)
+    log: LogConfig = Field(
+        default_factory=LogConfig,
+        description="Logging configuration (level, file output, rotation).",
+    )
     renew_intent: RenewIntentConfig = Field(
         default_factory=RenewIntentConfig,
         description="Auto-renew sandbox expiration when reverse-proxy access is observed.",
@@ -696,6 +763,7 @@ __all__ = [
     "RenewIntentConfig",
     "RenewIntentRedisConfig",
     "ServerConfig",
+    "LogConfig",
     "RuntimeConfig",
     "IngressConfig",
     "GatewayConfig",

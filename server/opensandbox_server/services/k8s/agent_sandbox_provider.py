@@ -29,7 +29,7 @@ from kubernetes.client import (
     V1VolumeMount,
 )
 
-from opensandbox_server.config import AppConfig, EGRESS_MODE_DNS
+from opensandbox_server.config import AppConfig, DEFAULT_EGRESS_DISABLE_IPV6, EGRESS_MODE_DNS
 from opensandbox_server.services.helpers import format_ingress_endpoint
 from opensandbox_server.api.schema import Endpoint, ImageSpec, NetworkPolicy, PlatformSpec, Volume
 from opensandbox_server.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
@@ -106,6 +106,12 @@ class AgentSandboxProvider(WorkloadProvider):
         self.resolver = SecureRuntimeResolver(app_config) if app_config else None
         self.runtime_class = (
             self.resolver.get_k8s_runtime_class() if self.resolver else None
+        )
+
+        self.egress_disable_ipv6 = (
+            bool(app_config.egress.disable_ipv6)
+            if app_config and app_config.egress is not None
+            else DEFAULT_EGRESS_DISABLE_IPV6
         )
 
     def _resource_name(self, sandbox_id: str) -> str:
@@ -250,7 +256,11 @@ class AgentSandboxProvider(WorkloadProvider):
         egress_mode: str = EGRESS_MODE_DNS,
     ) -> Dict[str, Any]:
         """Build pod spec dict for the Sandbox CRD."""
-        disable_ipv6_for_egress = network_policy is not None and egress_image is not None
+        disable_ipv6_for_egress = (
+            network_policy is not None
+            and egress_image is not None
+            and self.egress_disable_ipv6
+        )
         init_container = self._build_execd_init_container(
             execd_image, disable_ipv6_for_egress=disable_ipv6_for_egress
         )
@@ -298,7 +308,10 @@ class AgentSandboxProvider(WorkloadProvider):
         *,
         disable_ipv6_for_egress: bool = False,
     ) -> V1Container:
-        """Build init container that copies execd binary to the shared volume."""
+        """Build init container that copies execd binary to the shared volume.
+
+        ``disable_ipv6_for_egress`` is True only when ``egress.disable_ipv6`` is set and egress is used.
+        """
         script = (
             "cp ./execd /opt/opensandbox/bin/execd && "
             "cp ./bootstrap.sh /opt/opensandbox/bin/bootstrap.sh && "

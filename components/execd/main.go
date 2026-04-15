@@ -20,12 +20,12 @@ import (
 
 	"github.com/alibaba/opensandbox/internal/version"
 
+	_ "github.com/alibaba/opensandbox/internal/safego"
 	_ "go.uber.org/automaxprocs/maxprocs"
 
 	"github.com/alibaba/opensandbox/execd/pkg/clone3compat"
 	"github.com/alibaba/opensandbox/execd/pkg/flag"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
-	_ "github.com/alibaba/opensandbox/execd/pkg/util/safego"
 	"github.com/alibaba/opensandbox/execd/pkg/web"
 	"github.com/alibaba/opensandbox/execd/pkg/web/controller"
 )

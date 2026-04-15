@@ -25,8 +25,15 @@
 [server]
 host = "0.0.0.0"
 port = 8080
-log_level = "INFO"
 # api_key = "your-secret-api-key"  # Optional: Uncomment to enable API key authentication
+
+[log]
+level = "INFO"
+file_enabled = true  # When true, logs go to rotating files instead of stdout
+# file_path = "~/logs/opensandbox/server.log"  # Optional: override default server log path
+# access_file_path = "~/logs/opensandbox/access.log"  # Optional: override default access log path
+# file_max_bytes = 104857600  # 100MB - max file size before rotation
+# file_backup_count = 5       # Number of rotated files to keep
 
 # 🧪 [EXPERIMENTAL] Renew-on-access. Off by default — see server/README.md.
 [renew_intent]
@@ -39,7 +46,7 @@ redis.consumer_concurrency = 8
 
 [runtime]
 type = "kubernetes"
-execd_image = "opensandbox/execd:v1.0.10"
+execd_image = "opensandbox/execd:v1.0.11"
 
 [storage]
 # Volume and storage configuration
@@ -78,6 +85,8 @@ mode = "direct"
 [egress]
 # Egress configuration
 # -----------------------------------------------------------------
-image = "opensandbox/egress:v1.0.6"
+image = "opensandbox/egress:v1.0.7"
 # Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
 mode = "dns"
+# Default is true (recommended for dual-stack CNI). Set false only if you need IPv6 in the netns (see server/configuration.md).
+# disable_ipv6 = false

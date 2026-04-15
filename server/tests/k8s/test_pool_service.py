@@ -12,12 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Unit tests for PoolService (server/opensandbox_server/services/k8s/pool_service.py).
-
-All tests mock the Kubernetes CustomObjectsApi so no cluster connection is needed.
-"""
-
 import pytest
 from unittest.mock import MagicMock
 from kubernetes.client import ApiException
@@ -31,10 +25,6 @@ from opensandbox_server.services.constants import SandboxErrorCodes
 from opensandbox_server.services.k8s.pool_service import PoolService
 from fastapi import HTTPException
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _make_raw_pool(
     name: str = "my-pool",
@@ -98,10 +88,6 @@ def _capacity_spec(
     )
 
 
-# ---------------------------------------------------------------------------
-# _pool_from_raw
-# ---------------------------------------------------------------------------
-
 class TestPoolFromRaw:
     def test_full_pool_with_status(self):
         svc, _ = _make_pool_service()
@@ -146,10 +132,6 @@ class TestPoolFromRaw:
         assert result.capacity_spec.buffer_max == 0
         assert result.capacity_spec.pool_max == 0
 
-
-# ---------------------------------------------------------------------------
-# create_pool
-# ---------------------------------------------------------------------------
 
 class TestCreatePool:
     def test_create_pool_calls_k8s_api_with_correct_manifest(self):
@@ -235,10 +217,6 @@ class TestCreatePool:
         assert exc_info.value.detail["code"] == SandboxErrorCodes.K8S_POOL_API_ERROR
 
 
-# ---------------------------------------------------------------------------
-# get_pool
-# ---------------------------------------------------------------------------
-
 class TestGetPool:
     def test_get_pool_returns_correct_pool(self):
         svc, mock_api = _make_pool_service()
@@ -288,10 +266,6 @@ class TestGetPool:
 
         assert exc_info.value.status_code == 500
 
-
-# ---------------------------------------------------------------------------
-# list_pools
-# ---------------------------------------------------------------------------
 
 class TestListPools:
     def test_list_pools_returns_all_items(self):
@@ -346,10 +320,6 @@ class TestListPools:
         assert exc_info.value.status_code == 500
 
 
-# ---------------------------------------------------------------------------
-# update_pool
-# ---------------------------------------------------------------------------
-
 class TestUpdatePool:
     def test_update_pool_sends_correct_patch(self):
         svc, mock_api = _make_pool_service()
@@ -399,10 +369,6 @@ class TestUpdatePool:
 
         assert exc_info.value.status_code == 500
 
-
-# ---------------------------------------------------------------------------
-# delete_pool
-# ---------------------------------------------------------------------------
 
 class TestDeletePool:
     def test_delete_pool_calls_k8s_delete(self):
@@ -459,10 +425,6 @@ class TestDeletePool:
 
         assert exc_info.value.status_code == 500
 
-
-# ---------------------------------------------------------------------------
-# _build_pool_manifest
-# ---------------------------------------------------------------------------
 
 class TestBuildPoolManifest:
     def test_manifest_has_correct_structure(self):

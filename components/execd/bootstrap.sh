@@ -16,12 +16,59 @@
 
 set -e
 
+# Returns 0 if the value looks like a boolean "true" (1, true, yes, on).
+is_truthy() {
+	case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+	1 | true | yes | on) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# Install mitm egress CA into the system trust store (no extra env vars).
+# - Debian/Ubuntu/Alpine: update-ca-certificates + /usr/local/share/ca-certificates/
+# - RHEL/CentOS/Fedora/Alma/Rocky: update-ca-trust + /etc/pki/ca-trust/source/anchors/
+trust_mitm_ca() {
+	cert="$1"
+	if command -v update-ca-certificates >/dev/null 2>&1; then
+		mkdir -p /usr/local/share/ca-certificates
+		cp "$cert" /usr/local/share/ca-certificates/opensandbox-mitmproxy-ca.crt
+		update-ca-certificates
+		return 0
+	fi
+	if command -v update-ca-trust >/dev/null 2>&1; then
+		mkdir -p /etc/pki/ca-trust/source/anchors
+		cp "$cert" /etc/pki/ca-trust/source/anchors/opensandbox-mitmproxy-ca.pem
+		if ! update-ca-trust extract; then
+			update-ca-trust
+		fi
+		return 0
+	fi
+	echo "warning: cannot install mitm CA (need update-ca-certificates or update-ca-trust)" >&2
+	return 1
+}
+
+MITM_CA="/opt/opensandbox/mitmproxy-ca-cert.pem"
+if is_truthy "${OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT:-}"; then
+	i=0
+	while [ "$i" -lt 10 ]; do
+		if [ -f "$MITM_CA" ] && [ -s "$MITM_CA" ]; then
+			break
+		fi
+		sleep 1
+		i=$((i + 1))
+	done
+	if [ ! -f "$MITM_CA" ] || [ ! -s "$MITM_CA" ]; then
+		echo "warning: timed out after 10s waiting for $MITM_CA (egress mitm CA export); continuing without system CA trust" >&2
+	elif ! trust_mitm_ca "$MITM_CA"; then
+		echo "warning: failed to install mitm CA into system trust store; TLS interception may not work for system libraries" >&2
+	fi
+fi
+
 EXECD="${EXECD:=/opt/opensandbox/execd}"
 
 if [ -z "${EXECD_ENVS:-}" ]; then
 	EXECD_ENVS="/opt/opensandbox/.env"
 fi
-# Best-effort ensure file exists.
 if ! mkdir -p "$(dirname "$EXECD_ENVS")" 2>/dev/null; then
 	echo "warning: failed to create dir for EXECD_ENVS=$EXECD_ENVS" >&2
 fi

@@ -70,6 +70,13 @@ class TestJsonOutput:
         assert data[0]["id"] == "1"
         assert data[1]["name"] == "b"
 
+    def test_success_renders_structured_json(self, capsys: pytest.CaptureFixture[str]) -> None:
+        fmt = OutputFormatter("json", color=False)
+        fmt.success("done")
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data == {"status": "ok", "message": "done"}
+
 
 # ---------------------------------------------------------------------------
 # YAML output

@@ -23,15 +23,14 @@ from rich.console import Console
 
 from opensandbox_cli import __version__
 from opensandbox_cli.client import ClientContext
-from opensandbox_cli.commands.code import code_group
-from opensandbox_cli.commands.command import command_group, exec_cmd
+from opensandbox_cli.commands.command import command_group
 from opensandbox_cli.commands.config_cmd import config_group
 from opensandbox_cli.commands.devops import devops_group
+from opensandbox_cli.commands.egress import egress_group
 from opensandbox_cli.commands.file import file_group
 from opensandbox_cli.commands.sandbox import sandbox_group
 from opensandbox_cli.commands.skills import skills_group
 from opensandbox_cli.config import resolve_config
-from opensandbox_cli.output import OutputFormatter
 
 # ---------------------------------------------------------------------------
 # Banner
@@ -62,8 +61,12 @@ class BannerGroup(click.Group):
 @click.option("--api-key", envvar="OPEN_SANDBOX_API_KEY", default=None, help="API key for authentication.")
 @click.option("--domain", envvar="OPEN_SANDBOX_DOMAIN", default=None, help="API server domain (e.g. localhost:8080).")
 @click.option("--protocol", type=click.Choice(["http", "https"]), default=None, help="Protocol (http/https).")
-@click.option("--timeout", "request_timeout", type=int, default=None, help="Request timeout in seconds.")
-@click.option("-o", "--output", "output_format", type=click.Choice(["table", "json", "yaml"]), default=None, help="Output format.")
+@click.option("--request-timeout", type=int, default=None, help="Request timeout in seconds.")
+@click.option(
+    "--use-server-proxy/--no-use-server-proxy",
+    default=None,
+    help="Route execd and endpoint traffic through the sandbox server proxy.",
+)
 @click.option("--config", "config_path", type=click.Path(exists=False, path_type=Path), default=None, help="Config file path.")
 @click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose/debug output.")
 @click.option("--no-color", is_flag=True, default=False, help="Disable colored output.")
@@ -75,7 +78,7 @@ def cli(
     domain: str | None,
     protocol: str | None,
     request_timeout: int | None,
-    output_format: str | None,
+    use_server_proxy: bool | None,
     config_path: Path | None,
     verbose: bool,
     no_color: bool,
@@ -86,30 +89,50 @@ def cli(
 
         logging.basicConfig(level=logging.DEBUG)
 
-    resolved = resolve_config(
-        cli_api_key=api_key,
-        cli_domain=domain,
-        cli_protocol=protocol,
-        cli_timeout=request_timeout,
-        cli_output=output_format,
-        config_path=config_path,
-    )
+    cli_overrides = {
+        "api_key": api_key,
+        "domain": domain,
+        "protocol": protocol,
+        "request_timeout": request_timeout,
+        "use_server_proxy": use_server_proxy,
+    }
 
-    formatter = OutputFormatter(
-        resolved["output_format"],
-        color=not no_color and resolved.get("color", True),
-    )
+    if ctx.invoked_subcommand == "config":
+        resolved = {
+            "api_key": api_key,
+            "domain": domain,
+            "protocol": protocol or "http",
+            "request_timeout": request_timeout or 30,
+            "use_server_proxy": use_server_proxy if use_server_proxy is not None else False,
+            "color": True,
+            "default_image": None,
+            "default_timeout": None,
+        }
+    else:
+        resolved = resolve_config(
+            cli_api_key=api_key,
+            cli_domain=domain,
+            cli_protocol=protocol,
+            cli_timeout=request_timeout,
+            cli_use_server_proxy=use_server_proxy,
+            config_path=config_path,
+        )
+    resolved["color"] = not no_color and resolved.get("color", True)
 
-    ctx.obj = ClientContext(resolved_config=resolved, output=formatter)
+    effective_config_path = config_path or Path.home() / ".opensandbox" / "config.toml"
+    ctx.obj = ClientContext(
+        resolved_config=resolved,
+        config_path=effective_config_path,
+        cli_overrides=cli_overrides,
+    )
     ctx.call_on_close(lambda: ctx.obj.close())
 
 
 # Register sub-command groups
 cli.add_command(sandbox_group)
 cli.add_command(command_group)
-cli.add_command(exec_cmd)
 cli.add_command(file_group)
-cli.add_command(code_group)
+cli.add_command(egress_group)
 cli.add_command(config_group)
 cli.add_command(devops_group)
 cli.add_command(skills_group)

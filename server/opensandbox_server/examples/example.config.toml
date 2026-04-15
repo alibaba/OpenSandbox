@@ -17,15 +17,24 @@
 # Each top-level block mirrors the sections supported by opensandbox_server/config.py.
 
 [server]
-# Lifecycle API host/port and logging settings
+# Lifecycle API host/port settings
 # -----------------------------------------------------------------
 host = "127.0.0.1"
 port = 8080
-log_level = "INFO"
 # api_key = "your-secret-api-key"  # Optional: Uncomment to enable API key authentication
 # eip = "1.2.3.4"  # Optional: External IP/hostname for endpoint URLs when returning sandbox endpoints
 # Maximum TTL for sandboxes that specify timeout. Comment out this line to disable the upper bound.
 max_sandbox_timeout_seconds = 86400
+
+[log]
+# Logging configuration
+# -----------------------------------------------------------------
+level = "INFO"
+file_enabled = true  # When true, logs go to rotating files instead of stdout
+# file_path = "~/logs/opensandbox/server.log"  # Optional: override default server log path
+# access_file_path = "~/logs/opensandbox/access.log"  # Optional: override default access log path
+# file_max_bytes = 104857600  # 100MB - max file size before rotation
+# file_backup_count = 5       # Number of rotated files to keep
 
 # 🧪 [EXPERIMENTAL] Renew-on-access (OSEP-0009). Off by default — see server/README.md.
 [renew_intent]
@@ -40,14 +49,16 @@ redis.consumer_concurrency = 8
 # Runtime selection (docker | kubernetes)
 # -----------------------------------------------------------------
 type = "docker"
-execd_image = "opensandbox/execd:v1.0.10"
+execd_image = "opensandbox/execd:v1.0.11"
 
 [egress]
 # Egress configuration
 # -----------------------------------------------------------------
-image = "opensandbox/egress:v1.0.6"
+image = "opensandbox/egress:v1.0.7"
 # Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
 mode = "dns"
+# Default is true (recommended for dual-stack CNI). Set false only if you need IPv6 in the netns.
+# disable_ipv6 = false
 
 [storage]
 # Volume and storage configuration

@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	gerrors "errors"
 	"fmt"
-	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,6 +26,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -35,7 +35,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -57,6 +56,10 @@ var (
 	BatchSandboxScaleExpectations = expectations.NewScaleExpectations()
 	DurationStore                 = requeueduration.DurationStore{}
 )
+
+type taskScheduleResult struct {
+	Running, Failed, Succeed, Unknown, Pending int32
+}
 
 // BatchSandboxReconciler reconciles a BatchSandbox object
 type BatchSandboxReconciler struct {
@@ -192,55 +195,39 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			aggErrors = append(aggErrors, err)
 		}
 	}
-	if !reflect.DeepEqual(newStatus, batchSbx.Status) {
-		log.Info("To update BatchSandbox status", "replicas", newStatus.Replicas, "allocated", newStatus.Allocated, "ready", newStatus.Ready)
-		if err := r.updateStatus(batchSbx, newStatus); err != nil {
+
+	if taskStrategy.NeedTaskScheduling() {
+		ts, err := r.reconcileTasks(ctx, batchSbx, pods)
+		if err != nil {
 			aggErrors = append(aggErrors, err)
+		} else if ts != nil {
+			newStatus.TaskRunning = ts.Running
+			newStatus.TaskFailed = ts.Failed
+			newStatus.TaskSucceed = ts.Succeed
+			newStatus.TaskUnknown = ts.Unknown
+			newStatus.TaskPending = ts.Pending
 		}
 	}
 
-	if taskStrategy.NeedTaskScheduling() {
-		// Because tasks are in-memory and there is no event mechanism, periodic reconciliation is required.
-		DurationStore.Push(types.NamespacedName{Namespace: batchSbx.Namespace, Name: batchSbx.Name}.String(), 3*time.Second)
-		sch, err := r.getTaskScheduler(ctx, batchSbx, pods)
+	if !equality.Semantic.DeepEqual(*newStatus, batchSbx.Status) {
+		log.Info("To update BatchSandbox status", "replicas", newStatus.Replicas, "allocated", newStatus.Allocated, "ready", newStatus.Ready)
+		patchData, err := json.Marshal(map[string]any{
+			"status": map[string]any{
+				"replicas":           newStatus.Replicas,
+				"allocated":          newStatus.Allocated,
+				"ready":              newStatus.Ready,
+				"observedGeneration": newStatus.ObservedGeneration,
+				"taskRunning":        newStatus.TaskRunning,
+				"taskFailed":         newStatus.TaskFailed,
+				"taskSucceed":        newStatus.TaskSucceed,
+				"taskUnknown":        newStatus.TaskUnknown,
+				"taskPending":        newStatus.TaskPending,
+			},
+		})
 		if err != nil {
-			return ctrl.Result{}, err
-		}
-		if batchSbx.DeletionTimestamp != nil {
-			stoppingTasks := sch.StopTask()
-			if len(stoppingTasks) > 0 {
-				log.Info("stopping tasks", "count", len(stoppingTasks))
-			}
-		}
-		now := time.Now()
-		if err = r.scheduleTasks(ctx, sch, batchSbx); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to schedule tasks, err %w", err)
-		} else {
-			log.Info("schedule tasks completed", "costMs", time.Since(now).Milliseconds())
-		}
-		// check task cleanup is finished
-		if batchSbx.DeletionTimestamp != nil {
-			unfinishedTasks := r.getTasksCleanupUnfinished(batchSbx, sch)
-			if len(unfinishedTasks) > 0 {
-				log.Info("tasks cleanup is unfinished", "unfinishedCount", len(unfinishedTasks))
-			} else {
-				var err error
-				if controllerutil.ContainsFinalizer(batchSbx, FinalizerTaskCleanup) {
-					err = utils.UpdateFinalizer(r.Client, batchSbx, utils.RemoveFinalizerOpType, FinalizerTaskCleanup)
-					if err != nil {
-						if errors.IsNotFound(err) {
-							err = nil
-						} else {
-							log.Error(err, "failed to remove finalizer", "finalizer", FinalizerTaskCleanup)
-						}
-					}
-				}
-				if err == nil {
-					r.deleteTaskScheduler(ctx, batchSbx)
-					log.Info("task cleanup is finished, removed finalizer", "finalizer", FinalizerTaskCleanup)
-				}
-				return ctrl.Result{}, err
-			}
+			aggErrors = append(aggErrors, err)
+		} else if err := r.Status().Patch(ctx, batchSbx, client.RawPatch(types.MergePatchType, patchData)); err != nil {
+			aggErrors = append(aggErrors, err)
 		}
 	}
 
@@ -269,6 +256,64 @@ func calPodIndex(poolStrategy strategy.PoolStrategy, batchSbx *sandboxv1alpha1.B
 		}
 	}
 	return podIndex, nil
+}
+
+func (r *BatchSandboxReconciler) reconcileTasks(
+	ctx context.Context,
+	batchSbx *sandboxv1alpha1.BatchSandbox,
+	pods []*corev1.Pod,
+) (*taskScheduleResult, error) {
+	log := logf.FromContext(ctx)
+
+	sch, err := r.getTaskScheduler(ctx, batchSbx, pods)
+	if err != nil {
+		return nil, err
+	}
+
+	// Because tasks are in-memory and there is no event mechanism, periodic reconciliation is required.
+	DurationStore.Push(types.NamespacedName{Namespace: batchSbx.Namespace, Name: batchSbx.Name}.String(), 3*time.Second)
+
+	if batchSbx.DeletionTimestamp != nil {
+		stoppingTasks := sch.StopTask()
+		if len(stoppingTasks) > 0 {
+			log.Info("stopping tasks", "count", len(stoppingTasks))
+		}
+	}
+
+	now := time.Now()
+	ts, err := r.scheduleTasks(ctx, sch, batchSbx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to schedule tasks, err %w", err)
+	}
+	log.Info("schedule tasks completed", "costMs", time.Since(now).Milliseconds(), "task schedule result", utils.DumpJSON(ts))
+
+	// check task cleanup is finished
+	if batchSbx.DeletionTimestamp != nil {
+		unfinishedTasks := r.getTasksCleanupUnfinished(batchSbx, sch)
+		if len(unfinishedTasks) > 0 {
+			log.Info("tasks cleanup is unfinished", "unfinishedCount", len(unfinishedTasks))
+		} else {
+			var cleanupErr error
+			if controllerutil.ContainsFinalizer(batchSbx, FinalizerTaskCleanup) {
+				cleanupErr = utils.UpdateFinalizer(r.Client, batchSbx, utils.RemoveFinalizerOpType, FinalizerTaskCleanup)
+				if cleanupErr != nil {
+					if errors.IsNotFound(cleanupErr) {
+						cleanupErr = nil
+					} else {
+						log.Error(cleanupErr, "failed to remove finalizer", "finalizer", FinalizerTaskCleanup)
+					}
+				}
+			}
+			if cleanupErr == nil {
+				r.deleteTaskScheduler(ctx, batchSbx)
+				log.Info("task cleanup is finished, removed finalizer", "finalizer", FinalizerTaskCleanup)
+			}
+			// all tasks are cleaned up; skip returning task schedule result so the caller doesn't overwrite status
+			return nil, cleanupErr
+		}
+	}
+
+	return ts, nil
 }
 
 func (r *BatchSandboxReconciler) listPods(ctx context.Context, poolStrategy strategy.PoolStrategy, batchSbx *sandboxv1alpha1.BatchSandbox) ([]*corev1.Pod, error) {
@@ -358,10 +403,10 @@ func (r *BatchSandboxReconciler) deleteTaskScheduler(ctx context.Context, batchS
 	r.taskSchedulers.Delete(key)
 }
 
-func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch taskscheduler.TaskScheduler, batchSbx *sandboxv1alpha1.BatchSandbox) error {
+func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch taskscheduler.TaskScheduler, batchSbx *sandboxv1alpha1.BatchSandbox) (*taskScheduleResult, error) {
 	log := logf.FromContext(ctx)
 	if err := tSch.Schedule(); err != nil {
-		return err
+		return nil, err
 	}
 	tasks := tSch.ListTask()
 	toReleasedPods := []string{}
@@ -393,25 +438,17 @@ func (r *BatchSandboxReconciler) scheduleTasks(ctx context.Context, tSch tasksch
 	if len(toReleasedPods) > 0 {
 		log.Info("try to release Pods", "count", len(toReleasedPods))
 		if err := r.releasePods(ctx, batchSbx, toReleasedPods); err != nil {
-			return err
+			return nil, err
 		}
 		log.Info("successfully released Pods", "count", len(toReleasedPods))
 	}
-	oldStatus := batchSbx.Status
-	newStatus := oldStatus.DeepCopy()
-	newStatus.ObservedGeneration = batchSbx.Generation
-	newStatus.TaskRunning = running
-	newStatus.TaskFailed = failed
-	newStatus.TaskSucceed = succeed
-	newStatus.TaskUnknown = unknown
-	newStatus.TaskPending = pending
-	if !reflect.DeepEqual(newStatus, oldStatus) {
-		log.Info("To update BatchSandbox status", "replicas", newStatus.Replicas, "task_running", newStatus.TaskRunning, "task_succeed", newStatus.TaskSucceed, "task_failed", newStatus.TaskFailed, "task_unknown", newStatus.TaskUnknown, "task_pending", newStatus.TaskPending)
-		if err := r.updateStatus(batchSbx, newStatus); err != nil {
-			return err
-		}
-	}
-	return nil
+	return &taskScheduleResult{
+		Running: running,
+		Failed:  failed,
+		Succeed: succeed,
+		Unknown: unknown,
+		Pending: pending,
+	}, nil
 }
 
 func (r *BatchSandboxReconciler) getTasksCleanupUnfinished(batchSbx *sandboxv1alpha1.BatchSandbox, tSch taskscheduler.TaskScheduler) []taskscheduler.Task {
@@ -464,7 +501,6 @@ func (r *BatchSandboxReconciler) scaleBatchSandbox(ctx context.Context, batchSan
 	for i := range pods {
 		pod := pods[i]
 		BatchSandboxScaleExpectations.ObserveScale(controllerutils.GetControllerKey(batchSandbox), expectations.Create, pod.Name)
-		pods = append(pods, pod)
 		idx, err := parseIndex(pod)
 		if err != nil {
 			return fmt.Errorf("failed to parse idx Pod %s, err %w", pod.Name, err)
@@ -537,23 +573,12 @@ func parseIndex(pod *corev1.Pod) (int, error) {
 	return strconv.Atoi(pod.Name[idx+1:])
 }
 
-func (r *BatchSandboxReconciler) updateStatus(batchSandbox *sandboxv1alpha1.BatchSandbox, newStatus *sandboxv1alpha1.BatchSandboxStatus) error {
-	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-		clone := &sandboxv1alpha1.BatchSandbox{}
-		if err := r.Get(context.TODO(), types.NamespacedName{Namespace: batchSandbox.Namespace, Name: batchSandbox.Name}, clone); err != nil {
-			return err
-		}
-		clone.Status = *newStatus
-		return r.Status().Update(context.TODO(), clone)
-	})
-}
-
 // SetupWithManager sets up the controller with the Manager.
-func (r *BatchSandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *BatchSandboxReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconciles int) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&sandboxv1alpha1.BatchSandbox{}).
 		Named("batchsandbox").
 		Owns(&corev1.Pod{}).
-		WithOptions(controller.Options{MaxConcurrentReconciles: 32}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(r)
 }

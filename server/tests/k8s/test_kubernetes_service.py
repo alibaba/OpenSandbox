@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Unit tests for KubernetesSandboxService.
-"""
-
 import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
@@ -32,16 +28,9 @@ from opensandbox_server.api.schema import ImageAuth, ListSandboxesRequest, Netwo
 from opensandbox_server.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT, EgressConfig
 from opensandbox_server.api.schema import Endpoint
 
-
 class TestKubernetesSandboxServiceInit:
-    """KubernetesSandboxService initialization tests"""
     
     def test_init_with_valid_config_succeeds(self, k8s_app_config):
-        """
-        Test case: Successful initialization with valid config
-        
-        Purpose: Verify that service can be successfully initialized with valid Kubernetes config
-        """
         with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client, \
              patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
             
@@ -56,11 +45,6 @@ class TestKubernetesSandboxServiceInit:
             mock_create_provider.assert_called_once()
     
     def test_init_without_kubernetes_config_raises_error(self, app_config_no_k8s):
-        """
-        Test case: Raises exception when Kubernetes config is missing
-        
-        Purpose: Verify that ValueError is raised when kubernetes section is missing from config
-        """
         # app_config_no_k8s still has kubernetes config, just without kubeconfig
         # This will cause K8sClient initialization to fail and raise HTTPException
         with pytest.raises(HTTPException) as exc_info:
@@ -70,20 +54,10 @@ class TestKubernetesSandboxServiceInit:
         assert exc_info.value.detail["code"] == SandboxErrorCodes.K8S_INITIALIZATION_ERROR
     
     def test_init_with_wrong_runtime_type_raises_error(self, app_config_docker):
-        """
-        Test case: Raises exception with wrong runtime type
-        
-        Purpose: Verify that ValueError is raised when runtime.type is not 'kubernetes'
-        """
         with pytest.raises(ValueError, match="requires runtime.type = 'kubernetes'"):
             KubernetesSandboxService(app_config_docker)
     
     def test_init_with_k8s_client_failure_raises_http_exception(self, k8s_app_config):
-        """
-        Test case: Raises HTTPException when K8sClient initialization fails
-        
-        Purpose: Verify that correct HTTPException is raised when K8sClient initialization fails
-        """
         with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client:
             mock_k8s_client.side_effect = Exception("Failed to load kubeconfig")
             
@@ -94,19 +68,12 @@ class TestKubernetesSandboxServiceInit:
             assert "code" in exc_info.value.detail
             assert exc_info.value.detail["code"] == SandboxErrorCodes.K8S_INITIALIZATION_ERROR
 
-
 class TestKubernetesSandboxServiceCreate:
-    """KubernetesSandboxService create_sandbox tests"""
     
     @pytest.mark.asyncio
     async def test_create_sandbox_with_valid_request_succeeds(
         self, k8s_service, create_sandbox_request, mock_workload
     ):
-        """
-        Test case: Successfully create sandbox with valid request
-        
-        Purpose: Verify that sandbox can be successfully created with valid CreateSandboxRequest
-        """
         # Mock workload provider
         k8s_service.workload_provider.create_workload.return_value = {
             "name": "test-sandbox-123",
@@ -155,14 +122,6 @@ class TestKubernetesSandboxServiceCreate:
     async def test_create_sandbox_uses_configured_timeout_and_poll_interval(
         self, k8s_service, create_sandbox_request, mock_workload
     ):
-        """
-        Test case: create_sandbox uses timeout and poll_interval from config
-
-        Purpose: Verify that sandbox_create_timeout_seconds and
-        sandbox_create_poll_interval_seconds are read from KubernetesRuntimeConfig
-        and forwarded to _wait_for_sandbox_ready.
-        """
-
 
         k8s_service.workload_provider.create_workload.return_value = {
             "name": "test-sandbox-123",
@@ -254,7 +213,7 @@ class TestKubernetesSandboxServiceCreate:
         self, k8s_service, create_sandbox_request
     ):
         create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
-        k8s_service.app_config.egress = EgressConfig(image="opensandbox/egress:v1.0.6")
+        k8s_service.app_config.egress = EgressConfig(image="opensandbox/egress:v1.0.7")
         k8s_service.workload_provider.create_workload.return_value = {
             "name": "test-id", "uid": "uid-1"
         }
@@ -281,7 +240,7 @@ class TestKubernetesSandboxServiceCreate:
     ):
         create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
         k8s_service.app_config.egress = EgressConfig(
-            image="opensandbox/egress:v1.0.6",
+            image="opensandbox/egress:v1.0.7",
             mode=EGRESS_MODE_DNS_NFT,
         )
         k8s_service.workload_provider.create_workload.return_value = {
@@ -463,17 +422,11 @@ class TestKubernetesSandboxServiceCreate:
         assert "configured maximum of 3600s" in exc_info.value.detail["message"]
         k8s_service.workload_provider.create_workload.assert_not_called()
 
-
 class TestWaitForSandboxReady:
     """_wait_for_sandbox_ready method tests"""
     
     @pytest.mark.asyncio
     async def test_wait_for_running_pod_succeeds(self, k8s_service, mock_workload):
-        """
-        Test case: Successfully wait for Running Pod
-        
-        Purpose: Verify that it returns immediately when Pod enters Running state
-        """
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.get_status.return_value = {
             "state": "Running",
@@ -488,11 +441,6 @@ class TestWaitForSandboxReady:
     
     @pytest.mark.asyncio
     async def test_wait_for_pending_then_running_succeeds(self, k8s_service, mock_workload):
-        """
-        Test case: Successfully wait from Pending to Allocated to Running
-        
-        Purpose: Verify normal waiting when Pod transitions through Pending -> Allocated -> Running
-        """
         # Mock state transition: Pending -> Allocated -> Running
         status_sequence = [
             {"state": "Pending", "reason": "", "message": "Pending", "last_transition_at": datetime.now(timezone.utc)},
@@ -510,11 +458,6 @@ class TestWaitForSandboxReady:
     
     @pytest.mark.asyncio
     async def test_wait_for_allocated_pod_returns_immediately(self, k8s_service, mock_workload):
-        """
-        Test case: Returns immediately when Pod reaches Allocated state (IP assigned)
-        
-        Purpose: Verify that Allocated state (IP assigned) is treated as ready
-        """
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.get_status.return_value = {
             "state": "Allocated",
@@ -529,11 +472,6 @@ class TestWaitForSandboxReady:
     
     @pytest.mark.asyncio
     async def test_wait_timeout_raises_exception(self, k8s_service, mock_workload):
-        """
-        Test case: Raises exception on wait timeout
-        
-        Purpose: Verify that HTTPException is raised when wait times out
-        """
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.get_status.return_value = {
             "state": "Pending",
@@ -596,7 +534,6 @@ class TestWaitForSandboxReady:
 
         assert result == mock_workload
 
-
 class TestKubernetesSandboxServiceRenew:
     def test_renew_expiration_rejects_manual_cleanup_sandbox(self, k8s_service):
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
@@ -613,16 +550,10 @@ class TestKubernetesSandboxServiceRenew:
             == "Sandbox test-sandbox-id does not have automatic expiration enabled."
         )
 
-
 class TestGetSandbox:
     """get_sandbox method tests"""
     
     def test_get_existing_sandbox_succeeds(self, k8s_service, mock_workload):
-        """
-        Test case: Successfully get existing sandbox
-        
-        Purpose: Verify that existing sandbox details can be successfully retrieved
-        """
         mock_workload["spec"] = {
             "template": {
                 "spec": {
@@ -654,11 +585,6 @@ class TestGetSandbox:
         assert sandbox.platform.arch == "amd64"
     
     def test_get_nonexistent_sandbox_raises_404(self, k8s_service):
-        """
-        Test case: Raises 404 for nonexistent sandbox
-        
-        Purpose: Verify that 404 exception is raised when getting nonexistent sandbox
-        """
         k8s_service.workload_provider.get_workload.return_value = None
         
         with pytest.raises(HTTPException) as exc_info:
@@ -797,16 +723,10 @@ class TestGetSandbox:
 
         assert sandbox.platform is None
 
-
 class TestDeleteSandbox:
     """delete_sandbox method tests"""
     
     def test_delete_existing_sandbox_succeeds(self, k8s_service, mock_workload):
-        """
-        Test case: Successfully delete existing sandbox
-        
-        Purpose: Verify that existing sandbox can be successfully deleted
-        """
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.delete_workload.return_value = None
         
@@ -818,11 +738,6 @@ class TestDeleteSandbox:
         )
     
     def test_delete_nonexistent_sandbox_raises_404(self, k8s_service):
-        """
-        Test case: Raises 404 when deleting nonexistent sandbox
-        
-        Purpose: Verify that 404 exception is raised when deleting nonexistent sandbox
-        """
         # Mock delete_workload to raise exception containing "not found"
         k8s_service.workload_provider.delete_workload.side_effect = Exception("Sandbox not found")
         
@@ -831,16 +746,10 @@ class TestDeleteSandbox:
         
         assert exc_info.value.status_code == 404
 
-
 class TestListSandboxes:
     """list_sandboxes method tests"""
     
     def test_list_all_sandboxes_succeeds(self, k8s_service, mock_workload):
-        """
-        Test case: Successfully list all sandboxes
-        
-        Purpose: Verify that all sandboxes can be successfully listed
-        """
         k8s_service.workload_provider.list_workloads.return_value = [mock_workload]
         k8s_service.workload_provider.get_status.return_value = {
             "state": "Running",
@@ -861,11 +770,6 @@ class TestListSandboxes:
         assert response.pagination.total_items == 1
     
     def test_list_sandboxes_with_pagination(self, k8s_service, mock_workload):
-        """
-        Test case: List sandboxes with pagination
-        
-        Purpose: Verify that pagination functionality works correctly
-        """
         # Create multiple mock workloads using mock_workload as template
         workloads = []
         for i in range(10):
@@ -905,11 +809,6 @@ class TestListSandboxes:
         assert response.pagination.total_pages == 2
     
     def test_list_sandboxes_sorted_by_creation_time(self, k8s_service, mock_workload):
-        """
-        Test case: Verify sandboxes are sorted by creation time (newest first)
-        
-        Purpose: Verify that list_sandboxes returns sandboxes sorted by created_at in descending order
-        """
         # Create workloads with different creation times
         base_time = datetime.now(timezone.utc)
         workloads = []
@@ -1004,16 +903,10 @@ class TestListSandboxes:
         assert len(response.items) == 1
         assert response.items[0].platform is None
 
-
 class TestRenewExpiration:
     """renew_sandbox_expiration method tests"""
     
     def test_renew_expiration_succeeds(self, k8s_service, mock_workload):
-        """
-        Test case: Successfully renew expiration
-        
-        Purpose: Verify that sandbox expiration can be successfully renewed
-        """
         new_expiration = datetime.now(timezone.utc) + timedelta(hours=2)
         
         k8s_service.workload_provider.get_workload.return_value = mock_workload
@@ -1033,11 +926,6 @@ class TestRenewExpiration:
         )
     
     def test_renew_with_past_time_raises_error(self, k8s_service, mock_workload):
-        """
-        Test case: Raises exception when renewing with past time
-        
-        Purpose: Verify that HTTPException is raised when renewing with past time
-        """
         past_time = datetime.now(timezone.utc) - timedelta(hours=1)
         
         k8s_service.workload_provider.get_workload.return_value = mock_workload

@@ -30,9 +30,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alibaba/opensandbox/internal/safego"
+
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
-	"github.com/alibaba/opensandbox/execd/pkg/util/safego"
 )
 
 // getShell returns the preferred shell, falling back to sh if bash is not available.
@@ -140,7 +141,11 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		close(done)
 		wg.Wait()
 		request.Hooks.OnExecuteInit(session)
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "CommandExecError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{
+			EName:     "CommandExecError",
+			EValue:    err.Error(),
+			Traceback: []string{err.Error()},
+		})
 		log.Error("CommandExecError: error starting commands: %v", err)
 		return nil
 	}
@@ -157,7 +162,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	c.storeCommandKernel(session, kernel)
 	request.Hooks.OnExecuteInit(session)
 
-	go func() {
+	safego.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -172,7 +177,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 				}
 			}
 		}
-	}()
+	})
 
 	err = cmd.Wait()
 	close(done)

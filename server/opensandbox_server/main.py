@@ -19,8 +19,7 @@ This module initializes the FastAPI application with middleware, routes,
 and configuration for the sandbox lifecycle management service.
 """
 
-import copy
-import logging.config
+import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -32,43 +31,11 @@ from fastapi.responses import JSONResponse
 
 from opensandbox_server.config import load_config
 from opensandbox_server.integrations.renew_intent import start_renew_intent_consumer
-from uvicorn.config import LOGGING_CONFIG as UVICORN_LOGGING_CONFIG
+from opensandbox_server.logging_config import configure_logging
 
 # Load configuration before initializing routers/middleware
 app_config = load_config()
-
-# Unify logging format (including uvicorn access/error logs) with timestamp prefix.
-_log_config = copy.deepcopy(UVICORN_LOGGING_CONFIG)
-_fmt = "%(levelprefix)s %(asctime)s [%(request_id)s] %(name)s: %(message)s"
-_datefmt = "%Y-%m-%d %H:%M:%S%z"
-
-# Inject request_id into log records so one request's logs can be correlated.
-_log_config["filters"] = {
-    "request_id": {"()": "opensandbox_server.middleware.request_id.RequestIdFilter"},
-}
-_log_config["handlers"]["default"]["filters"] = ["request_id"]
-_log_config["handlers"]["access"]["filters"] = ["request_id"]
-
-# Enable colors and set format for both default and access loggers
-_log_config["formatters"]["default"]["fmt"] = _fmt
-_log_config["formatters"]["default"]["datefmt"] = _datefmt
-_log_config["formatters"]["default"]["use_colors"] = True
-
-_log_config["formatters"]["access"]["fmt"] = _fmt
-_log_config["formatters"]["access"]["datefmt"] = _datefmt
-_log_config["formatters"]["access"]["use_colors"] = True
-
-# Ensure project loggers emit at configured level using the default handler.
-_log_config["loggers"]["opensandbox_server"] = {
-    "handlers": ["default"],
-    "level": app_config.server.log_level.upper(),
-    "propagate": False,
-}
-
-logging.config.dictConfig(_log_config)
-logging.getLogger().setLevel(
-    getattr(logging, app_config.server.log_level.upper(), logging.INFO)
-)
+_log_config = configure_logging(app_config.log)
 
 from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402

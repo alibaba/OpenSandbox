@@ -37,9 +37,6 @@ func main() {
 	version.EchoVersion("OpenSandbox Ingress")
 
 	flag.InitFlags()
-	if flag.Namespace == "" {
-		log.Panicf("'-namespace' not set.")
-	}
 
 	cfg := injection.ParseAndGetRESTConfigOrDie()
 	cfg.ContentType = runtime.ContentTypeProtobuf
@@ -51,7 +48,6 @@ func main() {
 	// Create sandbox provider factory
 	providerFactory := sandbox.NewProviderFactory(
 		cfg,
-		flag.Namespace,
 		time.Second*30, // resync period
 	)
 

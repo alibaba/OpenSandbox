@@ -24,11 +24,12 @@ type ProviderType string
 const (
 	ProviderTypeBatchSandbox ProviderType = "batchsandbox"
 	ProviderTypeAgentSandbox ProviderType = "agent-sandbox"
+
+	sandboxNameIndex string = "sandbox-name"
 )
 
 func (tpy ProviderType) String() string { return string(tpy) }
 
-// Standard errors for Provider operations
 var (
 	// ErrSandboxNotFound indicates the sandbox resource does not exist
 	ErrSandboxNotFound = errors.New("sandbox not found")
@@ -42,7 +43,7 @@ var (
 // Implementations include BatchSandboxProvider, AgentSandboxProvider, etc.
 type Provider interface {
 	// GetEndpoint retrieves the IP address for a sandbox by its id/name
-	// The namespace is determined by the provider's configuration
+	// Providers run in global-watch mode across all namespaces.
 	// Returns the first available IP from the endpoints annotation
 	// Returns error if sandbox not found or no endpoints available
 	// Note: This is a local cache query, no network I/O involved

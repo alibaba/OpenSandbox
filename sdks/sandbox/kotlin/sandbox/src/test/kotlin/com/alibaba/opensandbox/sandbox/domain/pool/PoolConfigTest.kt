@@ -46,6 +46,7 @@ class PoolConfigTest {
         assertEquals(Duration.ofMillis(200), config.acquireHealthCheckPollingInterval)
         assertFalse(config.acquireSkipHealthCheck)
         assertEquals(null, config.acquireHealthCheck)
+        assertEquals(Duration.ofHours(24), config.idleTimeout)
     }
 
     @Test
@@ -69,6 +70,7 @@ class PoolConfigTest {
                 .warmupHealthCheck(healthCheck)
                 .warmupSandboxPreparer(preparer)
                 .warmupSkipHealthCheck()
+                .idleTimeout(Duration.ofMinutes(10))
                 .build()
 
         assertEquals(Duration.ofSeconds(10), config.acquireReadyTimeout)
@@ -80,5 +82,6 @@ class PoolConfigTest {
         assertSame(healthCheck, config.warmupHealthCheck)
         assertSame(preparer, config.warmupSandboxPreparer)
         assertEquals(true, config.warmupSkipHealthCheck)
+        assertEquals(Duration.ofMinutes(10), config.idleTimeout)
     }
 }

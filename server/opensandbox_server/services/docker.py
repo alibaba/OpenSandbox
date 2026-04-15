@@ -2227,13 +2227,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 "44772": ("0.0.0.0", host_execd_port),
                 "8080": ("0.0.0.0", host_http_port),
             },
-            # FIXME(Pangjiping): Disable IPv6 in the shared namespace to keep policy enforcement consistent.
-            "sysctls": {
+        }
+        if self.app_config.egress.disable_ipv6:
+            # Optional: disable IPv6 in the shared namespace when egress.disable_ipv6 is set.
+            sidecar_host_config_kwargs["sysctls"] = {
                 "net.ipv6.conf.all.disable_ipv6": 1,
                 "net.ipv6.conf.default.disable_ipv6": 1,
                 "net.ipv6.conf.lo.disable_ipv6": 1,
-            },
-        }
+            }
 
         sidecar_host_config = self.docker_client.api.create_host_config(
             **sidecar_host_config_kwargs

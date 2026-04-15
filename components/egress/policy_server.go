@@ -30,6 +30,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 type policyUpdater interface {
@@ -81,22 +82,22 @@ func startPolicyServer(proxy policyUpdater, nft nftApplier, enforcementMode stri
 	handler.server = srv
 
 	errCh := make(chan error, 1)
-	go func() {
+	safego.Go(func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
-	}()
+	})
 
 	select {
 	case err := <-errCh:
 		return nil, err
 	case <-time.After(200 * time.Millisecond):
 		// assume healthy start; keep logging future errors
-		go func() {
+		safego.Go(func() {
 			if err := <-errCh; err != nil {
 				log.Errorf("policy server error: %v", err)
 			}
-		}()
+		})
 		return srv, nil
 	}
 }

@@ -89,10 +89,12 @@ func (f *fakeCodeRunner) Interrupt(_ string) error {
 	return nil
 }
 
-func (f *fakeCodeRunner) CreatePTYSession(_ string, _ string) runtime.PTYSession { return nil }
-func (f *fakeCodeRunner) GetPTYSession(_ string) runtime.PTYSession              { return nil }
-func (f *fakeCodeRunner) DeletePTYSession(_ string) error                        { return nil }
-func (f *fakeCodeRunner) GetPTYSessionStatus(_ string) (bool, int64, error)      { return false, 0, nil }
+func (f *fakeCodeRunner) CreatePTYSession(_ string, _ string) (runtime.PTYSession, error) {
+	return nil, nil
+}
+func (f *fakeCodeRunner) GetPTYSession(_ string) runtime.PTYSession         { return nil }
+func (f *fakeCodeRunner) DeletePTYSession(_ string) error                   { return nil }
+func (f *fakeCodeRunner) GetPTYSessionStatus(_ string) (bool, int64, error) { return false, 0, nil }
 
 func TestBuildExecuteCodeRequestDefaultsToCommand(t *testing.T) {
 	ctrl := &CodeInterpretingController{}

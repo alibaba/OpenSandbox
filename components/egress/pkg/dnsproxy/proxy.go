@@ -34,6 +34,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 	"github.com/alibaba/opensandbox/egress/pkg/telemetry"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 const defaultListenAddr = "127.0.0.1:15353"
@@ -122,11 +123,11 @@ func (p *Proxy) Start(ctx context.Context) error {
 	errCh := make(chan error, len(p.servers))
 	for _, srv := range p.servers {
 		s := srv
-		go func() {
+		safego.Go(func() {
 			if err := s.ListenAndServe(); err != nil {
 				errCh <- err
 			}
-		}()
+		})
 	}
 
 	timer := time.NewTimer(200 * time.Millisecond)
@@ -138,7 +139,7 @@ func (p *Proxy) Start(ctx context.Context) error {
 		// listeners bound; start upstream probes only after DNS servers are up
 	}
 
-	go p.runUpstreamProbes(ctx)
+	safego.Go(func() { p.runUpstreamProbes(ctx) })
 
 	return nil
 }

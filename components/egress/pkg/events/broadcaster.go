@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/log"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 const defaultQueueSize = 128
@@ -76,7 +77,7 @@ func (b *Broadcaster) AddSubscriber(sub Subscriber) {
 	b.subscribers = append(b.subscribers, ch)
 	b.mu.Unlock()
 
-	go func() {
+	safego.Go(func() {
 		for {
 			select {
 			case <-b.ctx.Done():
@@ -88,7 +89,7 @@ func (b *Broadcaster) AddSubscriber(sub Subscriber) {
 				sub.HandleBlocked(b.ctx, ev)
 			}
 		}
-	}()
+	})
 }
 
 // Publish sends an event to all subscribers; drops and logs when a subscriber queue is full.

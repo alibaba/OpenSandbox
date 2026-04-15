@@ -173,6 +173,11 @@ Configures the **egress sidecar** image and enforcement mode. The server only at
 |-----|------|---------|-------------|
 | `image` | string \| omitted | `null` | OCI image for the egress sidecar. **Required in config** when clients send **`networkPolicy`** (create request). |
 | `mode` | string | `"dns"` | Passed to the sidecar as `OPENSANDBOX_EGRESS_MODE`. Values: **`dns`** — DNS-proxy-based enforcement (CIDR/static IP rules **not** enforced); **`dns+nft`** — adds nftables where available so **CIDR/IP** rules can be enforced. |
+| `disable_ipv6` | bool | `true` | IPv6 egress is incomplete (especially on Kubernetes). **Default on**; set `false` only when you want IPv6 left up in the netns. Details in [IPv6 and egress](#ipv6-and-egress) below. |
+
+### IPv6 and egress
+
+OpenSandbox egress does **not** treat IPv6 as a first-class, fully covered path—gaps show up most often under **`runtime.type = "kubernetes"`** (pod networking, CNI). The default **`disable_ipv6 = true`** matches the usual need on **dual-stack** CNI: do not rely on incomplete IPv6 egress. Set **`false`** when the cluster is effectively **IPv4-only** and you deliberately want IPv6 enabled in the sandbox network namespace, or when you accept those gaps for experiments.
 
 **Docker notes:**
 

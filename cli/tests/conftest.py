@@ -48,12 +48,16 @@ def mock_client_context(mock_manager: MagicMock, mock_sandbox: MagicMock) -> Mag
         "domain": "localhost:8080",
         "protocol": "http",
         "request_timeout": 30,
-        "output_format": "json",
         "color": False,
         "default_image": None,
         "default_timeout": None,
     }
     ctx.output = OutputFormatter("json", color=False)
+    def _make_output(fmt: str) -> OutputFormatter:
+        formatter = OutputFormatter(fmt, color=False)
+        ctx.output = formatter
+        return formatter
+    ctx.make_output.side_effect = _make_output
     ctx.get_manager.return_value = mock_manager
     ctx.connect_sandbox.return_value = mock_sandbox
     ctx.connection_config = MagicMock()
