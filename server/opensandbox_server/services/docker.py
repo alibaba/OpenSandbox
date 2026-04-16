@@ -1193,6 +1193,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 # dockur/windows exposes RDP and noVNC/web UI on these ports.
                 # https://github.com/dockur/windows/blob/master/Dockerfile
                 exposed_ports.extend(["3389/tcp", "3389/udp", "8006/tcp"])
+            container_exposed_ports: Optional[list[str]] = exposed_ports
 
             if request.network_policy:
                 egress_token = generate_egress_token()
@@ -1218,6 +1219,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 host_config_kwargs = self._base_host_config_kwargs(
                     effective_mem_limit, effective_nano_cpus, f"container:{sidecar_container.id}"
                 )
+                # Container network namespace is shared with sidecar. Docker rejects
+                # exposing ports on the main container in "container:<id>" mode.
+                container_exposed_ports = None
                 # Drop NET_ADMIN for the main container; only the sidecar should keep it
                 cap_drop = set(host_config_kwargs.get("cap_drop") or [])
                 cap_drop.add("NET_ADMIN")
@@ -1258,7 +1262,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 labels,
                 environment,
                 host_config_kwargs,
-                exposed_ports,
+                container_exposed_ports,
                 request.platform,
             )
         except Exception:

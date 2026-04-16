@@ -1537,9 +1537,7 @@ async def test_create_sandbox_windows_profile_with_network_policy_maps_windows_p
     assert host_config_kwargs["network_mode"] == "container:sidecar-123"
     assert "NET_ADMIN" in set(host_config_kwargs.get("cap_add") or [])
     assert "NET_ADMIN" not in set(host_config_kwargs.get("cap_drop") or [])
-    assert "3389/tcp" in forwarded_ports
-    assert "3389/udp" in forwarded_ports
-    assert "8006/tcp" in forwarded_ports
+    assert forwarded_ports is None
     assert labels["opensandbox.io/embedding-proxy-port"] == "51664"
     assert labels["opensandbox.io/http-port"] == "48891"
 
