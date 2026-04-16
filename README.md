@@ -101,6 +101,56 @@ Go:
 go get github.com/alibaba/OpenSandbox/sdks/sandbox/go
 ```
 
+## CLI
+
+OpenSandbox also provides `osb`, a terminal CLI for the common sandbox workflow: create sandboxes, run commands, move files, inspect diagnostics, and manage runtime egress policy.
+
+Install:
+
+```bash
+pip install opensandbox-cli
+# or
+uv tool install opensandbox-cli
+```
+
+Quick start:
+
+```bash
+osb config init
+osb config set connection.domain localhost:8080
+osb config set connection.protocol http
+osb sandbox create --image python:3.12 --timeout 30m -o json
+osb command run <sandbox-id> -o raw -- python -c "print(1 + 1)"
+```
+
+See the [CLI README](cli/README.md) for the full command reference.
+
+## MCP
+
+The OpenSandbox MCP server exposes sandbox creation, command execution, and text file operations to MCP-capable clients such as Claude Code and Cursor.
+
+Install and run:
+
+```bash
+pip install opensandbox-mcp
+opensandbox-mcp --domain localhost:8080 --protocol http
+```
+
+Minimal stdio config:
+
+```json
+{
+  "mcpServers": {
+    "opensandbox": {
+      "command": "opensandbox-mcp",
+      "args": ["--domain", "localhost:8080", "--protocol", "http"]
+    }
+  }
+}
+```
+
+See the [MCP README](sdks/mcp/sandbox/python/README.md) for client-specific setup.
+
 ## Getting Started
 
 Requirements:
@@ -223,6 +273,7 @@ For more details, please refer to [examples](examples/README.md) and the README 
 | [`sdks/`](sdks/) | Multi-language SDKs (Python, Java/Kotlin, TypeScript/JavaScript, C#/.NET) |
 | [`specs/`](specs/README.md) | OpenAPI specs and lifecycle specifications                      |
 | [`server/`](server/README.md) | Python FastAPI sandbox lifecycle server                          |
+| [`cli/`](cli/README.md) | OpenSandbox command-line interface                               |
 | [`kubernetes/`](kubernetes/README.md) | Kubernetes deployment and examples                               |
 | [`components/execd/`](components/execd/README.md) | Sandbox execution daemon (commands and file operations)          |
 | [`components/ingress/`](components/ingress/README.md) | Sandbox traffic ingress proxy                                    |
@@ -243,6 +294,8 @@ For detailed architecture, see [docs/architecture.md](docs/architecture.md).
 - SDK
   - Sandbox base SDK ([Java/Kotlin SDK](sdks/sandbox/kotlin/README.md), [Python SDK](sdks/sandbox/python/README.md), [JavaScript/TypeScript SDK](sdks/sandbox/javascript/README.md), [C#/.NET SDK](sdks/sandbox/csharp/README.md)), [Go SDK](sdks/sandbox/go/README.md) - includes sandbox lifecycle, command execution, file operations
   - Code Interpreter SDK ([Java/Kotlin SDK](sdks/code-interpreter/kotlin/README.md), [Python SDK](sdks/code-interpreter/python/README.md), [JavaScript/TypeScript SDK](sdks/code-interpreter/javascript/README.md), [C#/.NET SDK](sdks/code-interpreter/csharp/README.md)) - code interpreter
+- [cli/README.md](cli/README.md) - OpenSandbox CLI installation and command reference
+- [sdks/mcp/sandbox/python/README.md](sdks/mcp/sandbox/python/README.md) - MCP server installation and client setup
 - [specs/README.md](specs/README.md) - OpenAPI definitions for sandbox lifecycle API and sandbox execution API
 - [server/README.md](server/README.md) - Sandbox server startup and configuration; supports Docker and Kubernetes runtimes
 
@@ -254,18 +307,18 @@ This project is open source under the [Apache 2.0 License](LICENSE).
 
 ### SDK
 
-- **Sandbox client connection pool** - Client-side sandbox connection pool management, providing pre-provisioned sandboxes to obtain an environment at X ms.
-- **Go SDK** - Go client SDK for sandbox lifecycle management, command execution, and file operations.
+- [x] **Sandbox client connection pool** - Client-side sandbox connection pool management, providing pre-provisioned sandboxes to obtain an environment at X ms. Implemented for Kotlin `SandboxPool` and documented in the [Kotlin SDK README](sdks/sandbox/kotlin/README.md#6-sandbox-pool-client-side). Related PRs: [#301](https://github.com/alibaba/OpenSandbox/pull/301), [#393](https://github.com/alibaba/OpenSandbox/pull/393), [#617](https://github.com/alibaba/OpenSandbox/pull/617).
+- [x] **Go SDK** - Go client SDK for sandbox lifecycle management, command execution, and file operations. See the [Go SDK README](sdks/sandbox/go/README.md). Related PRs: [#597](https://github.com/alibaba/OpenSandbox/pull/597), [#683](https://github.com/alibaba/OpenSandbox/pull/683), [#707](https://github.com/alibaba/OpenSandbox/pull/707).
 
 ### Sandbox Runtime
 
-- **Persistent volumes** - Mountable persistent volumes for sandboxes (see [Proposal 0003](oseps/0003-volume-and-volumebinding-support.md)).
-- **Local lightweight sandbox** - Lightweight sandbox for AI tools running directly on PCs.
-- **Secure Container** - Secure sandbox for AI Agents running inside container.
+- [x] **Persistent volumes** - Mountable persistent volumes for sandboxes. See [Proposal 0003](oseps/0003-volume-and-volumebinding-support.md), [Docker PVC / named volumes](examples/docker-pvc-volume-mount/README.md), [Docker OSSFS](examples/docker-ossfs-volume-mount/README.md), and [Kubernetes PVC](examples/kubernetes-pvc-volume-mount/README.md). Related PRs: [#166](https://github.com/alibaba/OpenSandbox/pull/166), [#233](https://github.com/alibaba/OpenSandbox/pull/233), [#424](https://github.com/alibaba/OpenSandbox/pull/424), [#515](https://github.com/alibaba/OpenSandbox/pull/515), [#563](https://github.com/alibaba/OpenSandbox/pull/563).
+- [ ] **Local lightweight sandbox** - Lightweight sandbox for AI tools running directly on PCs.
+- [x] **Secure Container** - Secure sandbox for AI Agents running inside container. See the [Secure Container Runtime Guide](docs/secure-container.md). Related PRs: [#177](https://github.com/alibaba/OpenSandbox/pull/177), [#249](https://github.com/alibaba/OpenSandbox/pull/249), [#417](https://github.com/alibaba/OpenSandbox/pull/417).
 
 ### Deployment
 
-- **Guide** - Deployment guide for self-hosted Kubernetes cluster.
+- [x] **Guide** - Deployment guide for self-hosted Kubernetes cluster. See the [Kubernetes README](kubernetes/README.md) and Helm chart docs in [kubernetes/charts/](kubernetes/charts/). Related PRs: [#232](https://github.com/alibaba/OpenSandbox/pull/232), [#302](https://github.com/alibaba/OpenSandbox/pull/302), [#342](https://github.com/alibaba/OpenSandbox/pull/342).
 
 ## Contact and Discussion
 
