@@ -8,7 +8,7 @@ configs:
 
       [runtime]
       type = "docker"
-      execd_image = "opensandbox/execd:v1.0.11"
+      execd_image = "opensandbox/execd:v1.0.12"
 
       [egress]
       image = "opensandbox/egress:v1.0.4"

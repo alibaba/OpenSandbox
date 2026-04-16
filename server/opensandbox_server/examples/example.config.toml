@@ -49,7 +49,7 @@ redis.consumer_concurrency = 8
 # Runtime selection (docker | kubernetes)
 # -----------------------------------------------------------------
 type = "docker"
-execd_image = "opensandbox/execd:v1.0.11"
+execd_image = "opensandbox/execd:v1.0.12"
 
 [egress]
 # Egress configuration
