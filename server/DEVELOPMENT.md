@@ -54,8 +54,10 @@ This guide provides comprehensive information for developers working on OpenSand
    [server]
    host = "0.0.0.0"
    port = 8080
-   log_level = "DEBUG"
    api_key = "your-secret-api-key-change-this"
+
+   [log]
+   level = "DEBUG"
 
    [runtime]
    type = "docker"
@@ -296,8 +298,8 @@ def get_sandbox(self, sandbox_id: str) -> Sandbox:
 ### Enable Debug Logging
 
 ```toml
-[server]
-log_level = "DEBUG"
+[log]
+level = "DEBUG"
 ```
 
 ### Interactive Debugging

@@ -211,7 +211,6 @@ def k8s_app_config(k8s_runtime_config):
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -231,7 +230,6 @@ def agent_sandbox_app_config(agent_sandbox_runtime_config):
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -256,7 +254,6 @@ def app_config_no_k8s():
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -276,7 +273,6 @@ def app_config_docker():
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(

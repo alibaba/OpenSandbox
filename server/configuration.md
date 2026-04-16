@@ -21,17 +21,18 @@ Example files in this repository:
 
 1. [Top-level sections](#top-level-sections)
 2. [`[server]`](#server--lifecycle-api)
-3. [`[runtime]`](#runtime--required)
-4. [`[docker]`](#docker--only-when-runtime--docker)
-5. [`[kubernetes]`](#kubernetes--only-when-runtime--kubernetes)
-6. [`[agent_sandbox]`](#agent_sandbox--only-with-kubernetes--agent-sandbox)
-7. [`[ingress]`](#ingress)
-8. [`[egress]`](#egress)
-9. [`[storage]`](#storage)
-10. [`[secure_runtime]`](#secure_runtime)
-11. [`[renew_intent]`](#renew_intent--experimental)
-12. [Environment variables (outside TOML)](#environment-variables-outside-toml)
-13. [Cross-field validation rules](#cross-field-validation-rules)
+3. [`[log]`](#log)
+4. [`[runtime]`](#runtime--required)
+5. [`[docker]`](#docker--only-when-runtime--docker)
+6. [`[kubernetes]`](#kubernetes--only-when-runtime--kubernetes)
+7. [`[agent_sandbox]`](#agent_sandbox--only-with-kubernetes--agent-sandbox)
+8. [`[ingress]`](#ingress)
+9. [`[egress]`](#egress)
+10. [`[storage]`](#storage)
+11. [`[secure_runtime]`](#secure_runtime)
+12. [`[renew_intent]`](#renew_intent--experimental)
+13. [Environment variables (outside TOML)](#environment-variables-outside-toml)
+14. [Cross-field validation rules](#cross-field-validation-rules)
 
 ---
 
@@ -40,6 +41,7 @@ Example files in this repository:
 | Section | Required | When |
 |---------|----------|------|
 | `[server]` | No | Always (defaults apply if omitted) |
+| `[log]` | No | Always (defaults apply if omitted) |
 | `[runtime]` | **Yes** | Always |
 | `[docker]` | No | `runtime.type = "docker"` |
 | `[kubernetes]` | No | `runtime.type = "kubernetes"` (defaults are applied if missing) |
@@ -58,10 +60,23 @@ Example files in this repository:
 |-----|------|---------|-------------|
 | `host` | string | `"0.0.0.0"` | Bind address for the HTTP API. |
 | `port` | integer | `8080` | Listen port (1–65535). |
-| `log_level` | string | `"INFO"` | Python logging level for the server process. |
 | `api_key` | string \| omitted | `null` | If set to a non-empty string, requests must send header `OPEN-SANDBOX-API-KEY` with this value (except documented public routes such as `/health`, `/docs`, `/redoc`). If omitted or empty, API key checks are skipped (typical for local dev only). |
 | `eip` | string \| omitted | `null` | Public IP or hostname used as the **host part** when the server returns sandbox endpoint URLs (notably Docker runtime). |
 | `max_sandbox_timeout_seconds` | integer \| omitted | `null` | Upper bound on sandbox TTL in seconds for **create** requests that specify `timeout`. Must be ≥ **60** if set. Omit to disable the server-side cap. |
+| `timeout_keep_alive` | integer | `30` | Idle keep-alive timeout (seconds) passed to uvicorn. |
+
+---
+
+## `[log]`
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `level` | string | `"INFO"` | Python logging level for the server process (e.g. `"DEBUG"`, `"INFO"`, `"WARNING"`). |
+| `file_enabled` | boolean | `false` | When `true`, logs are written to rotating files instead of stdout. |
+| `file_path` | string \| omitted | `null` | Override path for the main log file. Defaults to `~/logs/opensandbox/server.log` when `file_enabled = true`. |
+| `access_file_path` | string \| omitted | `null` | Override path for the HTTP access log file. Defaults to `~/logs/opensandbox/access.log` when `file_enabled = true`. |
+| `file_max_bytes` | integer | `104857600` (100 MB) | Max bytes per log file before rotation. |
+| `file_backup_count` | integer | `5` | Number of rotated log files to retain. |
 
 ---
 
