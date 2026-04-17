@@ -112,7 +112,7 @@ func (m *Manager) AddResolvedIPs(ctx context.Context, ips []ResolvedIP) error {
 	if script == "" {
 		return nil
 	}
-	log.Infof("nftables: adding %d resolved IP(s) to dynamic allow sets with script statement %s", len(ips), script)
+	log.Debugf("nftables: adding %d resolved IP(s) to dynamic allow sets with script statement %s", len(ips), script)
 	_, err := m.run(ctx, script)
 	if err == nil {
 		telemetry.RecordNftablesUpdate()

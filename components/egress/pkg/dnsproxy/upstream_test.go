@@ -40,17 +40,17 @@ func TestUpstreamProbeFromEnv(t *testing.T) {
 	t.Setenv(constants.EnvDNSUpstreamProbe, "")
 	n, qt := upstreamProbeFromEnv()
 	require.Equal(t, ".", n)
-	require.Equal(t, uint16(dns.TypeNS), qt)
+	require.Equal(t, dns.TypeNS, qt)
 
 	t.Setenv(constants.EnvDNSUpstreamProbe, ".")
 	n, qt = upstreamProbeFromEnv()
 	require.Equal(t, ".", n)
-	require.Equal(t, uint16(dns.TypeNS), qt)
+	require.Equal(t, dns.TypeNS, qt)
 
 	t.Setenv(constants.EnvDNSUpstreamProbe, "intranet.corp")
 	n, qt = upstreamProbeFromEnv()
 	require.Equal(t, "intranet.corp.", n)
-	require.Equal(t, uint16(dns.TypeA), qt)
+	require.Equal(t, dns.TypeA, qt)
 }
 
 func TestNormalizeEnvUpstreamAddr(t *testing.T) {
@@ -110,29 +110,45 @@ func TestAllowIPsFromUpstreamAddrs(t *testing.T) {
 
 func TestShouldFailoverAfterResponse(t *testing.T) {
 	p2 := &Proxy{upstreams: []string{"198.51.100.254:53", "8.8.8.8:53"}}
-	const n = 2
 
 	emptyOK := new(dns.Msg)
 	emptyOK.Rcode = dns.RcodeSuccess
-	try, _ := p2.shouldFailoverAfterResponse(emptyOK, 0, n)
-	require.True(t, try, "empty NOERROR on first upstream should failover")
+	try, _ := p2.shouldFailoverAfterResponse(emptyOK)
+	require.False(t, try, "empty NOERROR should not failover")
 
-	try, _ = p2.shouldFailoverAfterResponse(emptyOK, 1, n)
+	try, _ = p2.shouldFailoverAfterResponse(emptyOK)
 	require.False(t, try, "empty NOERROR on last upstream should not failover")
+
+	emptyNODATA := new(dns.Msg)
+	emptyNODATA.Rcode = dns.RcodeSuccess
+	emptyNODATA.Ns = []dns.RR{
+		&dns.SOA{
+			Hdr:     dns.RR_Header{Name: "example.com.", Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 60},
+			Ns:      "ns1.example.com.",
+			Mbox:    "hostmaster.example.com.",
+			Serial:  1,
+			Refresh: 60,
+			Retry:   60,
+			Expire:  60,
+			Minttl:  60,
+		},
+	}
+	try, _ = p2.shouldFailoverAfterResponse(emptyNODATA)
+	require.False(t, try, "A/AAAA NODATA with authority should not failover")
 
 	withA := new(dns.Msg)
 	withA.Rcode = dns.RcodeSuccess
 	withA.Answer = []dns.RR{&dns.A{Hdr: dns.RR_Header{Name: "x."}, A: net.ParseIP("1.1.1.1")}}
-	try, _ = p2.shouldFailoverAfterResponse(withA, 0, n)
+	try, _ = p2.shouldFailoverAfterResponse(withA)
 	require.False(t, try)
 
 	nx := new(dns.Msg)
 	nx.Rcode = dns.RcodeNameError
-	try, _ = p2.shouldFailoverAfterResponse(nx, 0, n)
+	try, _ = p2.shouldFailoverAfterResponse(nx)
 	require.False(t, try)
 
 	sf := new(dns.Msg)
 	sf.Rcode = dns.RcodeServerFailure
-	try, _ = p2.shouldFailoverAfterResponse(sf, 0, n)
+	try, _ = p2.shouldFailoverAfterResponse(sf)
 	require.True(t, try)
 }
