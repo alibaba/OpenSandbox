@@ -1023,6 +1023,7 @@ class Sandbox internal constructor(
          * Default is false for backward compatibility. When true, the server may
          * return required endpoint headers that SDK calls must include.
          */
+        @JvmOverloads
         fun secureAccess(enabled: Boolean = true): Builder {
             this.secureAccess = enabled
             return this

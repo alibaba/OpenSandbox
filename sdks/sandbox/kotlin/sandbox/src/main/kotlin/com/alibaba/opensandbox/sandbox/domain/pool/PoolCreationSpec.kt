@@ -181,6 +181,7 @@ class PoolCreationSpec private constructor(
             return this
         }
 
+        @JvmOverloads
         fun secureAccess(enabled: Boolean = true): Builder {
             this.secureAccess = enabled
             return this
