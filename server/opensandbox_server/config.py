@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 CONFIG_ENV_VAR = "SANDBOX_CONFIG_PATH"
 DEFAULT_CONFIG_PATH = Path.home() / ".sandbox.toml"
 
-_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
+_HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?:\.(?!-)[A-Za-z0-9-]{1,63})*$")
 _WILDCARD_DOMAIN_RE = re.compile(r"^\*\.(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
 _IPV4_WITH_PORT_RE = re.compile(r"^(?P<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d{1,5}))?$")
 
@@ -79,8 +79,21 @@ def _is_valid_ip_or_ip_port(address: str) -> bool:
     return 1 <= port <= 65535
 
 
-def _is_valid_domain(host: str) -> bool:
-    return bool(_DOMAIN_RE.match(host))
+def _is_valid_hostname(address: str) -> bool:
+    host = address
+    port_str: Optional[str] = None
+
+    if ":" in address:
+        host, _, port_str = address.rpartition(":")
+        if not host or not port_str:
+            return False
+        if not port_str.isdigit():
+            return False
+        port = int(port_str)
+        if not (1 <= port <= 65535):
+            return False
+
+    return bool(_HOSTNAME_RE.match(host))
 
 
 def _is_wildcard_domain(host: str) -> bool:
@@ -219,10 +232,17 @@ class IngressConfig(BaseModel):
                     raise ValueError(
                         "ingress.gateway.address must not contain wildcard when gateway.route.mode is not wildcard."
                     )
-                if not (_is_valid_domain(hostport) or _is_valid_ip_or_ip_port(hostport)):
-                    raise ValueError(
-                        "ingress.gateway.address must be a valid domain, IP, or IP:port when gateway.route.mode is not wildcard."
-                    )
+                if route_mode == GATEWAY_ROUTE_MODE_HEADER:
+                    if not (_is_valid_hostname(hostport) or _is_valid_ip_or_ip_port(hostport)):
+                        raise ValueError(
+                            "ingress.gateway.address must be a valid hostname, hostname:port, IP, or IP:port "
+                            "when gateway.route.mode is header."
+                        )
+                elif route_mode == GATEWAY_ROUTE_MODE_URI:
+                    if not hostport.strip():
+                        raise ValueError(
+                            "ingress.gateway.address must not be empty when gateway.route.mode is uri."
+                        )
         return self
 
 
