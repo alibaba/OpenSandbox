@@ -31,6 +31,8 @@ k8s_e2e_export_kubeconfig() {
 
 k8s_e2e_setup_kind_and_controller() {
   cd "${REPO_ROOT}/kubernetes"
+  # Force-delete any leftover cluster to avoid stale Docker containers/networks
+  kind delete cluster --name "${KIND_CLUSTER}" 2>/dev/null || true
   make setup-test-e2e KIND_CLUSTER="${KIND_CLUSTER}" KIND_K8S_VERSION="${KIND_K8S_VERSION}"
   kind export kubeconfig --name "${KIND_CLUSTER}" --kubeconfig "${KUBECONFIG_PATH}"
 
@@ -198,7 +200,7 @@ EOF
 }
 
 k8s_e2e_validate_rendered_config_toml() {
-  python3 - <<'PY' "${REPO_ROOT}" "${SERVER_VALUES_FILE}"
+  uv run --with tomli python - <<'PY' "${REPO_ROOT}" "${SERVER_VALUES_FILE}"
 import subprocess
 import sys
 

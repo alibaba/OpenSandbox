@@ -23,7 +23,7 @@ concurrency:
 jobs:
   k8s-mini-e2e:
     name: Kubernetes mini E2E (${{ matrix.variant }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
@@ -44,27 +44,29 @@ jobs:
       KUBECONFIG: /tmp/opensandbox-kind-kubeconfig
       OPENSANDBOX_E2E_SANDBOX_CPU: 250m
       OPENSANDBOX_E2E_SANDBOX_MEMORY: 512Mi
+      UV_BIN: /home/admin/.local/bin
+      GOCACHE: /home/admin/actions-runner/_temp/go-build
+      GOMODCACHE: /home/admin/actions-runner/_temp/go-mod-cache
+      HOME: /home/admin/actions-runner
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
+      - name: Set up uv PATH and verify
+        run: |
+          echo "${UV_BIN}" >> "$GITHUB_PATH"
+          export PATH="${UV_BIN}:${PATH}"
+          uv --version
+          uv run python --version
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.24.0"
+          go-version: "1.24"
+          cache: false
 
       - name: Add Go bin to PATH
         run: echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "latest"
 
       - name: Set up kubectl
         uses: azure/setup-kubectl@v4
@@ -108,6 +110,7 @@ jobs:
         if: always()
         run: |
           kind delete cluster --name "${KIND_CLUSTER}" || true
+          rm -rf /tmp/opensandbox-kind-kubeconfig || true
 
   publish-nightly-latest:
     name: Publish latest (${{ matrix.component }} nightly)
