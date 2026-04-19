@@ -14,7 +14,7 @@ server:
   # -- Server image configuration
   image:
     repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server
-    tag: "v0.1.10"
+    tag: "v0.1.11"
 
   # -- Number of server replicas
   replicaCount: 2
