@@ -69,10 +69,10 @@ func LookupUser(userName string) (uid, gid int, home string, err error) {
 		return 0, 0, "", err
 	}
 	if uid64 > uint64(math.MaxInt) {
-		return 0, 0, "", fmt.Errorf("mitmproxy: uid %d overflows int", uid64)
+		return 0, 0, "", fmt.Errorf("mitmproxy: UID %d overflows int", uid64)
 	}
 	if gid64 > uint64(math.MaxInt) {
-		return 0, 0, "", fmt.Errorf("mitmproxy: gid %d overflows int", gid64)
+		return 0, 0, "", fmt.Errorf("mitmproxy: GID %d overflows int", gid64)
 	}
 	return int(uid64), int(gid64), u.HomeDir, nil
 }
