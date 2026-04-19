@@ -173,6 +173,7 @@ wait_for_sidecar_gone() {
   done
 }
 
+export OPENSANDBOX_INSECURE_SERVER=YES
 docker pull ubuntu:latest
 
 create_payload='{

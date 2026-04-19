@@ -23,6 +23,9 @@ max_sandbox_timeout_seconds = 86400
 
 # Optional: Uncomment to enable API key authentication
 # api_key = "your-secret-api-key"
+# If api_key stays empty, startup requires explicit acknowledgment:
+# - Interactive TTY: type YES when prompted
+# - Non-interactive: set OPENSANDBOX_INSECURE_SERVER=YES
 
 [log]
 level = "INFO"

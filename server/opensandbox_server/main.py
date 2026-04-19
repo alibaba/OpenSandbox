@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse
 from opensandbox_server.config import load_config
 from opensandbox_server.integrations.renew_intent import start_renew_intent_consumer
 from opensandbox_server.logging_config import configure_logging
+from opensandbox_server.startup_guard import api_key_confirm
 
 # Load configuration before initializing routers/middleware
 app_config = load_config()
@@ -186,6 +187,12 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+
+    try:
+        api_key_confirm(configured_api_key=app_config.server.api_key)
+    except RuntimeError as exc:
+        logger.error("%s", exc)
+        raise SystemExit(1) from exc
 
     # Run the application
     uvicorn.run(

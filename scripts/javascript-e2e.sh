@@ -45,6 +45,7 @@ echo "-------- JAVASCRIPT E2E test logs for execd --------" > /tmp/opensandbox-e
 
 # setup server
 cd server
+export OPENSANDBOX_INSECURE_SERVER=YES
 uv sync && uv run python -m opensandbox_server.main > server.log 2>&1 &
 cd ..
 

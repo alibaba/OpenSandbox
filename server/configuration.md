@@ -60,7 +60,7 @@ Example files in this repository:
 |-----|------|---------|-------------|
 | `host` | string | `"0.0.0.0"` | Bind address for the HTTP API. |
 | `port` | integer | `8080` | Listen port (1–65535). |
-| `api_key` | string \| omitted | `null` | If set to a non-empty string, requests must send header `OPEN-SANDBOX-API-KEY` with this value (except documented public routes such as `/health`, `/docs`, `/redoc`). If omitted or empty, API key checks are skipped (typical for local dev only). |
+| `api_key` | string \| omitted | `null` | If set to a non-empty string, requests must send header `OPEN-SANDBOX-API-KEY` with this value (except documented public routes such as `/health`, `/docs`, `/redoc`). If omitted or empty, API key checks are skipped, but startup now requires explicit risk acknowledgment: interactive TTY confirmation (`YES`) or `OPENSANDBOX_INSECURE_SERVER=YES`. |
 | `eip` | string \| omitted | `null` | Public IP or hostname used as the **host part** when the server returns sandbox endpoint URLs (notably Docker runtime). |
 | `max_sandbox_timeout_seconds` | integer \| omitted | `null` | Upper bound on sandbox TTL in seconds for **create** requests that specify `timeout`. Must be ≥ **60** if set. Omit to disable the server-side cap. |
 | `timeout_keep_alive` | integer | `30` | Idle keep-alive timeout (seconds) passed to uvicorn. |
