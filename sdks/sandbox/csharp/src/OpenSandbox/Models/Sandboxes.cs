@@ -155,6 +155,36 @@ public class PVC
     /// </summary>
     [JsonPropertyName("claimName")]
     public required string ClaimName { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to auto-create the volume if it does not exist. Defaults to true.
+    /// </summary>
+    [JsonPropertyName("createIfNotExists")]
+    public bool? CreateIfNotExists { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether auto-created Docker volumes should be removed on sandbox deletion.
+    /// </summary>
+    [JsonPropertyName("deleteOnSandboxTermination")]
+    public bool? DeleteOnSandboxTermination { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Kubernetes StorageClass for auto-created PVCs. Ignored for Docker.
+    /// </summary>
+    [JsonPropertyName("storageClass")]
+    public string? StorageClass { get; set; }
+
+    /// <summary>
+    /// Gets or sets the storage request for auto-created PVCs (e.g. "1Gi"). Ignored for Docker.
+    /// </summary>
+    [JsonPropertyName("storage")]
+    public string? Storage { get; set; }
+
+    /// <summary>
+    /// Gets or sets access modes for auto-created PVCs (e.g. "ReadWriteOnce"). Ignored for Docker.
+    /// </summary>
+    [JsonPropertyName("accessModes")]
+    public IReadOnlyList<string>? AccessModes { get; set; }
 }
 
 /// <summary>

@@ -193,7 +193,14 @@ internal object SandboxModelConverter {
      * Converts Domain PVC -> API PVC
      */
     fun PVC.toApiPVC(): ApiPVC {
-        return ApiPVC(claimName = this.claimName)
+        return ApiPVC(
+            claimName = this.claimName,
+            createIfNotExists = this.createIfNotExists,
+            deleteOnSandboxTermination = this.deleteOnSandboxTermination,
+            storageClass = this.storageClass,
+            storage = this.storage,
+            accessModes = this.accessModes,
+        )
     }
 
     /**

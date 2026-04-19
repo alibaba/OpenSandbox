@@ -851,13 +851,12 @@ export interface components {
         };
         /**
          * @description Platform-managed named volume backend. A runtime-neutral abstraction
-         *     for referencing a pre-existing, platform-managed named volume.
+         *     for referencing a platform-managed named volume. If `createIfNotExists`
+         *     is true (the default) and the volume does not yet exist, it will be
+         *     created automatically using the provisioning hints below.
          *
          *     - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
          *     - Docker: maps to a Docker named volume (created via `docker volume create`).
-         *
-         *     The volume must already exist on the target platform before sandbox
-         *     creation.
          */
         PVC: {
             /**
@@ -866,6 +865,39 @@ export interface components {
              *     volume name. Must be a valid DNS label.
              */
             claimName: string;
+            /**
+             * @description When true (the default), the volume is automatically created if
+             *     it does not exist. When false, referencing a non-existent volume
+             *     fails with an error.
+             * @default true
+             */
+            createIfNotExists?: boolean;
+            /**
+             * @description When true, the volume is automatically removed when the sandbox
+             *     is deleted. Only applies to volumes that were auto-created by the
+             *     server (Docker only). Pre-existing volumes are never removed.
+             *     Has no effect on Kubernetes PVCs, whose lifecycle is managed by
+             *     the StorageClass reclaim policy.
+             * @default false
+             */
+            deleteOnSandboxTermination?: boolean;
+            /**
+             * @description Kubernetes StorageClass name for auto-created PVCs. Null means
+             *     use the cluster default. Ignored for Docker volumes.
+             */
+            storageClass?: string | null;
+            /**
+             * @description Storage capacity request for auto-created PVCs (e.g. "1Gi",
+             *     "10Gi"). Defaults to the server-configured `volume_default_size`
+             *     when omitted. Ignored for Docker volumes.
+             */
+            storage?: string | null;
+            /**
+             * @description Access modes for auto-created PVCs (e.g. ["ReadWriteOnce"]).
+             *     Defaults to ["ReadWriteOnce"] when omitted. Ignored for Docker
+             *     volumes.
+             */
+            accessModes?: string[] | null;
         };
         /**
          * @description Alibaba Cloud OSS mount backend via ossfs.

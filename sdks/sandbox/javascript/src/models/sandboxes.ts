@@ -93,16 +93,41 @@ export interface Host extends Record<string, unknown> {
 }
 
 /**
- * Kubernetes PersistentVolumeClaim mount backend.
+ * Platform-managed named volume backend.
  *
- * References an existing PVC in the same namespace as the sandbox pod.
- * Only available in Kubernetes runtime.
+ * Runtime-neutral abstraction for referencing a pre-existing named volume:
+ * - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+ * - Docker: maps to a Docker named volume.
  */
 export interface PVC extends Record<string, unknown> {
   /**
-   * Name of the PersistentVolumeClaim in the same namespace.
+   * Name of the platform volume.
+   * In Kubernetes this is the PVC name; in Docker this is the named volume name.
    */
   claimName: string;
+  /**
+   * When true (default), auto-create the volume if it does not exist.
+   */
+  createIfNotExists?: boolean;
+  /**
+   * When true, delete auto-created volume on sandbox deletion (Docker-only).
+   */
+  deleteOnSandboxTermination?: boolean;
+  /**
+   * Kubernetes StorageClass name for auto-created PVCs.
+   * Null means use cluster default. Ignored for Docker.
+   */
+  storageClass?: string | null;
+  /**
+   * Capacity request for auto-created PVCs (e.g. "1Gi").
+   * Ignored for Docker.
+   */
+  storage?: string | null;
+  /**
+   * Access modes for auto-created PVCs (e.g. ["ReadWriteOnce"]).
+   * Ignored for Docker.
+   */
+  accessModes?: string[] | null;
 }
 
 /**
