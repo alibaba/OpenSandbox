@@ -411,7 +411,7 @@ class PaginationInfo(BaseModel):
     Pagination metadata.
     """
 
-    page: int = Field(description="Current page number (0-indexed)")
+    page: int = Field(description="Current page number (1-indexed)")
     page_size: int = Field(description="Number of items per page", alias="page_size")
     total_items: int = Field(
         description="Total number of items across all pages", alias="total_items"
@@ -451,7 +451,7 @@ class SandboxFilter(BaseModel):
     page_size: int | None = Field(
         default=None, description="Number of items per page", alias="page_size"
     )
-    page: int | None = Field(default=None, description="Page number (0-indexed)")
+    page: int | None = Field(default=None, description="Page number (1-indexed)")
 
     @field_validator("page_size")
     @classmethod

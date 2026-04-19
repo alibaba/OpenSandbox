@@ -12,15 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Generic token-bucket rate limiter.
-
-Usage example::
-
-    limiter = TokenBucketRateLimiter(qps=10.0, burst=20)
-    limiter.acquire()   # blocks until a token is available
-    do_something()
-"""
+"""Generic token-bucket rate limiter."""
 
 import threading
 import time
@@ -48,10 +40,6 @@ class TokenBucketRateLimiter:
         self._last_refill = time.monotonic()
         self._lock = threading.Lock()
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def acquire(self) -> None:
         """Acquire one token, blocking until one is available."""
         while True:
@@ -70,10 +58,6 @@ class TokenBucketRateLimiter:
         """
         return self._try_acquire() <= 0.0
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
     def _try_acquire(self) -> float:
         """Attempt to take a token.
 
@@ -86,7 +70,6 @@ class TokenBucketRateLimiter:
             if self._tokens >= 1.0:
                 self._tokens -= 1.0
                 return 0.0
-            # Time until one token is available
             return (1.0 - self._tokens) / self._qps
 
     def _refill(self) -> None:

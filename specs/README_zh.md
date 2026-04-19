@@ -35,7 +35,21 @@
 - HTTP Header: `OPEN-SANDBOX-API-KEY: your-api-key`
 - 环境变量: `OPEN_SANDBOX_API_KEY`（SDK 客户端）
 
-### 2. execd-api.yaml
+### 2. diagnostic-api.yml
+
+**沙箱诊断 API**
+
+定义用于排障的 best-effort 诊断描述符接口，用于获取沙箱诊断日志和事件。描述符可以内嵌纯文本诊断内容，也可以返回内容下载 URL。该规范不定义结构化审计或可观测性模型。
+
+**主要端点（基础路径 `/v1`）：**
+- `GET /sandboxes/{sandboxId}/diagnostics/logs` - 获取可选 scope 下的诊断日志内容描述符
+- `GET /sandboxes/{sandboxId}/diagnostics/events` - 获取可选 scope 下的诊断事件内容描述符
+
+**认证方式：**
+- HTTP Header: `OPEN-SANDBOX-API-KEY: your-api-key`
+- 环境变量: `OPEN_SANDBOX_API_KEY`（SDK 客户端）
+
+### 3. execd-api.yaml
 
 **沙箱内代码执行 API**
 
@@ -86,7 +100,7 @@
 - `GET /metrics` - 获取系统资源指标
 - `GET /metrics/watch` - 实时监控系统指标（SSE 流）
 
-### 3. egress-api.yaml
+### 4. egress-api.yaml
 
 **沙箱 Egress 运行时 API**
 

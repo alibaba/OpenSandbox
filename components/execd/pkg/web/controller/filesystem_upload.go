@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 )
 
@@ -113,8 +114,17 @@ func (c *FilesystemController) UploadFile() {
 			)
 			return
 		}
+		resolvedPath, err := pathutil.ExpandPath(targetPath)
+		if err != nil {
+			c.RespondError(
+				http.StatusInternalServerError,
+				model.ErrorCodeRuntimeError,
+				fmt.Sprintf("error resolving target path %s. %v", targetPath, err),
+			)
+			return
+		}
 
-		targetDir := filepath.Dir(targetPath)
+		targetDir := filepath.Dir(resolvedPath)
 		if err := os.MkdirAll(targetDir, os.ModePerm); err != nil {
 			c.RespondError(
 				http.StatusInternalServerError,
@@ -135,13 +145,13 @@ func (c *FilesystemController) UploadFile() {
 			return
 		}
 
-		dst, err := os.OpenFile(targetPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
+		dst, err := os.OpenFile(resolvedPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, os.ModePerm)
 		if err != nil {
 			file.Close()
 			c.RespondError(
 				http.StatusInternalServerError,
 				model.ErrorCodeRuntimeError,
-				fmt.Sprintf("error opening destination file %s. %v", targetPath, err),
+				fmt.Sprintf("error opening destination file %s. %v", resolvedPath, err),
 			)
 			return
 		}
@@ -152,7 +162,7 @@ func (c *FilesystemController) UploadFile() {
 			c.RespondError(
 				http.StatusInternalServerError,
 				model.ErrorCodeRuntimeError,
-				fmt.Sprintf("error copying file %s. %v", targetPath, err),
+				fmt.Sprintf("error copying file %s. %v", resolvedPath, err),
 			)
 			return
 		}
@@ -165,11 +175,11 @@ func (c *FilesystemController) UploadFile() {
 		}
 		file.Close()
 
-		if err := ChmodFile(targetPath, meta.Permission); err != nil {
+		if err := ChmodFile(resolvedPath, meta.Permission); err != nil {
 			c.RespondError(
 				http.StatusInternalServerError,
 				model.ErrorCodeRuntimeError,
-				fmt.Sprintf("error chmoding file %s. %v", targetPath, err),
+				fmt.Sprintf("error chmoding file %s. %v", resolvedPath, err),
 			)
 			return
 		}

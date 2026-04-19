@@ -34,6 +34,7 @@ import (
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 )
 
 const (
@@ -44,14 +45,18 @@ const (
 )
 
 func (c *Controller) createBashSession(req *CreateContextRequest) (string, error) {
-	if req.Cwd != "" {
-		err := os.MkdirAll(req.Cwd, os.ModePerm)
+	resolvedCwd, err := pathutil.ExpandPath(req.Cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve request cwd %s: %w", req.Cwd, err)
+	}
+	if resolvedCwd != "" {
+		err := os.MkdirAll(resolvedCwd, os.ModePerm)
 		if err != nil {
 			return "", err
 		}
 	}
 
-	session := newBashSession(req.Cwd)
+	session := newBashSession(resolvedCwd)
 	if err := session.start(); err != nil {
 		return "", fmt.Errorf("failed to start bash session: %w", err)
 	}
@@ -163,7 +168,12 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	cwd := s.cwd
 	// override original cwd if specified
 	if request.Cwd != "" {
-		cwd = request.Cwd
+		expandedCwd, err := pathutil.ExpandPath(request.Cwd)
+		if err != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("resolve cwd: %w", err)
+		}
+		cwd = expandedCwd
 	}
 	sessionID := s.config.Session
 	s.mu.Unlock()

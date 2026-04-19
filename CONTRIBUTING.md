@@ -77,7 +77,7 @@ uv sync
 cp server/opensandbox_server/examples/example.config.toml ~/.sandbox.toml
 
 # Edit configuration for development
-# Set log_level = "DEBUG" and api_key
+# Set [log] level = "DEBUG" and [server] api_key
 nano ~/.sandbox.toml
 
 # Run server

@@ -33,31 +33,39 @@ from opensandbox_server.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
     Endpoint,
-    ImageSpec,
     ListSandboxesRequest,
     ListSandboxesResponse,
-    PaginationInfo,
     RenewSandboxExpirationRequest,
     RenewSandboxExpirationResponse,
     Sandbox,
     SandboxStatus,
-    PlatformSpec,
 )
-from opensandbox_server.config import AppConfig, EGRESS_MODE_DNS, get_config
+from opensandbox_server.config import AppConfig, get_config
 from opensandbox_server.services.constants import (
-    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_ID_LABEL,
-    SANDBOX_MANUAL_CLEANUP_LABEL,
     SandboxErrorCodes,
 )
 from opensandbox_server.services.endpoint_auth import generate_egress_token
-from opensandbox_server.services.endpoint_auth import build_egress_auth_headers, merge_endpoint_headers
-from opensandbox_server.services.helpers import matches_filter
 from opensandbox_server.services.extension_service import ExtensionService
+from opensandbox_server.services.k8s.create_helpers import _build_create_workload_context
+from opensandbox_server.services.k8s.error_helpers import _build_k8s_api_error
 from opensandbox_server.services.k8s.k8s_diagnostics import K8sDiagnosticsMixin
+from opensandbox_server.services.k8s.endpoint_resolver import _attach_egress_auth_headers
+from opensandbox_server.services.k8s.list_helpers import _build_list_sandboxes_response
+from opensandbox_server.services.k8s.status_helpers import (
+    _is_unschedulable_status,
+    _normalize_create_status,
+)
+from opensandbox_server.services.k8s.workload_mapper import (
+    _build_sandbox_from_workload,
+    _extract_platform_from_workload,
+)
+from opensandbox_server.services.k8s.workload_access import (
+    _delete_workload_or_404,
+    _get_workload_or_404,
+)
 from opensandbox_server.services.sandbox_service import SandboxService
 from opensandbox_server.services.validators import (
-    calculate_expiration_or_raise,
     ensure_entrypoint,
     ensure_egress_configured,
     ensure_future_expiration,
@@ -98,13 +106,11 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         if not self.app_config.kubernetes:
             raise ValueError("Kubernetes configuration is required")
         
-        # Ingress configuration (direct/gateway) if provided
         self.ingress_config = self.app_config.ingress
 
         self.namespace = self.app_config.kubernetes.namespace
         self.execd_image = runtime_config.execd_image
         
-        # Initialize Kubernetes client
         try:
             self.k8s_client = K8sClient(self.app_config.kubernetes)
             logger.info("Kubernetes client initialized successfully")
@@ -118,7 +124,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 },
             ) from e
         
-        # Initialize workload provider
         provider_type = self.app_config.kubernetes.workload_provider
         try:
             self.workload_provider = create_workload_provider(
@@ -175,7 +180,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         
         while time.time() - start_time < timeout_seconds:
             try:
-                # Get current workload status
                 workload = self.workload_provider.get_workload(
                     sandbox_id=sandbox_id,
                     namespace=self.namespace,
@@ -186,14 +190,12 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     time.sleep(poll_interval_seconds)
                     continue
                 
-                # Get status
-                status_info = self._normalize_create_status(
+                status_info = _normalize_create_status(
                     self.workload_provider.get_status(workload)
                 )
                 current_state = status_info["state"]
                 current_message = status_info["message"]
                 
-                # Log state changes
                 if current_state != last_state or current_message != last_message:
                     logger.info(
                         f"Sandbox {sandbox_id} state: {current_state} - {current_message}"
@@ -201,10 +203,9 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     last_state = current_state
                     last_message = current_message
                 
-                # Check if Running or Allocated (IP assigned)
                 if current_state in ("Running", "Allocated"):
                     return workload
-                if self._is_unschedulable_status(status_info):
+                if _is_unschedulable_status(status_info):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail={
@@ -224,10 +225,8 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     exc_info=True
                 )
             
-            # Wait before next poll
             await asyncio.sleep(poll_interval_seconds)
         
-        # Timeout
         elapsed = time.time() - start_time
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -240,29 +239,12 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             },
         )
 
-    @staticmethod
-    def _normalize_create_status(status_info: Dict[str, Any]) -> Dict[str, Any]:
-        if status_info.get("state") != "Allocated":
-            return status_info
-
-        return {
-            **status_info,
-            "state": "Running",
-            "message": "Pod has IP assigned and sandbox is ready for requests",
-        }
-    
-    @staticmethod
-    def _is_unschedulable_status(status_info: Dict[str, Any]) -> bool:
-        reason = str(status_info.get("reason") or "")
-        return reason == "POD_PLATFORM_UNSCHEDULABLE"
-    
     def _ensure_network_policy_support(self, request: CreateSandboxRequest) -> None:
         """
         Validate that network policy can be honored under the current runtime config.
         
         This validates that egress.image is configured when network_policy is provided.
         """
-        # Common validation: egress.image must be configured
         ensure_egress_configured(request.network_policy, self.app_config.egress)
 
     def _ensure_image_auth_support(self, request: CreateSandboxRequest) -> None:
@@ -286,10 +268,105 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             },
         )
 
+    def _ensure_pvc_volumes(self, volumes: list) -> None:
+        """
+        Ensure that PVC volumes exist before creating the workload.
+
+        For each volume with a ``pvc`` backend, check whether the
+        PersistentVolumeClaim already exists in the target namespace.
+        If not, create it using the provisioning hints from the PVC model.
+
+        Degrades gracefully: if the service account lacks RBAC permissions
+        for PVC operations (403), the check is skipped and volume resolution
+        is left to the kubelet at pod scheduling time.
+        """
+        from kubernetes.client import V1PersistentVolumeClaim, V1ObjectMeta
+        from kubernetes.client import ApiException
+
+        default_size = self.app_config.storage.volume_default_size
+
+        seen_claims: set[str] = set()
+        for vol in volumes:
+            if vol.pvc is None or not vol.pvc.create_if_not_exists:
+                continue
+            claim_name = vol.pvc.claim_name
+            if claim_name in seen_claims:
+                continue
+            seen_claims.add(claim_name)
+
+            try:
+                existing = self.k8s_client.get_pvc(self.namespace, claim_name)
+            except ApiException as e:
+                if e.status == 403:
+                    logger.warning(
+                        "No RBAC permission to read PVC '%s', skipping auto-create. "
+                        "Grant 'get' and 'create' on 'persistentvolumeclaims' to enable.",
+                        claim_name,
+                    )
+                    return  # Skip all remaining PVCs — same SA, same permissions
+                raise
+            if existing is not None:
+                logger.debug("PVC '%s' already exists in namespace '%s'", claim_name, self.namespace)
+                continue
+
+            storage = vol.pvc.storage or default_size
+            access_modes = vol.pvc.access_modes or ["ReadWriteOnce"]
+            storage_class = vol.pvc.storage_class  # None = cluster default
+
+            pvc_body = V1PersistentVolumeClaim(
+                metadata=V1ObjectMeta(
+                    name=claim_name,
+                    namespace=self.namespace,
+                ),
+                spec={
+                    "accessModes": access_modes,
+                    "resources": {"requests": {"storage": storage}},
+                },
+            )
+            if storage_class is not None:
+                pvc_body.spec["storageClassName"] = storage_class
+
+            try:
+                self.k8s_client.create_pvc(self.namespace, pvc_body)
+                logger.info(
+                    "Auto-created PVC '%s' (size=%s, class=%s) in namespace '%s'",
+                    claim_name, storage, storage_class or "<default>", self.namespace,
+                )
+            except ApiException as e:
+                if e.status == 409:
+                    # Race condition: another request created it between our check and create
+                    logger.info("PVC '%s' was created concurrently, proceeding", claim_name)
+                elif e.status == 403:
+                    logger.warning(
+                        "No RBAC permission to create PVC '%s', skipping. "
+                        "The PVC must be pre-created or RBAC must be updated.",
+                        claim_name,
+                    )
+                elif e.status in (400, 422):
+                    # Invalid PVC spec from user-provided hints
+                    # (e.g. accessModes, storage). These are client errors,
+                    # not retryable server faults.
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "code": SandboxErrorCodes.INVALID_PARAMETER,
+                            "message": f"Invalid PVC spec for '{claim_name}': {e.reason}",
+                        },
+                    ) from e
+                else:
+                    logger.error("Failed to create PVC '%s': %s", claim_name, e)
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "code": SandboxErrorCodes.INTERNAL_ERROR,
+                            "message": f"Failed to auto-create PVC '{claim_name}': {e.reason}",
+                        },
+                    ) from e
+
     async def create_sandbox(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
         """
         Create a new sandbox using Kubernetes Pod.
-        
+
         Wait for the Pod to be Running and have an IP address before returning.
         
         Args:
@@ -301,7 +378,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         Raises:
             HTTPException: If creation fails, timeout, or invalid parameters
         """
-        # Validate request
         ensure_entrypoint(request.entrypoint)
         ensure_metadata_labels(request.metadata)
         ensure_platform_valid(request.platform)
@@ -312,54 +388,30 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         self._ensure_network_policy_support(request)
         self._ensure_image_auth_support(request)
         
-        # Generate sandbox ID
         sandbox_id = self.generate_sandbox_id()
         
-        # Calculate expiration time (None = no TTL, manual cleanup only; same as Docker)
         created_at = datetime.now(timezone.utc)
-        expires_at = None
-        if request.timeout is not None:
-            expires_at = calculate_expiration_or_raise(created_at, request.timeout)
-
-        # Build labels
-        labels = {
-            SANDBOX_ID_LABEL: sandbox_id,
-        }
-        annotations: Dict[str, str] = {}
-        if expires_at is None:
-            labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
-        
-        # Add user metadata as labels
-        if request.metadata:
-            labels.update(request.metadata)
-        
-        # Extract resource limits
-        resource_limits = {}
-        if request.resource_limits and request.resource_limits.root:
-            resource_limits = request.resource_limits.root
+        context = _build_create_workload_context(
+            app_config=self.app_config,
+            request=request,
+            sandbox_id=sandbox_id,
+            created_at=created_at,
+            egress_token_factory=generate_egress_token,
+        )
         
         try:
-            egress_mode = (
-                self.app_config.egress.mode
-                if self.app_config.egress
-                else EGRESS_MODE_DNS
-            )
-            # Get egress image if network policy is provided
-            egress_image = None
-            egress_auth_token = None
-            if request.network_policy:
-                egress_image = self.app_config.egress.image if self.app_config.egress else None
-                egress_auth_token = generate_egress_token()
-                annotations[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] = egress_auth_token
+            apply_access_renew_extend_seconds_to_mapping(context.annotations, request.extensions)
 
-            apply_access_renew_extend_seconds_to_mapping(annotations, request.extensions)
-
-            # Validate volumes before creating workload
             ensure_volumes_valid(
                 request.volumes,
                 self.app_config.storage.allowed_host_paths or None,
             )
             
+
+            # Auto-create PVCs that don't exist yet
+            if request.volumes:
+                self._ensure_pvc_volumes(request.volumes)
+
             # Create workload
             workload_info = self.workload_provider.create_workload(
                 sandbox_id=sandbox_id,
@@ -367,16 +419,16 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 image_spec=request.image,
                 entrypoint=request.entrypoint,
                 env=request.env or {},
-                resource_limits=resource_limits,
-                labels=labels,
-                annotations=annotations or None,
-                expires_at=expires_at,
+                resource_limits=context.resource_limits,
+                labels=context.labels,
+                annotations=context.annotations or None,
+                expires_at=context.expires_at,
                 execd_image=self.execd_image,
                 extensions=request.extensions,
                 network_policy=request.network_policy,
-                egress_image=egress_image,
-                egress_auth_token=egress_auth_token,
-                egress_mode=egress_mode,
+                egress_image=context.egress_image,
+                egress_auth_token=context.egress_auth_token,
+                egress_mode=context.egress_mode,
                 volumes=request.volumes,
                 platform=request.platform,
             )
@@ -387,7 +439,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 workload_info.get("name"),
             )
             
-            # Wait for Pod to be Running with IP
             try:
                 workload = await self._wait_for_sandbox_ready(
                     sandbox_id=sandbox_id,
@@ -395,13 +446,11 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     poll_interval_seconds=self.app_config.kubernetes.sandbox_create_poll_interval_seconds,
                 )
                 
-                # Get final status
-                status_info = self._normalize_create_status(
+                status_info = _normalize_create_status(
                     self.workload_provider.get_status(workload)
                 )
-                effective_platform = self._extract_platform_from_workload(workload)
+                effective_platform = _extract_platform_from_workload(workload)
                 
-                # Build and return response with Running state
                 return CreateSandboxResponse(
                     id=sandbox_id,
                     status=SandboxStatus(
@@ -411,7 +460,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                         last_transition_at=status_info["last_transition_at"],
                     ),
                     created_at=created_at,
-                    expires_at=expires_at,
+                    expires_at=context.expires_at,
                     metadata=request.metadata,
                     entrypoint=request.entrypoint,
                     platform=effective_platform or request.platform,
@@ -428,7 +477,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         except HTTPException:
             raise
         except ValueError as e:
-            # Handle parameter validation errors from provider
             logger.error(f"Invalid parameters for sandbox creation: {e}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -461,33 +509,18 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             HTTPException: If sandbox not found
         """
         try:
-            workload = self.workload_provider.get_workload(
-                sandbox_id=sandbox_id,
-                namespace=self.namespace,
+            workload = _get_workload_or_404(
+                self.workload_provider,
+                self.namespace,
+                sandbox_id,
             )
-            
-            if not workload:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={
-                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
-                        "message": f"Sandbox '{sandbox_id}' not found",
-                    },
-                )
-            
-            return self._build_sandbox_from_workload(workload)
+            return _build_sandbox_from_workload(workload, self.workload_provider)
             
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"Error getting sandbox {sandbox_id}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "code": SandboxErrorCodes.K8S_API_ERROR,
-                    "message": f"Failed to get sandbox: {str(e)}",
-                },
-            ) from e
+            raise _build_k8s_api_error("get sandbox", e) from e
     
     def list_sandboxes(self, request: ListSandboxesRequest) -> ListSandboxesResponse:
         """
@@ -500,49 +533,17 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             ListSandboxesResponse: Paginated list of sandboxes
         """
         try:
-            # Build label selector
             label_selector = SANDBOX_ID_LABEL
-            
-            # List all workloads
             workloads = self.workload_provider.list_workloads(
                 namespace=self.namespace,
                 label_selector=label_selector,
             )
-            
-            # Convert to Sandbox objects
             sandboxes = [
-                self._build_sandbox_from_workload(w)
+                _build_sandbox_from_workload(w, self.workload_provider)
                 for w in workloads
             ]
             
-            # Apply filters
-            filtered = self._apply_filters(sandboxes, request.filter)
-            
-            # Sort by creation time (newest first)
-            filtered.sort(key=lambda s: s.created_at or datetime.min, reverse=True)
-            
-            # Apply pagination
-            total_items = len(filtered)
-            page = request.pagination.page
-            page_size = request.pagination.page_size
-            
-            start_idx = (page - 1) * page_size
-            end_idx = start_idx + page_size
-            paginated_items = filtered[start_idx:end_idx]
-            
-            total_pages = (total_items + page_size - 1) // page_size
-            has_next = page < total_pages
-            
-            return ListSandboxesResponse(
-                items=paginated_items,
-                pagination=PaginationInfo(
-                    page=page,
-                    page_size=page_size,
-                    total_items=total_items,
-                    total_pages=total_pages,
-                    has_next_page=has_next,
-                ),
-            )
+            return _build_list_sandboxes_response(sandboxes, request)
             
         except Exception as e:
             logger.error(f"Error listing sandboxes: {e}")
@@ -565,31 +566,18 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             HTTPException: If deletion fails
         """
         try:
-            self.workload_provider.delete_workload(
-                sandbox_id=sandbox_id,
-                namespace=self.namespace,
+            _delete_workload_or_404(
+                self.workload_provider,
+                self.namespace,
+                sandbox_id,
             )
-            
             logger.info(f"Deleted sandbox: {sandbox_id}")
-            
+
+        except HTTPException:
+            raise
         except Exception as e:
-            if "not found" in str(e).lower():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={
-                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
-                        "message": f"Sandbox '{sandbox_id}' not found",
-                    },
-                ) from e
-            
             logger.error(f"Error deleting sandbox {sandbox_id}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "code": SandboxErrorCodes.K8S_API_ERROR,
-                    "message": f"Failed to delete sandbox: {str(e)}",
-                },
-            ) from e
+            raise _build_k8s_api_error("delete sandbox", e) from e
     
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
@@ -668,24 +656,14 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         Raises:
             HTTPException: If renewal fails
         """
-        # Validate future expiration
         new_expiration = ensure_future_expiration(request.expires_at)
         
         try:
-            # Verify sandbox exists
-            workload = self.workload_provider.get_workload(
-                sandbox_id=sandbox_id,
-                namespace=self.namespace,
+            workload = _get_workload_or_404(
+                self.workload_provider,
+                self.namespace,
+                sandbox_id,
             )
-            
-            if not workload:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={
-                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
-                        "message": f"Sandbox '{sandbox_id}' not found",
-                    },
-                )
 
             current_expiration = self.workload_provider.get_expiration(workload)
             if current_expiration is None:
@@ -697,7 +675,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     },
                 )
 
-            # Update BatchSandbox spec.expireTime field
             self.workload_provider.update_expiration(
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
@@ -716,13 +693,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             raise
         except Exception as e:
             logger.error(f"Error renewing expiration for {sandbox_id}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "code": SandboxErrorCodes.K8S_API_ERROR,
-                    "message": f"Failed to renew expiration: {str(e)}",
-                },
-            ) from e
+            raise _build_k8s_api_error("renew expiration", e) from e
     
     def get_endpoint(
         self,
@@ -747,19 +718,11 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         self.validate_port(port)
         
         try:
-            workload = self.workload_provider.get_workload(
-                sandbox_id=sandbox_id,
-                namespace=self.namespace,
+            workload = _get_workload_or_404(
+                self.workload_provider,
+                self.namespace,
+                sandbox_id,
             )
-            
-            if not workload:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={
-                        "code": SandboxErrorCodes.K8S_SANDBOX_NOT_FOUND,
-                        "message": f"Sandbox '{sandbox_id}' not found",
-                    },
-                )
             
             endpoint = self.workload_provider.get_endpoint_info(workload, port, sandbox_id)
             if not endpoint:
@@ -770,282 +733,12 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                         "message": "Pod IP is not yet available. The Pod may still be starting.",
                     },
                 )
-            self._attach_egress_auth_headers(endpoint, workload)
+            _attach_egress_auth_headers(endpoint, workload)
             return endpoint
             
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"Error getting endpoint for {sandbox_id}:{port}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "code": SandboxErrorCodes.K8S_API_ERROR,
-                    "message": f"Failed to get endpoint: {str(e)}",
-                },
-            ) from e
+            raise _build_k8s_api_error("get endpoint", e) from e
 
-    def _attach_egress_auth_headers(self, endpoint: Endpoint, workload: Any) -> None:
-        token = self._get_egress_auth_token(workload)
-        if not token:
-            return
-
-        endpoint.headers = merge_endpoint_headers(
-            endpoint.headers,
-            build_egress_auth_headers(token),
-        )
-
-    def _get_egress_auth_token(self, workload: Any) -> Optional[str]:
-        if isinstance(workload, dict):
-            metadata = workload.get("metadata", {})
-            annotations = metadata.get("annotations", {}) or {}
-            return annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
-
-        metadata = getattr(workload, "metadata", None)
-        annotations = getattr(metadata, "annotations", None) or {}
-        if isinstance(annotations, dict):
-            return annotations.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
-        return None
-
-    def _build_sandbox_from_workload(
-        self,
-        workload: Any,
-    ) -> Sandbox:
-        """
-        Build Sandbox object from Kubernetes workload.
-        
-        Args:
-            workload: Kubernetes workload object (V1Pod or dict for CRD)
-            
-        Returns:
-            Sandbox: Sandbox object
-        """
-        # Handle both dict (CRD) and object (Pod) formats
-        if isinstance(workload, dict):
-            metadata = workload.get("metadata", {})
-            spec = workload.get("spec", {})
-            labels = metadata.get("labels", {})
-            creation_timestamp = metadata.get("creationTimestamp")
-        else:
-            metadata = workload.metadata
-            spec = workload.spec
-            labels = metadata.labels or {}
-            creation_timestamp = metadata.creation_timestamp
-
-        sandbox_id = labels.get(SANDBOX_ID_LABEL, "")
-        
-        # Get expiration from provider
-        expires_at = self.workload_provider.get_expiration(workload)
-        
-        # Get status
-        status_info = self.workload_provider.get_status(workload)
-        
-        # Extract metadata (filter out system labels)
-        user_metadata = {
-            k: v for k, v in labels.items()
-            if not k.startswith("opensandbox.io/")
-        }
-        
-        # Get image and entrypoint from spec
-        image_uri = ""
-        entrypoint = []
-        
-        if isinstance(workload, dict):
-            # For CRD, extract from template
-            template = spec.get("template") or spec.get("podTemplate") or {}
-            pod_spec = template.get("spec", {})
-            containers = pod_spec.get("containers", [])
-            if containers:
-                container = containers[0]
-                image_uri = container.get("image", "")
-                entrypoint = container.get("command", [])
-        else:
-            # For Pod object
-            if hasattr(spec, 'containers') and spec.containers:
-                container = spec.containers[0]
-                image_uri = container.image or ""
-                entrypoint = container.command or []
-        
-        image_spec = ImageSpec(uri=image_uri) if image_uri else ImageSpec(uri="unknown")
-        platform_spec = self._extract_platform_from_workload(workload)
-        
-        return Sandbox(
-            id=sandbox_id,
-            status=SandboxStatus(
-                state=status_info["state"],
-                reason=status_info["reason"],
-                message=status_info["message"],
-                last_transition_at=status_info["last_transition_at"],
-            ),
-            created_at=creation_timestamp,
-            expires_at=expires_at,
-            metadata=user_metadata if user_metadata else None,
-            image=image_spec,
-            entrypoint=entrypoint,
-            platform=platform_spec,
-        )
-
-    def _extract_platform_from_workload(
-        self,
-        workload: Any,
-    ) -> Optional[PlatformSpec]:
-        if isinstance(workload, dict):
-            spec = workload.get("spec", {})
-            pod_spec = (
-                spec.get("template", {}).get("spec")
-                or spec.get("podTemplate", {}).get("spec")
-                or {}
-            )
-        else:
-            spec = getattr(workload, "spec", None)
-            template = getattr(spec, "template", None)
-            pod_template = getattr(spec, "pod_template", None)
-            pod_spec = (
-                getattr(template, "spec", None)
-                or getattr(pod_template, "spec", None)
-                or {}
-            )
-
-        node_selector = (
-            pod_spec.get("nodeSelector", {})
-            if isinstance(pod_spec, dict)
-            else getattr(pod_spec, "node_selector", {}) or {}
-        )
-        if not isinstance(node_selector, dict):
-            return None
-
-        os_value = node_selector.get("kubernetes.io/os")
-        arch_value = node_selector.get("kubernetes.io/arch")
-        os_constraint = os_value if isinstance(os_value, str) and os_value else None
-        arch_constraint = arch_value if isinstance(arch_value, str) and arch_value else None
-
-        affinity = (
-            pod_spec.get("affinity")
-            if isinstance(pod_spec, dict)
-            else getattr(pod_spec, "affinity", None)
-        )
-        if os_constraint is None:
-            os_constraint = self._extract_platform_value_from_affinity(
-                affinity,
-                "kubernetes.io/os",
-            )
-        if arch_constraint is None:
-            arch_constraint = self._extract_platform_value_from_affinity(
-                affinity,
-                "kubernetes.io/arch",
-            )
-
-        if os_constraint and arch_constraint:
-            return PlatformSpec(os=os_constraint, arch=arch_constraint)
-        return None
-
-    @staticmethod
-    def _extract_platform_from_affinity(affinity: Any) -> Optional[PlatformSpec]:
-        os_value = KubernetesSandboxService._extract_platform_value_from_affinity(
-            affinity,
-            "kubernetes.io/os",
-        )
-        arch_value = KubernetesSandboxService._extract_platform_value_from_affinity(
-            affinity,
-            "kubernetes.io/arch",
-        )
-        if not os_value or not arch_value:
-            return None
-        return PlatformSpec(os=os_value, arch=arch_value)
-
-    @staticmethod
-    def _extract_platform_value_from_affinity(
-        affinity: Any,
-        key: str,
-    ) -> Optional[str]:
-        if affinity is None:
-            return None
-        node_affinity = (
-            affinity.get("nodeAffinity")
-            if isinstance(affinity, dict)
-            else getattr(affinity, "node_affinity", None)
-        )
-        if node_affinity is None:
-            return None
-        required = (
-            node_affinity.get("requiredDuringSchedulingIgnoredDuringExecution")
-            if isinstance(node_affinity, dict)
-            else getattr(
-                node_affinity,
-                "required_during_scheduling_ignored_during_execution",
-                None,
-            )
-        )
-        if required is None:
-            return None
-        terms = (
-            required.get("nodeSelectorTerms", [])
-            if isinstance(required, dict)
-            else getattr(required, "node_selector_terms", []) or []
-        )
-        if not isinstance(terms, list) or not terms:
-            return None
-
-        inferred: Optional[str] = None
-        for term in terms:
-            expressions = (
-                term.get("matchExpressions", [])
-                if isinstance(term, dict)
-                else getattr(term, "match_expressions", []) or []
-            )
-            if not isinstance(expressions, list):
-                return None
-            term_value: Optional[str] = None
-            for expr in expressions:
-                expr_key = (
-                    expr.get("key")
-                    if isinstance(expr, dict)
-                    else getattr(expr, "key", None)
-                )
-                if expr_key != key:
-                    continue
-                operator = (
-                    expr.get("operator")
-                    if isinstance(expr, dict)
-                    else getattr(expr, "operator", None)
-                )
-                values = (
-                    expr.get("values", [])
-                    if isinstance(expr, dict)
-                    else getattr(expr, "values", []) or []
-                )
-                if operator != "In" or not isinstance(values, list) or len(values) != 1:
-                    return None
-                value = values[0]
-                if not isinstance(value, str) or not value:
-                    return None
-                term_value = value
-                break
-            if term_value is None:
-                return None
-            if inferred is None:
-                inferred = term_value
-            elif inferred != term_value:
-                return None
-        return inferred
-    
-    def _apply_filters(self, sandboxes: list[Sandbox], filter_spec: Any) -> list[Sandbox]:
-        """
-        Apply filters to sandbox list.
-        
-        Args:
-            sandboxes: List of sandboxes
-            filter_spec: Filter specification
-            
-        Returns:
-            Filtered list of sandboxes
-        """
-        if not filter_spec:
-            return sandboxes
-        
-        filtered = []
-        for sandbox in sandboxes:
-            if matches_filter(sandbox, filter_spec):
-                filtered.append(sandbox)
-        
-        return filtered

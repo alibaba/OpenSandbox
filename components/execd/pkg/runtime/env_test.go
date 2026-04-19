@@ -63,6 +63,19 @@ func TestLoadExtraEnvFromFileMissingFile(t *testing.T) {
 	require.Nil(t, loadExtraEnvFromFile(), "expected nil for missing file")
 }
 
+func TestLoadExtraEnvFromFileSupportsHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	envFile := filepath.Join(home, "extra.env")
+	require.NoError(t, os.WriteFile(envFile, []byte("FOO=bar\n"), 0o644))
+	t.Setenv("EXECD_ENVS", "~/extra.env")
+
+	got := loadExtraEnvFromFile()
+	require.Equal(t, "bar", got["FOO"])
+}
+
 func TestMergeEnvsOverlaysExtra(t *testing.T) {
 	base := []string{"A=1", "B=2"}
 	extra := map[string]string{"B": "override", "C": "3"}

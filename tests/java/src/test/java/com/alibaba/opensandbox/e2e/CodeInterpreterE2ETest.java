@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.*;
+import java.lang.reflect.Method;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +54,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
 
     private Sandbox sandbox;
     private CodeInterpreter codeInterpreter;
+    private boolean isolatedSandboxForCurrentTest = false;
 
     private static void assertTerminalEventContract(
             List<ExecutionInit> initEvents,
@@ -82,6 +84,44 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
 
     @BeforeAll
     void setup() {
+        createInterpreterWithTag("e2e-code-interpreter");
+        assertNotNull(codeInterpreter);
+        assertNotNull(codeInterpreter.getId());
+    }
+
+    @BeforeEach
+    void maybeRecreateInterpreterForHighFlakinessTests(TestInfo testInfo) {
+        String methodName =
+                testInfo.getTestMethod().map(Method::getName).orElse("");
+        if (!shouldIsolatePerTest(methodName)) {
+            isolatedSandboxForCurrentTest = false;
+            return;
+        }
+        closeCurrentSandboxQuietly();
+        createInterpreterWithTag("e2e-code-interpreter-isolated");
+        isolatedSandboxForCurrentTest = true;
+    }
+
+    @AfterEach
+    void cleanupIsolatedSandboxAfterEach() {
+        if (!isolatedSandboxForCurrentTest) {
+            return;
+        }
+        closeCurrentSandboxQuietly();
+        isolatedSandboxForCurrentTest = false;
+    }
+
+    private boolean shouldIsolatePerTest(String methodName) {
+        return methodName.equals("testJavaCodeExecution")
+                || methodName.equals("testPythonCodeExecution")
+                || methodName.equals("testGoCodeExecution")
+                || methodName.equals("testTypeScriptCodeExecution")
+                || methodName.equals("testMultiLanguageAndContextIsolation")
+                || methodName.equals("testConcurrentCodeExecution")
+                || methodName.equals("testCodeExecutionInterrupt");
+    }
+
+    private void createInterpreterWithTag(String metadataTag) {
         Volume volume =
                 Volume.builder()
                         .name("execd-logs")
@@ -97,7 +137,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                         .resource(java.util.Map.of("cpu", "2", "memory", "4Gi"))
                         .timeout(Duration.ofMinutes(20))
                         .readyTimeout(Duration.ofSeconds(60))
-                        .metadata(java.util.Map.of("tag", "e2e-code-interpreter"))
+                        .metadata(java.util.Map.of("tag", metadataTag))
                         .env("E2E_TEST", "true")
                         .env("GO_VERSION", "1.25")
                         .env("JAVA_VERSION", "21")
@@ -108,22 +148,27 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                         .volume(volume)
                         .build();
         codeInterpreter = CodeInterpreter.builder().fromSandbox(sandbox).build();
-        assertNotNull(codeInterpreter);
-        assertNotNull(codeInterpreter.getId());
+    }
+
+    private void closeCurrentSandboxQuietly() {
+        if (sandbox == null) {
+            return;
+        }
+        try {
+            sandbox.kill();
+        } catch (Exception ignored) {
+        }
+        try {
+            sandbox.close();
+        } catch (Exception ignored) {
+        }
+        sandbox = null;
+        codeInterpreter = null;
     }
 
     @AfterAll
     void teardown() {
-        if (sandbox != null) {
-            try {
-                sandbox.kill();
-            } catch (Exception ignored) {
-            }
-            try {
-                sandbox.close();
-            } catch (Exception ignored) {
-            }
-        }
+        closeCurrentSandboxQuietly();
     }
 
     // ==========================================

@@ -216,6 +216,171 @@ func TestRunCommand_Error(t *testing.T) {
 	require.Equal(t, "3", gotErr.EValue)
 }
 
+func TestRunCommand_ExpandsHomeInCwd(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("bash not available on windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found in PATH")
+	}
+
+	home := t.TempDir()
+	target := filepath.Join(home, "workspace")
+	require.NoError(t, os.MkdirAll(target, 0o755))
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	c := NewController("", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var stdoutLines []string
+	req := &ExecuteCodeRequest{
+		Code:    `pwd`,
+		Cwd:     "~/workspace",
+		Timeout: 5 * time.Second,
+		Hooks: ExecuteResultHook{
+			OnExecuteInit:   func(_ string) {},
+			OnExecuteStdout: func(s string) { stdoutLines = append(stdoutLines, s) },
+			OnExecuteStderr: func(_ string) {},
+			OnExecuteError: func(err *execute.ErrorOutput) {
+				require.Failf(t, "unexpected error hook", "%+v", err)
+			},
+			OnExecuteComplete: func(_ time.Duration) {},
+		},
+	}
+
+	require.NoError(t, c.runCommand(ctx, req))
+
+	targetRealPath, err := filepath.EvalSymlinks(target)
+	require.NoError(t, err)
+	targetRealPath = filepath.Clean(targetRealPath)
+
+	found := false
+	for _, line := range stdoutLines {
+		p := strings.TrimSpace(line)
+		if p == "" {
+			continue
+		}
+		pRealPath, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			continue
+		}
+		if filepath.Clean(pRealPath) == targetRealPath {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "pwd output does not match expected cwd; got=%v target=%s", stdoutLines, target)
+}
+
+func TestRunCommand_ExpandsCwdFromRequestEnvWithHigherPriority(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("bash not available on windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found in PATH")
+	}
+
+	processDir := t.TempDir()
+	requestDir := t.TempDir()
+	t.Setenv("WORKDIR", processDir)
+
+	c := NewController("", "")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		stdoutLines []string
+		gotErr      *execute.ErrorOutput
+	)
+	req := &ExecuteCodeRequest{
+		Code:    `pwd`,
+		Cwd:     `$WORKDIR`,
+		Timeout: 5 * time.Second,
+		Envs: map[string]string{
+			"WORKDIR": requestDir,
+		},
+		Hooks: ExecuteResultHook{
+			OnExecuteInit:   func(_ string) {},
+			OnExecuteStdout: func(s string) { stdoutLines = append(stdoutLines, s) },
+			OnExecuteStderr: func(_ string) {},
+			OnExecuteError: func(err *execute.ErrorOutput) {
+				gotErr = err
+			},
+			OnExecuteComplete: func(_ time.Duration) {},
+		},
+	}
+
+	require.NoError(t, c.runCommand(ctx, req))
+	require.Nil(t, gotErr, "expected cwd expansion to use request env")
+
+	requestRealPath, err := filepath.EvalSymlinks(requestDir)
+	require.NoError(t, err)
+	requestRealPath = filepath.Clean(requestRealPath)
+
+	found := false
+	for _, line := range stdoutLines {
+		p := strings.TrimSpace(line)
+		if p == "" {
+			continue
+		}
+		pRealPath, err := filepath.EvalSymlinks(p)
+		if err != nil {
+			continue
+		}
+		if filepath.Clean(pRealPath) == requestRealPath {
+			found = true
+			break
+		}
+	}
+	require.True(t, found, "pwd output does not match request env cwd; got=%v requestDir=%s", stdoutLines, requestDir)
+}
+
+func TestRunCommand_StartErrorIncludesTraceback(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("bash not available on windows")
+	}
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found in PATH")
+	}
+
+	c := NewController("", "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var (
+		sessionID      string
+		gotErr         *execute.ErrorOutput
+		completeCalled bool
+	)
+
+	req := &ExecuteCodeRequest{
+		Code:    `echo "hello"`,
+		Cwd:     filepath.Join(t.TempDir(), "missing"),
+		Timeout: 5 * time.Second,
+		Hooks: ExecuteResultHook{
+			OnExecuteInit: func(s string) { sessionID = s },
+			OnExecuteError: func(err *execute.ErrorOutput) {
+				gotErr = err
+			},
+			OnExecuteComplete: func(_ time.Duration) {
+				completeCalled = true
+			},
+		},
+	}
+
+	require.NoError(t, c.runCommand(ctx, req))
+
+	require.NotEmpty(t, sessionID, "expected session id to be set")
+	require.NotNil(t, gotErr, "expected error hook to be called")
+	require.Equal(t, "CommandExecError", gotErr.EName)
+	require.NotEmpty(t, gotErr.Traceback, "expected traceback to be populated")
+	require.Equal(t, gotErr.EValue, gotErr.Traceback[0])
+	require.False(t, completeCalled, "did not expect completion hook on start failure")
+}
+
 // TestStdLogDescriptor_AutoCreatesTempDir verifies that stdLogDescriptor
 // recreates the temp directory when it has been deleted, rather than failing.
 // Regression test for https://github.com/alibaba/OpenSandbox/issues/400.

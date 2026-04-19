@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared CLI utilities: duration parsing, error handling, key-value parsing."""
+"""Shared CLI utilities: duration parsing, output selection, error handling, key-value parsing."""
 
 from __future__ import annotations
 
@@ -22,6 +22,8 @@ import sys
 from datetime import timedelta
 
 import click
+
+from opensandbox_cli.client import ClientContext
 
 # ---------------------------------------------------------------------------
 # Duration parsing  (e.g. "10m", "1h30m", "90s", "2h")
@@ -56,6 +58,17 @@ def parse_duration(value: str) -> timedelta:
     minutes = int(m.group("minutes") or 0)
     seconds = int(m.group("seconds") or 0)
     return timedelta(hours=hours, minutes=minutes, seconds=seconds)
+
+
+def parse_nullable_duration(value: str) -> timedelta | None:
+    """Parse a duration string or the literal ``none``.
+
+    ``none`` means no automatic timeout / manual cleanup mode.
+    """
+    normalized = value.strip().lower()
+    if normalized == "none":
+        return None
+    return parse_duration(value)
 
 
 class DurationType(click.ParamType):
@@ -103,6 +116,60 @@ class KeyValueType(click.ParamType):
 
 
 KEY_VALUE = KeyValueType()
+
+
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+
+
+def output_option(
+    *choices: str,
+    default: str | None = None,
+    help_text: str | None = None,
+):
+    """Attach a command-scoped output option."""
+    option_help = help_text or f"Output format: {', '.join(choices)}."
+    return click.option(
+        "-o",
+        "--output",
+        "output_format",
+        type=click.Choice(list(choices), case_sensitive=False),
+        default=None if default is None else default,
+        show_default=default is not None,
+        help=option_help,
+    )
+
+
+def select_output_format(
+    obj: ClientContext,
+    requested: str | None,
+    *,
+    allowed: tuple[str, ...],
+    fallback: str,
+) -> str:
+    """Resolve a command-scoped output format from explicit input, config, and fallback."""
+    if requested:
+        if requested not in allowed:
+            allowed_list = ", ".join(allowed)
+            raise click.ClickException(
+                f"This command does not support `-o {requested}`. Allowed values: {allowed_list}."
+            )
+        return requested
+
+    return fallback
+
+
+def prepare_output(
+    obj: ClientContext,
+    requested: str | None,
+    *,
+    allowed: tuple[str, ...],
+    fallback: str,
+):
+    """Resolve and attach the formatter for the current command."""
+    fmt = select_output_format(obj, requested, allowed=allowed, fallback=fallback)
+    return obj.make_output(fmt)
 
 
 # ---------------------------------------------------------------------------

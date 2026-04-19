@@ -18,7 +18,7 @@ import (
 	"context"
 	"errors"
 	"math"
-	"math/rand/v2"
+	"math/rand"
 	"net"
 	"net/http"
 	"strconv"

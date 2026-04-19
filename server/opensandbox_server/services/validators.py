@@ -104,14 +104,6 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
     if not metadata:
         return
     for key, value in metadata.items():
-        if not isinstance(key, str) or not isinstance(value, str):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
-                    "message": "Metadata keys and values must be strings.",
-                },
-            )
         if key.startswith(RESERVED_LABEL_PREFIX):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -128,7 +120,7 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
-                    "message": f"Metadata key '{key}' is not a valid Kubernetes label key.",
+                    "message": f"Metadata key '{key}' is invalid: must be either a name or a DNS-subdomain prefix and name separated by /, where the name is up to 63 characters and matches [A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?, and the optional prefix is a valid DNS subdomain up to 253 characters.",
                 },
             )
         if not _is_valid_label_value(value):
@@ -136,7 +128,7 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
-                    "message": f"Metadata value '{value}' is not a valid Kubernetes label value.",
+                    "message": f"Metadata value '{value}' is invalid: must be 63 characters or less, start/end with an alphanumeric character, and contain only alphanumeric, '-', '_', or '.' characters.",
                 },
             )
 
@@ -246,14 +238,15 @@ def ensure_platform_valid(platform: Optional["PlatformSpec"]) -> None:
     Validate platform os/arch values for v1 platform contract.
 
     Supported values in this iteration:
-    - os: linux
-    - arch: amd64, arm64
+    - os: linux, windows
+    - arch:
+      - linux: amd64, arm64
+      - windows: amd64, arm64
     """
     if platform is None:
         return
 
-    # TODO: expand OS validation (e.g. windows) when runtime support is ready.
-    supported_os = {"linux"}
+    supported_os = {"linux", "windows"}
     supported_arch = {"amd64", "arm64"}
     normalized_os = platform.os.strip().lower()
     normalized_arch = platform.arch.strip().lower()
@@ -280,7 +273,6 @@ def ensure_platform_valid(platform: Optional["PlatformSpec"]) -> None:
                 ),
             },
         )
-
     platform.os = normalized_os
     platform.arch = normalized_arch
 

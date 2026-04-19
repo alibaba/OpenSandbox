@@ -70,6 +70,17 @@ func TestNewIpynbPath_ErrorWhenCwdIsFile(t *testing.T) {
 	require.Error(t, err, "expected error when cwd is a file")
 }
 
+func TestNewIpynbPath_ExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	c := NewController("", "")
+	path, err := c.newIpynbPath("abc", "~/workspace")
+	require.NoError(t, err)
+	require.Equal(t, filepath.Join(home, "workspace", "abc.ipynb"), path)
+}
+
 func TestListContextUnsupportedLanguage(t *testing.T) {
 	c := NewController("", "")
 	_, err := c.ListContext(Command.String())

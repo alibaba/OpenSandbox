@@ -172,8 +172,10 @@ configToml: |
   [server]
   host = "0.0.0.0"
   port = 80
-  log_level = "INFO"
   api_key = ""
+
+  [log]
+  level = "INFO"
 
   [runtime]
   type = "kubernetes"

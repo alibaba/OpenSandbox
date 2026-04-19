@@ -31,6 +31,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 )
 
 // PTYSession is the public interface for an interactive PTY/pipe session.
@@ -544,13 +545,17 @@ func (s *ptySession) close() {
 
 // CreatePTYSession creates a new PTY session and stores it in the map.
 func (c *Controller) CreatePTYSession(id, cwd string) (PTYSession, error) {
-	if cwd != "" {
-		err := os.MkdirAll(cwd, os.ModePerm)
+	resolvedCwd, err := pathutil.ExpandPath(cwd)
+	if err != nil {
+		return nil, fmt.Errorf("error resolving PTY session work directory: %w", err)
+	}
+	if resolvedCwd != "" {
+		err := os.MkdirAll(resolvedCwd, os.ModePerm)
 		if err != nil {
 			return nil, fmt.Errorf("error creating PTY session work directory: %w", err)
 		}
 	}
-	s := newPTYSession(id, cwd)
+	s := newPTYSession(id, resolvedCwd)
 	c.ptySessionMap.Store(id, s)
 	log.Info("created pty session %s", id)
 	return s, nil

@@ -450,6 +450,32 @@ class SandboxPoolTest {
         assertEquals(Duration.ofMinutes(15), config.idleTimeout)
     }
 
+    @Test
+    fun `start aligns state store idle ttl hook with idleTimeout`() {
+        val store = InMemoryPoolStateStore()
+        val pool =
+            SandboxPool.builder()
+                .poolName("test-pool")
+                .ownerId("test-owner")
+                .maxIdle(2)
+                .stateStore(store)
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .idleTimeout(Duration.ofMinutes(10))
+                .drainTimeout(Duration.ofMillis(50))
+                .reconcileInterval(Duration.ofSeconds(30))
+                .build()
+
+        pool.start()
+        try {
+            store.putIdle("test-pool", "id-1")
+            store.reapExpiredIdle("test-pool", java.time.Instant.now().plus(Duration.ofMinutes(11)))
+            assertEquals(0, store.snapshotCounters("test-pool").idleCount)
+        } finally {
+            pool.shutdown(graceful = false)
+        }
+    }
+
     private fun buildPool(): SandboxPool {
         val config = ConnectionConfig.builder().build()
         val spec = PoolCreationSpec.builder().image("ubuntu:22.04").build()

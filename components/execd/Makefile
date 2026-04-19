@@ -26,7 +26,7 @@ install-golint:
 golint: fmt install-golint
 	golangci-lint run -v --fix ./...
 
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo "dev")
 GIT_COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS := -X 'github.com/alibaba/opensandbox/internal/version.Version=$(VERSION)' \
@@ -43,7 +43,7 @@ multi-build: vet ## Cross-compile for linux/windows/darwin amd64/arm64.
 	@mkdir -p bin
 	@for os in linux windows darwin; do \
 		for arch in amd64 arm64; do \
-			out=bin/execd-$${os}-$${arch}; \
+			out=bin/execd_$(VERSION)_$${os}_$${arch}; \
 			[ "$${os}" = "windows" ] && out="$${out}.exe"; \
 			echo ">> building $${os}/$${arch} -> $${out}"; \
 			GOOS=$${os} GOARCH=$${arch} CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o "$${out}" main.go || exit $$?; \

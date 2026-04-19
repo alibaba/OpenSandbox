@@ -11,6 +11,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.41.0
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/sys v0.41.0
+	k8s.io/apimachinery v0.34.2
 )
 
 require (
@@ -44,8 +45,8 @@ require (
 	google.golang.org/grpc v1.79.3 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	k8s.io/apimachinery v0.34.2 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
+	k8s.io/utils v0.0.0-20250604170112-4c0f3b243397 // indirect
 )
 
 replace github.com/alibaba/opensandbox/internal => ../internal

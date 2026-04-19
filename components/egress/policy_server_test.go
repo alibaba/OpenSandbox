@@ -32,6 +32,8 @@ import (
 
 type stubProxy struct {
 	updated *policy.NetworkPolicy
+	deny    []policy.EgressRule
+	allow   []policy.EgressRule
 }
 
 func (s *stubProxy) CurrentPolicy() *policy.NetworkPolicy {
@@ -40,6 +42,11 @@ func (s *stubProxy) CurrentPolicy() *policy.NetworkPolicy {
 
 func (s *stubProxy) UpdatePolicy(p *policy.NetworkPolicy) {
 	s.updated = p
+}
+
+func (s *stubProxy) UpdateAlwaysRules(alwaysDeny, alwaysAllow []policy.EgressRule) {
+	s.deny = append([]policy.EgressRule(nil), alwaysDeny...)
+	s.allow = append([]policy.EgressRule(nil), alwaysAllow...)
 }
 
 type stubNft struct {
@@ -67,7 +74,8 @@ func TestHandlePolicy_AlwaysDenyMergedIntoNft(t *testing.T) {
 	require.NoError(t, err)
 	proxy := &stubProxy{}
 	nft := &stubNft{}
-	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft", alwaysDeny: []policy.EgressRule{deny}}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+	srv.setAlwaysRules([]policy.EgressRule{deny}, nil)
 
 	body := `{"defaultAction":"deny","egress":[{"action":"allow","target":"9.9.9.9"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/policy", strings.NewReader(body))

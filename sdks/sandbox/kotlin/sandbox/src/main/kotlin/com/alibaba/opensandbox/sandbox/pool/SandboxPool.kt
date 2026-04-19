@@ -118,6 +118,7 @@ class SandboxPool internal constructor(
         lifecycleState.set(LifecycleState.STARTING)
         try {
             sandboxManager = createSandboxManager()
+            stateStore.setIdleEntryTtl(config.poolName, config.idleTimeout)
             if (stateStore.getMaxIdle(config.poolName) == null) {
                 stateStore.setMaxIdle(config.poolName, config.maxIdle)
             }

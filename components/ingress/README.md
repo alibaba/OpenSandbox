@@ -2,7 +2,7 @@
 
 ## Overview
 - HTTP/WebSocket reverse proxy that routes to sandbox instances.
-- Watches sandbox CRs (BatchSandbox or AgentSandbox, chosen by `--provider-type`) in a target Namespace:
+- Watches sandbox CRs (BatchSandbox or AgentSandbox, chosen by `--provider-type`) across all namespaces:
   - BatchSandbox: reads endpoints from `sandbox.opensandbox.io/endpoints` annotation.
   - AgentSandbox: reads `status.serviceFQDN`.
 - Exposes `/status.ok` health check; prints build metadata (version, commit, time, Go/platform) at startup.
@@ -10,7 +10,7 @@
 ## Quick Start
 ```bash
 go run main.go \
-  --namespace <target-namespace> \
+  --namespace <any-value-kept-for-compatibility> \
   --provider-type <batchsandbox|agent-sandbox> \
   --mode <header|uri> \
   --port 28888 \
@@ -122,8 +122,8 @@ TAG=local VERSION=1.2.3 GIT_COMMIT=abc BUILD_TIME=2025-01-01T00:00:00Z bash buil
 
 ## Runtime Requirements
 - Access to Kubernetes API (in-cluster or via KUBECONFIG).
-- If `--provider-type=batchsandbox`: BatchSandbox CRs in the specified Namespace with `sandbox.opensandbox.io/endpoints` annotation containing Pod IPs.
-- If `--provider-type=agent-sandbox`: AgentSandbox CRs with `status.serviceFQDN` populated.
+- If `--provider-type=batchsandbox`: BatchSandbox CRs in any namespace with `sandbox.opensandbox.io/endpoints` annotation containing Pod IPs.
+- If `--provider-type=agent-sandbox`: AgentSandbox CRs in any namespace with `status.serviceFQDN` populated.
 
 ## Implementation Notes
 

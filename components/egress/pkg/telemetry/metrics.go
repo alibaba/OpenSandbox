@@ -41,7 +41,7 @@ var (
 
 var egressSharedAttrs = sync.OnceValue(func() []attribute.KeyValue {
 	return inttelemetry.SharedAttrsFromEnv(inttelemetry.SharedAttrsEnvConfig{
-		SandboxIDEnv:  constants.ENVSandboxID,
+		SandboxIDEnv:  constants.EnvSandboxID,
 		ExtraAttrsEnv: constants.EnvEgressMetricsExtraAttrs,
 		SandboxAttr:   "sandbox_id",
 	})

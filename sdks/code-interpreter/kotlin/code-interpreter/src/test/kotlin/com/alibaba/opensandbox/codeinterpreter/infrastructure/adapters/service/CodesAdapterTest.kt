@@ -200,6 +200,18 @@ class CodesAdapterTest {
     }
 
     @Test
+    fun `deleteContexts should send language query`() {
+        mockWebServer.enqueue(MockResponse().setResponseCode(204))
+
+        codesAdapter.deleteContexts("python")
+
+        val request = mockWebServer.takeRequest()
+        assertEquals("DELETE", request.method)
+        assertEquals("/code/contexts", request.requestUrl?.encodedPath)
+        assertEquals("python", request.requestUrl?.queryParameter("language"))
+    }
+
+    @Test
     fun `run should expose request id on api exception`() {
         mockWebServer.enqueue(
             MockResponse()

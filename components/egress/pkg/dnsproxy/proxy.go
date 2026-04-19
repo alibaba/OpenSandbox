@@ -212,7 +212,7 @@ func (p *Proxy) maybeNotifyResolved(domain string, resp *dns.Msg) {
 func (p *Proxy) forward(r *dns.Msg) (*dns.Msg, error) {
 	list := p.forwardUpstreams()
 	var lastErr error
-	for i, upstream := range list {
+	for _, upstream := range list {
 		c := &dns.Client{
 			Timeout: p.upstreamExchangeTimeout,
 			Dialer:  p.dialerForUpstream(upstream),
@@ -227,7 +227,7 @@ func (p *Proxy) forward(r *dns.Msg) (*dns.Msg, error) {
 			lastErr = fmt.Errorf("nil response from %s", upstream)
 			continue
 		}
-		if tryNext, reason := p.shouldFailoverAfterResponse(resp, i, len(list)); tryNext {
+		if tryNext, reason := p.shouldFailoverAfterResponse(resp); tryNext {
 			lastErr = fmt.Errorf("%s from %s", reason, upstream)
 			log.Warnf("[dns] upstream %s: %s; trying next", upstream, reason)
 			continue
@@ -241,9 +241,9 @@ func (p *Proxy) forward(r *dns.Msg) (*dns.Msg, error) {
 }
 
 // shouldFailoverAfterResponse returns whether to try the next upstream.
-// NXDOMAIN is not retried. NOERROR with an empty Answer (NODATA) is retried when another upstream exists:
-// a broken or non-recursive first hop may return empty NOERROR while a public resolver succeeds.
-func (p *Proxy) shouldFailoverAfterResponse(resp *dns.Msg, upstreamIdx, upstreamCount int) (tryNext bool, reason string) {
+//
+// NXDOMAIN and NOERROR are both accepted as final DNS responses (no retry).
+func (p *Proxy) shouldFailoverAfterResponse(resp *dns.Msg) (tryNext bool, reason string) {
 	if resp == nil {
 		return true, "nil response"
 	}
@@ -251,9 +251,6 @@ func (p *Proxy) shouldFailoverAfterResponse(resp *dns.Msg, upstreamIdx, upstream
 	case dns.RcodeNameError:
 		return false, ""
 	case dns.RcodeSuccess:
-		if len(resp.Answer) == 0 && upstreamIdx < upstreamCount-1 {
-			return true, "empty NOERROR"
-		}
 		return false, ""
 	default:
 		rcStr := dns.RcodeToString[resp.Rcode]
@@ -284,6 +281,16 @@ func (p *Proxy) UpdatePolicy(newPolicy *policy.NetworkPolicy) {
 	defer p.policyMu.Unlock()
 
 	p.userPolicy = ensurePolicyDefaults(newPolicy)
+	p.refreshEffectivePolicy()
+}
+
+// UpdateAlwaysRules swaps always-deny/always-allow overlays used by DNS evaluation.
+func (p *Proxy) UpdateAlwaysRules(alwaysDeny, alwaysAllow []policy.EgressRule) {
+	p.policyMu.Lock()
+	defer p.policyMu.Unlock()
+
+	p.alwaysDeny = append([]policy.EgressRule(nil), alwaysDeny...)
+	p.alwaysAllow = append([]policy.EgressRule(nil), alwaysAllow...)
 	p.refreshEffectivePolicy()
 }
 
