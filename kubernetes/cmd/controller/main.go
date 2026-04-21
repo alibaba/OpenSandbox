@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -29,6 +30,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -129,19 +131,43 @@ func init() {
 }
 
 // buildWatchNamespaces parses a comma-separated list of namespaces and returns
-// a map suitable for cache.Options.DefaultNamespaces. Empty entries are ignored.
-// An empty result (nil or empty map) means "watch all namespaces" and callers
-// should leave cache.Options unset to preserve controller-runtime defaults.
-func buildWatchNamespaces(raw string) map[string]cache.Config {
+// a map suitable for cache.Options.DefaultNamespaces.
+//
+// Parsing rules (strict on purpose — this flag controls cache scope, so silently
+// accepting malformed input and falling back to cluster-wide would broaden
+// privileges rather than narrow them):
+//
+//   - A completely empty / whitespace-only input returns (nil, nil), which the
+//     caller treats as "watch all namespaces" (controller-runtime default).
+//   - A non-empty input that yields no valid tokens (e.g. ",", "   , , ")
+//     returns an error.
+//   - Empty segments inside a non-empty list (e.g. "ns-a,,ns-b") are rejected
+//     rather than silently skipped, to surface operator/templating mistakes.
+//   - Each token is trimmed and validated as a DNS-1123 label so typos like
+//     "prod_a" or an overlong name fail fast at startup.
+//   - Duplicates are collapsed (set semantics) since cache.Options treats the
+//     map as a set.
+func buildWatchNamespaces(raw string) (map[string]cache.Config, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
 	result := map[string]cache.Config{}
-	for _, ns := range strings.Split(raw, ",") {
-		ns = strings.TrimSpace(ns)
+	for i, seg := range strings.Split(raw, ",") {
+		ns := strings.TrimSpace(seg)
 		if ns == "" {
-			continue
+			return nil, fmt.Errorf("invalid watch-namespaces value %q: empty segment at position %d", raw, i)
+		}
+		if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
+			return nil, fmt.Errorf("invalid watch-namespaces value %q: %q is not a valid namespace name: %s", raw, ns, strings.Join(errs, "; "))
 		}
 		result[ns] = cache.Config{}
 	}
-	return result
+	if len(result) == 0 {
+		// Should be unreachable given the rules above, but keep a defensive
+		// guard so the function never returns (nil, nil) for a non-empty input.
+		return nil, fmt.Errorf("invalid watch-namespaces value %q: no valid namespaces after parsing", raw)
+	}
+	return result, nil
 }
 
 // nolint:gocyclo
@@ -350,11 +376,17 @@ func main() {
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
 	}
-	if nsMap := buildWatchNamespaces(watchNamespaces); len(nsMap) > 0 {
+	nsMap, err := buildWatchNamespaces(watchNamespaces)
+	if err != nil {
+		setupLog.Error(err, "invalid watch-namespaces configuration")
+		os.Exit(1)
+	}
+	if len(nsMap) > 0 {
 		watched := make([]string, 0, len(nsMap))
 		for ns := range nsMap {
 			watched = append(watched, ns)
 		}
+		sort.Strings(watched)
 		setupLog.Info("restricting manager cache to specific namespaces",
 			"namespaces", watched)
 		mgrOptions.Cache = cache.Options{DefaultNamespaces: nsMap}
