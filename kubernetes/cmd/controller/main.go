@@ -31,6 +31,7 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -127,6 +128,22 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+// buildWatchNamespaces parses a comma-separated list of namespaces and returns
+// a map suitable for cache.Options.DefaultNamespaces. Empty entries are ignored.
+// An empty result (nil or empty map) means "watch all namespaces" and callers
+// should leave cache.Options unset to preserve controller-runtime defaults.
+func buildWatchNamespaces(raw string) map[string]cache.Config {
+	result := map[string]cache.Config{}
+	for _, ns := range strings.Split(raw, ",") {
+		ns = strings.TrimSpace(ns)
+		if ns == "" {
+			continue
+		}
+		result[ns] = cache.Config{}
+	}
+	return result
+}
+
 // nolint:gocyclo
 func main() {
 	var metricsAddr string
@@ -152,6 +169,13 @@ func main() {
 
 	// Controller concurrency options
 	var concurrencyConfig ConcurrencyConfig
+
+	// Cache scope option. Empty means the manager watches all namespaces
+	// (the historical default). A non-empty comma-separated list restricts
+	// the shared informer cache to just those namespaces, which drastically
+	// reduces memory usage when the controller only needs to manage a subset
+	// of a large cluster.
+	var watchNamespaces string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -180,6 +204,11 @@ func main() {
 	flag.BoolVar(&logCompress, "log-compress", true, "Compress determines if the rotated log files should be compressed using gzip")
 	flag.Float64Var(&kubeClientQPS, "kube-client-qps", 100, "QPS for Kubernetes client rate limiter.")
 	flag.IntVar(&kubeClientBurst, "kube-client-burst", 200, "Burst for Kubernetes client rate limiter.")
+	flag.StringVar(&watchNamespaces, "watch-namespaces", os.Getenv("WATCH_NAMESPACE"),
+		"Comma-separated list of namespaces the manager should watch. "+
+			"Empty (default) watches all namespaces; providing a list restricts "+
+			"the shared informer cache to only those namespaces. Also reads the "+
+			"WATCH_NAMESPACE environment variable.")
 	flag.Var(&concurrencyConfig, "concurrency", "Controller concurrency settings in format: controller1=N;controller2=M. "+
 		"Available controllers: batchsandbox, pool. "+
 		"Example: --concurrency='batchsandbox=32;pool=128'")
@@ -302,7 +331,7 @@ func main() {
 		config.Burst = kubeClientBurst
 	}
 
-	mgr, err := ctrl.NewManager(config, ctrl.Options{
+	mgrOptions := ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -320,7 +349,19 @@ func main() {
 		// if you are doing or is intended to do any operation such as perform cleanups
 		// after the manager stops then its usage might be unsafe.
 		// LeaderElectionReleaseOnCancel: true,
-	})
+	}
+	if nsMap := buildWatchNamespaces(watchNamespaces); len(nsMap) > 0 {
+		watched := make([]string, 0, len(nsMap))
+		for ns := range nsMap {
+			watched = append(watched, ns)
+		}
+		setupLog.Info("restricting manager cache to specific namespaces",
+			"namespaces", watched)
+		mgrOptions.Cache = cache.Options{DefaultNamespaces: nsMap}
+	} else {
+		setupLog.Info("manager cache is cluster-scoped (watching all namespaces)")
+	}
+	mgr, err := ctrl.NewManager(config, mgrOptions)
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
 		os.Exit(1)
