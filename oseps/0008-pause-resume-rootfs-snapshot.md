@@ -186,7 +186,7 @@ sequenceDiagram
 
     Client->>Server: POST /sandboxes/{id}/pause
     Server->>Batch: Read live BatchSandbox and Pod info
-    Server->>Snapshot: Create/Update SandboxSnapshot\n(sandboxId, podName, containerName, nodeName, imageUri, pushSecretRef, resumePullSecretRef)
+    Server->>Snapshot: Create/Update SandboxSnapshot\n(sandboxId, podName, containerName, nodeName, imageUri, snapshotPushSecretRef, resumePullSecretRef)
     Server-->>Client: 202 Accepted
     Ctrl->>Job: Create same-node commit Job Pod
     Job->>Registry: Push snapshot image
@@ -273,7 +273,7 @@ Suggested request shape:
 pausePolicy:
   snapshotType: Rootfs
   snapshotRegistry: registry.example.com/sandbox-snapshots
-  snapshotPushSecretName: snapshot-registry-push-secret
+  snapshotPushSecretName: registry-snapshot-push-secret
   resumeImagePullSecretName: snapshot-registry-pull-secret
 ```
 

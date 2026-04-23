@@ -7,7 +7,7 @@ This guide explains how to use the pause and resume features for Kubernetes-back
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
-- [Server Configuration](#server-configuration)
+- [Controller Configuration](#controller-configuration)
 - [Registry and Secret Setup](#registry-and-secret-setup)
 - [Usage Guide](#usage-guide)
 - [Administrator Guide](#administrator-guide)
@@ -22,13 +22,13 @@ This guide explains how to use the pause and resume features for Kubernetes-back
 
 | | Behavior |
 |--|---------|
-| **Pause** | Commits the running container's root filesystem as an OCI image, pushes it to a registry, then deletes the `BatchSandbox` and its Pod to release cluster resources |
-| **Resume** | Creates a new `BatchSandbox` using the snapshot image, restoring the filesystem state |
+| **Pause** | Creates an internal `SandboxSnapshot`, commits the running container root filesystem as an OCI image, then quiesces the sandbox runtime and releases Pods / pooled allocations |
+| **Resume** | Reuses the same `BatchSandbox`, rewrites its template to the latest snapshot image, and recreates the runtime from that image |
 | **sandboxId** | Stable across pause/resume cycles — callers use the same ID throughout the sandbox lifetime |
 
 ### Key Design Principle
 
-**Server-level configuration**: Push/pull secrets and registry URL are configured once in `~/.sandbox.toml`. SDK users and API callers require **no code changes** to use pause/resume — they just call `pause` and `resume` on the existing sandbox ID.
+**Controller-level configuration**: Registry URL and push/pull secrets are configured on the Kubernetes controller manager, not in `~/.sandbox.toml`. SDK users and API callers require **no code changes** to use pause/resume — they just call `pause` and `resume` on the existing sandbox ID.
 
 ### Lifecycle
 
@@ -37,9 +37,9 @@ Time ---------------------------------------------------------------->
 
 Sandbox lifecycle:   [Running]--[Pausing]--[Paused]--[Resuming]--[Running]
                          |                     |
-                  commit rootfs          create new BatchSandbox
-                  push to registry       from snapshot image
-                  delete BatchSandbox
+                  commit rootfs          rewrite template images
+                  push to registry       recreate runtime from snapshot
+                  release pods/alloc
 ```
 
 ### State Machine Details
@@ -49,30 +49,17 @@ The sandbox transitions through both stable and intermediate states:
 | State | Type | Description |
 |-------|------|-------------|
 | `Running` | Stable | Sandbox is active and processing requests |
-| `Pausing` | Intermediate | Pause operation in progress. See [Pausing Substates](#pausing-substates) for details. |
-| `Paused` | Stable | Sandbox is paused, rootfs committed as OCI image, cluster resources released |
-| `Resuming` | Intermediate | Resume operation in progress, new BatchSandbox being created from snapshot |
+| `Pausing` | Intermediate | Pause operation in progress. Snapshot commit is coordinated through an internal `SandboxSnapshot` resource. |
+| `Paused` | Stable | Sandbox is paused, the latest rootfs snapshot is ready, and runtime Pods / pooled allocations have been released |
+| `Resuming` | Intermediate | Resume operation in progress. The controller is rewriting the sandbox template to the latest snapshot image and recreating the runtime |
 | `Failed` | Stable | Operation failed (check `reason` and `message` for details) |
 
-#### Pausing Substates
+The Lifecycle API exposes only the coarse-grained sandbox states above. For detailed snapshot progress, inspect the internal `SandboxSnapshot` resource:
 
-The `Pausing` state has multiple substates exposed via the `reason` field:
-
-| Reason | Phase | Description |
-|--------|-------|-------------|
-| `SNAPSHOT_PENDING` | Pending | Snapshot CR created, waiting for controller to start commit |
-| `SNAPSHOT_COMMITTING` | Committing | Commit Job is running, container rootfs being committed and pushed |
-| `SNAPSHOT_READY_CLEANUP` | Ready | Snapshot is ready, BatchSandbox is being deleted to release resources |
-
-#### Resuming State
-
-The `Resuming` state occurs when:
-- A paused sandbox is being restored
-- The controller has created a new `BatchSandbox` from the snapshot image
-- The BatchSandbox is in `Pending` or `Allocated` phase
-- Marked by annotation `sandbox.opensandbox.io/resumed-from-snapshot=true`
-
-Once the resumed BatchSandbox transitions to `Running`, the sandbox state becomes `Running`.
+- `Pending`: snapshot request accepted, waiting to resolve source Pod / create commit Job
+- `Committing`: commit Job is running and pushing snapshot images
+- `Succeed`: snapshot is ready and can be used for the next resume
+- `Failed`: snapshot creation failed
 
 ### What Is Preserved
 
@@ -92,10 +79,13 @@ API caller
     │ POST /v1/sandboxes/{id}/pause
     ▼
 OpenSandbox Server
-    │ reads [pause] config from ~/.sandbox.toml
-    │ creates/updates SandboxSnapshot CR (spec.action = Pause)
+    │ PATCH BatchSandbox.spec.pause=true
     ▼
-SandboxSnapshot Controller (Kubernetes)
+BatchSandbox Controller (Kubernetes)
+    │ validates lifecycle state
+    │ creates internal SandboxSnapshot CR
+    ▼
+SandboxSnapshot Controller
     │ resolves running Pod
     │ creates commit Job on the same node
     ▼
@@ -103,8 +93,9 @@ commit Job Pod (image-committer)
     │ nerdctl: commit container rootfs → OCI image
     │ nerdctl: push to registry
     ▼
-SandboxSnapshot.status.phase = Ready
-    │ controller deletes source BatchSandbox
+SandboxSnapshot.status.phase = Succeed
+    │ BatchSandbox.status.phase = Paused
+    │ deletes Pods or releases pooled allocation
     ▼
 Cluster resources released
 
@@ -114,10 +105,13 @@ API caller
     │ POST /v1/sandboxes/{id}/resume
     ▼
 OpenSandbox Server
-    │ sets SandboxSnapshot.spec.action = Resume
+    │ PATCH BatchSandbox.spec.pause=false
     ▼
-SandboxSnapshot Controller
-    │ creates new BatchSandbox from snapshot image
+BatchSandbox Controller
+    │ reads internal SandboxSnapshot
+    │ rewrites pod template images from snapshot
+    │ clears poolRef for pooled sandboxes
+    │ recreates runtime Pods
     ▼
 Sandbox running again with restored filesystem
 ```
@@ -129,39 +123,45 @@ Sandbox running again with restored filesystem
 1. **Kubernetes cluster** with the OpenSandbox controller deployed
 2. **OCI-compatible container registry** accessible from cluster nodes (push) and the Kubernetes API (pull)
 3. **Kubernetes Secrets** of type `kubernetes.io/dockerconfigjson` for registry authentication
-4. **Server** running with `[pause]` configured in `~/.sandbox.toml`
+4. **Controller manager** configured with snapshot registry and secret flags
 
 ---
 
-## Server Configuration
+## Controller Configuration
 
-Add a `[pause]` section to `~/.sandbox.toml`:
+Configure the controller manager deployment with snapshot flags:
 
-```toml
-[runtime]
-type = "kubernetes"
-execd_image = "opensandbox/execd:latest"
-
-[pause]
-snapshot_registry = "registry.example.com/sandboxes"
-snapshot_push_secret = "registry-push-secret"
-resume_pull_secret = "registry-pull-secret"
+```yaml
+- --snapshot-registry=registry.example.com/sandboxes
+- --snapshot-push-secret=registry-snapshot-push-secret
+- --resume-pull-secret=registry-pull-secret
 ```
 
 ### Configuration Reference
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `snapshot_registry` | string | `""` | **Required.** OCI registry prefix. Images are stored as `<registry>/<sandboxId>-<container>:snapshot-v<N>`. |
-| `snapshot_push_secret` | string | `""` | Kubernetes Secret name for pushing snapshots. Must be `kubernetes.io/dockerconfigjson` type. |
-| `resume_pull_secret` | string | `""` | Kubernetes Secret name for pulling snapshot images on resume. Can be the same as push secret. |
-| `snapshot_type` | string | `"Rootfs"` | Snapshot type. Only `"Rootfs"` is supported. |
+| `--snapshot-registry` | string | `""` | **Required.** OCI registry prefix. Images are stored as `<registry>/<sandboxName>-<container>:snap-gen<N>`. |
+| `--snapshot-push-secret` | string | `""` | Kubernetes Secret name for pushing snapshots. Must be `kubernetes.io/dockerconfigjson` type. |
+| `--resume-pull-secret` | string | `""` | Kubernetes Secret name injected into resumed sandboxes for pulling snapshot images. Can be the same as push secret. |
+| `--image-committer-image` | string | `"image-committer:dev"` | Image used by commit Jobs. |
+| `--commit-job-timeout` | duration | `"10m"` | Timeout for commit Jobs. |
 
-> **Full reference**: [`server/configuration.md`](../server/configuration.md#pause--kubernetes-only)
+### Helm chart support
+
+The `opensandbox-controller` Helm chart now exposes the snapshot-related controller values directly:
+
+- `controller.snapshot.imageCommitterImage`
+- `controller.snapshot.commitJobTimeout`
+- `controller.snapshot.registry`
+- `controller.snapshot.snapshotPushSecret`
+- `controller.snapshot.resumePullSecret`
+
+For the all-in-one `opensandbox` chart, use the same values under the `opensandbox-controller.*` prefix.
 
 ### Startup behavior
 
-The server does **not** validate `[pause]` at startup — the section can be omitted if pause/resume is not needed. Validation happens at request time: if `snapshot_registry` is empty when a pause request arrives, the server returns `400 Bad Request` with code `PAUSE_POLICY_NOT_CONFIGURED`.
+The server no longer carries dedicated pause/resume config. Missing registry or secret settings are surfaced by the Kubernetes controllers when a `SandboxSnapshot` is processed, for example as `SandboxSnapshot.status.conditions[type=Failed]` with reasons like `RegistryNotConfigured`.
 
 ---
 
@@ -177,7 +177,7 @@ Any OCI-compatible registry works (Docker Hub, GitHub Container Registry, Harbor
 ### Step 2: Create the push secret
 
 ```bash
-kubectl create secret docker-registry registry-push-secret \
+kubectl create secret docker-registry registry-snapshot-push-secret \
   --docker-server=registry.example.com \
   --docker-username=<username> \
   --docker-password=<password-or-token> \
@@ -208,14 +208,14 @@ kubectl create deployment docker-registry \
 kubectl expose deployment docker-registry --port=5000
 
 # No authentication needed for internal registry
-# Leave snapshot_push_secret and resume_pull_secret empty in config
+# Leave snapshot push/pull secret flags empty on the controller manager
 ```
 
 ---
 
 ## Usage Guide
 
-Once the server is configured, pause/resume works through the standard Lifecycle API. No SDK changes are needed.
+Once the controller manager is configured and the server is running, pause/resume works through the standard Lifecycle API. No SDK changes are needed.
 
 ### Pause a sandbox
 
@@ -224,14 +224,7 @@ curl -X POST http://localhost:8080/v1/sandboxes/{sandbox_id}/pause \
   -H "Content-Type: application/json"
 ```
 
-**Response:**
-
-```json
-{
-  "id": "my-sandbox-id",
-  "status": "pausing"
-}
-```
+**Response:** `202 Accepted` with an empty body.
 
 The pause is asynchronous. The sandbox transitions through:
 `running` → `pausing` → `paused`
@@ -251,12 +244,14 @@ curl -X POST http://localhost:8080/v1/sandboxes/{sandbox_id}/resume \
   -H "Content-Type: application/json"
 ```
 
+**Response:** `202 Accepted` with an empty body.
+
 The sandbox transitions through:
 `paused` → `resuming` → `running`
 
 ### Multiple pause/resume cycles
 
-Pause and resume can be repeated. Each pause cycle produces a new snapshot version (`snapshot-v1`, `snapshot-v2`, ...). The latest snapshot is always used for the next resume.
+Pause and resume can be repeated. Each pause cycle produces a new snapshot image tag (`snap-gen1`, `snap-gen2`, ...). The latest snapshot is always used for the next resume.
 
 ---
 
@@ -277,19 +272,19 @@ The OpenSandbox controller requires the following RBAC permissions for pause/res
 
 Snapshot images are named:
 ```
-<snapshot_registry>/<sandboxId>-<containerName>:snapshot-v<N>
+<snapshot-registry>/<sandboxName>-<containerName>:snap-gen<N>
 ```
 
-For example, with `snapshot_registry = "registry.example.com/sandboxes"`, sandbox ID `my-sandbox`, container `sandbox`, first pause:
+For example, with `--snapshot-registry=registry.example.com/sandboxes`, sandbox `my-sandbox`, container `sandbox`, first pause:
 ```
-registry.example.com/sandboxes/my-sandbox-sandbox:snapshot-v1
+registry.example.com/sandboxes/my-sandbox-sandbox:snap-gen1
 ```
 
 ### Commit Job
 
 The controller creates a short-lived Kubernetes `Job` for each pause:
 
-- **Job name**: `<snapshotName>-commit-v<N>`
+- **Job name**: `<snapshotName>-commit`
 - **Node affinity**: Runs on the **same node** as the source Pod (containerd socket access required)
 - **Timeout**: 10 minutes (`ActiveDeadlineSeconds`)
 - **TTL**: 5 minutes after completion (`TTLSecondsAfterFinished`)
@@ -302,17 +297,17 @@ Check SandboxSnapshot status:
 ```bash
 kubectl get sandboxsnapshot -n <namespace>
 # NAME          PHASE       SANDBOX_ID     AGE
-# my-snapshot   Ready       my-sandbox     5m
+# my-snapshot   Succeed     my-sandbox     5m
 
 kubectl describe sandboxsnapshot my-snapshot -n <namespace>
 ```
 
 Key fields to watch:
 
-- `status.phase`: `Pending` → `Committing` → `Ready` / `Failed`
-- `status.message`: Human-readable status or error message
-- `status.containerSnapshots`: Image URIs for each committed container
-- `status.history`: Audit log of last 10 pause/resume events
+- `status.phase`: `Pending` → `Committing` → `Succeed` / `Failed`
+- `status.conditions`: readiness or failure reasons with human-readable messages
+- `status.containers`: image URIs for each committed container
+- `status.sourcePodName` / `status.sourceNodeName`: resolved execution source for the snapshot
 
 #### Monitoring Sandbox State Transitions
 
@@ -324,9 +319,11 @@ curl http://localhost:8080/v1/sandboxes/{sandbox_id}
 # Response during pause:
 {
   "id": "my-sandbox",
-  "status": "pausing",
-  "reason": "SNAPSHOT_COMMITTING",
-  "message": "Snapshot is committing"
+  "status": {
+    "state": "Pausing",
+    "reason": "PAUSING",
+    "message": "Pausing sandbox"
+  }
 }
 ```
 
@@ -336,9 +333,11 @@ curl http://localhost:8080/v1/sandboxes/{sandbox_id}
 # Response during resume:
 {
   "id": "my-sandbox",
-  "status": "resuming",
-  "reason": "RESUMING",
-  "message": "Restoring from snapshot"
+  "status": {
+    "state": "Resuming",
+    "reason": "RESUMING",
+    "message": "Resuming sandbox"
+  }
 }
 ```
 
@@ -346,49 +345,36 @@ curl http://localhost:8080/v1/sandboxes/{sandbox_id}
 
 ## SandboxSnapshot Reference
 
-### Spec fields (set by Server)
+### Spec fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `sandboxId` | string | Stable sandbox identifier |
-| `sourceBatchSandboxName` | string | BatchSandbox to snapshot |
-| `action` | string | `Pause` or `Resume` |
-| `snapshotRegistry` | string | OCI registry prefix |
-| `snapshotPushSecret` | string | Secret name for push |
-| `resumeImagePullSecret` | string | Secret name for pull on resume |
-| `snapshotType` | string | `Rootfs` |
+| `sandboxName` | string | Target `BatchSandbox` name in the same namespace |
 
 ### Status fields (set by Controller)
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `phase` | string | `Pending` / `Committing` / `Ready` / `Failed` |
-| `message` | string | Status message or error detail |
+| `phase` | string | `Pending` / `Committing` / `Succeed` / `Failed` |
+| `conditions` | list | `Ready` / `Failed` conditions with reason and message |
 | `sourcePodName` | string | Pod name used for commit |
 | `sourceNodeName` | string | Node where commit Job runs |
-| `containerSnapshots` | list | `{containerName, imageUri}` per container |
-| `resumeTemplate` | object | BatchSandbox spec template for resume |
-| `pauseVersion` | int | Monotonically increasing pause counter |
-| `resumeVersion` | int | Monotonically increasing resume counter |
-| `lastPauseAt` | time | Timestamp of most recent pause request |
-| `lastResumeAt` | time | Timestamp of most recent resume |
-| `readyAt` | time | Timestamp when snapshot became Ready |
-| `history` | list | Last 10 pause/resume records |
+| `containers` | list | `{containerName, imageUri, imageDigest}` per container |
 | `observedGeneration` | int | Last processed spec generation |
 
 ---
 
 ## Troubleshooting
 
-### 1. Snapshot stuck in `Failed` — `snapshotPushSecret "xxx" not found`
+### 1. Snapshot stuck in `Failed` — push secret not found
 
-**Cause**: The `snapshotPushSecret` specified in `~/.sandbox.toml` does not exist in the sandbox namespace.
+**Cause**: The controller manager was configured with a `--snapshot-push-secret` that does not exist in the sandbox namespace.
 
 **Solution**:
 ```bash
-kubectl get secret registry-push-secret -n <namespace>
+kubectl get secret registry-snapshot-push-secret -n <namespace>
 # If missing:
-kubectl create secret docker-registry registry-push-secret \
+kubectl create secret docker-registry registry-snapshot-push-secret \
   --docker-server=<registry> \
   --docker-username=<user> \
   --docker-password=<token> \
@@ -425,12 +411,12 @@ Docker registry secrets **must** be type `kubernetes.io/dockerconfigjson`. Gener
 
 ```bash
 # Check secret type
-kubectl get secret registry-push-secret -o jsonpath='{.type}'
+kubectl get secret registry-snapshot-push-secret -o jsonpath='{.type}'
 # Expected: kubernetes.io/dockerconfigjson
 
 # If wrong type, delete and recreate:
-kubectl delete secret registry-push-secret
-kubectl create secret docker-registry registry-push-secret \
+kubectl delete secret registry-snapshot-push-secret
+kubectl create secret docker-registry registry-snapshot-push-secret \
   --docker-server=<registry> \
   --docker-username=<user> \
   --docker-password=<token>
@@ -460,7 +446,7 @@ kubectl run registry-test --rm -it --image=alpine -- \
 
 ---
 
-### 5. Resume creates sandbox but Pod fails to start
+### 5. Resume accepted but the runtime Pod fails to start
 
 **Cause**: The snapshot image cannot be pulled.
 
@@ -470,9 +456,9 @@ kubectl describe pod <resumed-pod-name> -n <namespace>
 ```
 
 **Check:**
-- `resume_pull_secret` is correctly configured and exists
+- `--resume-pull-secret` is correctly configured and the Secret exists in the namespace
 - The registry is accessible from the node pulling the image
-- The snapshot image was successfully pushed during pause (check `status.containerSnapshots`)
+- The snapshot image was successfully pushed during pause (check `status.containers`)
 
 ---
 
@@ -492,5 +478,4 @@ kubectl logs -n opensandbox-system deployment/opensandbox-controller-manager
 - **Documentation**: [OpenSandbox GitHub](https://github.com/alibaba/OpenSandbox)
 - **Issues**: [GitHub Issues](https://github.com/alibaba/OpenSandbox/issues)
 - **Design Document**: [OSEP-0008](../oseps/0008-pause-resume-rootfs-snapshot.md)
-- **Server configuration reference**: [`server/configuration.md`](../server/configuration.md#pause--kubernetes-only)
 - **Kubernetes controller**: [`kubernetes/README.md`](../kubernetes/README.md#pause-and-resume-rootfs-snapshot)

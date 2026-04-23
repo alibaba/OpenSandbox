@@ -173,10 +173,14 @@ var _ = Describe("BatchSandbox Controller", func() {
 			}, timeout, interval).Should(Succeed())
 		})
 		It("should successfully correctly create new Pod and update batch sandbox status when user scale out", func() {
-			bs := &sandboxv1alpha1.BatchSandbox{}
-			Expect(k8sClient.Get(ctx, typeNamespacedName, bs)).Should(Succeed())
-			*bs.Spec.Replicas = *bs.Spec.Replicas + 1 // scale out
-			Expect(k8sClient.Update(ctx, bs)).Should(Succeed())
+			Expect(retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+				bs := &sandboxv1alpha1.BatchSandbox{}
+				if err := k8sClient.Get(ctx, typeNamespacedName, bs); err != nil {
+					return err
+				}
+				*bs.Spec.Replicas = *bs.Spec.Replicas + 1 // scale out using the latest resourceVersion
+				return k8sClient.Update(ctx, bs)
+			})).Should(Succeed())
 			Eventually(func(g Gomega) {
 				batchsandbox := &sandboxv1alpha1.BatchSandbox{}
 				if err := k8sClient.Get(ctx, typeNamespacedName, batchsandbox); err != nil {
@@ -186,6 +190,8 @@ var _ = Describe("BatchSandbox Controller", func() {
 				g.Expect(batchsandbox.Status.Replicas).To(Equal(*batchsandbox.Spec.Replicas))
 			}, timeout, interval).Should(Succeed())
 			Eventually(func(g Gomega) {
+				bs := &sandboxv1alpha1.BatchSandbox{}
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, bs)).To(Succeed())
 				pods := &v1.PodList{}
 				g.Expect(k8sClient.List(ctx, pods, &client.ListOptions{
 					Namespace:     bs.Namespace,

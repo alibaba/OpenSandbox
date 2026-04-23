@@ -29,10 +29,9 @@ Example files in this repository:
 8. [`[egress]`](#egress)
 9. [`[storage]`](#storage)
 10. [`[secure_runtime]`](#secure_runtime)
-11. [`[pause]`](#pause--kubernetes-only)
-12. [`[renew_intent]`](#renew_intent--experimental)
-13. [Environment variables (outside TOML)](#environment-variables-outside-toml)
-14. [Cross-field validation rules](#cross-field-validation-rules)
+11. [`[renew_intent]`](#renew_intent--experimental)
+12. [Environment variables (outside TOML)](#environment-variables-outside-toml)
+13. [Cross-field validation rules](#cross-field-validation-rules)
 
 ---
 
@@ -49,7 +48,6 @@ Example files in this repository:
 | `[egress]` | No | Required values when clients use `networkPolicy` on create |
 | `[storage]` | No | Host bind mounts / OSSFS mount root |
 | `[secure_runtime]` | No | gVisor / Kata / Firecracker |
-| `[pause]` | No | Kubernetes pause/resume via rootfs snapshot |
 | `[renew_intent]` | No | Experimental auto-renew on access |
 
 ---
@@ -224,49 +222,6 @@ Optional **strong isolation** runtimes (gVisor, Kata, Firecracker).
 - If `type` is **`gvisor`** or **`kata`**, at least one of **`docker_runtime`** or **`k8s_runtime_class`** must be set.
 
 See [`docs/secure-container.md`](../docs/secure-container.md) for installation and node requirements.
-
----
-
-## `[pause]` — Kubernetes only
-
-Configures **pause and resume** for Kubernetes sandboxes via rootfs snapshot. When a sandbox is paused, the controller commits the container rootfs as an OCI image and pushes it to a registry. The original `BatchSandbox` (and its Pod) is then deleted to release cluster resources. Resume creates a new `BatchSandbox` from the snapshot image, restoring the filesystem state.
-
-**Kubernetes-only**: Docker runtime does not support pause/resume via rootfs snapshot.
-
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
-| `snapshot_registry` | string | `""` | **Required to enable pause/resume.** OCI registry URL prefix for snapshot images, e.g. `registry.example.com/snapshots`. Images are pushed as `<registry>/<sandboxId>-<container>:snapshot-v<N>`. |
-| `snapshot_push_secret` | string | `""` | Kubernetes Secret name (type `kubernetes.io/dockerconfigjson`) for pushing snapshots to the registry. Leave empty if the registry is unauthenticated or uses node-level credentials. |
-| `resume_pull_secret` | string | `""` | Kubernetes Secret name for pulling snapshot images when resuming. Can be the same secret as `snapshot_push_secret` for read+write secrets. Leave empty if pull is unauthenticated. |
-| `snapshot_type` | string | `"Rootfs"` | Snapshot type. Currently only **`"Rootfs"`** (full root filesystem commit) is supported. |
-
-### Example
-
-```toml
-[pause]
-snapshot_registry = "registry.example.com/sandboxes"
-snapshot_push_secret = "registry-push-secret"
-resume_pull_secret = "registry-pull-secret"
-```
-
-### Fail-fast validation
-
-When a pause request arrives, the server validates that `snapshot_registry` is configured. If it is empty, the request fails immediately with `400 Bad Request` and code `PAUSE_POLICY_NOT_CONFIGURED`.
-
-The Kubernetes controller further validates that `snapshot_push_secret` exists before creating the commit Job. If the secret is missing, the `SandboxSnapshot` transitions to `Failed` immediately (rather than waiting for the 10-minute job timeout).
-
-### Registry setup
-
-Create the push/pull secrets as standard Docker config secrets:
-
-```bash
-kubectl create secret docker-registry registry-push-secret \
-  --docker-server=registry.example.com \
-  --docker-username=<user> \
-  --docker-password=<token>
-```
-
-See [`docs/pause-resume.md`](../docs/pause-resume.md) for a full walkthrough including registry setup, RBAC requirements, and troubleshooting.
 
 ---
 

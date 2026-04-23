@@ -4,10 +4,4 @@ metadata:
   name: {{.SnapshotName}}
   namespace: {{.Namespace}}
 spec:
-  sandboxId: {{.SandboxId}}
-  sourceBatchSandboxName: {{.SourceBatchSandboxName}}
-  snapshotType: Rootfs
-  snapshotRegistry: {{.SnapshotRegistry}}
-  snapshotPushSecret: {{.SnapshotPushSecret}}
-  resumeImagePullSecret: {{.ResumeImagePullSecret}}
-  action: Pause
+  sandboxName: {{.SandboxName}}

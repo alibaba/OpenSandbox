@@ -148,6 +148,12 @@ setup-test-e2e: install-kind ## Set up a Kind cluster for e2e tests if it does n
 			$(KIND) create cluster --name $(KIND_CLUSTER) --image kindest/node:$(KIND_K8S_VERSION) ;; \
 	esac
 
+.PHONY: test-e2e-pause-resume
+test-e2e-pause-resume: setup-test-e2e manifests generate fmt vet 
+	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \
+		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -ginkgo.focus="PauseResume" -timeout $(E2E_TIMEOUT) $(GINKGO_ARGS)
+	$(MAKE) cleanup-test-e2e
+
 .PHONY: test-e2e-main
 test-e2e-main: setup-test-e2e manifests generate fmt vet 
 	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \

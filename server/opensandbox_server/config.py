@@ -506,27 +506,6 @@ class EgressConfig(BaseModel):
     )
 
 
-class PauseConfig(BaseModel):
-    """Pause/resume configuration for snapshot support."""
-
-    snapshot_registry: str = Field(
-        default="",
-        description="Registry for snapshots, e.g. registry.example.com/snapshots.",
-    )
-    snapshot_push_secret: str = Field(
-        default="",
-        description="K8s Secret name for pushing snapshots to registry.",
-    )
-    resume_pull_secret: str = Field(
-        default="",
-        description="K8s Secret name for pulling snapshot images during resume.",
-    )
-    snapshot_type: str = Field(
-        default="Rootfs",
-        description="Snapshot type: Rootfs (full root filesystem) or other types.",
-    )
-
-
 class RuntimeConfig(BaseModel):
     """Runtime selection (docker, kubernetes, etc.)."""
 
@@ -678,11 +657,6 @@ class AppConfig(BaseModel):
         default=None,
         description="Secure container runtime configuration (gVisor, Kata, Firecracker).",
     )
-    pause: Optional[PauseConfig] = Field(
-        default=None,
-        description="Pause/resume configuration for snapshot support.",
-    )
-
     @model_validator(mode="after")
     def validate_runtime_blocks(self) -> "AppConfig":
         if self.runtime.type == "docker":
@@ -807,7 +781,6 @@ __all__ = [
     "StorageConfig",
     "KubernetesRuntimeConfig",
     "EgressConfig",
-    "PauseConfig",
     "EGRESS_MODE_DNS",
     "EGRESS_MODE_DNS_NFT",
     "SecureRuntimeConfig",

@@ -1003,12 +1003,14 @@ var _ = Describe("Manager", Ordered, func() {
 			const replicas = 2
 
 			By("creating a Pool")
+			// Use a zero-buffer pool so restart recovery verifies allocation reconstruction
+			// without racing the normal buffer refill behavior.
 			poolYAML, err := renderTemplate("testdata/pool-basic.yaml", map[string]interface{}{
 				"PoolName":     poolName,
 				"SandboxImage": utils.SandboxImage,
 				"Namespace":    testNamespace,
-				"BufferMax":    3,
-				"BufferMin":    2,
+				"BufferMax":    0,
+				"BufferMin":    0,
 				"PoolMax":      5,
 				"PoolMin":      2,
 			})

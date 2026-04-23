@@ -135,13 +135,26 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	batchSandboxes := make([]*sandboxv1alpha1.BatchSandbox, 0, len(batchSandboxList.Items))
 	for i := range batchSandboxList.Items {
 		batchSandbox := batchSandboxList.Items[i]
-		if batchSandbox.Spec.Template != nil {
+		if !shouldManageBatchSandboxInPool(&batchSandbox) {
 			continue
 		}
 		batchSandboxes = append(batchSandboxes, &batchSandbox)
 	}
 	log.Info("Pool reconcile", "pool", pool.Name, "pods", len(pods), "batchSandboxes", len(batchSandboxes))
 	return r.reconcilePool(ctx, pool, batchSandboxes, pods)
+}
+
+func shouldManageBatchSandboxInPool(batchSandbox *sandboxv1alpha1.BatchSandbox) bool {
+	if batchSandbox == nil {
+		return false
+	}
+	if batchSandbox.Spec.PoolRef == "" {
+		return false
+	}
+	// Pause solidifies the pool template onto the BatchSandbox before the snapshot commits.
+	// Keep the sandbox visible to pool scheduling until resume detaches it by clearing poolRef,
+	// otherwise the source pool pod can be GC'd and recycled mid-snapshot.
+	return true
 }
 
 // reconcilePool contains the main reconciliation logic

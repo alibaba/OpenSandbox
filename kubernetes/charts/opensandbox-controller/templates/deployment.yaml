@@ -52,10 +52,10 @@ spec:
         {{- end }}
         - --health-probe-bind-address=:8081
         - --zap-log-level={{ .Values.controller.logLevel }}
-        {{- if and .Values.controller.kubeClient (gt .Values.controller.kubeClient.qps 0) }}
+        {{- if and .Values.controller.kubeClient .Values.controller.kubeClient.qps }}
         - --kube-client-qps={{ .Values.controller.kubeClient.qps }}
         {{- end }}
-        {{- if and .Values.controller.kubeClient (gt .Values.controller.kubeClient.burst 0) }}
+        {{- if and .Values.controller.kubeClient .Values.controller.kubeClient.burst }}
         - --kube-client-burst={{ .Values.controller.kubeClient.burst }}
         {{- end }}
         {{- if .Values.controller.snapshot.imageCommitterImage }}
@@ -63,6 +63,15 @@ spec:
         {{- end }}
         {{- if .Values.controller.snapshot.commitJobTimeout }}
         - --commit-job-timeout={{ .Values.controller.snapshot.commitJobTimeout }}
+        {{- end }}
+        {{- if .Values.controller.snapshot.registry }}
+        - --snapshot-registry={{ .Values.controller.snapshot.registry }}
+        {{- end }}
+        {{- if .Values.controller.snapshot.snapshotPushSecret }}
+        - --snapshot-push-secret={{ .Values.controller.snapshot.snapshotPushSecret }}
+        {{- end }}
+        {{- if .Values.controller.snapshot.resumePullSecret }}
+        - --resume-pull-secret={{ .Values.controller.snapshot.resumePullSecret }}
         {{- end }}
         ports:
         - name: health

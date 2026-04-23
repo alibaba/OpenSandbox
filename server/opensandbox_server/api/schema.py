@@ -299,7 +299,7 @@ class SandboxStatus(BaseModel):
     """
     state: str = Field(
         ...,
-        description="Current lifecycle state (Pending, Running, Pausing, Paused, Stopping, Terminated, Failed)",
+        description="Current lifecycle state (Pending, Running, Pausing, Paused, Resuming, Stopping, Terminated, Failed)",
     )
     reason: Optional[str] = Field(
         None,
@@ -386,6 +386,7 @@ class CreateSandboxRequest(BaseModel):
         None,
         description="Opaque container for provider-specific or transient parameters not covered by the core API",
     )
+
     class Config:
         populate_by_name = True
 

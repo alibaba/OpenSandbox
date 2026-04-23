@@ -67,15 +67,15 @@ OpenSandbox 支持通过将容器根文件系统持久化为 OCI 镜像来实现
 
 沙箱生命周期：   [运行中]--[暂停中]--[已暂停]--[恢复中]--[运行中]
                          |                     |
-                  提交 rootfs          从快照镜像
-                  推送到 registry      创建新的 BatchSandbox
-                  删除 BatchSandbox
+                  提交 rootfs          重写模板镜像
+                  推送到 registry      基于快照重建运行时
+                  释放 Pod/池化分配
 ```
 
 ### 工作原理
 
-1. **暂停**：服务器创建 `SandboxSnapshot` CR。控制器在同一节点上创建 commit Job，提交容器 rootfs 并推送到配置的 OCI registry。快照就绪后，源 `BatchSandbox`（及其 Pod）将被删除以释放集群资源。
-2. **恢复**：服务器在 `SandboxSnapshot` 上设置 `action: Resume`。控制器从快照镜像创建新的 `BatchSandbox`，恢复文件系统状态。公共 `sandboxId` 在暂停/恢复周期中保持稳定。
+1. **暂停**：服务器 patch `BatchSandbox.spec.pause=true`。控制器创建内部 `SandboxSnapshot`，在同一节点上启动 commit Job，提交容器 rootfs 并推送到配置的 OCI registry。快照就绪后，控制器将同一个 `BatchSandbox` 置为 `Paused`，并释放运行时 Pod / 池化分配。
+2. **恢复**：服务器 patch `BatchSandbox.spec.pause=false`。控制器读取最新的 `SandboxSnapshot`，把 `BatchSandbox` 模板镜像重写为快照镜像 URI，重建运行时，并将沙箱恢复到 `Running`。公共 `sandboxId` 在暂停/恢复周期中保持稳定。
 
 ### SandboxSnapshot CRD
 
@@ -83,22 +83,18 @@ OpenSandbox 支持通过将容器根文件系统持久化为 OCI 镜像来实现
 
 | 字段 | 位置 | 描述 |
 |-------|----------|-------------|
-| `spec.sandboxId` | Spec | 目标沙箱标识符 |
-| `spec.sourceBatchSandboxName` | Spec | 要快照的源 BatchSandbox |
-| `spec.action` | Spec | `Pause` 或 `Resume` |
-| `spec.snapshotRegistry` | Spec | OCI registry 前缀（由服务器从 `[pause]` 配置填充） |
-| `spec.snapshotPushSecret` | Spec | 推送用的 Secret 名称（由服务器填充） |
-| `spec.resumeImagePullSecret` | Spec | 恢复时拉取用的 Secret 名称（由服务器填充） |
-| `status.phase` | Status | `Pending` → `Committing` → `Ready` / `Failed` |
-| `status.containerSnapshots` | Status | 每个容器已提交的镜像 URI |
+| `spec.sandboxName` | Spec | 同命名空间下目标 `BatchSandbox` 的名称 |
+| `status.phase` | Status | `Pending` → `Committing` → `Succeed` / `Failed` |
+| `status.conditions` | Status | 带有 reason 和 message 的 `Ready` / `Failed` 条件 |
+| `status.containers` | Status | 每个容器已提交的镜像 URI |
 | `status.sourcePodName` | Status | 控制器解析的 Pod 名称 |
-| `status.history` | Status | 暂停/恢复操作的审计日志（最近 10 条） |
+| `status.sourceNodeName` | Status | commit Job 选择的节点 |
 
 ### 前置条件
 
 1. **OCI Registry**：用于存储快照镜像的可访问容器 registry。
 2. **Kubernetes Secrets**：用于推送和拉取访问的 Docker 配置 secrets。
-3. **服务器配置**：在 `~/.sandbox.toml` 中设置 `[pause]` 部分（参见[服务器配置](../server/configuration.md#pause--kubernetes-only)）。
+3. **控制器配置**：为 controller manager 配置快照 registry 和 secret 参数。
 4. **控制器 RBAC**：控制器需要 `secrets: get` 权限（已包含在 Helm chart 和 `make manifests` 输出中）。
 
 ### 控制器配置
@@ -107,32 +103,37 @@ OpenSandbox 支持通过将容器根文件系统持久化为 OCI 镜像来实现
 
 | 参数 | 默认值 | 描述 |
 |------|---------|-------------|
+| `--snapshot-registry` | `""` | 快照镜像使用的 OCI registry 前缀 |
+| `--snapshot-push-secret` | `""` | commit Job 推送快照时使用的 Secret 名称 |
+| `--resume-pull-secret` | `""` | 恢复后沙箱拉取镜像时注入的 Secret 名称 |
 | `--image-committer-image` | `image-committer:dev` | 用于 commit 操作的镜像（必须包含 `nerdctl` 工具） |
 | `--commit-job-timeout` | `10m` | commit Job 的超时时间 |
 
 这些参数在控制器启动时配置。`image-committer-image` 必须是包含 `nerdctl` 的容器镜像，以执行 rootfs commit 和推送操作。
 
-**Helm 配置：**
+本地开发时，示例 manager manifest 会直接传入这些 registry 和 secret 参数：
 
-```sh
-helm install opensandbox-controller ./charts/opensandbox-controller \
-  --set controller.snapshot.imageCommitterImage=<your-registry>/image-committer:v1.0.0 \
-  --set controller.snapshot.commitJobTimeout=15m
+```yaml
+- --snapshot-registry=<your-registry>/sandboxes
+- --snapshot-push-secret=registry-snapshot-push-secret
+- --resume-pull-secret=registry-pull-secret
 ```
 
-**Kustomize 配置：**
+当前 Helm chart 已直接暴露 `controller.snapshot.*` 这组 values，包括 `imageCommitterImage`、`commitJobTimeout`、`registry`、`snapshotPushSecret` 和 `resumePullSecret`。
+
+**源码 / Kustomize 部署：**
+
+如果通过源码执行 `make deploy` 部署，Makefile 目前只会改写 `CONTROLLER_IMG`。快照相关 flags 仍然来自 `config/manager/manager.yaml`（或您自己的 Kustomize overlay / patch）。如果需要修改 registry、secret 或 image-committer 设置，请先更新该 manifest，再执行：
 
 ```sh
-make deploy CONTROLLER_IMG=<controller-image> \
-  IMAGE_COMMITTER_IMAGE=<your-registry>/image-committer:v1.0.0 \
-  COMMIT_JOB_TIMEOUT=15m
+make deploy CONTROLLER_IMG=<controller-image>
 ```
 
 ### 快速设置
 
 ```bash
 # 创建推送 secret
-kubectl create secret docker-registry registry-push-secret \
+kubectl create secret docker-registry registry-snapshot-push-secret \
   --docker-server=<your-registry> \
   --docker-username=<user> \
   --docker-password=<token>
@@ -144,13 +145,12 @@ kubectl create secret docker-registry registry-pull-secret \
   --docker-password=<token>
 ```
 
-服务器配置（`~/.sandbox.toml`）：
+然后为 controller manager 配置：
 
-```toml
-[pause]
-snapshot_registry = "<your-registry>/sandboxes"
-snapshot_push_secret = "registry-push-secret"
-resume_pull_secret = "registry-pull-secret"
+```yaml
+- --snapshot-registry=<your-registry>/sandboxes
+- --snapshot-push-secret=registry-snapshot-push-secret
+- --resume-pull-secret=registry-pull-secret
 ```
 
 ### CRD 清理
@@ -424,10 +424,10 @@ helm uninstall opensandbox-controller -n opensandbox-system
 
 3. **将管理器部署到集群：**
    ```sh
-   make deploy CONTROLLER_IMG=<some-registry>/opensandbox-controller:tag TASK_EXECUTOR_IMG=<some-registry>/opensandbox-task-executor:tag
+   make deploy CONTROLLER_IMG=<some-registry>/opensandbox-controller:tag
    ```
 
-   **注意**：您可能需要授予自己集群管理员权限或以管理员身份登录以确保您在运行命令之前具有集群管理员权限。
+   **注意**：`make deploy` 只会改写 controller 镜像。如果您的 Pool / BatchSandbox 模板会引用 `TASK_EXECUTOR_IMG`，请单独构建并推送该镜像。您也可能需要在执行这些命令前具备集群管理员权限。
 
 **Kind 用户的重要说明**：如果您使用的是 kind 集群，需要在构建镜像后将两个镜像都加载到 kind 节点中：
 ```sh

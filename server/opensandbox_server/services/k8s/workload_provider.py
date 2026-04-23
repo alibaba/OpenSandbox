@@ -97,15 +97,16 @@ class WorkloadProvider(ABC):
         pass
     
     @abstractmethod
-    def delete_workload(self, sandbox_id: str, namespace: str) -> bool:
-        """Delete a workload resource.
+    def delete_workload(self, sandbox_id: str, namespace: str) -> None:
+        """
+        Delete a workload resource.
 
         Args:
             sandbox_id: Unique sandbox identifier
             namespace: Kubernetes namespace
 
-        Returns:
-            True if deleted, False if not found. Raises on error.
+        Raises:
+            ApiException: If deletion fails
         """
         pass
     
@@ -168,16 +169,38 @@ class WorkloadProvider(ABC):
     def get_endpoint_info(self, workload: Any, port: int, sandbox_id: str) -> Optional[Endpoint]:
         """
         Get endpoint information from workload.
-        
+
         Args:
             workload: Workload object
             port: Port number
             sandbox_id: Sandbox identifier for ingress-based endpoints
-            
+
         Returns:
             Endpoint object (including optional headers) or None if not available
         """
         pass
+
+    def pause_sandbox(self, sandbox_id: str, namespace: str) -> None:
+        """
+        Pause a running sandbox.
+
+        The provider validates the current state and signals the pause intent.
+        Raises NotImplementedError if the provider does not support pause.
+        Raises ValueError if the sandbox is in an invalid state for pause.
+        Raises Exception if the sandbox is not found or the API call fails.
+        """
+        raise NotImplementedError("Pause is not supported by this provider")
+
+    def resume_sandbox(self, sandbox_id: str, namespace: str) -> None:
+        """
+        Resume a paused sandbox.
+
+        The provider validates the current state and signals the resume intent.
+        Raises NotImplementedError if the provider does not support resume.
+        Raises ValueError if the sandbox is in an invalid state for resume.
+        Raises Exception if the sandbox is not found or the API call fails.
+        """
+        raise NotImplementedError("Resume is not supported by this provider")
 
     def supports_image_auth(self) -> bool:
         """

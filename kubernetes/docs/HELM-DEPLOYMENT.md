@@ -124,6 +124,11 @@ controller:
   
   logLevel: debug
 
+  snapshot:
+    registry: myregistry.example.com/opensandbox/snapshots
+    snapshotPushSecret: registry-snapshot-push-secret
+    resumePullSecret: registry-pull-secret
+
 imagePullSecrets:
   - name: myregistrykey
 ```
@@ -170,6 +175,16 @@ controller:
 ```bash
 helm install opensandbox-controller ./charts/opensandbox-controller \
   -f affinity-values.yaml \
+  --namespace opensandbox-system
+```
+
+#### 4. 配置 Pause/Resume 快照参数
+
+```bash
+helm install opensandbox-controller ./charts/opensandbox-controller \
+  --set controller.snapshot.registry=myregistry.example.com/opensandbox/snapshots \
+  --set controller.snapshot.snapshotPushSecret=registry-snapshot-push-secret \
+  --set controller.snapshot.resumePullSecret=registry-pull-secret \
   --namespace opensandbox-system
 ```
 
@@ -235,6 +250,7 @@ make helm-uninstall
 ```bash
 kubectl delete crd batchsandboxes.sandbox.opensandbox.io
 kubectl delete crd pools.sandbox.opensandbox.io
+kubectl delete crd sandboxsnapshots.sandbox.opensandbox.io
 ```
 
 ### 清理 Namespace

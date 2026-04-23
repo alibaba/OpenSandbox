@@ -50,6 +50,12 @@ controller:
     imageCommitterImage: "image-committer:dev"
     # -- Timeout duration for commit jobs
     commitJobTimeout: "10m"
+    # -- OCI registry prefix used for snapshot images.
+    registry: ""
+    # -- Secret name used by commit Jobs to push snapshot images.
+    snapshotPushSecret: ""
+    # -- Secret name injected into resumed sandboxes for pulling snapshot images.
+    resumePullSecret: ""
 
   # -- Enable leader election for controller manager
   leaderElection:

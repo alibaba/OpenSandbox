@@ -728,20 +728,18 @@ class TestDeleteSandbox:
     
     def test_delete_existing_sandbox_succeeds(self, k8s_service, mock_workload):
         k8s_service.workload_provider.get_workload.return_value = mock_workload
-        k8s_service.workload_provider.delete_workload.return_value = True
-        k8s_service.snapshot_provider.delete_snapshot.return_value = False
+        k8s_service.workload_provider.delete_workload.return_value = None
 
         k8s_service.delete_sandbox("test-sandbox-id")
         
         k8s_service.workload_provider.delete_workload.assert_called_once_with(
-            "test-sandbox-id",
-            k8s_service.namespace
+            sandbox_id="test-sandbox-id",
+            namespace=k8s_service.namespace
         )
     
     def test_delete_nonexistent_sandbox_raises_404(self, k8s_service):
-        # Mock both resources not found
-        k8s_service.workload_provider.delete_workload.return_value = False
-        k8s_service.snapshot_provider.delete_snapshot.return_value = False
+        # Mock delete_workload to raise exception containing "not found"
+        k8s_service.workload_provider.delete_workload.side_effect = Exception("Sandbox not found")
 
         with pytest.raises(HTTPException) as exc_info:
             k8s_service.delete_sandbox("nonexistent-id")

@@ -75,6 +75,11 @@ kubectl delete crd sandboxsnapshots.sandbox.opensandbox.io
 | `controller.logLevel` | Can be one of 'debug', 'info', 'error' | `info` |
 | `controller.kubeClient.qps` | QPS for Kubernetes client rate limiter | `100` |
 | `controller.kubeClient.burst` | Burst for Kubernetes client rate limiter | `200` |
+| `controller.snapshot.imageCommitterImage` | Image used by snapshot commit Jobs | `image-committer:dev` |
+| `controller.snapshot.commitJobTimeout` | Timeout duration for snapshot commit Jobs | `10m` |
+| `controller.snapshot.registry` | OCI registry prefix used for snapshot images | `""` |
+| `controller.snapshot.snapshotPushSecret` | Secret name used by commit Jobs to push snapshots | `""` |
+| `controller.snapshot.resumePullSecret` | Secret name injected into resumed sandboxes for image pulls | `""` |
 | `controller.leaderElection.enabled` | Enable leader election | `true` |
 | `controller.nodeSelector` | Node labels for pod assignment | `{}` |
 | `controller.tolerations` | Tolerations for pod assignment | `[]` |
@@ -150,6 +155,28 @@ controller:
 imagePullSecrets:
   - name: myregistrykey
 ```
+
+### Pause/Resume Snapshot Configuration
+
+The chart exposes the snapshot-related settings below:
+
+```yaml
+controller:
+  snapshot:
+    imageCommitterImage: my-registry/image-committer:v1.0.0
+    commitJobTimeout: 15m
+    registry: my-registry/snapshots
+    snapshotPushSecret: registry-snapshot-push-secret
+    resumePullSecret: registry-pull-secret
+```
+
+These values render directly to the controller flags:
+
+- `--image-committer-image`
+- `--commit-job-timeout`
+- `--snapshot-registry`
+- `--snapshot-push-secret`
+- `--resume-pull-secret`
 
 ### Node Affinity
 

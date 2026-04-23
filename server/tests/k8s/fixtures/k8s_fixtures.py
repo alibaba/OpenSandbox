@@ -205,7 +205,7 @@ def fixed_datetime():
 @pytest.fixture
 def k8s_app_config(k8s_runtime_config):
     """Provide complete app configuration (Kubernetes type)"""
-    from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig, PauseConfig
+    from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig
     
     return AppConfig(
         server=ServerConfig(
@@ -219,11 +219,6 @@ def k8s_app_config(k8s_runtime_config):
             execd_image="ghcr.io/opensandbox/execd:test",
         ),
         kubernetes=k8s_runtime_config,
-        pause=PauseConfig(
-            snapshot_registry="registry.example.com/snapshots",
-            snapshot_push_secret="push-secret",
-            resume_pull_secret="pull-secret",
-        ),
     )
 
 
@@ -298,8 +293,7 @@ def k8s_service(k8s_app_config):
     from unittest.mock import patch, MagicMock
     
     with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client_cls, \
-         patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider, \
-         patch('opensandbox_server.services.k8s.kubernetes_service.SandboxSnapshotProvider') as mock_snapshot_provider_cls:
+         patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
 
         # Mock K8sClient instance
         mock_k8s_client = MagicMock()
@@ -309,17 +303,12 @@ def k8s_service(k8s_app_config):
         mock_provider = MagicMock()
         mock_create_provider.return_value = mock_provider
 
-        # Mock SnapshotProvider instance
-        mock_snapshot_provider = MagicMock()
-        mock_snapshot_provider_cls.return_value = mock_snapshot_provider
-
         from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
         service = KubernetesSandboxService(k8s_app_config)
         
         # Save mock objects for access in tests
         service.k8s_client = mock_k8s_client
         service.workload_provider = mock_provider
-        service.snapshot_provider = mock_snapshot_provider
 
         yield service
 

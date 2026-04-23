@@ -177,6 +177,33 @@ def test_load_config_renew_intent_legacy_redis_subtable(tmp_path, monkeypatch):
     assert loaded.renew_intent.redis.dsn == "redis://legacy:6379/0"
 
 
+def test_load_config_ignores_legacy_pause_block(tmp_path, monkeypatch):
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [runtime]
+        type = "kubernetes"
+        execd_image = "opensandbox/execd:test"
+
+        [pause]
+        snapshot_registry = "registry.example.com/sandboxes"
+        snapshot_push_secret = "registry-snapshot-push-secret"
+        resume_pull_secret = "registry-pull-secret"
+        snapshot_type = "Rootfs"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.runtime.type == "kubernetes"
+    assert not hasattr(loaded, "pause")
+
+
 def test_kubernetes_runtime_fills_missing_block():
     server_cfg = ServerConfig()
     runtime_cfg = RuntimeConfig(type="kubernetes", execd_image="opensandbox/execd:latest")

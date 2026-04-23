@@ -495,6 +495,73 @@ var _ = Describe("Pool allocate", func() {
 			}, timeout, interval).Should(Succeed())
 			Expect(k8sClient.Delete(ctx, batchSandbox)).To(Succeed())
 		})
+
+		It("should keep an allocated pod while a pooled BatchSandbox solidifies its template", func() {
+			pool := &sandboxv1alpha1.Pool{}
+			bsbxNamespaceName := types.NamespacedName{
+				Name:      "batch-sandbox-solidify-test-" + rand.String(8),
+				Namespace: typeNamespacedName.Namespace,
+			}
+			batchSandbox := &sandboxv1alpha1.BatchSandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      bsbxNamespaceName.Name,
+					Namespace: bsbxNamespaceName.Namespace,
+				},
+				Spec: sandboxv1alpha1.BatchSandboxSpec{
+					Replicas: ptr.To(int32(1)),
+					PoolRef:  typeNamespacedName.Name,
+				},
+			}
+			Expect(k8sClient.Create(ctx, batchSandbox)).To(Succeed())
+
+			var allocatedPod string
+			Eventually(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, bsbxNamespaceName, batchSandbox)).To(Succeed())
+				alloc, err := getSandboxAllocation(batchSandbox)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(alloc.Pods).To(HaveLen(1))
+				allocatedPod = alloc.Pods[0]
+			}, timeout, interval).Should(Succeed())
+			Expect(allocatedPod).NotTo(BeEmpty())
+
+			Expect(k8sClient.Get(ctx, typeNamespacedName, pool)).To(Succeed())
+			Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				latest := &sandboxv1alpha1.BatchSandbox{}
+				if err := k8sClient.Get(ctx, bsbxNamespaceName, latest); err != nil {
+					return err
+				}
+				latest.Spec.Template = pool.Spec.Template.DeepCopy()
+				return k8sClient.Update(ctx, latest)
+			})).To(Succeed())
+
+			maxUnavailable := intstr.FromString("100%")
+			Expect(retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				latestPool := &sandboxv1alpha1.Pool{}
+				if err := k8sClient.Get(ctx, typeNamespacedName, latestPool); err != nil {
+					return err
+				}
+				latestPool.Spec.ScaleStrategy = &sandboxv1alpha1.ScaleStrategy{
+					MaxUnavailable: &maxUnavailable,
+				}
+				return k8sClient.Update(ctx, latestPool)
+			})).To(Succeed())
+
+			Consistently(func(g Gomega) {
+				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pool)).To(Succeed())
+				allocation, err := getPoolAllocation(pool)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(allocation.PodAllocation).To(HaveKeyWithValue(allocatedPod, batchSandbox.Name))
+
+				pod := &v1.Pod{}
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      allocatedPod,
+					Namespace: typeNamespacedName.Namespace,
+				}, pod)).To(Succeed())
+				g.Expect(pod.DeletionTimestamp).To(BeNil())
+			}, 5*time.Second, interval).Should(Succeed())
+
+			Expect(k8sClient.Delete(ctx, batchSandbox)).To(Succeed())
+		})
 	})
 })
 

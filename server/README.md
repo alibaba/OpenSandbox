@@ -61,9 +61,9 @@ opensandbox-server init-config ~/.sandbox.toml --example docker
 
 2. Edit the file for your environment. **Full reference:** **[configuration.md](configuration.md)** (all keys, defaults, validation, env vars).
 
-   Topics covered there include: Docker **`network_mode`** / **`host_ip`** (e.g. server in Docker Compose), **`[egress]`** when clients send **`networkPolicy`**, **`[ingress]`**, **`[secure_runtime]`**, **`[pause]`** (Kubernetes pause/resume via rootfs snapshot), Kubernetes **`workload_provider`** / **`batchsandbox_template_file`**, **`[agent_sandbox]`**, TTL caps, **`[renew_intent]`**.
+   Topics covered there include: Docker **`network_mode`** / **`host_ip`** (e.g. server in Docker Compose), **`[egress]`** when clients send **`networkPolicy`**, **`[ingress]`**, **`[secure_runtime]`**, Kubernetes **`workload_provider`** / **`batchsandbox_template_file`**, **`[agent_sandbox]`**, TTL caps, **`[renew_intent]`**.
 
-**Also useful:** [Pause and Resume](../docs/pause-resume.md) · [Secure container runtime](../docs/secure-container.md) · [Manual cleanup / optional fields](../docs/manual-cleanup-refactor-guide.md) · [Egress component](../components/egress/README.md) · [`docker-compose.example.yaml`](docker-compose.example.yaml) · [Experimental features](#experimental-features)
+**Also useful:** [Secure container runtime](../docs/secure-container.md) · [Manual cleanup / optional fields](../docs/manual-cleanup-refactor-guide.md) · [Egress component](../components/egress/README.md) · [`docker-compose.example.yaml`](docker-compose.example.yaml) · [Experimental features](#experimental-features)
 
 ### Run the server
 
@@ -153,7 +153,9 @@ Response:
 }
 ```
 
-**Other lifecycle calls** (same `OPEN-SANDBOX-API-KEY` header): `GET /v1/sandboxes/{id}`, `GET /v1/sandboxes/{id}/endpoints/{port}` (append `?use_server_proxy=true` when needed), `POST .../renew-expiration`, `DELETE /v1/sandboxes/{id}`. Full request/response shapes: **Swagger UI** above or OpenAPI under [`specs/`](../specs/).
+**Other lifecycle calls** (same `OPEN-SANDBOX-API-KEY` header): `GET /v1/sandboxes/{id}`, `POST /v1/sandboxes/{id}/pause`, `POST /v1/sandboxes/{id}/resume`, `GET /v1/sandboxes/{id}/endpoints/{port}` (append `?use_server_proxy=true` when needed), `POST .../renew-expiration`, `DELETE /v1/sandboxes/{id}`. Full request/response shapes: **Swagger UI** above or OpenAPI under [`specs/`](../specs/).
+
+For Kubernetes-backed sandboxes, pause/resume is implemented via `BatchSandbox.spec.pause` and internal `SandboxSnapshot` resources. The externally visible lifecycle transitions are `Running -> Pausing -> Paused -> Resuming -> Running`. Operational details are documented in [docs/pause-resume.md](../docs/pause-resume.md).
 
 ## Architecture
 
@@ -180,13 +182,19 @@ Response:
      ┌─────────┐    pause()         │
      │ Running │───────────────┐    │
      └────┬────┘               │    │
-          │      resume()      │    │
-          │   ┌────────────────┘    │
-          │   │                     │
-          │   ▼                     │
-          │ ┌────────┐              │
-          ├─│ Paused │              │
-          │ └────────┘              │
+          │                    │    │
+          │   resume()         │    │
+          │   ┌──────────────┐ │    │
+          │   │              │ │    │
+          │   ▼              │ │    │
+          │ ┌────────┐       │ │    │
+          ├─│ Paused │───────┘ │    │
+          │ └────┬───┘         │    │
+          │      │             │    │
+          │      ▼             │    │
+          │  ┌──────────┐      │    │
+          │  │ Resuming │──────┘    │
+          │  └──────────┘           │
           │                         │
           │ delete() or expire()    │
           ▼                         │

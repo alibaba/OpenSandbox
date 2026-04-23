@@ -67,15 +67,15 @@ Time ---------------------------------------------------------------->
 
 Sandbox lifecycle:   [Running]--[Pausing]--[Paused]--[Resuming]--[Running]
                          |                     |
-                  commit rootfs          create new BatchSandbox
-                  push to registry       from snapshot image
-                  delete BatchSandbox
+                  commit rootfs          rewrite template images
+                  push to registry       recreate runtime from snapshot
+                  release pods/alloc
 ```
 
 ### How it works
 
-1. **Pause**: The server creates a `SandboxSnapshot` CR. The controller creates a commit Job on the same node, commits the container rootfs, and pushes it to the configured OCI registry. After the snapshot is ready, the source `BatchSandbox` (and its Pod) is deleted to release cluster resources.
-2. **Resume**: The server sets `action: Resume` on the `SandboxSnapshot`. The controller creates a new `BatchSandbox` from the snapshot image, restoring the filesystem state. The public `sandboxId` remains stable across pause/resume cycles.
+1. **Pause**: The server patches `BatchSandbox.spec.pause=true`. The controller creates an internal `SandboxSnapshot`, runs a commit Job on the same node, commits the container rootfs, and pushes it to the configured OCI registry. After the snapshot is ready, the controller transitions the same `BatchSandbox` to `Paused` and releases runtime Pods / pooled allocations.
+2. **Resume**: The server patches `BatchSandbox.spec.pause=false`. The controller reads the latest `SandboxSnapshot`, rewrites the `BatchSandbox` template images to the snapshot image URIs, recreates the runtime, and transitions the sandbox back to `Running`. The public `sandboxId` remains stable across pause/resume cycles.
 
 ### The SandboxSnapshot CRD
 
@@ -83,22 +83,18 @@ The `SandboxSnapshot` CR is the central resource for pause/resume lifecycle:
 
 | Field | Location | Description |
 |-------|----------|-------------|
-| `spec.sandboxId` | Spec | Target sandbox identifier |
-| `spec.sourceBatchSandboxName` | Spec | Source BatchSandbox to snapshot |
-| `spec.action` | Spec | `Pause` or `Resume` |
-| `spec.snapshotRegistry` | Spec | OCI registry prefix (filled by Server from `[pause]` config) |
-| `spec.snapshotPushSecret` | Spec | Secret name for pushing (filled by Server) |
-| `spec.resumeImagePullSecret` | Spec | Secret name for pulling on resume (filled by Server) |
-| `status.phase` | Status | `Pending` → `Committing` → `Ready` / `Failed` |
-| `status.containerSnapshots` | Status | Committed image URIs per container |
+| `spec.sandboxName` | Spec | Target `BatchSandbox` name in the same namespace |
+| `status.phase` | Status | `Pending` → `Committing` → `Succeed` / `Failed` |
+| `status.conditions` | Status | `Ready` / `Failed` conditions with reason and message |
+| `status.containers` | Status | Committed image URIs per container |
 | `status.sourcePodName` | Status | Pod name resolved by controller |
-| `status.history` | Status | Audit log of pause/resume actions (last 10) |
+| `status.sourceNodeName` | Status | Node selected for the commit Job |
 
 ### Prerequisites
 
 1. **OCI Registry**: An accessible container registry for storing snapshot images.
 2. **Kubernetes Secrets**: Docker config secrets for push and pull access.
-3. **Server configuration**: Set `[pause]` section in `~/.sandbox.toml` (see [Server configuration](../server/configuration.md#pause--kubernetes-only)).
+3. **Controller configuration**: Configure the controller manager with snapshot registry and secret flags.
 4. **Controller RBAC**: The controller requires `secrets: get` permission (included in the Helm chart and `make manifests` output).
 
 ### Controller Configuration
@@ -107,32 +103,37 @@ The snapshot controller supports the following command-line flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--snapshot-registry` | `""` | OCI registry prefix used for snapshot images |
+| `--snapshot-push-secret` | `""` | Secret name used by commit Jobs to push snapshots |
+| `--resume-pull-secret` | `""` | Secret name injected into resumed sandboxes for image pulls |
 | `--image-committer-image` | `image-committer:dev` | Image used for commit operations (must contain `nerdctl` tool) |
 | `--commit-job-timeout` | `10m` | Timeout duration for commit jobs |
 
 These flags are configured at controller startup. The `image-committer-image` must be a container image with `nerdctl` to perform rootfs commit and push operations.
 
-**Helm configuration:**
+For local development, the sample manager manifest wires the registry and secret flags directly:
 
-```sh
-helm install opensandbox-controller ./charts/opensandbox-controller \
-  --set controller.snapshot.imageCommitterImage=<your-registry>/image-committer:v1.0.0 \
-  --set controller.snapshot.commitJobTimeout=15m
+```yaml
+- --snapshot-registry=<your-registry>/sandboxes
+- --snapshot-push-secret=registry-snapshot-push-secret
+- --resume-pull-secret=registry-pull-secret
 ```
 
-**Kustomize configuration:**
+The Helm chart exposes the snapshot values directly under `controller.snapshot.*`, including `imageCommitterImage`, `commitJobTimeout`, `registry`, `snapshotPushSecret`, and `resumePullSecret`.
+
+**Source / Kustomize deployment:**
+
+When deploying from source with `make deploy`, the Makefile only rewrites `CONTROLLER_IMG`. Snapshot flags still come from `config/manager/manager.yaml` (or your own Kustomize overlay / patch). Update that manifest if you need different registry, secret, or image-committer settings, then deploy with:
 
 ```sh
-make deploy CONTROLLER_IMG=<controller-image> \
-  IMAGE_COMMITTER_IMAGE=<your-registry>/image-committer:v1.0.0 \
-  COMMIT_JOB_TIMEOUT=15m
+make deploy CONTROLLER_IMG=<controller-image>
 ```
 
 ### Quick setup
 
 ```bash
 # Create push secret
-kubectl create secret docker-registry registry-push-secret \
+kubectl create secret docker-registry registry-snapshot-push-secret \
   --docker-server=<your-registry> \
   --docker-username=<user> \
   --docker-password=<token>
@@ -144,13 +145,12 @@ kubectl create secret docker-registry registry-pull-secret \
   --docker-password=<token>
 ```
 
-Server config (`~/.sandbox.toml`):
+Then configure the controller manager with:
 
-```toml
-[pause]
-snapshot_registry = "<your-registry>/sandboxes"
-snapshot_push_secret = "registry-push-secret"
-resume_pull_secret = "registry-pull-secret"
+```yaml
+- --snapshot-registry=<your-registry>/sandboxes
+- --snapshot-push-secret=registry-snapshot-push-secret
+- --resume-pull-secret=registry-pull-secret
 ```
 
 ### CRD cleanup
@@ -423,10 +423,10 @@ For more configuration options and advanced usage, see the [Helm Chart README](c
 
 3. **Deploy the Manager to the cluster:**
    ```sh
-   make deploy CONTROLLER_IMG=<some-registry>/opensandbox-controller:tag TASK_EXECUTOR_IMG=<some-registry>/opensandbox-task-executor:tag
+   make deploy CONTROLLER_IMG=<some-registry>/opensandbox-controller:tag
    ```
 
-   **NOTE**: you may need to grant yourself cluster-admin privileges or be logged in as admin to ensure you have cluster-admin privileges before running the commands.
+   **NOTE**: `make deploy` only rewrites the controller image. Build and publish `TASK_EXECUTOR_IMG` separately if your Pool / BatchSandbox templates refer to it. You may also need cluster-admin privileges before running the commands.
 
 **Important Note for Kind Users**: If you're using a kind cluster, you need to load both images into the kind node after building them:
 ```sh
