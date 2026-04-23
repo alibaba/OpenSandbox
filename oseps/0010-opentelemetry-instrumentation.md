@@ -4,8 +4,8 @@ authors:
   - "@Pangjiping"
   - "@ninan-nn"
 creation-date: 2026-03-18
-last-updated: 2026-04-01
-status: draft
+last-updated: 2026-04-12
+status: implementing
 ---
 
 # OSEP-0010: OpenTelemetry Metrics and Logs (execd, egress, and ingress)
@@ -85,7 +85,7 @@ Introduce an **OpenTelemetry initialization module** in the main startup of exec
 2. Optionally creates a **LoggerProvider** and registers an OTLP log exporter; otherwise rely on zap JSON logs and optional **Logs Bridge** to OTLP (**egress:** metrics-only OTLP; logs stay on stdout unless collected by an agent).
 3. Reads OTLP endpoint, service name, etc., from environment variables (or config files).
 
-Application code records metrics on critical paths. **HTTP metrics** for execd/egress/ingress use **aggregated dimensions** (e.g. `http.route` as route template, `http.status_code`, `method`)—**without** OpenTelemetry spans: implement via **manual instrumentation** or thin middleware that only increments histograms/counters (no `TracerProvider`). Egress and ingress use `net/http`; execd uses Gin—same principle (metrics only, no trace spans).
+Application code records metrics on critical paths. **HTTP metrics** for execd/egress/ingress use **aggregated dimensions** (route template, status code, method; **execd current keys:** `http_route`, `http_status_code`, `http_method`)—**without** OpenTelemetry spans: implement via **manual instrumentation** or thin middleware that only increments histograms/counters (no `TracerProvider`). Egress and ingress use `net/http`; execd uses Gin—same principle (metrics only, no trace spans).
 
 ### Notes/Constraints/Caveats
 
@@ -99,7 +99,7 @@ Application code records metrics on critical paths. **HTTP metrics** for execd/e
 | Risk | Mitigation |
 |------|------------|
 | OTLP export failures or unreachable endpoint cause blocking or retry storms | Use async export, configurable timeouts and queue limits; on failure only log locally and do not affect the main flow |
-| High metric cardinality (e.g., per sandbox_id or raw URL path) | Avoid high-cardinality dimensions: only use aggregated dimensions such as status_code, operation; **HTTP metrics must use the route template `http.route`** (e.g. `/code/contexts/:contextId`), not the raw request path, or execd routes with path parameters will produce high-cardinality series that are hard to operate |
+| High metric cardinality (e.g., per sandbox_id or raw URL path) | Avoid high-cardinality dimensions: only use aggregated dimensions such as status_code, operation; **HTTP metrics must use the route template dimension** (execd current key: `http_route`, e.g. `/code/contexts/:contextId`), not the raw request path, or execd routes with path parameters will produce high-cardinality series that are hard to operate |
 | Divergence from existing metrics APIs | Leave existing HTTP metric endpoints unchanged; OpenTelemetry metrics are additive |
 
 ## Design Details
@@ -110,23 +110,16 @@ Application code records metrics on critical paths. **HTTP metrics** for execd/e
 
 | Category | Metric name (suggested) | Type | Description |
 |----------|-------------------------|------|-------------|
-| **HTTP** | `execd.http.request.count` | Counter | Request count by method, **http.route (route template)**, status_code (QPS derivable) |
-| | `execd.http.request.duration` | Histogram | Request latency (s or ms) by method, **http.route (route template)** |
-| **Code execution** | `execd.execution.count` | Counter | Execution count by result (success/failure) |
-| | `execd.execution.duration` | Histogram | Duration per execution |
-| | `execd.execution.memory_bytes` | Histogram / Gauge | Memory usage during execution (if available) |
-| **Jupyter sessions** | `execd.jupyter.sessions.active` | UpDownCounter / Gauge | Current active sessions |
-| | `execd.jupyter.sessions.created_total` | Counter | Sessions created |
-| | `execd.jupyter.sessions.deleted_total` | Counter | Sessions deleted |
-| **Filesystem** | `execd.filesystem.operations.count` | Counter | Operation count by type (upload/download/list/delete, etc.) |
-| | `execd.filesystem.operations.duration` | Histogram | Operation duration |
-| **System** | `execd.system.cpu.usage` | Gauge | Process or host CPU usage (optional) |
+| **HTTP** | `execd.http.request.duration` | Histogram | Request latency (ms) by `http_method`, **`http_route` (route template)**, `http_status_code` |
+| **Code execution** | `execd.execution.duration` | Histogram | Duration per execution with attributes `operation` (e.g. `run_code`/`run_in_session`/`run_command`) and `result` (derived from execution callbacks) |
+| **Filesystem** | `execd.filesystem.operations.duration` | Histogram | Operation duration with attributes `operation` (upload/download/search/replace/chmod/rename/mkdir/rmdir/delete/info) and `result` (`success`/`failure`) |
+| **System** | `execd.system.cpu.usage` | Gauge | System CPU usage percent (from gopsutil) |
 | | `execd.system.memory.usage_bytes` | Gauge | Memory usage |
 | | `execd.system.process.count` | Gauge | Current number of processes in the system |
 
-All metrics are created via the OpenTelemetry Meter; units and attributes follow [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/).
+All metrics are created via the OpenTelemetry Meter; metric names/units/attributes are implementation-defined and keep low-cardinality dimensions.
 
-**Execd HTTP dimensions:** Several execd routes embed identifiers in the URL (e.g. `/code/contexts/:contextId`, `/session/:sessionId/run`, `/command/status/:id` in `components/execd/pkg/web/router.go`). Using the raw request path as a metric dimension would create high-cardinality time series and make OTLP/Prometheus metrics hard to operate. Therefore **the route template must be used as the dimension**: `http.route` (e.g. `/code/contexts/:contextId`), not the actual request path (e.g. `/code/contexts/abc-123`). Record the matched route pattern from Gin (e.g. `c.FullPath()` or equivalent) in metric attributes—**without** OpenTelemetry tracing middleware.
+**Execd HTTP dimensions:** Several execd routes embed identifiers in the URL (e.g. `/code/contexts/:contextId`, `/session/:sessionId/run`, `/command/status/:id` in `components/execd/pkg/web/router.go`). Using the raw request path as a metric dimension would create high-cardinality time series and make OTLP/Prometheus metrics hard to operate. Therefore **the route template must be used as the dimension**: `http_route` (e.g. `/code/contexts/:contextId`), not the actual request path (e.g. `/code/contexts/abc-123`). Record the matched route pattern from Gin (e.g. `c.FullPath()` or equivalent; fallback `unknown`) in metric attributes—**without** OpenTelemetry tracing middleware.
 
 #### 1.2 egress metrics
 
@@ -164,7 +157,7 @@ Meter name: **`opensandbox/egress`**.
 
 Note: Ingress typically returns 200 (success), 400 (bad request), 404 (sandbox not found), 502 (upstream error), 503 (sandbox not ready); aggregate by `http.status_code` for error-rate monitoring.
 
-Metric namespaces are `execd.*`, `egress.*`, and `ingress.*` for easy filtering in a shared backend. **execd** and **ingress** obtain sandbox-related identifiers from the **request or routing context** where applicable (not from `OPENSANDBOX_EGRESS_SANDBOX_ID`).
+Metric namespaces are `execd.*`, `egress.*`, and `ingress.*` for easy filtering in a shared backend. **Execd (current implementation)** attaches `sandbox_id` from `OPENSANDBOX_ID` when set; ingress obtains sandbox-related identifiers from routing context where applicable.
 
 ### 2. Logging
 
@@ -295,6 +288,8 @@ Policy **deny** is not represented in this log (use **`egress.policy.denied_tota
   - `OTEL_EXPORTER_OTLP_ENDPOINT` (or per-signal endpoints for metrics/logs).
   - `OTEL_METRICS_EXPORTER`, `OTEL_LOGS_EXPORTER` (e.g., `none` to disable).
   - `OTEL_RESOURCE_ATTRIBUTES`: key-value pairs for resource attributes (e.g., deployment.env);
+  - **`OPENSANDBOX_ID`** (execd): when set, `sandbox_id` is attached to the OTLP Resource and to every execd metric datapoint.
+  - **`OPENSANDBOX_EXECD_METRICS_EXTRA_ATTRS`** (execd): optional comma-separated `key=value` pairs appended to every execd metric datapoint.
   - **`OPENSANDBOX_EGRESS_SANDBOX_ID`** (egress): sets **`sandbox_id`** on the OTLP **Resource**, on **every metric measurement**, and in structured log events (same key everywhere). When unset, omitted from all of the above.
   - **`OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS`** (egress): optional comma-separated **`key=value`** pairs appended to **every metric measurement** and to the **root zap logger** (see [§1.2](#12-egress-metrics)).
 

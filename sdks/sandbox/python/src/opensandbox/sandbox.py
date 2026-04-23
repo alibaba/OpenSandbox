@@ -425,7 +425,7 @@ class Sandbox:
                 Prefer namespaced keys (e.g. ``storage.id``).
             entrypoint: Command to run as entrypoint
             volumes: Optional list of volume mounts for persistent storage.
-                Each volume specifies a backend (host path or PVC) and mount configuration.
+                Each volume specifies a backend (host path, PVC, or OSSFS) and mount configuration.
             connection_config: Connection configuration
             health_check: Custom async health check function
             health_check_polling_interval: Time between health check attempts

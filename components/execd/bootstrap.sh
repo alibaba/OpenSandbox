@@ -61,7 +61,7 @@ trust_mitm_ca() {
 MITM_CA="/opt/opensandbox/mitmproxy-ca-cert.pem"
 if is_truthy "${OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT:-}"; then
 	i=0
-	while [ "$i" -lt 10 ]; do
+	while [ "$i" -lt 30 ]; do
 		if [ -f "$MITM_CA" ] && [ -s "$MITM_CA" ]; then
 			break
 		fi

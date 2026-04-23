@@ -61,8 +61,12 @@ func (c *FilesystemController) handleFileError(err error) {
 
 // GetFilesInfo retrieves metadata for specified file paths
 func (c *FilesystemController) GetFilesInfo() {
+	rec := beginFilesystemMetric("info")
+	defer rec.Finish(c.basicController)
+
 	paths := c.ctx.QueryArray("path")
 	if len(paths) == 0 {
+		rec.MarkSuccess()
 		c.RespondSuccess(make(map[string]model.FileInfo))
 		return
 	}
@@ -77,11 +81,15 @@ func (c *FilesystemController) GetFilesInfo() {
 		resp[filePath] = fileInfo
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(resp)
 }
 
 // RemoveFiles deletes specified files
 func (c *FilesystemController) RemoveFiles() {
+	rec := beginFilesystemMetric("delete")
+	defer rec.Finish(c.basicController)
+
 	paths := c.ctx.QueryArray("path")
 	for _, filePath := range paths {
 		if err := DeleteFile(filePath); err != nil {
@@ -94,11 +102,15 @@ func (c *FilesystemController) RemoveFiles() {
 		}
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(nil)
 }
 
 // ChmodFiles changes file permissions for specified files
 func (c *FilesystemController) ChmodFiles() {
+	rec := beginFilesystemMetric("chmod")
+	defer rec.Finish(c.basicController)
+
 	var request map[string]model.Permission
 	if err := c.bindJSON(&request); err != nil {
 		c.RespondError(
@@ -121,11 +133,15 @@ func (c *FilesystemController) ChmodFiles() {
 		}
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(nil)
 }
 
 // RenameFiles renames or moves files to new paths
 func (c *FilesystemController) RenameFiles() {
+	rec := beginFilesystemMetric("rename")
+	defer rec.Finish(c.basicController)
+
 	var request []model.RenameFileItem
 	if err := c.bindJSON(&request); err != nil {
 		c.RespondError(
@@ -143,11 +159,15 @@ func (c *FilesystemController) RenameFiles() {
 		}
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(nil)
 }
 
 // MakeDirs creates directories with specified permissions
 func (c *FilesystemController) MakeDirs() {
+	rec := beginFilesystemMetric("mkdir")
+	defer rec.Finish(c.basicController)
+
 	var request map[string]model.Permission
 	if err := c.bindJSON(&request); err != nil {
 		c.RespondError(
@@ -165,11 +185,15 @@ func (c *FilesystemController) MakeDirs() {
 		}
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(nil)
 }
 
 // RemoveDirs recursively removes directories
 func (c *FilesystemController) RemoveDirs() {
+	rec := beginFilesystemMetric("rmdir")
+	defer rec.Finish(c.basicController)
+
 	paths := c.ctx.QueryArray("path")
 	for _, dir := range paths {
 		resolvedDir, err := pathutil.ExpandPath(dir)
@@ -191,11 +215,15 @@ func (c *FilesystemController) RemoveDirs() {
 		}
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(nil)
 }
 
 // SearchFiles searches for files matching a pattern in a directory
 func (c *FilesystemController) SearchFiles() {
+	rec := beginFilesystemMetric("search")
+	defer rec.Finish(c.basicController)
+
 	path := c.ctx.Query("path")
 	if path == "" {
 		c.RespondError(
@@ -286,11 +314,15 @@ func (c *FilesystemController) SearchFiles() {
 		return
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(files)
 }
 
 // ReplaceContent replaces text content in specified files
 func (c *FilesystemController) ReplaceContent() {
+	rec := beginFilesystemMetric("replace")
+	defer rec.Finish(c.basicController)
+
 	var request map[string]model.ReplaceFileContentItem
 	if err := c.bindJSON(&request); err != nil {
 		c.RespondError(
@@ -335,5 +367,6 @@ func (c *FilesystemController) ReplaceContent() {
 		}
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(nil)
 }

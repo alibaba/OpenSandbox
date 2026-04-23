@@ -39,7 +39,7 @@ cd components/egress
 
 ### View results
 
-- **Terminal**: tables per scenario (latency / throughput vs no-MITM).
+- **Terminal**: tables per scenario (latency / throughput vs no-MITM), plus **`E2E latency loss (avg time_total)`** in **ms/request** and **%**.
 - **Host `/tmp`**:
   - Latency artifacts: `bench-mitm-*-short-*.txt`, `*-download-*.tsv`, `*-wall.txt`, etc.
   - **Container metrics** (always written): `bench-mitm-docker-stats-dns_nft.tsv`, `bench-mitm-docker-stats-dns_nft_mitm.tsv` — `unix_ts`, **`/proc/loadavg`** (load1/5/15, …), **`docker stats`** (CPUPerc, MemUsage, …). *`loadavg` inside the container often tracks the host; use for relative trends.*
@@ -62,6 +62,16 @@ Illustrative only — **same machine, same script**, not a SLA. **MITM** row = *
 
 ### `BENCH_SCENARIOS=short` (HEAD storm; **sparse** rows if the phase is short)
 
+Run profile (sample): `10 rounds × 40 URLs × 1 inflight = 400 requests`.
+
+| Metric | `dns+nft` | + mitm |
+|--------|-----------|--------|
+| **Req/s** | **3.64** | **1.90** (**-47.6%**) |
+| **Avg latency (time_total)** | **0.315 s** | **0.605 s** (**+91.9%**) |
+| **P50 latency** | **0.136 s** | **0.143 s** (**+5.2%**) |
+| **P99 latency** | **1.439 s** | **10.006 s** (**+595.2%**) |
+| **E2E latency loss (avg)** | baseline | **+289.88 ms/request (+91.95%)** |
+
 | Metric | `dns+nft` | + mitm |
 |--------|-----------|--------|
 | **CPUPerc** | Hot sample **~132%** | Hot sample **~232%** |
@@ -69,4 +79,6 @@ Illustrative only — **same machine, same script**, not a SLA. **MITM** row = *
 
 **`CPUPerc` > 100%** on multi-core is normal (container can use more than one core-equivalent per Docker’s metric).
 
-**Takeaway**: peak CPU sample **~1.8×** (**232/132**); RSS much higher with mitmdump. Numbers are **timing-sensitive**; longer runs or **`BENCH_DOCKER_STATS_INTERVAL=0.5`** give denser TSVs.
+**Takeaway**: this sample shows clear request-side overhead from transparent MITM, about **+289.88 ms/request** on average with throughput dropping to about half. `P50` is close to baseline while `P99` grows sharply, indicating tail-latency amplification. With only **40 requests**, tail metrics are timing-sensitive; use more rounds or more domains for stable P99.
+
+CPU/memory trend remains consistent: peak CPU sample **~1.8×** (**232/132**), and RSS is much higher with mitmdump. For denser host/container telemetry, use longer runs or **`BENCH_DOCKER_STATS_INTERVAL=0.5`**.

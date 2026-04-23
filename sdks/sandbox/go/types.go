@@ -80,7 +80,12 @@ type Host struct {
 
 // PVC represents a platform-managed named volume backend.
 type PVC struct {
-	ClaimName string `json:"claimName"`
+	ClaimName                  string   `json:"claimName"`
+	CreateIfNotExists          *bool    `json:"createIfNotExists,omitempty"`
+	DeleteOnSandboxTermination *bool    `json:"deleteOnSandboxTermination,omitempty"`
+	StorageClass               *string  `json:"storageClass,omitempty"`
+	Storage                    *string  `json:"storage,omitempty"`
+	AccessModes                []string `json:"accessModes,omitempty"`
 }
 
 // OSSFS represents an Alibaba Cloud OSS mount backend via ossfs.

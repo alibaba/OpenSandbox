@@ -10,8 +10,7 @@ on:
       - 'server/opensandbox_server/**'
       - 'components/execd/**'
       - 'components/egress/**'
-      - 'sdks/code-interpreter/**'
-      - 'sdks/sandbox/**'
+      - 'sdks/**'
       - 'tests/**'
   push:
     branches: [ main ]

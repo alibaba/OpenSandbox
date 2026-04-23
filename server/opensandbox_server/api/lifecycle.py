@@ -25,6 +25,7 @@ from fastapi import APIRouter, Header, Query, Request, status
 from fastapi.responses import Response
 
 from opensandbox_server.extensions import validate_extensions
+from opensandbox_server.config import get_config
 from opensandbox_server.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
@@ -391,8 +392,11 @@ async def get_sandbox_endpoint(
     endpoint = sandbox_service.get_endpoint(sandbox_id, port)
 
     if use_server_proxy:
-        # Construct proxy URL
+        # Prefer configured external address when available.
         base_url = str(request.base_url).rstrip("/")
+        eip = (get_config().server.eip or "").strip().rstrip("/")
+        if eip:
+            base_url = eip
         base_url = base_url.replace("https://", "").replace("http://", "")
         endpoint.endpoint = f"{base_url}/sandboxes/{sandbox_id}/proxy/{port}"
 

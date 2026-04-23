@@ -4,8 +4,7 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'server/opensandbox_server/**'
-      - 'server/tests/**'
+      - 'server/**'
 
 permissions:
   contents: read

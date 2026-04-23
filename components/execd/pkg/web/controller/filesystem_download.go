@@ -29,6 +29,9 @@ import (
 
 // DownloadFile serves a file for download with support for range requests.
 func (c *FilesystemController) DownloadFile() {
+	rec := beginFilesystemMetric("download")
+	defer rec.Finish(c.basicController)
+
 	filePath := c.ctx.Query("path")
 	if filePath == "" {
 		c.RespondError(
@@ -86,10 +89,12 @@ func (c *FilesystemController) DownloadFile() {
 
 			_, _ = file.Seek(r.start, io.SeekStart)
 			_, _ = io.CopyN(c.ctx.Writer, file, r.length)
+			rec.MarkSuccess()
 			return
 		}
 	}
 
+	rec.MarkSuccess()
 	http.ServeContent(c.ctx.Writer, c.ctx.Request, filepath.Base(resolvedFilePath), fileInfo.ModTime(), file)
 }
 

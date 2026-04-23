@@ -19,15 +19,13 @@ on:
     branches: [main]
     paths:
       - "cli/**"
-      - "sdks/sandbox/**"
-      - "sdks/code-interpreter/**"
+      - "sdks/**"
       - "specs/**"
   push:
     branches: [main]
     paths:
       - "cli/**"
-      - "sdks/sandbox/**"
-      - "sdks/code-interpreter/**"
+      - "sdks/**"
       - "specs/**"
 
 permissions:

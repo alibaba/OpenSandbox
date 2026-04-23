@@ -193,6 +193,18 @@ stats_download_time() {
   echo "$n $avg $p50 $p99"
 }
 
+# End-to-end request latency loss vs baseline.
+# Args: with_mitm_avg_seconds baseline_avg_seconds
+# Echo: "<loss_ms_per_req> <loss_pct>"
+calc_e2e_latency_loss() {
+  local with_mitm_avg="$1"
+  local baseline_avg="$2"
+  local loss_ms loss_pct
+  loss_ms=$(awk -v a="$with_mitm_avg" -v b="$baseline_avg" 'BEGIN { printf "%.2f", (a-b)*1000 }')
+  loss_pct=$(awk -v a="$with_mitm_avg" -v b="$baseline_avg" 'BEGIN { if (b>0) printf "%+.2f", (a-b)/b*100; else print "+0.00" }')
+  echo "$loss_ms $loss_pct"
+}
+
 # Sum of column 2 (size_download bytes)
 sum_bytes() {
   local file="$1"
@@ -476,6 +488,8 @@ report_short() {
   ov_p50=$(awk -v a="$p50_1" -v b="$p50_0" 'BEGIN { printf "%+.1f", (b>0 && b!="") ? (a-b)/b*100 : 0 }')
   ov_p99=$(awk -v a="$p99_1" -v b="$p99_0" 'BEGIN { printf "%+.1f", (b>0 && b!="") ? (a-b)/b*100 : 0 }')
   ov_rps=$(awk -v a="$rps1" -v b="$rps0" 'BEGIN { printf "%+.1f", (b>0 && b!="") ? (b-a)/b*100 : 0 }')
+  local e2e_loss_ms e2e_loss_pct
+  read -r e2e_loss_ms e2e_loss_pct <<< "$(calc_e2e_latency_loss "$avg1" "$avg0")"
 
   echo ""
   echo "========== Scenario: short HTTPS (HEAD), high concurrency =========="
@@ -485,6 +499,7 @@ report_short() {
   printf "%-28s %14s %20s %20s %20s\n" "dns+nft (no mitm)" "$rps0" "$avg0" "$p50_0" "$p99_0"
   printf "%-28s %14s %20s %20s %20s\n" "dns+nft + mitm (transparent)" "$(printf '%.2f(%s%%)' "$rps1" "$ov_rps")" "$(printf '%.3f(%s%%)' "$avg1" "$ov_avg")" "$(printf '%.3f(%s%%)' "$p50_1" "$ov_p50")" "$(printf '%.3f(%s%%)' "$p99_1" "$ov_p99")"
   echo ""
+  echo "E2E latency loss (avg time_total): ${e2e_loss_ms} ms/request (${e2e_loss_pct}%)"
   echo "Parentheses vs dns+nft (no mitm): latency +% = slower; Req/s +% = lower throughput."
   echo "Artifacts: /tmp/bench-mitm-dns_nft-{short-total,short-wall}.txt and *-dns_nft_mitm-short-*.txt"
   echo "=========="
@@ -508,6 +523,8 @@ report_download() {
   ov_p50=$(awk -v a="$p50_1" -v b="$p50_0" 'BEGIN { printf "%+.1f", (b>0 && b!="") ? (a-b)/b*100 : 0 }')
   ov_p99=$(awk -v a="$p99_1" -v b="$p99_0" 'BEGIN { printf "%+.1f", (b>0 && b!="") ? (a-b)/b*100 : 0 }')
   ov_mbps=$(awk -v a="$mbps1" -v b="$mbps0" 'BEGIN { printf "%+.1f", (b>0 && b!="") ? (b-a)/b*100 : 0 }')
+  local e2e_loss_ms e2e_loss_pct
+  read -r e2e_loss_ms e2e_loss_pct <<< "$(calc_e2e_latency_loss "$avg1" "$avg0")"
 
   echo ""
   echo "========== Scenario: large download (parallel GET) =========="
@@ -518,6 +535,7 @@ report_download() {
   printf "%-28s %18s %20s %20s %20s %12s\n" "dns+nft (no mitm)" "${mbps0}" "$avg0" "$p50_0" "$p99_0" "$mib0"
   printf "%-28s %18s %20s %20s %20s %12s\n" "dns+nft + mitm (transparent)" "$(printf '%.2f(%s%%)' "$mbps1" "$ov_mbps")" "$(printf '%.3f(%s%%)' "$avg1" "$ov_avg")" "$(printf '%.3f(%s%%)' "$p50_1" "$ov_p50")" "$(printf '%.3f(%s%%)' "$p99_1" "$ov_p99")" "$mib1"
   echo ""
+  echo "E2E latency loss (avg time_total): ${e2e_loss_ms} ms/request (${e2e_loss_pct}%)"
   echo "Agg MB/s = sum(bytes) / wall clock for the download phase (overlapping streams). Latency % vs no mitm; Agg MB/s % = lower throughput."
   echo "Artifacts: /tmp/bench-mitm-*-download-{raw.tsv,wall,bytes}.txt"
   echo "=========="

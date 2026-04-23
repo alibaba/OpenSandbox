@@ -29,7 +29,7 @@ level = "INFO"
 
 [runtime]
 type = "kubernetes"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.12"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.13"
 
 [storage]
 # 允许进行 bind mount 的宿主机路径前缀白名单。

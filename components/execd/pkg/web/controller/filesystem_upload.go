@@ -29,6 +29,9 @@ import (
 
 // UploadFile uploads files with metadata to specified paths
 func (c *FilesystemController) UploadFile() {
+	rec := beginFilesystemMetric("upload")
+	defer rec.Finish(c.basicController)
+
 	form, err := c.ctx.MultipartForm()
 	if err != nil || form == nil {
 		c.RespondError(
@@ -182,5 +185,6 @@ func (c *FilesystemController) UploadFile() {
 		}
 	}
 
+	rec.MarkSuccess()
 	c.RespondSuccess(nil)
 }

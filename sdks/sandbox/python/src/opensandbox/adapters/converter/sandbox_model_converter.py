@@ -109,7 +109,14 @@ class SandboxModelConverter:
 
         api_pvc = UNSET
         if volume.pvc is not None:
-            api_pvc = ApiPVC(claim_name=volume.pvc.claim_name)
+            api_pvc = ApiPVC(
+                claim_name=volume.pvc.claim_name,
+                create_if_not_exists=volume.pvc.create_if_not_exists,
+                delete_on_sandbox_termination=volume.pvc.delete_on_sandbox_termination,
+                storage_class=volume.pvc.storage_class,
+                storage=volume.pvc.storage,
+                access_modes=volume.pvc.access_modes,
+            )
 
         api_ossfs = UNSET
         if volume.ossfs is not None and volume.ossfs.access_key_id is not None and volume.ossfs.access_key_secret is not None:

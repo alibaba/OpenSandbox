@@ -12,27 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//go:build linux
-
-package telemetry
+package web
 
 import (
-	"github.com/shirou/gopsutil/cpu"
-	"github.com/shirou/gopsutil/mem"
+	"time"
+
+	"github.com/gin-gonic/gin"
+
+	"github.com/alibaba/opensandbox/execd/pkg/telemetry"
 )
 
-func systemMemoryUsedBytes() int64 {
-	stats, err := mem.VirtualMemory()
-	if err != nil {
-		return 0
-	}
-	return int64(stats.Used)
-}
+func otelHTTPMetricsMiddleware() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		start := time.Now()
+		ctx.Next()
 
-func cpuUtilizationRatio() float64 {
-	usage, err := cpu.Percent(0, false)
-	if err != nil || len(usage) == 0 {
-		return 0
+		telemetry.RecordHTTPRequest(
+			ctx.Request.Context(),
+			ctx.Request.Method,
+			ctx.FullPath(),
+			ctx.Writer.Status(),
+			float64(time.Since(start))/float64(time.Millisecond),
+		)
 	}
-	return usage[0] / 100.0
 }

@@ -19,27 +19,29 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.opentelemetry.io/otel/attribute"
+
+	inttelemetry "github.com/alibaba/opensandbox/internal/telemetry"
 )
 
 func TestAppendMetricAttrsFromKeyValuePairs(t *testing.T) {
 	var base []attribute.KeyValue
-	out := appendMetricAttrsFromKeyValuePairs(base, "a=b")
+	out := inttelemetry.AppendAttrsFromKeyValuePairs(base, "a=b")
 	assert.Len(t, out, 1)
 	assert.Equal(t, "a", string(out[0].Key))
 	assert.Equal(t, "b", out[0].Value.AsString())
 
-	out = appendMetricAttrsFromKeyValuePairs(nil, "  foo=bar  , baz=qux ")
+	out = inttelemetry.AppendAttrsFromKeyValuePairs(nil, "  foo=bar  , baz=qux ")
 	assert.Len(t, out, 2)
 	assert.Equal(t, "foo", string(out[0].Key))
 	assert.Equal(t, "bar", out[0].Value.AsString())
 	assert.Equal(t, "baz", string(out[1].Key))
 	assert.Equal(t, "qux", out[1].Value.AsString())
 
-	out = appendMetricAttrsFromKeyValuePairs(nil, "k=v=x")
+	out = inttelemetry.AppendAttrsFromKeyValuePairs(nil, "k=v=x")
 	assert.Len(t, out, 1)
 	assert.Equal(t, "k", string(out[0].Key))
 	assert.Equal(t, "v=x", out[0].Value.AsString())
 
-	out = appendMetricAttrsFromKeyValuePairs(nil, "novalue=,=bad,nokv")
+	out = inttelemetry.AppendAttrsFromKeyValuePairs(nil, "novalue=,=bad,nokv")
 	assert.Len(t, out, 0)
 }

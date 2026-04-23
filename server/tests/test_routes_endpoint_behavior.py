@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from opensandbox_server.api import lifecycle
@@ -63,6 +65,33 @@ def test_get_endpoint_use_server_proxy_rewrites_url(
 
     assert response.status_code == 200
     assert response.json()["endpoint"] == "testserver/sandboxes/sbx-001/proxy/44772"
+
+
+def test_get_endpoint_use_server_proxy_prefers_server_eip(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int) -> Endpoint:
+            return Endpoint(endpoint="10.57.1.91:40109/proxy/44772")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    monkeypatch.setattr(
+        lifecycle,
+        "get_config",
+        lambda: SimpleNamespace(server=SimpleNamespace(eip="sandbox.example.com/opensandbox/")),
+    )
+
+    response = client.get(
+        "/v1/sandboxes/sbx-001/endpoints/44772",
+        params={"use_server_proxy": "true"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["endpoint"] == "sandbox.example.com/opensandbox/sandboxes/sbx-001/proxy/44772"
 
 
 def test_get_endpoint_rejects_non_numeric_port(

@@ -16,6 +16,7 @@ package mitmproxy
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"os/user"
@@ -66,6 +67,12 @@ func LookupUser(userName string) (uid, gid int, home string, err error) {
 	gid64, err := strconv.ParseUint(u.Gid, 10, 32)
 	if err != nil {
 		return 0, 0, "", err
+	}
+	if uid64 > uint64(math.MaxInt) {
+		return 0, 0, "", fmt.Errorf("mitmproxy: UID %d overflows int", uid64)
+	}
+	if gid64 > uint64(math.MaxInt) {
+		return 0, 0, "", fmt.Errorf("mitmproxy: GID %d overflows int", gid64)
 	}
 	return int(uid64), int(gid64), u.HomeDir, nil
 }
