@@ -27,7 +27,10 @@ from typing import Optional, Dict, Any
 
 from fastapi import HTTPException, status
 
-from opensandbox_server.extensions import apply_access_renew_extend_seconds_to_mapping
+from opensandbox_server.extensions import (
+    apply_access_renew_extend_seconds_to_mapping,
+    apply_extensions_to_annotations,
+)
 from opensandbox_server.extensions.keys import ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY
 from opensandbox_server.api.schema import (
     CreateSandboxRequest,
@@ -420,6 +423,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         
         try:
             apply_access_renew_extend_seconds_to_mapping(context.annotations, request.extensions)
+            apply_extensions_to_annotations(context.annotations, request.extensions)
 
             ensure_volumes_valid(
                 request.volumes,

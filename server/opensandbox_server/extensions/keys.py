@@ -14,6 +14,12 @@
 
 """Well-known CreateSandboxRequest.extensions keys and workload storage keys."""
 
+# access.renew.extend.seconds extension key (annotation-based)
 ACCESS_RENEW_EXTEND_SECONDS_KEY = "access.renew.extend.seconds"
-# Kubernetes annotation or Docker label value (plain seconds string).
 ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY = "opensandbox.io/access-renew-extend-seconds"
+
+# Extensions to annotations transformation prefix
+# User-specified extension keys starting with EXTENSIONS_ANNOTATION_PREFIX
+# are automatically propagated to Pod annotations with ANNOTATION_METADATA_PREFIX
+EXTENSIONS_ANNOTATION_PREFIX = "opensandbox.extensions."
+ANNOTATION_METADATA_PREFIX = "opensandbox.io/extensions."
