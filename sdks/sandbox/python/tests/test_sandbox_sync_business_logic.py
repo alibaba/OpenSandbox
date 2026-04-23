@@ -190,26 +190,38 @@ def test_sync_create_resolves_egress_endpoint_and_builds_service(
     ]
 
 
-def test_sync_create_keeps_service_create_signature_backward_compatible(
+def test_sync_create_passes_new_signature_keywords_even_when_unused(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _CreateResponse:
         id = "sync-created"
 
-    class _SandboxServiceOldSignatureStub:
+    class _SandboxServiceCreateStub:
         def create_sandbox(
             self,
-            _spec,
-            _entrypoint,
-            _env,
-            _metadata,
-            _timeout,
-            _resource,
+            spec,
+            entrypoint,
+            env,
+            metadata,
+            timeout,
+            resource,
             network_policy,
-            _extensions,
-            _volumes,
+            extensions,
+            volumes,
+            platform=None,
+            snapshot_id=None,
         ):
+            assert spec is not None
+            assert entrypoint is not None
+            assert isinstance(env, dict)
+            assert isinstance(metadata, dict)
+            assert timeout is not None
+            assert isinstance(resource, dict)
             assert isinstance(network_policy, NetworkPolicy)
+            assert isinstance(extensions, dict)
+            assert volumes is None
+            assert platform is None
+            assert snapshot_id is None
             return _CreateResponse()
 
         def get_sandbox_endpoint(self, _sandbox_id, port: int, _use_server_proxy: bool = False):
@@ -223,7 +235,7 @@ def test_sync_create_keeps_service_create_signature_backward_compatible(
             pass
 
         def create_sandbox_service(self):
-            return _SandboxServiceOldSignatureStub()
+            return _SandboxServiceCreateStub()
 
         def create_filesystem_service(self, _endpoint):
             return _Noop()
@@ -262,16 +274,23 @@ def test_sync_create_restore_from_snapshot_passes_snapshot_id(
             self,
             spec,
             entrypoint,
-            _env,
-            _metadata,
-            _timeout,
-            _resource,
-            _network_policy,
-            _extensions,
-            _volumes,
+            env,
+            metadata,
+            timeout,
+            resource,
+            network_policy,
+            extensions,
+            volumes,
             platform=None,
             snapshot_id=None,
         ):
+            assert isinstance(env, dict)
+            assert isinstance(metadata, dict)
+            assert timeout is not None
+            assert isinstance(resource, dict)
+            assert network_policy is None
+            assert isinstance(extensions, dict)
+            assert volumes is None
             assert platform is None
             assert snapshot_id == "snap-123"
             assert spec is None
@@ -321,16 +340,23 @@ def test_sync_create_restore_from_snapshot_preserves_custom_entrypoint(
             self,
             spec,
             entrypoint,
-            _env,
-            _metadata,
-            _timeout,
-            _resource,
-            _network_policy,
-            _extensions,
-            _volumes,
+            env,
+            metadata,
+            timeout,
+            resource,
+            network_policy,
+            extensions,
+            volumes,
             platform=None,
             snapshot_id=None,
         ):
+            assert isinstance(env, dict)
+            assert isinstance(metadata, dict)
+            assert timeout is not None
+            assert isinstance(resource, dict)
+            assert network_policy is None
+            assert isinstance(extensions, dict)
+            assert volumes is None
             assert platform is None
             assert snapshot_id == "snap-123"
             assert spec is None

@@ -474,25 +474,19 @@ class Sandbox:
 
         try:
             sandbox_service = factory.create_sandbox_service()
-            create_args = (
-                image,
-                entrypoint,
-                env,
-                metadata,
-                timeout,
-                resource,
-                network_policy,
-                extensions,
-                volumes,
+            response = await sandbox_service.create_sandbox(
+                spec=image,
+                entrypoint=entrypoint,
+                env=env,
+                metadata=metadata,
+                timeout=timeout,
+                resource=resource,
+                network_policy=network_policy,
+                extensions=extensions,
+                volumes=volumes,
+                platform=platform,
+                snapshot_id=snapshot_id,
             )
-            if platform is not None or snapshot_id is not None:
-                response = await sandbox_service.create_sandbox(
-                    *create_args,
-                    platform=platform,
-                    snapshot_id=snapshot_id,
-                )
-            else:
-                response = await sandbox_service.create_sandbox(*create_args)
             sandbox_id = response.id
 
             execd_endpoint = await sandbox_service.get_sandbox_endpoint(
