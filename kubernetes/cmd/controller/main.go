@@ -17,8 +17,11 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -43,10 +46,80 @@ import (
 	// +kubebuilder:scaffold:imports
 )
 
+const (
+	defaultBatchSandboxConcurrency = 32
+	defaultPoolConcurrency         = 16
+)
+
+type ConcurrencyConfig map[string]int
+
+func (c *ConcurrencyConfig) String() string {
+	if *c == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(*c))
+	for k, v := range *c {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, v))
+	}
+	return strings.Join(parts, ";")
+}
+
+func (c *ConcurrencyConfig) Set(value string) error {
+	if *c == nil {
+		*c = make(ConcurrencyConfig)
+	}
+	if value == "" {
+		return nil
+	}
+	pairs := strings.Split(value, ";")
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) != 2 {
+			return fmt.Errorf("invalid concurrency config format: %s, expected format: controller=value", pair)
+		}
+		name := strings.TrimSpace(kv[0])
+		val, err := strconv.Atoi(strings.TrimSpace(kv[1]))
+		if err != nil {
+			return fmt.Errorf("invalid concurrency value for %s: %v", name, err)
+		}
+		if val <= 0 {
+			return fmt.Errorf("concurrency value must be positive for %s: %d", name, val)
+		}
+		(*c)[name] = val
+	}
+	return nil
+}
+
+func (c *ConcurrencyConfig) Get(name string, defaultVal int) int {
+	if *c != nil {
+		if v, ok := (*c)[name]; ok {
+			return v
+		}
+	}
+	return defaultVal
+}
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
+
+// getKindFromType returns the Kind name for a given runtime.Object using the scheme.
+// It panics if the object's kind cannot be determined.
+func getKindFromType(obj runtime.Object) string {
+	gvks, _, err := scheme.ObjectKinds(obj)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get kind for object %T: %v", obj, err))
+	}
+	if len(gvks) == 0 {
+		panic(fmt.Sprintf("no kind registered for object %T", obj))
+	}
+	return gvks[0].Kind
+}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -78,6 +151,9 @@ func main() {
 	var kubeClientQPS float64
 	var kubeClientBurst int
 
+	// Controller concurrency options
+	var concurrencyConfig ConcurrencyConfig
+
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -105,6 +181,9 @@ func main() {
 	flag.BoolVar(&logCompress, "log-compress", true, "Compress determines if the rotated log files should be compressed using gzip")
 	flag.Float64Var(&kubeClientQPS, "kube-client-qps", 100, "QPS for Kubernetes client rate limiter.")
 	flag.IntVar(&kubeClientBurst, "kube-client-burst", 200, "Burst for Kubernetes client rate limiter.")
+	flag.Var(&concurrencyConfig, "concurrency", "Controller concurrency settings in format: controller1=N;controller2=M. "+
+		"Available controllers: batchsandbox, pool. "+
+		"Example: --concurrency='batchsandbox=32;pool=128'")
 
 	// Image committer
 	var imageCommitterImage string
@@ -269,12 +348,21 @@ func main() {
 		setupLog.Error(err, "failed to register field index")
 		os.Exit(1)
 	}
+
+	var (
+		batchSandboxKindName = strings.ToLower(getKindFromType(&sandboxv1alpha1.BatchSandbox{}))
+		poolKindName         = strings.ToLower(getKindFromType(&sandboxv1alpha1.Pool{}))
+	)
+	batchSandboxConcurrency := concurrencyConfig.Get(batchSandboxKindName, defaultBatchSandboxConcurrency)
+	poolConcurrency := concurrencyConfig.Get(poolKindName, defaultPoolConcurrency)
+	setupLog.Info("controller concurrency configured", batchSandboxKindName, batchSandboxConcurrency, poolKindName, poolConcurrency)
+
 	if err := (&controller.BatchSandboxReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		Recorder:         mgr.GetEventRecorderFor("batchsandbox-controller"),
 		ResumePullSecret: resumePullSecret,
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, batchSandboxConcurrency); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BatchSandbox")
 		os.Exit(1)
 	}
@@ -283,7 +371,7 @@ func main() {
 		Scheme:    mgr.GetScheme(),
 		Recorder:  mgr.GetEventRecorderFor("pool-controller"),
 		Allocator: controller.NewDefaultAllocator(mgr.GetClient()),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, poolConcurrency); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pool")
 		os.Exit(1)
 	}

@@ -23,7 +23,7 @@ authors = [
     { name = "OpenSandbox Team", email = "ninan.nn@alibaba-inc.com" }
 ]
 dependencies = [
-    "pytest>=7.0.0",
+    "pytest>=9.0.3",
     "pytest-asyncio>=0.21.0",
     "pytest-timeout>=2.1.0",
     "pytest-order>=1.2.0",

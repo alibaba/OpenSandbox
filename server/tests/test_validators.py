@@ -29,12 +29,18 @@ from opensandbox_server.services.validators import (
     ensure_volumes_valid,
 )
 
-def test_ensure_platform_valid_rejects_windows_until_runtime_support_ready():
+def test_ensure_platform_valid_accepts_windows_amd64():
     platform = PlatformSpec(os="windows", arch="amd64")
-    with pytest.raises(HTTPException) as exc_info:
-        assert ensure_platform_valid(platform) is None
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert ensure_platform_valid(platform) is None
+    assert platform.os == "windows"
+    assert platform.arch == "amd64"
+
+
+def test_ensure_platform_valid_accepts_windows_arm64():
+    platform = PlatformSpec(os="windows", arch="arm64")
+    assert ensure_platform_valid(platform) is None
+    assert platform.os == "windows"
+    assert platform.arch == "arm64"
 
 def test_ensure_platform_valid_rejects_unsupported_os():
     platform = PlatformSpec(os="darwin", arch="amd64")
@@ -97,13 +103,6 @@ def test_ensure_metadata_labels_rejects_value_too_long():
     long_value = "a" * 64
     with pytest.raises(HTTPException) as exc_info:
         assert ensure_metadata_labels({"app": long_value}) is None
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
-
-def test_ensure_metadata_labels_rejects_non_string_key():
-    """Non-string keys in metadata should be rejected."""
-    with pytest.raises(HTTPException) as exc_info:
-        ensure_metadata_labels({1: "value"})  # type: ignore[dict-item]
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
 

@@ -15,8 +15,10 @@
 package policy
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -66,4 +68,56 @@ func TestLoadAlwaysRuleFile_Missing(t *testing.T) {
 func TestParseValidatedEgressRule_EmptyTarget(t *testing.T) {
 	_, err := ParseValidatedEgressRule(ActionDeny, "")
 	require.Error(t, err)
+}
+
+func TestAlwaysRuleLoader_RefreshIntervalAndReloadByMTime(t *testing.T) {
+	dir := t.TempDir()
+	denyPath := filepath.Join(dir, "deny.always")
+	allowPath := filepath.Join(dir, "allow.always")
+	require.NoError(t, os.WriteFile(denyPath, []byte("1.1.1.1\n"), 0o644))
+
+	loader := newAlwaysRuleLoader(time.Minute, denyPath, allowPath)
+	t0 := time.Unix(1000, 0)
+
+	deny, allow, changed, err := loader.RefreshIfDue(t0)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, deny, 1)
+	require.Nil(t, allow)
+	require.Equal(t, "1.1.1.1", deny[0].Target)
+
+	require.NoError(t, os.WriteFile(denyPath, []byte("2.2.2.2\n"), 0o644))
+	require.NoError(t, os.Chtimes(denyPath, t0.Add(10*time.Second), t0.Add(10*time.Second)))
+	deny, _, changed, err = loader.RefreshIfDue(t0.Add(30 * time.Second))
+	require.NoError(t, err)
+	require.False(t, changed, "should skip checks before refresh interval")
+	require.Len(t, deny, 1)
+	require.Equal(t, "1.1.1.1", deny[0].Target, "cached rules should remain before interval")
+
+	deny, _, changed, err = loader.RefreshIfDue(t0.Add(61 * time.Second))
+	require.NoError(t, err)
+	require.True(t, changed, "mtime changed after interval, should reload")
+	require.Len(t, deny, 1)
+	require.Equal(t, "2.2.2.2", deny[0].Target)
+}
+
+func TestAlwaysRuleLoader_DeleteFileRemovesRules(t *testing.T) {
+	dir := t.TempDir()
+	denyPath := filepath.Join(dir, "deny.always")
+	allowPath := filepath.Join(dir, "allow.always")
+	require.NoError(t, os.WriteFile(denyPath, []byte("3.3.3.3\n"), 0o644))
+
+	loader := newAlwaysRuleLoader(time.Minute, denyPath, allowPath)
+	t0 := time.Unix(2000, 0)
+
+	deny, _, changed, err := loader.RefreshIfDue(t0)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Len(t, deny, 1)
+
+	require.NoError(t, os.Remove(denyPath))
+	deny, _, changed, err = loader.RefreshIfDue(t0.Add(61 * time.Second))
+	require.NoError(t, err)
+	require.True(t, changed, "file deletion should be treated as rules removed")
+	require.Nil(t, deny)
 }

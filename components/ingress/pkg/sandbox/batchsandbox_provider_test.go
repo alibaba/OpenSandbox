@@ -17,6 +17,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -86,7 +87,6 @@ func TestBatchSandboxProvider_WithFakeInformer(t *testing.T) {
 		informerFactory: informerFactory,
 		lister:          batchSandboxInformer.Lister(),
 		informerSynced:  batchSandboxInformer.Informer().HasSynced,
-		namespace:       namespace,
 	}
 
 	// Start informer and wait for cache sync
@@ -158,7 +158,6 @@ func TestBatchSandboxProvider_MissingAnnotation(t *testing.T) {
 		informerFactory: informerFactory,
 		lister:          batchSandboxInformer.Lister(),
 		informerSynced:  batchSandboxInformer.Informer().HasSynced,
-		namespace:       namespace,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -211,7 +210,6 @@ func TestBatchSandboxProvider_InvalidAnnotation(t *testing.T) {
 		informerFactory: informerFactory,
 		lister:          batchSandboxInformer.Lister(),
 		informerSynced:  batchSandboxInformer.Informer().HasSynced,
-		namespace:       namespace,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -247,7 +245,6 @@ func TestBatchSandboxProvider_DynamicUpdate(t *testing.T) {
 		informerFactory: informerFactory,
 		lister:          batchSandboxInformer.Lister(),
 		informerSynced:  batchSandboxInformer.Informer().HasSynced,
-		namespace:       namespace,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -308,7 +305,6 @@ func TestBatchSandboxProvider_StartCacheSyncFailure(t *testing.T) {
 		informerFactory: informerFactory,
 		lister:          batchSandboxInformer.Lister(),
 		informerSynced:  batchSandboxInformer.Informer().HasSynced,
-		namespace:       namespace,
 	}
 
 	// Create a context that expires immediately
@@ -358,7 +354,6 @@ func TestBatchSandboxProvider_GetEndpointNonNotFoundError(t *testing.T) {
 		informerFactory: informerFactory,
 		lister:          batchSandboxInformer.Lister(),
 		informerSynced:  batchSandboxInformer.Informer().HasSynced,
-		namespace:       namespace,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -375,6 +370,57 @@ func TestBatchSandboxProvider_GetEndpointNonNotFoundError(t *testing.T) {
 	endpoint, err := provider.GetEndpoint("missing-endpoint-sandbox")
 	assert.NoError(t, err)
 	assert.Equal(t, "10.0.0.1", endpoint)
+}
+
+func TestBatchSandboxProvider_GetEndpoint_AmbiguousAcrossNamespaces(t *testing.T) {
+	namespaceA := "ns-a"
+	namespaceB := "ns-b"
+	sandboxName := "shared-id"
+
+	first := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sandboxName,
+			Namespace: namespaceA,
+			Annotations: map[string]string{
+				utils.AnnotationEndpoints: `["10.0.0.1"]`,
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{Replicas: 1, Ready: 1},
+	}
+	second := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sandboxName,
+			Namespace: namespaceB,
+			Annotations: map[string]string{
+				utils.AnnotationEndpoints: `["10.0.0.2"]`,
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{Replicas: 1, Ready: 1},
+	}
+
+	fakeClient := fakeclientset.NewSimpleClientset(first, second)
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(
+		fakeClient,
+		time.Second*30,
+		informers.WithNamespace(metav1.NamespaceAll),
+	)
+	batchSandboxInformer := informerFactory.Sandbox().V1alpha1().BatchSandboxes()
+	provider := &BatchSandboxProvider{
+		informerFactory: informerFactory,
+		lister:          batchSandboxInformer.Lister(),
+		informerSynced:  batchSandboxInformer.Informer().HasSynced,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := provider.Start(ctx)
+	assert.NoError(t, err)
+	assert.NoError(t, batchSandboxInformer.Informer().GetStore().Add(first))
+	assert.NoError(t, batchSandboxInformer.Informer().GetStore().Add(second))
+
+	_, err = provider.GetEndpoint(sandboxName)
+	assert.Error(t, err)
+	assert.True(t, strings.Contains(err.Error(), "ambiguous sandbox id"))
 }
 
 // ptr is a helper function to create int32 pointer

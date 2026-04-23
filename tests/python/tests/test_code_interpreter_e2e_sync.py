@@ -43,7 +43,11 @@ from opensandbox.models.execd import (
 from opensandbox.models.execd_sync import ExecutionHandlersSync
 from opensandbox.models.sandboxes import Host, SandboxImageSpec, Volume
 
-from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
+from tests.base_e2e_test import (
+    create_connection_config_sync,
+    get_e2e_sandbox_resource,
+    get_sandbox_image,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +288,53 @@ class TestCodeInterpreterE2ESync:
                 except Exception:
                     pass
 
+    @pytest.fixture
+    def isolated_code_interpreter(self):
+        """Create an isolated sandbox+interpreter for high-flakiness run tests."""
+        connection_config = create_connection_config_sync()
+        sandbox = SandboxSync.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+            connection_config=connection_config,
+            resource=get_e2e_sandbox_resource(),
+            timeout=timedelta(minutes=15),
+            ready_timeout=timedelta(seconds=60),
+            metadata={"tag": "e2e-code-interpreter-isolated"},
+            env={
+                "E2E_TEST": "true",
+                "GO_VERSION": "1.25",
+                "JAVA_VERSION": "21",
+                "NODE_VERSION": "22",
+                "PYTHON_VERSION": "3.12",
+                "EXECD_LOG_FILE": "/tmp/opensandbox-e2e/logs/execd.log",
+            },
+            health_check_polling_interval=timedelta(milliseconds=500),
+            volumes=[
+                Volume(
+                    name="execd-log",
+                    host=Host(path="/tmp/opensandbox-e2e/logs"),
+                    mountPath="/tmp/opensandbox-e2e/logs",
+                    readOnly=False,
+                ),
+            ],
+        )
+        code_interpreter = CodeInterpreterSync.create(sandbox=sandbox)
+        try:
+            yield code_interpreter
+        finally:
+            try:
+                sandbox.kill()
+            except Exception as e:
+                logger.warning("Teardown(isolated): sandbox.kill() failed: %s", e, exc_info=True)
+            try:
+                sandbox.close()
+            except Exception as e:
+                logger.warning("Teardown(isolated): sandbox.close() failed: %s", e, exc_info=True)
+            try:
+                connection_config.transport.close()
+            except Exception:
+                pass
+
     @classmethod
     def _ensure_code_interpreter_created(cls) -> None:
         if cls._setup_done:
@@ -295,6 +346,7 @@ class TestCodeInterpreterE2ESync:
             image=SandboxImageSpec(get_sandbox_image()),
             entrypoint=["/opt/opensandbox/code-interpreter.sh"],
             connection_config=cls.connection_config,
+            resource=get_e2e_sandbox_resource(),
             timeout=timedelta(minutes=15),
             ready_timeout=timedelta(seconds=60),
             metadata={"tag": "e2e-code-interpreter"},
@@ -367,10 +419,8 @@ class TestCodeInterpreterE2ESync:
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(2)
-    def test_02_java_code_execution(self):
-        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
-        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
-        assert code_interpreter is not None
+    def test_02_java_code_execution(self, isolated_code_interpreter: CodeInterpreterSync):
+        code_interpreter = isolated_code_interpreter
 
         with managed_ctx_sync(code_interpreter, SupportedLanguage.JAVA) as java_context:
             assert java_context.id is not None and str(java_context.id).strip()
@@ -486,10 +536,8 @@ class TestCodeInterpreterE2ESync:
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(3)
-    def test_03_python_code_execution(self):
-        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
-        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
-        assert code_interpreter is not None
+    def test_03_python_code_execution(self, isolated_code_interpreter: CodeInterpreterSync):
+        code_interpreter = isolated_code_interpreter
 
         # New usage: directly pass a language string (ephemeral context).
         # This validates the `codes.run(..., language=...)` convenience interface.
@@ -603,10 +651,8 @@ class TestCodeInterpreterE2ESync:
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(4)
-    def test_04_go_code_execution(self):
-        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
-        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
-        assert code_interpreter is not None
+    def test_04_go_code_execution(self, isolated_code_interpreter: CodeInterpreterSync):
+        code_interpreter = isolated_code_interpreter
 
         with managed_ctx_sync(code_interpreter, SupportedLanguage.GO) as go_context:
             assert go_context.id is not None and str(go_context.id).strip()
@@ -704,10 +750,8 @@ class TestCodeInterpreterE2ESync:
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(5)
-    def test_05_typescript_code_execution(self):
-        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
-        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
-        assert code_interpreter is not None
+    def test_05_typescript_code_execution(self, isolated_code_interpreter: CodeInterpreterSync):
+        code_interpreter = isolated_code_interpreter
 
         with managed_ctx_sync(code_interpreter, SupportedLanguage.TYPESCRIPT) as ts_context:
             assert ts_context.id is not None and str(ts_context.id).strip()
@@ -795,10 +839,10 @@ class TestCodeInterpreterE2ESync:
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(6)
-    def test_06_multi_language_support_and_context_isolation(self):
-        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
-        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
-        assert code_interpreter is not None
+    def test_06_multi_language_support_and_context_isolation(
+        self, isolated_code_interpreter: CodeInterpreterSync
+    ):
+        code_interpreter = isolated_code_interpreter
 
         with managed_ctx_stack_sync(
             code_interpreter,
@@ -884,10 +928,8 @@ class TestCodeInterpreterE2ESync:
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(7)
-    def test_07_concurrent_code_execution(self):
-        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
-        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
-        assert code_interpreter is not None
+    def test_07_concurrent_code_execution(self, isolated_code_interpreter: CodeInterpreterSync):
+        code_interpreter = isolated_code_interpreter
 
         with managed_ctx_stack_sync(
             code_interpreter,
@@ -969,10 +1011,8 @@ class TestCodeInterpreterE2ESync:
 
     @pytest.mark.timeout(900)
     @pytest.mark.order(8)
-    def test_08_code_execution_interrupt(self):
-        TestCodeInterpreterE2ESync._ensure_code_interpreter_created()
-        code_interpreter = TestCodeInterpreterE2ESync.code_interpreter
-        assert code_interpreter is not None
+    def test_08_code_execution_interrupt(self, isolated_code_interpreter: CodeInterpreterSync):
+        code_interpreter = isolated_code_interpreter
 
         with managed_ctx_sync(code_interpreter, SupportedLanguage.PYTHON) as python_int_context:
             assert python_int_context is not None and python_int_context.id is not None and str(python_int_context.id).strip()

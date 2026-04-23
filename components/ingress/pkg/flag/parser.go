@@ -18,10 +18,14 @@ import (
 	"flag"
 )
 
+var (
+	deprecatedNamespace string
+)
+
 func InitFlags() {
 	flag.StringVar(&LogLevel, "log-level", "info", "Server log level")
 	flag.IntVar(&Port, "port", 28888, "Server listening port (default: 28888)")
-	flag.StringVar(&Namespace, "namespace", "opensandbox", "The Kubernetes namespace to watch for sandbox resources")
+	flag.StringVar(&deprecatedNamespace, "namespace", "opensandbox", "Deprecated compatibility flag (ingress now watches sandbox resources across all namespaces)")
 	flag.StringVar(&ProviderType, "provider-type", "batchsandbox", "The sandbox provider type (default: batchsandbox)")
 	flag.StringVar(&Mode, "mode", "header", "The sandbox service discovery mode (default: header)")
 

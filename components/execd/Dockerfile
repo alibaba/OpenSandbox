@@ -40,9 +40,17 @@ RUN CGO_ENABLED=0 go build \
               -X 'github.com/alibaba/opensandbox/internal/version.GitCommit=${GIT_COMMIT}'" \
     -o /build/execd ./main.go
 
+RUN CGO_ENABLED=0 GOOS=windows go build \
+    -ldflags "-X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
+              -X 'github.com/alibaba/opensandbox/internal/version.BuildTime=${BUILD_TIME}' \
+              -X 'github.com/alibaba/opensandbox/internal/version.GitCommit=${GIT_COMMIT}'" \
+    -o /build/execd.exe ./main.go
+
 FROM alpine:latest
 
 COPY --from=builder /build/execd .
+COPY --from=builder /build/execd.exe ./execd.exe
 COPY components/execd/bootstrap.sh ./bootstrap.sh
+COPY components/execd/install.bat ./install.bat
 
 ENTRYPOINT ["./execd"]

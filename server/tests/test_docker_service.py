@@ -138,7 +138,13 @@ async def test_create_sandbox_applies_security_defaults(mock_docker):
     with (
         patch.object(service, "_ensure_image_available"),
         patch.object(service, "_prepare_sandbox_runtime"),
-        patch.object(service, "_allocate_distinct_host_ports", return_value=(40001, 40002)),
+        patch(
+            "opensandbox_server.services.docker.allocate_port_bindings",
+            return_value={
+                "44772": ("0.0.0.0", 40001),
+                "8080": ("0.0.0.0", 40002),
+            },
+        ),
     ):
         await service.create_sandbox(request)
 
@@ -380,6 +386,47 @@ def test_pull_image_passes_platform_to_docker_api(mock_docker):
     )
 
 @patch("opensandbox_server.services.docker.docker")
+def test_pull_image_skips_platform_for_windows_profile(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    service = DockerSandboxService(config=_app_config())
+    service._pull_image(
+        image_uri="dockurr/windows:latest",
+        auth_config=None,
+        sandbox_id="sandbox-win-1",
+        platform=PlatformSpec(os="windows", arch="amd64"),
+    )
+
+    mock_client.images.pull.assert_called_once_with(
+        "dockurr/windows:latest",
+        auth_config=None,
+    )
+
+@patch("opensandbox_server.services.docker.docker")
+def test_ensure_image_available_skips_windows_platform_mismatch_repull(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cached_image = MagicMock()
+    cached_image.attrs = {"Os": "linux", "Architecture": "amd64"}
+    mock_client.images.get.return_value = cached_image
+    mock_client.info.return_value = {"OSType": "linux", "Architecture": "amd64"}
+
+    service = DockerSandboxService(config=_app_config())
+    with patch.object(service, "_pull_image") as mock_pull:
+        service._ensure_image_available(
+            "dockurr/windows:latest",
+            auth_config=None,
+            sandbox_id="sandbox-win-1",
+            platform=PlatformSpec(os="windows", arch="amd64"),
+        )
+
+    mock_pull.assert_not_called()
+
+@patch("opensandbox_server.services.docker.docker")
 def test_fetch_execd_archive_caches_by_platform_key(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -541,7 +588,13 @@ async def test_egress_sidecar_injection_and_capabilities(mock_docker):
 
     with (
         patch("opensandbox_server.services.docker.generate_egress_token", return_value="egress-token"),
-        patch.object(service, "_allocate_distinct_host_ports", return_value=(44772, 8080)),
+        patch(
+            "opensandbox_server.services.docker.allocate_port_bindings",
+            return_value={
+                "44772": ("0.0.0.0", 44772),
+                "8080": ("0.0.0.0", 8080),
+            },
+        ),
         patch.object(service, "_ensure_image_available"),
         patch.object(service, "_prepare_sandbox_runtime"),
     ):
@@ -667,7 +720,13 @@ async def test_create_sandbox_user_defined_network_uses_correct_network_mode(moc
     with (
         patch.object(service, "_ensure_image_available"),
         patch.object(service, "_prepare_sandbox_runtime"),
-        patch.object(service, "_allocate_distinct_host_ports", return_value=(40001, 40002)),
+        patch(
+            "opensandbox_server.services.docker.allocate_port_bindings",
+            return_value={
+                "44772": ("0.0.0.0", 40001),
+                "8080": ("0.0.0.0", 40002),
+            },
+        ),
     ):
         await service.create_sandbox(request)
 
@@ -872,7 +931,8 @@ def test_egress_sidecar_host_config_sysctls_only_when_egress_disable_ipv6(mock_d
 def test_expire_cleans_sidecar():
     service = DockerSandboxService(config=_app_config())
     mock_container = MagicMock()
-    mock_container.attrs = {"State": {"Running": False}, "Config": {"Labels": {}}}
+    labels = {SANDBOX_PLATFORM_OS_LABEL: "windows"}
+    mock_container.attrs = {"State": {"Running": False}, "Config": {"Labels": labels}}
     mock_container.kill = MagicMock()
     mock_container.remove = MagicMock()
 
@@ -880,6 +940,7 @@ def test_expire_cleans_sidecar():
         patch.object(service, "_get_container_by_sandbox_id", return_value=mock_container),
         patch.object(service, "_remove_expiration_tracking") as mock_remove,
         patch.object(service, "_cleanup_egress_sidecar") as mock_cleanup,
+        patch.object(service, "_cleanup_windows_oem_volume") as mock_cleanup_oem,
         patch.object(service, "_docker_operation") as mock_op,
     ):
         mock_op.return_value.__enter__.return_value = None
@@ -887,6 +948,7 @@ def test_expire_cleans_sidecar():
         service._expire_sandbox("sandbox-id")
 
     mock_cleanup.assert_called_once_with("sandbox-id")
+    mock_cleanup_oem.assert_called_once_with("sandbox-id", labels)
     mock_remove.assert_called_once()
 
 def test_restore_cleans_orphan_sidecar():
@@ -907,6 +969,23 @@ def test_restore_cleans_orphan_sidecar():
         service._restore_existing_sandboxes()
 
     mock_cleanup.assert_called_once_with("orphan-id")
+
+def test_expire_not_found_attempts_windows_oem_volume_cleanup():
+    service = DockerSandboxService(config=_app_config())
+
+    with (
+        patch.object(
+            service,
+            "_get_container_by_sandbox_id",
+            side_effect=HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={}),
+        ),
+        patch.object(service, "_remove_expiration_tracking") as mock_remove,
+        patch.object(service, "_cleanup_windows_oem_volume") as mock_cleanup_oem,
+    ):
+        service._expire_sandbox("sandbox-missing")
+
+    mock_remove.assert_called_once_with("sandbox-missing")
+    mock_cleanup_oem.assert_called_once_with("sandbox-missing", None)
 
 def test_prepare_creation_context_allows_manual_cleanup():
     service = DockerSandboxService(config=_app_config())
@@ -1099,6 +1178,290 @@ def test_create_and_start_container_maps_platform_typeerror_to_invalid_parameter
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
     assert "platform-aware container create" in exc_info.value.detail["message"]
 
+
+@patch("opensandbox_server.services.docker.docker")
+def test_create_and_start_container_windows_profile_keeps_image_entrypoint(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.api.create_host_config.return_value = {}
+    mock_client.api.create_container.return_value = {"Id": "cid"}
+
+    created_container = MagicMock()
+    # dockurr/windows image metadata is linux/*, but request platform is windows/*.
+    created_container.image.attrs = {"Os": "linux", "Architecture": "amd64"}
+    mock_client.containers.get.return_value = created_container
+
+    service = DockerSandboxService(config=_app_config())
+    with (
+        patch("opensandbox_server.services.docker.fetch_execd_install_bat", return_value=b"script"),
+        patch("opensandbox_server.services.docker.fetch_execd_windows_binary", return_value=b"exe"),
+        patch("opensandbox_server.services.docker.install_windows_oem_scripts") as mock_install,
+    ):
+        service._create_and_start_container(
+            sandbox_id="sandbox-win-1",
+            image_uri="dockurr/windows:latest",
+            bootstrap_command=["cmd", "/c", "echo ready"],
+            labels={SANDBOX_ID_LABEL: "sandbox-win-1"},
+            environment=[],
+            host_config_kwargs={},
+            exposed_ports=None,
+            platform=PlatformSpec(os="windows", arch="amd64"),
+        )
+
+    kwargs = mock_client.api.create_container.call_args.kwargs
+    assert "entrypoint" not in kwargs
+    assert "platform" not in kwargs
+    assert kwargs["command"] == ["cmd", "/c", "echo ready"]
+    mock_install.assert_called_once()
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_create_and_start_container_windows_profile_skips_linux_runtime_injection(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.api.create_host_config.return_value = {}
+    mock_client.api.create_container.return_value = {"Id": "cid"}
+
+    created_container = MagicMock()
+    created_container.image.attrs = {"Os": "linux", "Architecture": "amd64"}
+    mock_client.containers.get.return_value = created_container
+
+    service = DockerSandboxService(config=_app_config())
+    with (
+        patch.object(service, "_prepare_sandbox_runtime") as mock_prepare,
+        patch("opensandbox_server.services.docker.fetch_execd_install_bat", return_value=b"script"),
+        patch("opensandbox_server.services.docker.fetch_execd_windows_binary", return_value=b"exe"),
+        patch("opensandbox_server.services.docker.install_windows_oem_scripts") as mock_install,
+    ):
+        service._create_and_start_container(
+            sandbox_id="sandbox-win-2",
+            image_uri="dockurr/windows:latest",
+            bootstrap_command=["cmd", "/c", "echo ready"],
+            labels={SANDBOX_ID_LABEL: "sandbox-win-2"},
+            environment=[],
+            host_config_kwargs={},
+            exposed_ports=None,
+            platform=PlatformSpec(os="windows", arch="amd64"),
+        )
+
+    mock_prepare.assert_not_called()
+    mock_install.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_windows_profile_injects_runtime_defaults(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.runtime.execd_image = "ghcr.io/opensandbox/execd:v1.0.13"
+    cfg.docker.network_mode = "bridge"
+    service = DockerSandboxService(config=cfg)
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="dockurr/windows:latest"),
+        resourceLimits=ResourceLimits(root={}),
+        entrypoint=["cmd", "/c", "echo ready"],
+        platform=PlatformSpec(os="windows", arch="amd64"),
+    )
+    created_container = MagicMock()
+    created_container.image.attrs = {"Os": "windows", "Architecture": "amd64"}
+
+    with (
+        patch(
+            "opensandbox_server.services.docker.validate_windows_runtime_prerequisites",
+            return_value=[],
+        ),
+        patch.object(
+            service,
+            "_create_and_start_container",
+            return_value=created_container,
+        ) as mock_create,
+    ):
+        await service.create_sandbox(request)
+
+    host_config_kwargs = mock_create.call_args.args[5]
+    assert "/dev/kvm" in host_config_kwargs["devices"]
+    assert "/dev/net/tun" in host_config_kwargs["devices"]
+    assert "NET_ADMIN" in host_config_kwargs["cap_add"]
+    assert "NET_RAW" in host_config_kwargs["cap_add"]
+    assert not any(bind.endswith(":/storage:rw") for bind in host_config_kwargs["binds"])
+    assert any(bind.endswith(":/oem:rw") for bind in host_config_kwargs["binds"])
+    port_bindings = host_config_kwargs["port_bindings"]
+    assert "44772" in port_bindings
+    assert "8080" in port_bindings
+    assert "3389/tcp" in port_bindings
+    assert "3389/udp" in port_bindings
+    assert "8006/tcp" in port_bindings
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_windows_profile_does_not_require_download_url_override(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.runtime.execd_image = "ghcr.io/opensandbox/execd:latest"
+    service = DockerSandboxService(config=cfg)
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="dockurr/windows:latest"),
+        resourceLimits=ResourceLimits(root={}),
+        entrypoint=["cmd", "/c", "echo ready"],
+        platform=PlatformSpec(os="windows", arch="amd64"),
+    )
+    created_container = MagicMock()
+    created_container.image.attrs = {"Os": "windows", "Architecture": "amd64"}
+
+    with (
+        patch(
+            "opensandbox_server.services.docker.validate_windows_runtime_prerequisites",
+            return_value=[],
+        ),
+        patch.object(
+            service,
+            "_create_and_start_container",
+            return_value=created_container,
+        ) as mock_create,
+    ):
+        await service.create_sandbox(request)
+
+    mock_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_windows_profile_rejects_missing_runtime_devices(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.runtime.execd_image = "ghcr.io/opensandbox/execd:v1.0.13"
+    cfg.docker.network_mode = "bridge"
+    service = DockerSandboxService(config=cfg)
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="dockurr/windows:latest"),
+        resourceLimits=ResourceLimits(root={}),
+        entrypoint=["cmd", "/c", "echo ready"],
+        platform=PlatformSpec(os="windows", arch="amd64"),
+    )
+    with (
+        patch(
+            "opensandbox_server.services.docker.validate_windows_runtime_prerequisites",
+            side_effect=HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": "Windows profile requires host devices to be present: /dev/kvm.",
+                },
+            ),
+        ),
+        patch.object(service, "_create_and_start_container") as mock_create,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await service.create_sandbox(request)
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "/dev/kvm" in exc_info.value.detail["message"]
+    mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_windows_profile_rejects_below_minimum_resource_limits(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.runtime.execd_image = "ghcr.io/opensandbox/execd:v1.0.13"
+    cfg.docker.network_mode = "bridge"
+    service = DockerSandboxService(config=cfg)
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="dockurr/windows:latest"),
+        resourceLimits=ResourceLimits(root={"cpu": "1", "memory": "2G", "disk": "32G"}),
+        entrypoint=["cmd", "/c", "echo ready"],
+        platform=PlatformSpec(os="windows", arch="amd64"),
+    )
+    with (
+        patch(
+            "opensandbox_server.services.docker.validate_windows_runtime_prerequisites",
+            return_value=None,
+        ),
+        patch.object(service, "_create_and_start_container") as mock_create,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        await service.create_sandbox(request)
+
+    assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "resourceLimits.cpu >= 2" in exc_info.value.detail["message"]
+    mock_create.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_windows_profile_accepts_dockur_demo_like_request(mock_docker):
+    """
+    Use a dockur/windows-style request payload (VERSION env) and verify
+    it is forwarded through the windows profile create path.
+    """
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.runtime.execd_image = "ghcr.io/opensandbox/execd:v1.0.13"
+    cfg.docker.network_mode = "bridge"
+    service = DockerSandboxService(config=cfg)
+    request = CreateSandboxRequest(
+        image=ImageSpec(uri="dockurr/windows:latest"),
+        resourceLimits=ResourceLimits(
+            root={
+                "cpu": "4",
+                "memory": "8G",
+                "disk": "64G",
+            }
+        ),
+        env={"VERSION": "11"},
+        entrypoint=["cmd", "/c", "echo ready"],
+        platform=PlatformSpec(os="windows", arch="amd64"),
+    )
+    created_container = MagicMock()
+    created_container.image.attrs = {"Os": "windows", "Architecture": "amd64"}
+
+    with (
+        patch(
+            "opensandbox_server.services.docker.validate_windows_runtime_prerequisites",
+            return_value=None,
+        ),
+        patch.object(
+            service,
+            "_create_and_start_container",
+            return_value=created_container,
+        ) as mock_create,
+    ):
+        response = await service.create_sandbox(request)
+
+    forwarded_env = mock_create.call_args.args[4]
+    host_config_kwargs = mock_create.call_args.args[5]
+    assert "VERSION=11" in forwarded_env
+    assert "CPU_CORES=4" in forwarded_env
+    assert "RAM_SIZE=8G" in forwarded_env
+    assert "DISK_SIZE=64G" in forwarded_env
+    assert "USER_PORTS=44772,8080,3389,8006" in forwarded_env
+    assert "mem_limit" not in host_config_kwargs
+    assert "nano_cpus" not in host_config_kwargs
+    assert response.platform is not None
+    assert response.platform.os == "windows"
+    assert response.platform.arch == "amd64"
+
 def test_restore_existing_sandboxes_ignores_manual_cleanup_without_warning():
     service = DockerSandboxService(config=_app_config())
     manual_container = MagicMock()
@@ -1120,6 +1483,51 @@ def test_restore_existing_sandboxes_ignores_manual_cleanup_without_warning():
 
     mock_schedule.assert_not_called()
     mock_warning.assert_not_called()
+
+@patch("opensandbox_server.services.docker.docker")
+def test_delete_sandbox_removes_windows_oem_volume(mock_docker):
+    mock_container = MagicMock()
+    mock_container.attrs = {
+        "Config": {
+            "Labels": {
+                SANDBOX_ID_LABEL: "sandbox-win-1",
+                SANDBOX_PLATFORM_OS_LABEL: "windows",
+            }
+        },
+        "State": {"Running": True},
+    }
+
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = [mock_container]
+    mock_docker.from_env.return_value = mock_client
+    service = DockerSandboxService(config=_app_config())
+
+    service.delete_sandbox("sandbox-win-1")
+
+    mock_client.api.remove_volume.assert_called_once_with("opensandbox-win-oem-sandbox-win-1")
+
+
+@patch("opensandbox_server.services.docker.docker")
+def test_delete_sandbox_skips_oem_volume_cleanup_for_linux(mock_docker):
+    mock_container = MagicMock()
+    mock_container.attrs = {
+        "Config": {
+            "Labels": {
+                SANDBOX_ID_LABEL: "sandbox-linux-1",
+                SANDBOX_PLATFORM_OS_LABEL: "linux",
+            }
+        },
+        "State": {"Running": True},
+    }
+
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = [mock_container]
+    mock_docker.from_env.return_value = mock_client
+    service = DockerSandboxService(config=_app_config())
+
+    service.delete_sandbox("sandbox-linux-1")
+
+    mock_client.api.remove_volume.assert_not_called()
 
 def test_renew_expiration_rejects_manual_cleanup_sandbox():
     service = DockerSandboxService(config=_app_config())
@@ -1543,13 +1951,14 @@ class TestDockerVolumeValidation:
 
     @pytest.mark.asyncio
     async def test_pvc_volume_not_found_rejected(self, mock_docker):
-        """PVC backend with non-existent Docker named volume should be rejected."""
+        """PVC backend with non-existent Docker named volume should be rejected when createIfNotExists is false."""
         mock_client = MagicMock()
         mock_client.containers.list.return_value = []
         mock_client.api.inspect_volume.side_effect = DockerNotFound("volume not found")
         mock_docker.from_env.return_value = mock_client
 
-        service = DockerSandboxService(config=_app_config())
+        cfg = _app_config()
+        service = DockerSandboxService(config=cfg)
 
         request = CreateSandboxRequest(
             image=ImageSpec(uri="python:3.11"),
@@ -1561,7 +1970,7 @@ class TestDockerVolumeValidation:
             volumes=[
                 Volume(
                     name="models",
-                    pvc=PVC(claim_name="nonexistent-volume"),
+                    pvc=PVC(claim_name="nonexistent-volume", create_if_not_exists=False),
                     mount_path="/mnt/models",
                     read_only=True,
                 )
@@ -1573,6 +1982,36 @@ class TestDockerVolumeValidation:
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert exc_info.value.detail["code"] == SandboxErrorCodes.PVC_VOLUME_NOT_FOUND
+
+    def test_pvc_volume_auto_created_when_not_found(self, mock_docker):
+        """PVC backend auto-creates Docker named volume when createIfNotExists is true (default)."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        # First inspect fails (not found), then succeeds after create
+        mock_client.api.inspect_volume.side_effect = [
+            DockerNotFound("volume not found"),
+            {"Name": "my-volume", "Driver": "local", "Mountpoint": "/var/lib/docker/volumes/my-volume/_data"},
+        ]
+        mock_client.api.create_volume.return_value = {}
+        mock_docker.from_env.return_value = mock_client
+
+        cfg = _app_config()
+        service = DockerSandboxService(config=cfg)
+
+        volume = Volume(
+            name="data",
+            pvc=PVC(claim_name="my-volume"),
+            mount_path="/mnt/data",
+            read_only=False,
+        )
+        vol_info, auto_created = service._validate_pvc_volume(volume)
+
+        mock_client.api.create_volume.assert_called_once_with(
+            name="my-volume",
+            labels={"opensandbox.io/volume-managed-by": "server"},
+        )
+        assert vol_info["Name"] == "my-volume"
+        assert auto_created is True
 
     def test_ossfs_inline_credentials_missing_rejected(self, mock_docker):
         """OSSFS with missing inline credentials should be rejected at schema validation."""
@@ -2397,6 +2836,49 @@ class TestDockerVolumeValidation:
             binds = host_config_call.kwargs["binds"]
             assert len(binds) == 1
             assert binds[0] == f"{tmpdir}:/mnt/work:rw"
+
+    @pytest.mark.asyncio
+    async def test_host_file_bind_passes_validation(self, mock_docker):
+        """Existing host file should be allowed without mkdir."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.create_host_config.return_value = {}
+        mock_client.api.create_container.return_value = {"Id": "cid"}
+        mock_client.containers.get.return_value = MagicMock()
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".iso") as iso_file:
+            request = CreateSandboxRequest(
+                image=ImageSpec(uri="python:3.11"),
+                timeout=120,
+                resourceLimits=ResourceLimits(root={}),
+                env={},
+                metadata={},
+                entrypoint=["python"],
+                volumes=[
+                    Volume(
+                        name="boot-iso",
+                        host=Host(path=iso_file.name),
+                        mount_path="/boot.iso",
+                        read_only=True,
+                    )
+                ],
+            )
+
+            with (
+                patch.object(service, "_ensure_image_available"),
+                patch.object(service, "_prepare_sandbox_runtime"),
+            ):
+                await service.create_sandbox(request)
+
+            host_config_call = mock_client.api.create_host_config.call_args
+            binds = host_config_call.kwargs["binds"]
+            assert len(binds) == 1
+            assert binds[0] == f"{iso_file.name}:/boot.iso:ro"
 
     @pytest.mark.asyncio
     async def test_host_volume_with_subpath_resolved_correctly(self, mock_docker):

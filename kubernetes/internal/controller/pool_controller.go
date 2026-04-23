@@ -20,7 +20,10 @@ import (
 	"encoding/hex"
 	gerrors "errors"
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
+	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -37,6 +40,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -60,9 +64,24 @@ const (
 	LabelPoolRevision = "sandbox.opensandbox.io/pool-revision"
 )
 
-var (
-	PoolScaleExpectations = expectations.NewScaleExpectations()
+const (
+	defaultSyncSandboxAllocConcurrency = 256
+	envSyncSandboxAllocConcurrency     = "SYNC_SANDBOX_ALLOC_CONCURRENCY"
 )
+
+var (
+	PoolScaleExpectations       = expectations.NewScaleExpectations()
+	syncSandboxAllocConcurrency int
+)
+
+func init() {
+	syncSandboxAllocConcurrency = defaultSyncSandboxAllocConcurrency
+	if val := os.Getenv(envSyncSandboxAllocConcurrency); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			syncSandboxAllocConcurrency = n
+		}
+	}
+}
 
 // PoolReconciler reconciles a Pool object
 type PoolReconciler struct {
@@ -232,7 +251,7 @@ func (r *PoolReconciler) calculateRevision(pool *sandboxv1alpha1.Pool) (string, 
 
 // SetupWithManager sets up the controller with the Manager.
 // Todo pod deletion expectations
-func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconciles int) error {
 	filterBatchSandbox := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			bsb, ok := e.Object.(*sandboxv1alpha1.BatchSandbox)
@@ -302,6 +321,7 @@ func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			builder.WithPredicates(filterBatchSandbox),
 		).
 		Named("pool").
+		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).
 		Complete(r)
 }
 
@@ -340,16 +360,33 @@ func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alp
 		}
 	}
 
-	// Sync to each BatchSandbox
-	var syncErrs []error
+	// Sync to each BatchSandbox concurrently
+	errCh := make(chan error, len(pendingSyncs))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, syncSandboxAllocConcurrency)
+
 	for _, syncInfo := range pendingSyncs {
-		if err := r.Allocator.SyncSandboxAllocation(ctx, syncInfo.Sandbox, syncInfo.Pods); err != nil {
-			log.Error(err, "Failed to sync sandbox allocation", "sandbox", syncInfo.SandboxName)
-			syncErrs = append(syncErrs, fmt.Errorf("failed to sync sandbox %s: %w", syncInfo.SandboxName, err))
-		} else {
-			log.Info("Successfully sync Sandbox allocation", "sandbox", syncInfo.SandboxName, "pods", syncInfo.Pods)
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(info SandboxSyncInfo) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := r.Allocator.SyncSandboxAllocation(ctx, info.Sandbox, info.Pods); err != nil {
+				log.Error(err, "Failed to sync sandbox allocation", "sandbox", info.SandboxName)
+				errCh <- fmt.Errorf("failed to sync sandbox %s: %w", info.SandboxName, err)
+			} else {
+				log.Info("Successfully sync Sandbox allocation", "sandbox", info.SandboxName, "pods", info.Pods)
+			}
+		}(syncInfo)
 	}
+	wg.Wait()
+	close(errCh)
+
+	var syncErrs []error
+	for err := range errCh {
+		syncErrs = append(syncErrs, err)
+	}
+
 	if err := gerrors.Join(syncErrs...); err != nil {
 		return nil, err
 	}
@@ -490,7 +527,7 @@ func (r *PoolReconciler) updatePoolStatus(ctx context.Context, updateRevision st
 	pool.Status.Available = availableCnt
 	pool.Status.Revision = updateRevision
 	pool.Status.Updated = updatedCnt
-	if equality.Semantic.DeepEqual(oldStatus, pool.Status) {
+	if equality.Semantic.DeepEqual(*oldStatus, pool.Status) {
 		return nil
 	}
 	log := logf.FromContext(ctx)

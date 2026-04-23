@@ -12,63 +12,32 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Example OpenSandbox configuration.
-# Copy this file to ~/.sandbox.toml or set SANDBOX_CONFIG_PATH to point at it.
-# Each top-level block mirrors the sections supported by opensandbox_server/config.py.
+# Example Docker Runtime Configuration for OpenSandbox Server
+#
+# 完整配置参考：https://github.com/alibaba/OpenSandbox/blob/main/server/configuration.md
 
 [server]
-# Lifecycle API 主机/端口设置
-# -----------------------------------------------------------------
 host = "127.0.0.1"
 port = 8080
-# api_key = "your-secret-api-key"  # 可选：取消注释以启用 API Key 认证
+max_sandbox_timeout_seconds = 86400
+
+# 可选：取消注释以启用 API Key 认证
+# api_key = "your-secret-api-key"
 
 [log]
-# 日志配置
-# -----------------------------------------------------------------
 level = "INFO"
-file_enabled = true  # 开启后日志写入文件（默认路径 ~/logs/opensandbox/）
-# file_path = "~/logs/opensandbox/server.log"  # 可选：自定义 server.log 路径
-# access_file_path = "~/logs/opensandbox/access.log"  # 可选：自定义 access.log 路径
-# file_max_bytes = 104857600  # 100MB - 轮转前最大文件大小
-# file_backup_count = 5       # 保留的轮转文件数量
-
-# 🧪 [EXPERIMENTAL] 按访问续期（OSEP-0009）。默认关闭 — 说明见 server/README_zh.md。
-[renew_intent]
-enabled = false
-min_interval_seconds = 60
-redis.enabled = false
-# redis.dsn = "redis://127.0.0.1:6379/0"
-redis.queue_key = "opensandbox:renew:intent"
-redis.consumer_concurrency = 8
 
 [runtime]
-# Runtime selection (docker | kubernetes)
-# -----------------------------------------------------------------
 type = "docker"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.10"
-
-[egress]
-# Egress configuration
-# -----------------------------------------------------------------
-image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.6"
-# Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
-mode = "dns"
-# Default is true (recommended for dual-stack CNI). Set false only if you need IPv6 in the netns.
-# disable_ipv6 = false
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.13"
 
 [storage]
-# 卷存储配置
-# -----------------------------------------------------------------
-# 允许进行 bind mount 的宿主机路径前缀白名单。
-# 仅匹配这些前缀的路径才能被挂载到沙箱中。
-# 如果为空，则允许所有路径（不建议在生产环境使用）。
-# 示例：allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
 allowed_host_paths = []
 
+# 自动创建 Kubernetes PVC 时的默认存储大小（当调用方未指定时使用）。
+volume_default_size = "1Gi"
+
 [docker]
-# Docker-specific knobs
-# -----------------------------------------------------------------
 # Supported values for network_mode: "host", "bridge"
 network_mode = "bridge"
 # Drop dangerous capabilities and block privilege escalation
@@ -77,12 +46,18 @@ no_new_privileges = true
 # Optional: set an AppArmor profile name (e.g., "docker-default") when AppArmor is enabled
 apparmor_profile = ""
 # Limit process count to reduce host impact from fork bombs; set to null to disable
-# TODO: 生产环境建议设置为 4096 或更高，避免多沙箱并发时出现 "can't start new thread" 错误
-# See: https://github.com/alibaba/OpenSandbox/issues/447
 pids_limit = 4096
 # Seccomp profile: empty string uses Docker default; set to an absolute path for a custom profile
 seccomp_profile = ""
 
 [ingress]
-# Ingress exposure mode: direct (default) or gateway
 mode = "direct"
+
+[egress]
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.8"
+mode = "dns"
+
+# 🧪 [EXPERIMENTAL] 按访问续期。默认关闭 — 见 server/README_zh.md。
+[renew_intent]
+enabled = false
+min_interval_seconds = 60

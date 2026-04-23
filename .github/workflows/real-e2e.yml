@@ -10,8 +10,7 @@ on:
       - 'server/opensandbox_server/**'
       - 'components/execd/**'
       - 'components/egress/**'
-      - 'sdks/code-interpreter/**'
-      - 'sdks/sandbox/**'
+      - 'sdks/**'
       - 'tests/**'
   push:
     branches: [ main ]
@@ -56,8 +55,9 @@ jobs:
           [server]
           host = "127.0.0.1"
           port = 8080
-          log_level = "INFO"
           api_key = ""
+          [log]
+          level = "INFO"
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
@@ -143,8 +143,9 @@ jobs:
           [server]
           host = "127.0.0.1"
           port = 8080
-          log_level = "INFO"
           api_key = ""
+          [log]
+          level = "INFO"
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
@@ -237,8 +238,9 @@ jobs:
           [server]
           host = "127.0.0.1"
           port = 8080
-          log_level = "INFO"
           api_key = ""
+          [log]
+          level = "INFO"
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
@@ -319,8 +321,9 @@ jobs:
           [server]
           host = "127.0.0.1"
           port = 8080
-          log_level = "INFO"
           api_key = ""
+          [log]
+          level = "INFO"
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"
@@ -403,8 +406,9 @@ jobs:
           [server]
           host = "127.0.0.1"
           port = 8080
-          log_level = "INFO"
           api_key = ""
+          [log]
+          level = "INFO"
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:local"

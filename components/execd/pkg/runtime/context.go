@@ -28,6 +28,7 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter"
 	jupytersession "github.com/alibaba/opensandbox/execd/pkg/jupyter/session"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 )
 
 // CreateContext provisions a kernel-backed session and returns its ID.
@@ -129,14 +130,18 @@ func (c *Controller) newContextID() string {
 }
 
 func (c *Controller) newIpynbPath(sessionID, cwd string) (string, error) {
+	resolvedCwd, err := pathutil.ExpandPath(cwd)
+	if err != nil {
+		return "", err
+	}
 	if cwd != "" {
-		err := os.MkdirAll(cwd, os.ModePerm)
+		err := os.MkdirAll(resolvedCwd, os.ModePerm)
 		if err != nil {
 			return "", err
 		}
 	}
 
-	return filepath.Join(cwd, fmt.Sprintf("%s.ipynb", sessionID)), nil
+	return filepath.Join(resolvedCwd, fmt.Sprintf("%s.ipynb", sessionID)), nil
 }
 
 // createDefaultLanguageJupyterContext prewarms a session for stateless execution.

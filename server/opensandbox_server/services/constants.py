@@ -25,6 +25,7 @@ SANDBOX_PLATFORM_ARCH_LABEL = "opensandbox.io/platform-arch"
 SANDBOX_EMBEDDING_PROXY_PORT_LABEL = "opensandbox.io/embedding-proxy-port"  # maps container 44772 -> host port
 SANDBOX_HTTP_PORT_LABEL = "opensandbox.io/http-port"  # maps container 8080 -> host port
 SANDBOX_OSSFS_MOUNTS_LABEL = "opensandbox.io/ossfs-mounts"
+SANDBOX_MANAGED_VOLUMES_LABEL = "opensandbox.io/volume-managed-by"
 OPEN_SANDBOX_INGRESS_HEADER = "OpenSandbox-Ingress-To"
 OPEN_SANDBOX_EGRESS_AUTH_HEADER = "OPENSANDBOX-EGRESS-AUTH"
 SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY = "opensandbox.io/egress-auth-token"
@@ -119,6 +120,7 @@ __all__ = [
     "SANDBOX_EMBEDDING_PROXY_PORT_LABEL",
     "SANDBOX_HTTP_PORT_LABEL",
     "SANDBOX_OSSFS_MOUNTS_LABEL",
+    "SANDBOX_MANAGED_VOLUMES_LABEL",
     "OPEN_SANDBOX_INGRESS_HEADER",
     "OPEN_SANDBOX_EGRESS_AUTH_HEADER",
     "SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY",

@@ -16,8 +16,6 @@ package telemetry
 
 import (
 	"context"
-	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -28,6 +26,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
+	inttelemetry "github.com/alibaba/opensandbox/internal/telemetry"
 )
 
 var (
@@ -40,39 +39,12 @@ var (
 	lastNftRuleCount atomic.Int64
 )
 
-func appendMetricAttrsFromKeyValuePairs(kvs []attribute.KeyValue, raw string) []attribute.KeyValue {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return kvs
-	}
-	for _, part := range strings.Split(raw, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		i := strings.IndexByte(part, '=')
-		if i <= 0 || i == len(part)-1 {
-			continue
-		}
-		k := strings.TrimSpace(part[:i])
-		v := strings.TrimSpace(part[i+1:])
-		if k == "" {
-			continue
-		}
-		kvs = append(kvs, attribute.String(k, v))
-	}
-	return kvs
-}
-
-// egressSharedAttrs is the single source of truth for OTLP metric dimensions and default log fields
-// (sandbox_id + OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS).
 var egressSharedAttrs = sync.OnceValue(func() []attribute.KeyValue {
-	var kvs []attribute.KeyValue
-	if id := strings.TrimSpace(os.Getenv(constants.ENVSandboxID)); id != "" {
-		kvs = append(kvs, attribute.String("sandbox_id", id))
-	}
-	kvs = appendMetricAttrsFromKeyValuePairs(kvs, os.Getenv(constants.EnvEgressMetricsExtraAttrs))
-	return kvs
+	return inttelemetry.SharedAttrsFromEnv(inttelemetry.SharedAttrsEnvConfig{
+		SandboxIDEnv:  constants.EnvSandboxID,
+		ExtraAttrsEnv: constants.EnvEgressMetricsExtraAttrs,
+		SandboxAttr:   "sandbox_id",
+	})
 })
 
 var egressMetricOpt = sync.OnceValue(func() metric.MeasurementOption {
@@ -136,7 +108,7 @@ func registerEgressMetrics() error {
 
 	_, err = meter.Int64ObservableGauge(
 		"egress.system.memory.usage_bytes",
-		metric.WithDescription("System RAM in use (Linux: MemTotal−MemAvailable from /proc/meminfo; non-Linux: 0)."),
+		metric.WithDescription("System RAM used bytes from gopsutil on Linux (non-Linux build: 0)."),
 		metric.WithUnit("By"),
 		metric.WithInt64Callback(func(ctx context.Context, obs metric.Int64Observer) error {
 			obs.Observe(systemMemoryUsedBytes(), egressMetricOpt())
@@ -149,7 +121,7 @@ func registerEgressMetrics() error {
 
 	_, err = meter.Float64ObservableGauge(
 		"egress.system.cpu.utilization",
-		metric.WithDescription("CPU busy ratio across all cores since last scrape (Linux /proc/stat jiffies; first scrape is 0; non-Linux: 0)."),
+		metric.WithDescription("CPU busy ratio 0-1 from gopsutil on Linux (non-Linux build: 0)."),
 		metric.WithUnit("1"),
 		metric.WithFloat64Callback(func(ctx context.Context, obs metric.Float64Observer) error {
 			obs.Observe(cpuUtilizationRatio(), egressMetricOpt())

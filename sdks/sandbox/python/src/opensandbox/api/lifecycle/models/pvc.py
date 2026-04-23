@@ -39,20 +39,46 @@ class PVC:
             claim_name (str): Name of the volume on the target platform.
                 In Kubernetes this is the PVC name; in Docker this is the named
                 volume name. Must be a valid DNS label.
+            create_if_not_exists (bool): When true (default), auto-create the volume if it does not exist.
+            delete_on_sandbox_termination (bool): When true, auto-created Docker volume is removed on sandbox
+                deletion. Ignored for Kubernetes PVCs.
+            storage_class (str | None): Kubernetes StorageClass for auto-created PVCs. Null means cluster default.
+                Ignored for Docker.
+            storage (str | None): Storage capacity request for auto-created PVCs (e.g. "1Gi"). Ignored for Docker.
+            access_modes (list[str] | None): Access modes for auto-created PVCs (e.g. ["ReadWriteOnce"]). Ignored
+                for Docker.
     """
 
     claim_name: str
+    create_if_not_exists: bool = True
+    delete_on_sandbox_termination: bool = False
+    storage_class: str | None = None
+    storage: str | None = None
+    access_modes: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         claim_name = self.claim_name
+        create_if_not_exists = self.create_if_not_exists
+        delete_on_sandbox_termination = self.delete_on_sandbox_termination
+        storage_class = self.storage_class
+        storage = self.storage
+        access_modes = self.access_modes
 
         field_dict: dict[str, Any] = {}
 
         field_dict.update(
             {
                 "claimName": claim_name,
+                "createIfNotExists": create_if_not_exists,
+                "deleteOnSandboxTermination": delete_on_sandbox_termination,
             }
         )
+        if storage_class is not None:
+            field_dict["storageClass"] = storage_class
+        if storage is not None:
+            field_dict["storage"] = storage
+        if access_modes is not None:
+            field_dict["accessModes"] = access_modes
 
         return field_dict
 
@@ -60,9 +86,19 @@ class PVC:
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
         claim_name = d.pop("claimName")
+        create_if_not_exists = d.pop("createIfNotExists", True)
+        delete_on_sandbox_termination = d.pop("deleteOnSandboxTermination", False)
+        storage_class = d.pop("storageClass", None)
+        storage = d.pop("storage", None)
+        access_modes = d.pop("accessModes", None)
 
         pvc = cls(
             claim_name=claim_name,
+            create_if_not_exists=create_if_not_exists,
+            delete_on_sandbox_termination=delete_on_sandbox_termination,
+            storage_class=storage_class,
+            storage=storage,
+            access_modes=access_modes,
         )
 
         return pvc

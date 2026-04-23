@@ -119,4 +119,15 @@ interface PoolStateStore {
         poolName: String,
         maxIdle: Int,
     )
+
+    /**
+     * Configures idle-entry TTL semantics for the given pool.
+     * Default is no-op so existing distributed stores can opt in explicitly.
+     */
+    fun setIdleEntryTtl(
+        poolName: String,
+        idleTtl: Duration,
+    ) {
+        // Default no-op.
+    }
 }

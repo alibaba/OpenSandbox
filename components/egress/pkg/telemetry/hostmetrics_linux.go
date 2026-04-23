@@ -17,56 +17,22 @@
 package telemetry
 
 import (
-	"bufio"
-	"os"
-	"sync"
+	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/mem"
 )
 
 func systemMemoryUsedBytes() int64 {
-	b, err := os.ReadFile("/proc/meminfo")
+	stats, err := mem.VirtualMemory()
 	if err != nil {
 		return 0
 	}
-	return meminfoUsedBytesFromContent(b)
+	return int64(stats.Used)
 }
 
-var cpuJiffyPrev struct {
-	sync.Mutex
-	total, idle uint64
-	hasPrev     bool
-}
-
-// cpuUtilizationRatio returns the fraction of CPU time non-idle since the previous observation
-// (0–1). The first observation after process start returns 0 (no delta yet).
 func cpuUtilizationRatio() float64 {
-	f, err := os.Open("/proc/stat")
-	if err != nil {
+	usage, err := cpu.Percent(0, false)
+	if err != nil || len(usage) == 0 {
 		return 0
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	if !sc.Scan() {
-		return 0
-	}
-	total, idle, ok := procStatCPUJiffies(sc.Text())
-	if !ok {
-		return 0
-	}
-
-	cpuJiffyPrev.Lock()
-	defer cpuJiffyPrev.Unlock()
-	if !cpuJiffyPrev.hasPrev {
-		cpuJiffyPrev.total = total
-		cpuJiffyPrev.idle = idle
-		cpuJiffyPrev.hasPrev = true
-		return 0
-	}
-	dt := total - cpuJiffyPrev.total
-	di := idle - cpuJiffyPrev.idle
-	cpuJiffyPrev.total = total
-	cpuJiffyPrev.idle = idle
-	if dt == 0 || dt < di {
-		return 0
-	}
-	return float64(dt-di) / float64(dt)
+	return usage[0] / 100.0
 }

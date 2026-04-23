@@ -47,7 +47,6 @@ def agent_sandbox_app_config(agent_sandbox_runtime_config):
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -69,7 +68,6 @@ def app_config_docker():
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -86,7 +84,6 @@ class TestAgentSandboxServiceInit:
             server=ServerConfig(
                 host="0.0.0.0",
                 port=8080,
-                log_level="DEBUG",
                 api_key="test-api-key",
             ),
             runtime=RuntimeConfig(
@@ -124,7 +121,6 @@ class TestAgentSandboxServiceInit:
                 server=ServerConfig(
                     host="0.0.0.0",
                     port=8080,
-                    log_level="DEBUG",
                     api_key="test-api-key",
                 ),
                 runtime=RuntimeConfig(
@@ -154,7 +150,9 @@ class TestAgentSandboxServiceBuildSandbox:
 
     def test_build_sandbox_from_workload_dict(self):
         service = object.__new__(KubernetesSandboxService)
+        service.namespace = "test-namespace"
         service.workload_provider = MagicMock(
+            get_workload=MagicMock(),
             get_expiration=MagicMock(return_value=datetime(2025, 12, 31, tzinfo=timezone.utc)),
             get_status=MagicMock(
                 return_value={
@@ -187,8 +185,9 @@ class TestAgentSandboxServiceBuildSandbox:
                 }
             },
         }
+        service.workload_provider.get_workload.return_value = workload
 
-        sandbox = service._build_sandbox_from_workload(workload)
+        sandbox = service.get_sandbox("sandbox-id")
 
         assert sandbox.id == "sandbox-id"
         assert sandbox.image.uri == "python:3.11"

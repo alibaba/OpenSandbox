@@ -26,9 +26,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // newLifecycleServer creates an httptest.Server and a LifecycleClient pointing at it.

@@ -47,3 +47,13 @@ func TestValidateWorkingDir_notDir(t *testing.T) {
 func TestValidateWorkingDir_ok(t *testing.T) {
 	require.NoError(t, ValidateWorkingDir(t.TempDir()))
 }
+
+func TestValidateWorkingDir_ExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	target := filepath.Join(home, "workspace")
+	require.NoError(t, os.MkdirAll(target, 0o755))
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	require.NoError(t, ValidateWorkingDir("~/workspace"))
+}

@@ -27,11 +27,13 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 IMG="opensandbox/egress:local"
 containerName="egress-smoke-nft"
 POLICY_PORT=18080
+ALWAYS_RULES_DIR_HOST="$(mktemp -d -t egress-always-rules.XXXXXX)"
 
 info() { echo "[$(date +%H:%M:%S)] $*"; }
 
 cleanup() {
   docker rm -f "${containerName}" >/dev/null 2>&1 || true
+  rm -rf "${ALWAYS_RULES_DIR_HOST}" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -46,6 +48,7 @@ docker run -d --name "${containerName}" \
   -e OPENSANDBOX_EGRESS_MODE=dns+nft \
   -e OPENSANDBOX_EGRESS_DNS_UPSTREAM=8.8.8.8,8.8.4.4 \
   -p ${POLICY_PORT}:18080 \
+  -v "${ALWAYS_RULES_DIR_HOST}:/var/egress/rules" \
   "${IMG}"
 
 info "Waiting for policy server..."
@@ -66,6 +69,24 @@ run_in_app() {
 
 pass() { info "PASS: $*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
+
+wait_until_always_flip() {
+  local timeout_sec="${1:-90}"
+  local elapsed=0
+  local step_sec=2
+  while [ "${elapsed}" -lt "${timeout_sec}" ]; do
+    # Expected after refresh:
+    # - deny.always blocks api.github.com
+    # - allow.always allows www.mozilla.org
+    if ! run_in_app -I https://api.github.com --max-time 8 >/dev/null 2>&1 \
+      && run_in_app -I https://www.mozilla.org --max-time 8 >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep "${step_sec}"
+    elapsed=$((elapsed + step_sec))
+  done
+  return 1
+}
 
 info "Test: allowed domain should succeed (google.com)"
 run_in_app -I https://google.com --max-time 20 >/dev/null 2>&1 || fail "google.com should succeed"
@@ -132,6 +153,25 @@ if run_in_app -I https://www.mozilla.org --max-time 8 >/dev/null 2>&1; then
   fail "www.mozilla.org should be blocked after patch"
 else
   pass "www.mozilla.org blocked after patch"
+fi
+
+info "Always-rule dynamic check (single transition)"
+curl -sSf -XPOST "http://127.0.0.1:${POLICY_PORT}/policy" \
+  -d '{"defaultAction":"deny","egress":[{"action":"allow","target":"api.github.com"}]}'
+
+info "Baseline before file update: github allowed, mozilla blocked"
+run_in_app -I https://api.github.com --max-time 20 >/dev/null 2>&1 || fail "api.github.com should be allowed before always file update"
+if run_in_app -I https://www.mozilla.org --max-time 8 >/dev/null 2>&1; then
+  fail "www.mozilla.org should be blocked before always file update"
+fi
+pass "baseline verified"
+
+printf '%s\n' '*.github.com' > "${ALWAYS_RULES_DIR_HOST}/deny.always"
+printf '%s\n' 'www.mozilla.org' > "${ALWAYS_RULES_DIR_HOST}/allow.always"
+if wait_until_always_flip 90; then
+  pass "always files reloaded (github blocked, mozilla allowed)"
+else
+  fail "always file update did not take effect in time"
 fi
 
 info "All smoke tests passed."

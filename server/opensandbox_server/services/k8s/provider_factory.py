@@ -27,16 +27,12 @@ from opensandbox_server.services.k8s.client import K8sClient
 
 logger = logging.getLogger(__name__)
 
-# Provider type constants
 PROVIDER_TYPE_BATCHSANDBOX = "batchsandbox"
 PROVIDER_TYPE_AGENT_SANDBOX = "agent-sandbox"
 
-# Registry of available workload providers
 _PROVIDER_REGISTRY: Dict[str, Type[WorkloadProvider]] = {
     PROVIDER_TYPE_BATCHSANDBOX: BatchSandboxProvider,
     PROVIDER_TYPE_AGENT_SANDBOX: AgentSandboxProvider,
-    # Future providers can be registered here:
-    # "pod": PodProvider
 }
 
 
@@ -45,23 +41,7 @@ def create_workload_provider(
     k8s_client: K8sClient,
     app_config: Optional[AppConfig] = None,
 ) -> WorkloadProvider:
-    """
-    Create a WorkloadProvider instance based on the provider type.
-
-    Args:
-        provider_type: Type of provider (e.g., 'batchsandbox', 'pod', 'job').
-                      If None, uses the first registered provider.
-        k8s_client: Kubernetes client instance
-        app_config: Application config; kubernetes/agent_sandbox/ingress sub-configs
-                    are read from it directly.
-
-    Returns:
-        WorkloadProvider instance
-
-    Raises:
-        ValueError: If provider_type is not supported or no providers are registered
-    """
-    # Use first registered provider if not specified
+    """Create a workload provider instance by provider type."""
     if provider_type is None:
         if not _PROVIDER_REGISTRY:
             raise ValueError(
@@ -83,29 +63,14 @@ def create_workload_provider(
     provider_class = _PROVIDER_REGISTRY[provider_type_lower]
     logger.info(f"Creating workload provider: {provider_class.__name__}")
 
-    # BatchSandboxProvider and AgentSandboxProvider read all sub-configs from app_config.
     if provider_type_lower in (PROVIDER_TYPE_BATCHSANDBOX, PROVIDER_TYPE_AGENT_SANDBOX):
         return provider_class(k8s_client, app_config=app_config)
 
-    # Providers that do not accept app_config
     return provider_class(k8s_client)
 
 
 def register_provider(name: str, provider_class: Type[WorkloadProvider]) -> None:
-    """
-    Register a custom WorkloadProvider implementation.
-    
-    This allows extending the system with custom provider implementations
-    without modifying core code.
-    
-    Args:
-        name: Provider name (used in configuration)
-        provider_class: Provider class that implements WorkloadProvider
-        
-    Example:
-        from my_module import CustomProvider
-        register_provider("custom", CustomProvider)
-    """
+    """Register a custom workload provider implementation."""
     if not issubclass(provider_class, WorkloadProvider):
         raise TypeError(
             f"Provider class must inherit from WorkloadProvider, "
@@ -123,10 +88,5 @@ def register_provider(name: str, provider_class: Type[WorkloadProvider]) -> None
 
 
 def list_available_providers() -> list[str]:
-    """
-    List all registered provider types.
-    
-    Returns:
-        List of provider type names
-    """
+    """List registered provider types."""
     return sorted(_PROVIDER_REGISTRY.keys())

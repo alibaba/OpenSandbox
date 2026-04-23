@@ -177,15 +177,55 @@ class Host(BaseModel):
 
 class PVC(BaseModel):
     """
-    Kubernetes PersistentVolumeClaim mount backend.
+    Platform-managed named volume backend.
 
-    References an existing PVC in the same namespace as the sandbox pod.
-    Only available in Kubernetes runtime.
+    Runtime-neutral abstraction for referencing a pre-existing named volume:
+    - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+    - Docker: maps to a Docker named volume.
     """
 
     claim_name: str = Field(
-        description="Name of the PersistentVolumeClaim in the same namespace.",
+        description=(
+            "Name of the platform volume. In Kubernetes this is the PVC name; "
+            "in Docker this is the named volume name."
+        ),
         alias="claimName",
+    )
+    create_if_not_exists: bool = Field(
+        default=True,
+        alias="createIfNotExists",
+        description="When true, auto-create the volume if it does not exist.",
+    )
+    delete_on_sandbox_termination: bool = Field(
+        default=False,
+        alias="deleteOnSandboxTermination",
+        description=(
+            "When true, auto-created Docker volume is removed on sandbox deletion. "
+            "Ignored for Kubernetes PVCs."
+        ),
+    )
+    storage_class: str | None = Field(
+        default=None,
+        alias="storageClass",
+        description=(
+            "Kubernetes StorageClass for auto-created PVCs. "
+            "Null means cluster default. Ignored for Docker."
+        ),
+    )
+    storage: str | None = Field(
+        default=None,
+        description=(
+            "Storage capacity request for auto-created PVCs (e.g. '1Gi'). "
+            "Ignored for Docker."
+        ),
+    )
+    access_modes: list[str] | None = Field(
+        default=None,
+        alias="accessModes",
+        description=(
+            "Access modes for auto-created PVCs (e.g. ['ReadWriteOnce']). "
+            "Ignored for Docker."
+        ),
     )
 
     model_config = ConfigDict(populate_by_name=True)
@@ -411,7 +451,7 @@ class PaginationInfo(BaseModel):
     Pagination metadata.
     """
 
-    page: int = Field(description="Current page number (0-indexed)")
+    page: int = Field(description="Current page number (1-indexed)")
     page_size: int = Field(description="Number of items per page", alias="page_size")
     total_items: int = Field(
         description="Total number of items across all pages", alias="total_items"
@@ -451,7 +491,7 @@ class SandboxFilter(BaseModel):
     page_size: int | None = Field(
         default=None, description="Number of items per page", alias="page_size"
     )
-    page: int | None = Field(default=None, description="Page number (0-indexed)")
+    page: int | None = Field(default=None, description="Page number (1-indexed)")
 
     @field_validator("page_size")
     @classmethod

@@ -299,16 +299,8 @@ def test_gateway_address_validation_for_non_wildcard_mode():
         IngressConfig(
             mode="gateway",
             gateway=GatewayConfig(
-                address="not a host",
+                address="*.opensandbox.io",
                 route=GatewayRouteModeConfig(mode="uri"),
-            ),
-        )
-    with pytest.raises(ValueError):
-        IngressConfig(
-            mode="gateway",
-            gateway=GatewayConfig(
-                address="gateway.opensandbox.io:8080",
-                route=GatewayRouteModeConfig(mode="header"),
             ),
         )
     with pytest.raises(ValueError):
@@ -355,15 +347,7 @@ def test_gateway_address_validation_for_non_wildcard_mode():
         IngressConfig(
             mode="gateway",
             gateway=GatewayConfig(
-                address="10.0.0.1:0",
-                route=GatewayRouteModeConfig(mode="uri"),
-            ),
-        )
-    with pytest.raises(ValueError):
-        IngressConfig(
-            mode="gateway",
-            gateway=GatewayConfig(
-                address="10.0.0.1:abc",
+                address="http://gateway.opensandbox.io:8080",
                 route=GatewayRouteModeConfig(mode="uri"),
             ),
         )
@@ -383,6 +367,22 @@ def test_gateway_address_validation_for_non_wildcard_mode():
         ),
     )
     assert cfg.gateway.address == "gateway.opensandbox.io"
+    cfg_hostname = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="gateway",
+            route=GatewayRouteModeConfig(mode="header"),
+        ),
+    )
+    assert cfg_hostname.gateway.address == "gateway"
+    cfg_hostname_port = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="gateway.opensandbox.io:8080",
+            route=GatewayRouteModeConfig(mode="header"),
+        ),
+    )
+    assert cfg_hostname_port.gateway.address == "gateway.opensandbox.io:8080"
     cfg_ip = IngressConfig(
         mode="gateway",
         gateway=GatewayConfig(
@@ -399,6 +399,22 @@ def test_gateway_address_validation_for_non_wildcard_mode():
         ),
     )
     assert cfg_ip_port.gateway.address == "10.0.0.1:8080"
+    cfg_uri_freeform = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="not a host",
+            route=GatewayRouteModeConfig(mode="uri"),
+        ),
+    )
+    assert cfg_uri_freeform.gateway.address == "not a host"
+    cfg_uri_port_like = IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address="10.0.0.1:abc",
+            route=GatewayRouteModeConfig(mode="uri"),
+        ),
+    )
+    assert cfg_uri_port_like.gateway.address == "10.0.0.1:abc"
 
 
 def test_gateway_address_allows_scheme_less_defaults():

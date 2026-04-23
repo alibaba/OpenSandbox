@@ -1,0 +1,65 @@
+# Copyright 2026 Alibaba Group Holding Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import annotations
+
+import random
+import socket
+from typing import Dict, Optional
+
+from fastapi import HTTPException, status
+
+from opensandbox_server.services.constants import SandboxErrorCodes
+
+
+def allocate_host_port(
+    min_port: int = 40000,
+    max_port: int = 60000,
+    attempts: int = 50,
+) -> Optional[int]:
+    """Find an available TCP port on the host within the given range."""
+    for _ in range(attempts):
+        port = random.randint(min_port, max_port)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                sock.bind(("0.0.0.0", port))
+            except OSError:
+                continue
+            return port
+    return None
+
+
+def allocate_port_bindings(
+    container_ports: list[str],
+) -> Dict[str, tuple[str, int]]:
+    """Allocate distinct random host ports for each container port spec."""
+    allocated_ports: set[int] = set()
+    bindings: Dict[str, tuple[str, int]] = {}
+    for container_port in container_ports:
+        while True:
+            host_port = allocate_host_port()
+            if host_port is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "code": SandboxErrorCodes.CONTAINER_START_FAILED,
+                        "message": "Failed to allocate host ports for sandbox container.",
+                    },
+                )
+            if host_port not in allocated_ports:
+                allocated_ports.add(host_port)
+                bindings[container_port] = ("0.0.0.0", host_port)
+                break
+    return bindings

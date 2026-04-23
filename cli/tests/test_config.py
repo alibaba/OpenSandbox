@@ -50,11 +50,10 @@ class TestLoadConfigFile:
         cfg = tmp_path / "config.toml"
         cfg.write_text(
             '[connection]\napi_key = "k"\n\n'
-            '[output]\nformat = "json"\ncolor = false\n\n'
+            '[output]\ncolor = false\n\n'
             '[defaults]\nimage = "alpine"\ntimeout = "5m"\n'
         )
         result = load_config_file(cfg)
-        assert result["output"]["format"] == "json"
         assert result["output"]["color"] is False
         assert result["defaults"]["image"] == "alpine"
         assert result["defaults"]["timeout"] == "5m"
@@ -74,15 +73,15 @@ class TestResolveConfig:
         assert result["domain"] is None
         assert result["protocol"] == "http"
         assert result["request_timeout"] == 30
-        assert result["output_format"] == "table"
+        assert result["use_server_proxy"] is False
         assert result["color"] is True
 
     def test_file_values_override_defaults(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.toml"
         cfg.write_text(
             '[connection]\napi_key = "file-key"\ndomain = "file.host"\n'
-            'protocol = "https"\nrequest_timeout = 60\n\n'
-            '[output]\nformat = "json"\ncolor = false\n\n'
+            'protocol = "https"\nrequest_timeout = 60\nuse_server_proxy = true\n\n'
+            '[output]\ncolor = false\n\n'
             '[defaults]\nimage = "node:20"\ntimeout = "15m"\n'
         )
         result = resolve_config(config_path=cfg)
@@ -90,7 +89,7 @@ class TestResolveConfig:
         assert result["domain"] == "file.host"
         assert result["protocol"] == "https"
         assert result["request_timeout"] == 60
-        assert result["output_format"] == "json"
+        assert result["use_server_proxy"] is True
         assert result["color"] is False
         assert result["default_image"] == "node:20"
         assert result["default_timeout"] == "15m"
@@ -103,14 +102,14 @@ class TestResolveConfig:
         monkeypatch.setenv("OPEN_SANDBOX_DOMAIN", "env.host")
         monkeypatch.setenv("OPEN_SANDBOX_PROTOCOL", "https")
         monkeypatch.setenv("OPEN_SANDBOX_REQUEST_TIMEOUT", "120")
-        monkeypatch.setenv("OPEN_SANDBOX_OUTPUT", "yaml")
+        monkeypatch.setenv("OPEN_SANDBOX_USE_SERVER_PROXY", "true")
 
         result = resolve_config(config_path=cfg)
         assert result["api_key"] == "env-key"
         assert result["domain"] == "env.host"
         assert result["protocol"] == "https"
         assert result["request_timeout"] == 120
-        assert result["output_format"] == "yaml"
+        assert result["use_server_proxy"] is True
 
     def test_cli_overrides_everything(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = tmp_path / "config.toml"
@@ -122,14 +121,14 @@ class TestResolveConfig:
             cli_domain="cli.host",
             cli_protocol="https",
             cli_timeout=999,
-            cli_output="yaml",
+            cli_use_server_proxy=True,
             config_path=cfg,
         )
         assert result["api_key"] == "cli-key"
         assert result["domain"] == "cli.host"
         assert result["protocol"] == "https"
         assert result["request_timeout"] == 999
-        assert result["output_format"] == "yaml"
+        assert result["use_server_proxy"] is True
 
     def test_invalid_timeout_env_falls_through(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = tmp_path / "empty.toml"
@@ -138,6 +137,13 @@ class TestResolveConfig:
         result = resolve_config(config_path=cfg)
         # Falls through to default 30
         assert result["request_timeout"] == 30
+
+    def test_invalid_bool_env_falls_through(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "empty.toml"
+        cfg.write_text("")
+        monkeypatch.setenv("OPEN_SANDBOX_USE_SERVER_PROXY", "not-a-bool")
+        result = resolve_config(config_path=cfg)
+        assert result["use_server_proxy"] is False
 
 
 # ---------------------------------------------------------------------------

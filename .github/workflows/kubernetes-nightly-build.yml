@@ -42,7 +42,6 @@ jobs:
       KIND_K8S_VERSION: v1.30.4
       KUBECONFIG_PATH: /tmp/opensandbox-kind-kubeconfig
       KUBECONFIG: /tmp/opensandbox-kind-kubeconfig
-      # tests/base_e2e_test.get_e2e_sandbox_resource (scripts/common/kubernetes-e2e.sh)
       OPENSANDBOX_E2E_SANDBOX_CPU: 250m
       OPENSANDBOX_E2E_SANDBOX_MEMORY: 512Mi
     steps:

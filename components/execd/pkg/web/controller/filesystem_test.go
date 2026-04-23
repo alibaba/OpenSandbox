@@ -96,6 +96,31 @@ func TestFilesystemControllerReplaceContent(t *testing.T) {
 	require.Equal(t, "hello universe", string(data))
 }
 
+func TestFilesystemControllerReplaceContentSupportsHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	target := filepath.Join(home, "content.txt")
+	require.NoError(t, os.WriteFile(target, []byte("hello world"), 0o644))
+
+	body, err := json.Marshal(map[string]model.ReplaceFileContentItem{
+		"~/content.txt": {
+			Old: "world",
+			New: "home",
+		},
+	})
+	require.NoError(t, err)
+
+	ctrl, rec := newFilesystemController(t, http.MethodPost, "/files/replace", body)
+	ctrl.ReplaceContent()
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	data, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "hello home", string(data))
+}
+
 func TestFilesystemControllerSearchFilesHandlesAbsentDir(t *testing.T) {
 	rawURL := "/files/search?path=/not/exists"
 	ctrl, rec := newFilesystemController(t, http.MethodGet, rawURL, nil)

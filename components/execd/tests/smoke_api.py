@@ -148,6 +148,12 @@ def filesystem_smoke():
     sub_dir = os.path.join(base_dir, "sub")
     file_path = os.path.join(sub_dir, "hello.txt")
     renamed_path = os.path.join(sub_dir, "hello_renamed.txt")
+    home_dir = os.path.expanduser("~")
+    home_file_name = f"execd-smoke-home-{uuid.uuid4().hex}.txt"
+    home_file_abs = os.path.join(home_dir, home_file_name)
+    # Windows uses backslash path style by default; keep smoke path style aligned
+    # with platform so "~" expansion is exercised in a realistic way.
+    home_file_tilde = f"~\\{home_file_name}" if os.name == "nt" else f"~/{home_file_name}"
 
     # create dirs
     mk = session.post(f"{BASE_URL}/directories", json={sub_dir: {"mode": 0}}, timeout=10)
@@ -207,6 +213,26 @@ def filesystem_smoke():
     # remove file
     rm_file = session.delete(f"{BASE_URL}/files", params={"path": [renamed_path]}, timeout=10)
     expect(rm_file.status_code == 200, f"remove file failed: {rm_file.status_code} {rm_file.text}")
+
+    # read file using "~/<file>" style path
+    home_metadata = json.dumps({"path": home_file_abs})
+    home_files = {
+        "metadata": ("metadata", home_metadata, "application/json"),
+        "file": ("file", b"home path content\n", "application/octet-stream"),
+    }
+    home_up = session.post(f"{BASE_URL}/files/upload", files=home_files, timeout=10)
+    expect(home_up.status_code == 200, f"home upload failed: {home_up.status_code} {home_up.text}")
+
+    home_down = session.get(f"{BASE_URL}/files/download", params={"path": home_file_tilde}, timeout=10)
+    # On Windows, also accept "~/" form as a compatibility fallback.
+    if home_down.status_code != 200 and os.name == "nt":
+        alt_tilde = f"~/{home_file_name}"
+        home_down = session.get(f"{BASE_URL}/files/download", params={"path": alt_tilde}, timeout=10)
+    expect(home_down.status_code == 200, f"home download via tilde failed: {home_down.status_code} {home_down.text}")
+    expect(home_down.content == b"home path content\n", "home download content mismatch")
+
+    home_rm = session.delete(f"{BASE_URL}/files", params={"path": [home_file_tilde]}, timeout=10)
+    expect(home_rm.status_code == 200, f"home remove failed: {home_rm.status_code} {home_rm.text}")
 
     # remove dir
     rm_dir = session.delete(f"{BASE_URL}/directories", params={"path": [base_dir]}, timeout=10)

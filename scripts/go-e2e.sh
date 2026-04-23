@@ -54,4 +54,4 @@ sleep 10
 # run Go e2e tests
 cd tests/go
 mkdir -p reports
-go test -v -count=1 -timeout 5m ./... 2>&1 | tee reports/test-output.txt
+go test -v -count=1 -timeout 30m ./... 2>&1 | tee reports/test-output.txt

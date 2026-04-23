@@ -16,13 +16,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from collections.abc import Mapping
+from typing import Any
 
 import click
 
 from opensandbox_cli.client import ClientContext
-from opensandbox_cli.config import DEFAULT_CONFIG_PATH, init_config_file
-from opensandbox_cli.utils import handle_errors
+from opensandbox_cli.config import init_config_file, resolve_config
+from opensandbox_cli.utils import handle_errors, output_option, prepare_output
 
 
 @click.group("config", invoke_without_command=True)
@@ -37,36 +38,71 @@ def config_group(ctx: click.Context) -> None:
 
 @config_group.command("init")
 @click.option("--force", is_flag=True, default=False, help="Overwrite existing config file.")
-@click.option("--path", "config_path", type=click.Path(path_type=Path), default=None, help="Config file path.")
+@output_option("table", "json", "yaml")
 @handle_errors
-def config_init(force: bool, config_path: Path | None) -> None:
+@click.pass_obj
+def config_init(obj: ClientContext, force: bool, output_format: str | None) -> None:
     """Create a default configuration file."""
-    # config_init doesn't have @click.pass_obj, get formatter from context
-    ctx = click.get_current_context(silent=True)
-    obj = getattr(ctx, "obj", None) if ctx else None
-    output = getattr(obj, "output", None) if obj else None
+    output = prepare_output(
+        obj, output_format, allowed=("table", "json", "yaml"), fallback="table"
+    )
 
     try:
-        path = init_config_file(config_path, force=force)
-        if output:
-            output.success(f"Config file created: {path}")
-        else:
-            click.echo(f"Config file created: {path}")
+        path = init_config_file(obj.config_path, force=force)
+        output.success(f"Config file created: {path}")
     except FileExistsError as exc:
-        if output:
-            output.warning(str(exc))
-        else:
-            click.secho(str(exc), fg="yellow", err=True)
+        output.warning(str(exc))
 
 
 # ---- show -----------------------------------------------------------------
 
+_SENSITIVE_CONFIG_KEYS = {
+    "api_key",
+}
+
+
+def _mask_secret(value: str | None) -> str | None:
+    """Mask a secret while keeping enough shape for debugging."""
+    if value is None:
+        return None
+    if len(value) <= 4:
+        return "*" * len(value)
+    return f"{value[:2]}{'*' * (len(value) - 4)}{value[-2:]}"
+
+
+def _sanitize_config_for_display(data: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a display-safe copy of the resolved config."""
+    sanitized: dict[str, Any] = {}
+    for key, value in data.items():
+        if key in _SENSITIVE_CONFIG_KEYS:
+            sanitized[key] = _mask_secret(value if isinstance(value, str) else None)
+            continue
+        sanitized[key] = value
+    return sanitized
+
 @config_group.command("show")
+@output_option("table", "json", "yaml")
 @click.pass_obj
 @handle_errors
-def config_show(obj: ClientContext) -> None:
+def config_show(obj: ClientContext, output_format: str | None) -> None:
     """Show the resolved configuration."""
-    obj.output.print_dict(obj.resolved_config, title="Resolved Configuration")
+    prepare_output(obj, output_format, allowed=("table", "json", "yaml"), fallback="table")
+    resolved = resolve_config(
+        cli_api_key=obj.cli_overrides.get("api_key"),
+        cli_domain=obj.cli_overrides.get("domain"),
+        cli_protocol=obj.cli_overrides.get("protocol"),
+        cli_timeout=obj.cli_overrides.get("request_timeout"),
+        cli_use_server_proxy=obj.cli_overrides.get("use_server_proxy"),
+        config_path=obj.config_path,
+    )
+    obj.output.print_dict(
+        {
+            **_sanitize_config_for_display(resolved),
+            "config_path": str(obj.config_path),
+            "config_file_exists": obj.config_path.exists(),
+        },
+        title="Resolved Configuration",
+    )
 
 
 # ---- set ------------------------------------------------------------------
@@ -74,17 +110,25 @@ def config_show(obj: ClientContext) -> None:
 @config_group.command("set")
 @click.argument("key")
 @click.argument("value")
-@click.option("--path", "config_path", type=click.Path(path_type=Path), default=None, help="Config file path.")
+@output_option("table", "json", "yaml")
 @handle_errors
-def config_set(key: str, value: str, config_path: Path | None) -> None:
+@click.pass_obj
+def config_set(
+    obj: ClientContext,
+    key: str,
+    value: str,
+    output_format: str | None,
+) -> None:
     """Set a configuration value (e.g. 'connection.domain' 'localhost:9090')."""
-    path = config_path or DEFAULT_CONFIG_PATH
+    prepare_output(obj, output_format, allowed=("table", "json", "yaml"), fallback="table")
+    path = obj.config_path
     if not path.exists():
-        click.secho(f"Config file not found: {path}. Run 'osb config init' first.", fg="red", err=True)
-        return
+        raise click.ClickException(f"Config file not found: {path}. Run 'osb config init' first.")
 
     content = path.read_text()
 
+    # TODO: Replace this regex-based TOML editing with a parser-backed update
+    # path so formatting/comments survive reliably as config complexity grows.
     # Simple key replacement in TOML
     # Supports dotted keys like connection.domain
     parts = key.split(".", 1)
@@ -130,16 +174,10 @@ def config_set(key: str, value: str, config_path: Path | None) -> None:
             # Add new section
             content += f'\n[{section}]\n{field} = {toml_val}\n'
     else:
-        click.secho("Key must be in 'section.field' format (e.g. connection.domain).", fg="red", err=True)
-        return
+        raise click.ClickException(
+            "Key must be in 'section.field' format (e.g. connection.domain)."
+        )
 
     path.write_text(content)
 
-    # config_set doesn't have @click.pass_obj, get formatter from context
-    ctx = click.get_current_context(silent=True)
-    obj = getattr(ctx, "obj", None) if ctx else None
-    output = getattr(obj, "output", None) if obj else None
-    if output:
-        output.success(f"Set {key} = {value}")
-    else:
-        click.echo(f"Set {key} = {value}")
+    obj.output.success(f"Set {key} = {value}")

@@ -14,51 +14,34 @@
 
 # Example Kubernetes Runtime Configuration for OpenSandbox Server
 #
-# This configuration file demonstrates how to configure the OpenSandbox server
-# to use Kubernetes as the sandbox runtime.
-#
-# Usage:
-#   1. Copy this file to ~/.sandbox.toml (or set SANDBOX_CONFIG_PATH environment variable)
-#   2. Update the configuration values according to your environment
-#   3. Start the server: uvicorn opensandbox_server.main:app --host 0.0.0.0 --port 8080
+# Full configuration reference: https://github.com/alibaba/OpenSandbox/blob/main/server/configuration.md
 
 [server]
 host = "0.0.0.0"
 port = 8080
-# api_key = "your-secret-api-key"  # Optional: Uncomment to enable API key authentication
+max_sandbox_timeout_seconds = 86400
+
+# Optional: Uncomment to enable API key authentication
+# api_key = "your-secret-api-key"
 
 [log]
 level = "INFO"
-file_enabled = true  # When true, logs go to rotating files instead of stdout
-# file_path = "~/logs/opensandbox/server.log"  # Optional: override default server log path
-# access_file_path = "~/logs/opensandbox/access.log"  # Optional: override default access log path
-# file_max_bytes = 104857600  # 100MB - max file size before rotation
-# file_backup_count = 5       # Number of rotated files to keep
-
-# 🧪 [EXPERIMENTAL] Renew-on-access. Off by default — see server/README.md.
-[renew_intent]
-enabled = false
-min_interval_seconds = 60
-redis.enabled = false
-# redis.dsn = "redis://127.0.0.1:6379/0"
-redis.queue_key = "opensandbox:renew:intent"
-redis.consumer_concurrency = 8
 
 [runtime]
 type = "kubernetes"
-execd_image = "opensandbox/execd:v1.0.10"
+execd_image = "opensandbox/execd:v1.0.13"
 
 [storage]
-# Volume and storage configuration
-# -----------------------------------------------------------------
 # Allowlist of host path prefixes permitted for bind mounts.
 # If empty, all host paths are allowed (not recommended for production).
 # Example: allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
 allowed_host_paths = []
 
+# Default storage size for auto-created Kubernetes PVCs (when caller omits size).
+volume_default_size = "1Gi"
+
 [kubernetes]
 # Path to kubeconfig file. Leave as null to use in-cluster configuration
-# Replace with your path
 kubeconfig_path = "~/.kube/config"
 
 # Namespace for sandbox workloads
@@ -75,18 +58,22 @@ informer_watch_timeout_seconds = 60
 workload_provider = "batchsandbox"
 
 # Path to the BatchSandbox template file
-# Replace with your path
 batchsandbox_template_file = "~/batchsandbox-template.yaml"
 
 [ingress]
-# Ingress exposure mode: direct (default) or gateway
 mode = "direct"
 
 [egress]
-# Egress configuration
-# -----------------------------------------------------------------
-image = "opensandbox/egress:v1.0.6"
-# Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
+image = "opensandbox/egress:v1.0.8"
 mode = "dns"
 # Default is true (recommended for dual-stack CNI). Set false only if you need IPv6 in the netns (see server/configuration.md).
 # disable_ipv6 = false
+
+# 🧪 [EXPERIMENTAL] Renew-on-access. Off by default — see server/README.md.
+[renew_intent]
+enabled = false
+min_interval_seconds = 60
+redis.enabled = false
+# redis.dsn = "redis://127.0.0.1:6379/0"
+# redis.queue_key = "opensandbox:renew:intent"
+# redis.consumer_concurrency = 8

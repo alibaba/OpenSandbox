@@ -193,7 +193,14 @@ internal object SandboxModelConverter {
      * Converts Domain PVC -> API PVC
      */
     fun PVC.toApiPVC(): ApiPVC {
-        return ApiPVC(claimName = this.claimName)
+        return ApiPVC(
+            claimName = this.claimName,
+            createIfNotExists = this.createIfNotExists,
+            deleteOnSandboxTermination = this.deleteOnSandboxTermination,
+            storageClass = this.storageClass,
+            storage = this.storage,
+            accessModes = this.accessModes,
+        )
     }
 
     /**
@@ -291,7 +298,10 @@ internal object SandboxModelConverter {
             entrypoint = this.entrypoint,
             expiresAt = this.expiresAt,
             createdAt = this.createdAt,
-            image = this.image.toImageSpec(),
+            image =
+                requireNotNull(this.image) {
+                    "Sandbox image is missing from API response. Snapshot-based sandbox responses are not supported by this SDK yet."
+                }.toImageSpec(),
             platform = this.platform?.toDomainPlatformSpec(),
             status = this.status.toSandboxStatus(),
             metadata = metadata,

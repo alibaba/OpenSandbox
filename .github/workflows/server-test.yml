@@ -4,8 +4,7 @@ on:
   pull_request:
     branches: [ main ]
     paths:
-      - 'server/opensandbox_server/**'
-      - 'server/tests/**'
+      - 'server/**'
 
 permissions:
   contents: read
@@ -77,8 +76,9 @@ jobs:
           [server]
           host = "127.0.0.1"
           port = 32888
-          log_level = "INFO"
           api_key = ""
+          [log]
+          level = "INFO"
           [runtime]
           type = "docker"
           execd_image = "opensandbox/execd:latest"

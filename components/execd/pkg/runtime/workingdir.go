@@ -17,13 +17,19 @@ package runtime
 import (
 	"fmt"
 	"os"
+
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 )
 
 func ValidateWorkingDir(cwd string) error {
 	if cwd == "" {
 		return nil
 	}
-	fi, err := os.Stat(cwd)
+	resolvedCwd, err := pathutil.ExpandPath(cwd)
+	if err != nil {
+		return fmt.Errorf("cannot resolve working directory %q: %w", cwd, err)
+	}
+	fi, err := os.Stat(resolvedCwd)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("working directory does not exist: %s", cwd)

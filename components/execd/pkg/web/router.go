@@ -29,7 +29,7 @@ func NewRouter(accessToken string) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	r.Use(logMiddleware(), accessTokenMiddleware(accessToken), ProxyMiddleware())
+	r.Use(logMiddleware(), otelHTTPMetricsMiddleware(), accessTokenMiddleware(accessToken), ProxyMiddleware())
 
 	r.GET("/ping", controller.PingHandler)
 
