@@ -64,6 +64,7 @@ from tests.base_e2e_test import (
     get_test_host_volume_dir,
     get_test_pvc_name,
     is_kubernetes_runtime,
+    is_secure_access_verifiable,
 )
 
 logger = logging.getLogger(__name__)
@@ -156,6 +157,7 @@ class TestSandboxE2E:
                 "PYTHON_VERSION": "3.12"
             },
             health_check_polling_interval=timedelta(milliseconds=500),
+            secure_access=is_secure_access_verifiable(),
         )
 
         logger.info(f"✓ Sandbox created: {cls.sandbox.id}")
