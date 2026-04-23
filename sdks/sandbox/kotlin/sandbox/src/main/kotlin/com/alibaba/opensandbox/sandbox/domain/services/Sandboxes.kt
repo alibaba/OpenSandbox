@@ -47,6 +47,7 @@ interface Sandboxes {
      * @param resource Runtime resource limits (e.g. cpu/memory). Exact semantics are server-defined
      * @param platform Optional runtime platform constraint used for provisioning
      * @param networkPolicy Optional outbound network policy (egress)
+     * @param secureAccess Whether to enable secured access for sandbox endpoints
      * @param extensions Opaque extension parameters passed through to the server as-is. Prefer namespaced keys
      * @param volumes Optional list of volume mounts for persistent storage
      * @return Sandbox creation response containing the sandbox id
@@ -92,6 +93,20 @@ interface Sandboxes {
             extensions = extensions,
             volumes = volumes,
         )
+
+    fun createSandbox(
+        spec: SandboxImageSpec,
+        entrypoint: List<String>,
+        env: Map<String, String>,
+        metadata: Map<String, String>,
+        timeout: Duration?,
+        resource: Map<String, String>,
+        networkPolicy: NetworkPolicy?,
+        extensions: Map<String, String>,
+        volumes: List<Volume>?,
+        platform: PlatformSpec?,
+        secureAccess: Boolean,
+    ): SandboxCreateResponse
 
     /**
      * Retrieves information about an existing sandbox.

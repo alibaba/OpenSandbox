@@ -24,6 +24,7 @@ from opensandbox_server.api import lifecycle
 from opensandbox_server.api.schema import Endpoint
 from opensandbox_server.middleware.auth import SANDBOX_API_KEY_HEADER
 from opensandbox_server.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER, OPEN_SANDBOX_INGRESS_HEADER
+from opensandbox_server.services.constants import OPEN_SANDBOX_SECURE_ACCESS_HEADER
 
 
 class _FakeStreamingResponse:
@@ -221,6 +222,85 @@ def test_proxy_root_path_forwards_endpoint_headers_and_query(
     }
     assert lowered_headers["opensandbox-ingress-to"] == "sbx-123-44772"
     assert lowered_headers["x-trace"] == "trace-root"
+
+
+def test_proxy_does_not_auto_inject_secure_access_header(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert sandbox_id == "sbx-123"
+            assert port == 44772
+            assert resolve_internal is True
+            return Endpoint(
+                endpoint="10.57.1.91:40109/base",
+                headers={
+                    OPEN_SANDBOX_INGRESS_HEADER: "sbx-123-44772",
+                    OPEN_SANDBOX_SECURE_ACCESS_HEADER: "secure-token",
+                },
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(chunks=[b"root-ok"])
+    _set_http_client(client, fake_client)
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/44772",
+        params={"q": "search"},
+        headers={**auth_headers, "X-Trace": "trace-root"},
+    )
+
+    assert response.status_code == 200
+    lowered_headers = {
+        key.lower(): value for key, value in fake_client.built["headers"].items()
+    }
+    assert lowered_headers["opensandbox-ingress-to"] == "sbx-123-44772"
+    assert OPEN_SANDBOX_SECURE_ACCESS_HEADER.lower() not in lowered_headers
+
+
+def test_proxy_forwards_client_supplied_secure_access_header(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert sandbox_id == "sbx-123"
+            assert port == 44772
+            assert resolve_internal is True
+            return Endpoint(
+                endpoint="10.57.1.91:40109/base",
+                headers={
+                    OPEN_SANDBOX_INGRESS_HEADER: "sbx-123-44772",
+                    OPEN_SANDBOX_SECURE_ACCESS_HEADER: "server-side-token",
+                },
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(chunks=[b"root-ok"])
+    _set_http_client(client, fake_client)
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/44772",
+        headers={
+            **auth_headers,
+            OPEN_SANDBOX_SECURE_ACCESS_HEADER: "client-token",
+        },
+    )
+
+    assert response.status_code == 200
+    lowered_headers = {
+        key.lower(): value for key, value in fake_client.built["headers"].items()
+    }
+    assert lowered_headers[OPEN_SANDBOX_SECURE_ACCESS_HEADER.lower()] == "client-token"
 
 
 def test_proxy_forwards_get_request_with_query_params(

@@ -116,6 +116,7 @@ type CreateSandboxRequest struct {
 	Timeout        *int              `json:"timeout,omitempty"`
 	ResourceLimits ResourceLimits    `json:"resourceLimits"`
 	Env            map[string]string `json:"env,omitempty"`
+	SecureAccess   bool              `json:"secureAccess,omitempty"`
 	Metadata       map[string]string `json:"metadata,omitempty"`
 	Entrypoint     []string          `json:"entrypoint"`
 	NetworkPolicy  *NetworkPolicy    `json:"networkPolicy,omitempty"`

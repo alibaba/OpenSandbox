@@ -76,7 +76,10 @@ class CreateSandboxRequest:
                 OS and CPU architecture for sandbox execution.
 
                 Behavioral notes:
-                - If omitted, runtime uses existing default behavior (backward compatible).
+                - If omitted, the runtime applies its own default platform selection behavior.
+                  For Docker, requests are created without an explicit platform override.
+                  For Kubernetes, no `kubernetes.io/os` or `kubernetes.io/arch` constraint
+                  is injected unless provided by request or workload template.
                 - If provided and cannot be satisfied by runtime/template/pool constraints,
                   request must fail explicitly.
             timeout (int | None | Unset): Sandbox timeout in seconds. The sandbox will automatically terminate after this
@@ -95,6 +98,15 @@ class CreateSandboxRequest:
             network_policy (NetworkPolicy | Unset): Egress network policy matching the sidecar `/policy` request body.
                 If `defaultAction` is omitted, the sidecar defaults to "deny"; passing an empty
                 object or null results in allow-all behavior at startup.
+            secure_access (bool | Unset): Opts the sandbox into secured access for endpoint access.
+                This is currently supported only for Kubernetes sandboxes exposed
+                through ingress gateway mode. When enabled, the server provisions
+                access credentials and returns the required request headers with
+                endpoint responses. Clients must include those endpoint headers when
+                calling the sandbox. When omitted or false, endpoints remain
+                accessible without the additional access token for backward
+                compatibility.
+                 Default: False.
             volumes (list[Volume] | Unset): Storage mounts for the sandbox. Each volume entry specifies a named backend-
                 specific
                 storage source and common mount settings. Exactly one backend type must be specified
@@ -124,6 +136,7 @@ class CreateSandboxRequest:
     env: CreateSandboxRequestEnv | Unset = UNSET
     metadata: CreateSandboxRequestMetadata | Unset = UNSET
     network_policy: NetworkPolicy | Unset = UNSET
+    secure_access: bool | Unset = False
     volumes: list[Volume] | Unset = UNSET
     extensions: CreateSandboxRequestExtensions | Unset = UNSET
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
@@ -157,6 +170,8 @@ class CreateSandboxRequest:
         if not isinstance(self.network_policy, Unset):
             network_policy = self.network_policy.to_dict()
 
+        secure_access = self.secure_access
+
         volumes: list[dict[str, Any]] | Unset = UNSET
         if not isinstance(self.volumes, Unset):
             volumes = []
@@ -187,6 +202,8 @@ class CreateSandboxRequest:
             field_dict["metadata"] = metadata
         if network_policy is not UNSET:
             field_dict["networkPolicy"] = network_policy
+        if secure_access is not UNSET:
+            field_dict["secureAccess"] = secure_access
         if volumes is not UNSET:
             field_dict["volumes"] = volumes
         if extensions is not UNSET:
@@ -249,6 +266,8 @@ class CreateSandboxRequest:
         else:
             network_policy = NetworkPolicy.from_dict(_network_policy)
 
+        secure_access = d.pop("secureAccess", UNSET)
+
         _volumes = d.pop("volumes", UNSET)
         volumes: list[Volume] | Unset = UNSET
         if _volumes is not UNSET:
@@ -274,6 +293,7 @@ class CreateSandboxRequest:
             env=env,
             metadata=metadata,
             network_policy=network_policy,
+            secure_access=secure_access,
             volumes=volumes,
             extensions=extensions,
         )

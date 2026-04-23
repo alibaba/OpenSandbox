@@ -41,6 +41,9 @@ type SandboxCreateOptions struct {
 	// Env variables injected into the sandbox.
 	Env map[string]string
 
+	// SecureAccess enables secured access for sandbox endpoints.
+	SecureAccess bool
+
 	// Metadata for filtering and tagging.
 	Metadata map[string]string
 
@@ -121,6 +124,7 @@ func CreateSandbox(ctx context.Context, config ConnectionConfig, opts SandboxCre
 		ResourceLimits: limits,
 		Timeout:        timeout,
 		Env:            opts.Env,
+		SecureAccess:   opts.SecureAccess,
 		Metadata:       opts.Metadata,
 		NetworkPolicy:  opts.NetworkPolicy,
 		Volumes:        opts.Volumes,

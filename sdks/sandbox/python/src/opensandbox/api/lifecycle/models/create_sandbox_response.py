@@ -51,7 +51,10 @@ class CreateSandboxResponse:
             OS and CPU architecture for sandbox execution.
 
             Behavioral notes:
-            - If omitted, runtime uses existing default behavior (backward compatible).
+            - If omitted, the runtime applies its own default platform selection behavior.
+              For Docker, requests are created without an explicit platform override.
+              For Kubernetes, no `kubernetes.io/os` or `kubernetes.io/arch` constraint
+              is injected unless provided by request or workload template.
             - If provided and cannot be satisfied by runtime/template/pool constraints,
               request must fail explicitly.
         expires_at (datetime.datetime | Unset): Timestamp when sandbox will auto-terminate. Omitted when manual cleanup

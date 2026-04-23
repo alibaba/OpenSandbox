@@ -81,6 +81,21 @@ test("Sandbox.create omits timeout when timeoutSeconds is null", async () => {
   assert.ok(!Object.hasOwn(recordedRequests[0], "timeout"));
 });
 
+test("Sandbox.create forwards secureAccess", async () => {
+  const { adapterFactory, recordedRequests } = createAdapterFactory();
+
+  await Sandbox.create({
+    adapterFactory,
+    connectionConfig: { domain: "http://127.0.0.1:8080" },
+    image: "python:3.12",
+    secureAccess: true,
+    skipHealthCheck: true,
+  });
+
+  assert.equal(recordedRequests.length, 1);
+  assert.equal(recordedRequests[0].secureAccess, true);
+});
+
 test("Sandbox.create floors finite timeoutSeconds", async () => {
   const { adapterFactory, recordedRequests } = createAdapterFactory();
 

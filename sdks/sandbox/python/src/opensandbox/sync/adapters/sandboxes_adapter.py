@@ -98,6 +98,7 @@ class SandboxesAdapterSync(SandboxesSync):
         extensions: dict[str, str],
         volumes: list[Volume] | None,
         platform: PlatformSpec | None = None,
+        secure_access: bool = False,
     ) -> SandboxCreateResponse:
         logger.info("Creating sandbox with image: %s", spec.image)
         try:
@@ -117,6 +118,7 @@ class SandboxesAdapterSync(SandboxesSync):
                 network_policy=network_policy,
                 extensions=extensions,
                 volumes=volumes,
+                secure_access=secure_access,
             )
             response_obj = post_sandboxes.sync_detailed(client=self._get_client(), body=create_request)
             handle_api_error(response_obj, "Create sandbox")

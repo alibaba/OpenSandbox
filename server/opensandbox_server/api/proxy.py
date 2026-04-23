@@ -33,6 +33,7 @@ from websockets.typing import Origin
 from opensandbox_server.api import lifecycle
 from opensandbox_server.api.schema import Endpoint
 from opensandbox_server.middleware.auth import SANDBOX_API_KEY_HEADER
+from opensandbox_server.services.constants import OPEN_SANDBOX_SECURE_ACCESS_HEADER
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,11 @@ def _filter_proxy_headers(
     extra_excluded: Optional[set[str]] = None,
     connection_header: Optional[str] = None,
 ) -> dict[str, str]:
-    """Drop transport/auth headers while preserving app-level headers."""
+    """Drop transport/auth headers while preserving app-level headers.
+
+    Endpoint-resolved headers are merged for routing, except secure-access
+    credentials which callers must explicitly provide on server-proxy requests.
+    """
     excluded = set(HOP_BY_HOP_HEADERS) | set(SENSITIVE_HEADERS)
     if extra_excluded:
         excluded.update(extra_excluded)
@@ -113,7 +118,13 @@ def _filter_proxy_headers(
             forwarded[key] = value
 
     if endpoint_headers:
-        forwarded.update(endpoint_headers)
+        forwarded.update(
+            {
+                key: value
+                for key, value in endpoint_headers.items()
+                if key.lower() != OPEN_SANDBOX_SECURE_ACCESS_HEADER.lower()
+            }
+        )
     return forwarded
 
 

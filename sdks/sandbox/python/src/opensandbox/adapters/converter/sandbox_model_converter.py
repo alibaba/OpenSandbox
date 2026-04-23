@@ -155,6 +155,7 @@ class SandboxModelConverter:
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
         volumes: list[Volume] | None,
+        secure_access: bool = False,
     ) -> CreateSandboxRequest:
         """Convert domain parameters to API CreateSandboxRequest."""
         from opensandbox.api.lifecycle.models.create_sandbox_request import (
@@ -260,6 +261,7 @@ class SandboxModelConverter:
             network_policy=api_network_policy,
             extensions=api_extensions,
             volumes=api_volumes,
+            secure_access=secure_access,
         )
         if timeout is not None:
             request.timeout = int(timeout.total_seconds())

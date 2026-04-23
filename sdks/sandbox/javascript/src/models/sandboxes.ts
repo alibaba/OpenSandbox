@@ -247,6 +247,10 @@ export interface CreateSandboxRequest extends Record<string, unknown> {
   entrypoint: string[];
   platform?: PlatformSpec;
   /**
+   * Whether to require secure access headers for sandbox endpoint access.
+   */
+  secureAccess?: boolean;
+  /**
    * Timeout in seconds (server semantics).
    */
   timeout?: number | null;

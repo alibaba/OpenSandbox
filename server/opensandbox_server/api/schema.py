@@ -422,6 +422,15 @@ class CreateSandboxRequest(BaseModel):
             "Empty/omitted means allow-all until updated."
         ),
     )
+    secure_access: bool = Field(
+        False,
+        alias="secureAccess",
+        description=(
+            "Opts the sandbox into secured access for endpoint access. "
+            "Currently supported only for Kubernetes sandboxes exposed through ingress gateway mode. "
+            "When enabled, the server provisions access credentials and returns required endpoint headers."
+        ),
+    )
     volumes: Optional[List[Volume]] = Field(
         None,
         description=(

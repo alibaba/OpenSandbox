@@ -34,6 +34,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
  * @property metadata User-defined metadata.
  * @property extensions Optional extension parameters for server-side customized behaviors.
  * @property networkPolicy Optional outbound network policy.
+ * @property secureAccess Whether to enable secured access for sandbox endpoints.
  * @property volumes Optional volume mounts.
  */
 class PoolCreationSpec private constructor(
@@ -44,6 +45,7 @@ class PoolCreationSpec private constructor(
     val metadata: Map<String, String> = emptyMap(),
     val extensions: Map<String, String> = emptyMap(),
     val networkPolicy: NetworkPolicy? = null,
+    val secureAccess: Boolean = false,
     val volumes: List<Volume>? = null,
 ) {
     companion object {
@@ -69,6 +71,7 @@ class PoolCreationSpec private constructor(
         private var metadata: Map<String, String> = emptyMap()
         private var extensions: Map<String, String> = emptyMap()
         private var networkPolicy: NetworkPolicy? = null
+        private var secureAccess: Boolean = false
         private var volumes: List<Volume>? = null
 
         fun imageSpec(imageSpec: SandboxImageSpec): Builder {
@@ -178,6 +181,12 @@ class PoolCreationSpec private constructor(
             return this
         }
 
+        @JvmOverloads
+        fun secureAccess(enabled: Boolean = true): Builder {
+            this.secureAccess = enabled
+            return this
+        }
+
         fun volumes(volumes: List<Volume>?): Builder {
             this.volumes = volumes
             return this
@@ -204,6 +213,7 @@ class PoolCreationSpec private constructor(
                 metadata = metadata,
                 extensions = extensions,
                 networkPolicy = networkPolicy,
+                secureAccess = secureAccess,
                 volumes = volumes,
             )
         }
