@@ -32,8 +32,6 @@ from opensandbox_server.services.k8s.security_context import (
     build_security_context_from_dict,
     serialize_security_context_to_dict,
 )
-
-
 def _build_execd_init_container(
     execd_image: str,
     execd_init_resources: Any,

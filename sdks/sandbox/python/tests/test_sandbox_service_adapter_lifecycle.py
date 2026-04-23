@@ -126,9 +126,11 @@ async def test_create_sandbox_success(monkeypatch: pytest.MonkeyPatch) -> None:
         ),
         extensions={"storage.id": "abc123", "debug": "true"},
         volumes=None,
+        secure_access=True,
     )
     assert isinstance(out.id, str)
     assert "image" in called["body"].to_dict()
+    assert called["body"].to_dict()["secureAccess"] is True
     assert called["body"].to_dict()["extensions"] == {"storage.id": "abc123", "debug": "true"}
     network_policy = called["body"].to_dict()["networkPolicy"]
     assert network_policy["defaultAction"] == "deny"

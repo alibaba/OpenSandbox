@@ -22,6 +22,7 @@ from opensandbox_server.api.schema import CreateSandboxRequest
 from opensandbox_server.config import AppConfig, EGRESS_MODE_DNS
 from opensandbox_server.services.constants import (
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
+    SANDBOX_SECURE_ACCESS_TOKEN_METADATA_KEY,
     SANDBOX_ID_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SANDBOX_SNAPSHOT_ID_LABEL,
@@ -38,6 +39,7 @@ class _CreateWorkloadContext:
     egress_mode: str
     egress_image: Optional[str]
     egress_auth_token: Optional[str]
+    secure_access_token: Optional[str]
 
 
 def _build_create_workload_context(
@@ -46,6 +48,7 @@ def _build_create_workload_context(
     sandbox_id: str,
     created_at: datetime,
     egress_token_factory: Callable[[], str],
+    secure_access_token_factory: Callable[[], str],
 ) -> _CreateWorkloadContext:
     expires_at = None
     if request.timeout is not None:
@@ -60,6 +63,11 @@ def _build_create_workload_context(
         labels.update(request.metadata)
 
     annotations: Dict[str, str] = {}
+    secure_access_token = None
+    if request.secure_access:
+        secure_access_token = secure_access_token_factory()
+        annotations[SANDBOX_SECURE_ACCESS_TOKEN_METADATA_KEY] = secure_access_token
+
     egress_mode = app_config.egress.mode if app_config.egress else EGRESS_MODE_DNS
     egress_image = None
     egress_auth_token = None
@@ -80,4 +88,5 @@ def _build_create_workload_context(
         egress_mode=egress_mode,
         egress_image=egress_image,
         egress_auth_token=egress_auth_token,
+        secure_access_token=secure_access_token,
     )

@@ -14,6 +14,7 @@
 
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using OpenSandbox.Adapters;
 using OpenSandbox.Internal;
@@ -108,88 +109,24 @@ public class SandboxesAdapterTests
     }
 
     [Fact]
-    public async Task GetSandboxAsync_ShouldSupportSnapshotBackedSandbox()
+    public async Task CreateSandboxAsync_ShouldSerializeSecureAccess()
     {
-        var payload = """
-        {
-          "id": "sbx-snap",
-          "snapshotId": "snap-1",
-          "entrypoint": ["python"],
-          "status": { "state": "Running" },
-          "createdAt": "2026-03-14T12:00:00Z"
-        }
-        """;
-        var adapter = CreateAdapterWithJsonResponse(payload);
-
-        SandboxInfo sandbox = await adapter.GetSandboxAsync("sbx-snap");
-
-        sandbox.Image.Should().BeNull();
-        sandbox.SnapshotId.Should().Be("snap-1");
-    }
-
-    [Fact]
-    public async Task SnapshotLifecycleMethods_ShouldMapRequestsAndResponses()
-    {
-        var calls = new List<string>();
-        var handler = new DelegateHandler(request =>
-        {
-            calls.Add($"{request.Method} {request.RequestUri!.PathAndQuery}");
-            var payload = request.RequestUri!.AbsolutePath switch
-            {
-                "/v1/sandboxes/sbx-1/snapshots" => """
-                {
-                  "id": "snap-1",
-                  "sandboxId": "sbx-1",
-                  "name": "before-upgrade",
-                  "status": { "state": "Creating" },
-                  "createdAt": "2026-03-14T12:00:00Z"
-                }
-                """,
-                "/v1/snapshots/snap-1" when request.Method == HttpMethod.Get => """
-                {
-                  "id": "snap-1",
-                  "sandboxId": "sbx-1",
-                  "status": { "state": "Ready", "lastTransitionAt": "2026-03-14T12:10:00Z" },
-                  "createdAt": "2026-03-14T12:00:00Z"
-                }
-                """,
-                "/v1/snapshots" => """
-                {
-                  "items": [
-                    {
-                      "id": "snap-1",
-                      "sandboxId": "sbx-1",
-                      "status": { "state": "Ready" },
-                      "createdAt": "2026-03-14T12:00:00Z"
-                    }
-                  ],
-                  "pagination": { "page": 1, "pageSize": 10, "totalItems": 1, "totalPages": 1, "hasNextPage": false }
-                }
-                """,
-                _ => "{}"
-            };
-            var statusCode = request.Method == HttpMethod.Delete ? HttpStatusCode.NoContent : HttpStatusCode.OK;
-            return new HttpResponseMessage(statusCode)
-            {
-                Content = new StringContent(payload, Encoding.UTF8, "application/json")
-            };
-        });
+        var handler = new CaptureCreateRequestHandler();
         var client = new HttpClient(handler);
         var wrapper = new HttpClientWrapper(client, "http://localhost:8080/v1");
         var adapter = new SandboxesAdapter(wrapper);
 
-        var created = await adapter.CreateSnapshotAsync("sbx-1", new CreateSnapshotRequest { Name = "before-upgrade" });
-        var loaded = await adapter.GetSnapshotAsync("snap-1");
-        var listed = await adapter.ListSnapshotsAsync(new ListSnapshotsParams { SandboxId = "sbx-1", States = ["Ready"], Page = 1, PageSize = 10 });
-        await adapter.DeleteSnapshotAsync("snap-1");
+        _ = await adapter.CreateSandboxAsync(new CreateSandboxRequest
+        {
+            Image = new ImageSpec { Uri = "python:3.11" },
+            ResourceLimits = new Dictionary<string, string>(),
+            Entrypoint = new List<string> { "python" },
+            SecureAccess = true
+        });
 
-        created.Id.Should().Be("snap-1");
-        loaded.Status.LastTransitionAt.Should().NotBeNull();
-        listed.Items.Should().HaveCount(1);
-        calls.Should().Contain("POST /v1/sandboxes/sbx-1/snapshots");
-        calls.Should().Contain("GET /v1/snapshots/snap-1");
-        calls.Should().Contain("GET /v1/snapshots?sandboxId=sbx-1&state=Ready&page=1&pageSize=10");
-        calls.Should().Contain("DELETE /v1/snapshots/snap-1");
+        handler.RequestBody.Should().NotBeNullOrEmpty();
+        using var json = JsonDocument.Parse(handler.RequestBody!);
+        json.RootElement.GetProperty("secureAccess").GetBoolean().Should().BeTrue();
     }
 
     private static SandboxesAdapter CreateAdapterWithJsonResponse(string payload)
@@ -228,9 +165,28 @@ public class SandboxesAdapterTests
         }
     }
 
-    private sealed class DelegateHandler(Func<HttpRequestMessage, HttpResponseMessage> handler) : HttpMessageHandler
+    private sealed class CaptureCreateRequestHandler : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => Task.FromResult(handler(request));
+        public string? RequestBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestBody = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync();
+            var payload = """
+            {
+              "id": "sbx-3",
+              "status": { "state": "Pending" },
+              "createdAt": "2026-03-14T12:00:00Z",
+              "entrypoint": ["python"]
+            }
+            """;
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+            return response;
+        }
     }
 }

@@ -98,6 +98,10 @@ export interface SandboxCreateOptions {
    * Optional runtime platform constraint used for provisioning.
    */
   platform?: PlatformSpec;
+  /**
+   * Whether to enable secured access for sandbox endpoints.
+   */
+  secureAccess?: boolean;
 
   /**
    * Resource limits applied to the sandbox container.
@@ -297,6 +301,7 @@ export class Sandbox {
       snapshotId: opts.snapshotId,
       entrypoint: opts.entrypoint ?? DEFAULT_ENTRYPOINT,
       resourceLimits: opts.resource ?? DEFAULT_RESOURCE_LIMITS,
+      secureAccess: opts.secureAccess ?? false,
       env: opts.env ?? {},
       metadata: opts.metadata ?? {},
       networkPolicy: opts.networkPolicy

@@ -988,6 +988,18 @@ export interface components {
              */
             networkPolicy?: components["schemas"]["NetworkPolicy"];
             /**
+             * @description Opts the sandbox into secured access for endpoint access.
+             *     This is currently supported only for Kubernetes sandboxes exposed
+             *     through ingress gateway mode. When enabled, the server provisions
+             *     access credentials and returns the required request headers with
+             *     endpoint responses. Clients must include those endpoint headers when
+             *     calling the sandbox. When omitted or false, endpoints remain
+             *     accessible without the additional access token for backward
+             *     compatibility.
+             * @default false
+             */
+            secureAccess: boolean;
+            /**
              * @description Storage mounts for the sandbox. Each volume entry specifies a named backend-specific
              *     storage source and common mount settings. Exactly one backend type must be specified
              *     per volume entry.

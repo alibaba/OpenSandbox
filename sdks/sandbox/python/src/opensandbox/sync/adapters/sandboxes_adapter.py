@@ -102,6 +102,7 @@ class SandboxesAdapterSync(SandboxesSync):
         extensions: dict[str, str],
         volumes: list[Volume] | None,
         platform: PlatformSpec | None = None,
+        secure_access: bool = False,
         snapshot_id: str | None = None,
     ) -> SandboxCreateResponse:
         logger.info(
@@ -125,6 +126,7 @@ class SandboxesAdapterSync(SandboxesSync):
                 network_policy=network_policy,
                 extensions=extensions,
                 volumes=volumes,
+                secure_access=secure_access,
                 snapshot_id=snapshot_id,
             )
             response_obj = post_sandboxes.sync_detailed(client=self._get_client(), body=create_request)

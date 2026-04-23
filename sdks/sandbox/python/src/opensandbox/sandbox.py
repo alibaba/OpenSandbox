@@ -412,6 +412,7 @@ class Sandbox:
         platform: PlatformSpec | None = None,
         network_policy: NetworkPolicy | None = None,
         extensions: dict[str, str] | None = None,
+        secure_access: bool = False,
         entrypoint: list[str] | None = None,
         volumes: list[Volume] | None = None,
         connection_config: ConnectionConfig | None = None,
@@ -432,6 +433,7 @@ class Sandbox:
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
+            secure_access: Whether to enable secured access for sandbox endpoints.
             entrypoint: Command to run as entrypoint
             volumes: Optional list of volume mounts for persistent storage.
                 Each volume specifies a backend (host path, PVC, or OSSFS) and mount configuration.
@@ -485,6 +487,7 @@ class Sandbox:
                 extensions=extensions,
                 volumes=volumes,
                 platform=platform,
+                secure_access=secure_access,
                 snapshot_id=snapshot_id,
             )
             sandbox_id = response.id

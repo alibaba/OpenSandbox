@@ -138,6 +138,31 @@ func TestCreateSandbox_ImageAuth(t *testing.T) {
 	require.NoErrorf(t, err, "CreateSandbox with ImageAuth")
 }
 
+func TestCreateSandbox_SecureAccess(t *testing.T) {
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var req CreateSandboxRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		if !req.SecureAccess {
+			assert.Fail(t, "expected SecureAccess to be true")
+		}
+
+		jsonResponse(w, http.StatusCreated, SandboxInfo{
+			ID:        "sbx-secure",
+			Status:    SandboxStatus{State: StatePending},
+			CreatedAt: time.Now().UTC().Truncate(time.Second),
+		})
+	})
+
+	_, err := client.CreateSandbox(context.Background(), CreateSandboxRequest{
+		Image:          ImageSpec{URI: "python:3.12"},
+		Entrypoint:     []string{"/bin/sh"},
+		ResourceLimits: ResourceLimits{"cpu": "500m"},
+		SecureAccess:   true,
+	})
+	require.NoErrorf(t, err, "CreateSandbox with SecureAccess")
+}
+
 func TestCreateSandbox_ManualCleanup(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)

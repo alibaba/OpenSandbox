@@ -404,6 +404,12 @@ public class CreateSandboxRequest
     public IReadOnlyDictionary<string, string>? Env { get; set; }
 
     /// <summary>
+    /// Gets or sets whether to enable secured access for sandbox endpoints.
+    /// </summary>
+    [JsonPropertyName("secureAccess")]
+    public bool? SecureAccess { get; set; }
+
+    /// <summary>
     /// Gets or sets the custom metadata tags.
     /// </summary>
     [JsonPropertyName("metadata")]

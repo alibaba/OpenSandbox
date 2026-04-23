@@ -60,6 +60,7 @@ class Sandboxes(Protocol):
         extensions: dict[str, str],
         volumes: list[Volume] | None,
         platform: PlatformSpec | None = None,
+        secure_access: bool = False,
         snapshot_id: str | None = None,
     ) -> SandboxCreateResponse:
         """
@@ -76,6 +77,7 @@ class Sandboxes(Protocol):
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
             volumes: Optional list of volume mounts for persistent storage.
+            secure_access: Whether to enable secured access for sandbox endpoints.
 
         Returns:
             Sandbox create response

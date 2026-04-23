@@ -251,6 +251,7 @@ internal object SandboxModelConverter {
         resource: Map<String, String>,
         platform: PlatformSpec?,
         networkPolicy: NetworkPolicy?,
+        secureAccess: Boolean,
         extensions: Map<String, String>,
         volumes: List<Volume>?,
         snapshotId: String?,
@@ -265,6 +266,7 @@ internal object SandboxModelConverter {
             resourceLimits = resource,
             platform = platform?.toApiPlatformSpec(),
             networkPolicy = networkPolicy?.toApiNetworkPolicy(),
+            secureAccess = secureAccess,
             extensions = extensions,
             volumes = volumes?.map { it.toApiVolume() },
         )

@@ -32,7 +32,10 @@ from opensandbox_server.config import (
     IngressConfig,
 )
 from opensandbox_server.extensions import ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY
-from opensandbox_server.services.constants import EGRESS_MODE_ENV, OPENSANDBOX_EGRESS_TOKEN
+from opensandbox_server.services.constants import (
+    EGRESS_MODE_ENV,
+    OPENSANDBOX_EGRESS_TOKEN,
+)
 from opensandbox_server.services.constants import (
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_EXPIRES_AT_LABEL,
@@ -626,6 +629,37 @@ async def test_egress_sidecar_injection_and_capabilities(mock_docker):
     sidecar_env = sidecar_kwargs["environment"]
     assert f"{OPENSANDBOX_EGRESS_TOKEN}=egress-token" in sidecar_env
     assert f"{EGRESS_MODE_ENV}={EGRESS_MODE_DNS}" in sidecar_env
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker")
+async def test_create_sandbox_rejects_secure_access_on_docker_runtime(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "bridge"
+    service = DockerSandboxService(config=cfg)
+
+    req = CreateSandboxRequest(
+        image=ImageSpec(uri="python:3.11"),
+        timeout=120,
+        resourceLimits=ResourceLimits(root={}),
+        env={},
+        metadata={},
+        entrypoint=["python"],
+        secureAccess=True,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await service.create_sandbox(req)
+
+    assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+    assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+    assert "secureAccess is not supported when runtime.type='docker'" in exc.value.detail["message"]
+    mock_client.api.create_container.assert_not_called()
+
 
 @pytest.mark.asyncio
 @patch("opensandbox_server.services.docker.docker")

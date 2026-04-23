@@ -849,7 +849,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             [
                 "#!/bin/sh",
                 "set -e",
-                f"{execd_binary} >/tmp/execd.log 2>&1 &",
+                f"  {execd_binary} >/tmp/execd.log 2>&1 &",
                 'exec "$@"',
                 "",
             ]
@@ -917,6 +917,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             request.timeout,
             self.app_config.server.max_sandbox_timeout_seconds,
         )
+        self._ensure_secure_access_support(request)
         self._ensure_network_policy_support(request)
         self._validate_network_exists()
         pvc_inspect_cache, auto_created_volumes = self._validate_volumes(request)
@@ -1375,6 +1376,22 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
         # Common validation: egress.image must be configured
         ensure_egress_configured(request.network_policy, self.app_config.egress)
+
+    def _ensure_secure_access_support(self, request: CreateSandboxRequest) -> None:
+        """Validate that secure access can be honored under the current Docker runtime."""
+        if not request.secure_access:
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    "secureAccess is not supported when runtime.type='docker'. "
+                    "Use the Kubernetes runtime to create secured sandboxes."
+                ),
+            },
+        )
 
     def _validate_volumes(
         self, request: CreateSandboxRequest
@@ -2076,10 +2093,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if self.network_mode == HOST_NETWORK_MODE:
             endpoint = Endpoint(endpoint=f"{public_host}:{port}")
             container = self._get_container_by_sandbox_id(sandbox_id)
-            self._attach_egress_auth_headers(
-                endpoint,
-                (container.attrs.get("Config", {}).get("Labels") or {}),
-            )
+            labels = container.attrs.get("Config", {}).get("Labels") or {}
+            self._attach_egress_auth_headers(endpoint, labels)
             return endpoint
 
         # non-host mode (bridge / user-defined network)
@@ -2111,7 +2126,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                         "message": "Missing host port mapping for container port 8080.",
                     },
                 )
-            return Endpoint(endpoint=f"{public_host}:{http_host_port}")
+            endpoint = Endpoint(endpoint=f"{public_host}:{http_host_port}")
+            self._attach_egress_auth_headers(endpoint, labels)
+            return endpoint
 
         if execd_host_port is None:
             raise HTTPException(

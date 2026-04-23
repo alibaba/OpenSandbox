@@ -408,9 +408,9 @@ class BatchSandboxProvider(WorkloadProvider):
         user_process_cmd = f"/opt/opensandbox/bin/bootstrap.sh {escaped_entrypoint} &"
         
         wrapped_command = ["/bin/sh", "-c", user_process_cmd]
-        
+
         env_list = [{"name": k, "value": v} for k, v in env.items()] if env else []
-        
+
         return {
             "spec": {
                 "process": {

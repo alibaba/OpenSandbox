@@ -91,6 +91,11 @@ public class SandboxCreateOptions
     public IReadOnlyDictionary<string, string>? Extensions { get; set; }
 
     /// <summary>
+    /// Gets or sets whether to enable secured access for sandbox endpoints.
+    /// </summary>
+    public bool SecureAccess { get; set; }
+
+    /// <summary>
     /// Gets or sets the resource limits.
     /// </summary>
     public IReadOnlyDictionary<string, string>? Resource { get; set; }

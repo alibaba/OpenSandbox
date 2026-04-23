@@ -71,7 +71,6 @@ internal class SandboxesAdapter(
         networkPolicy: NetworkPolicy?,
         extensions: Map<String, String>,
         volumes: List<Volume>?,
-        snapshotId: String?,
     ): SandboxCreateResponse =
         createSandbox(
             spec = spec,
@@ -84,7 +83,6 @@ internal class SandboxesAdapter(
             extensions = extensions,
             volumes = volumes,
             platform = null,
-            snapshotId = snapshotId,
         )
 
     override fun createSandbox(
@@ -98,9 +96,37 @@ internal class SandboxesAdapter(
         extensions: Map<String, String>,
         volumes: List<Volume>?,
         platform: PlatformSpec?,
+    ): SandboxCreateResponse {
+        return createSandbox(
+            spec = spec,
+            entrypoint = entrypoint,
+            env = env,
+            metadata = metadata,
+            timeout = timeout,
+            resource = resource,
+            networkPolicy = networkPolicy,
+            extensions = extensions,
+            volumes = volumes,
+            platform = platform,
+            secureAccess = false,
+        )
+    }
+
+    override fun createSandbox(
+        spec: SandboxImageSpec,
+        entrypoint: List<String>,
+        env: Map<String, String>,
+        metadata: Map<String, String>,
+        timeout: Duration?,
+        resource: Map<String, String>,
+        networkPolicy: NetworkPolicy?,
+        extensions: Map<String, String>,
+        volumes: List<Volume>?,
+        platform: PlatformSpec?,
+        secureAccess: Boolean,
         snapshotId: String?,
     ): SandboxCreateResponse {
-        logger.info("Creating sandbox with startup source: {}", spec?.image ?: snapshotId)
+        logger.info("Creating sandbox with image: {}", spec.image)
 
         return try {
             val createRequest =
@@ -113,6 +139,7 @@ internal class SandboxesAdapter(
                     resource = resource,
                     platform = platform,
                     networkPolicy = networkPolicy,
+                    secureAccess = secureAccess,
                     extensions = extensions,
                     volumes = volumes,
                     snapshotId = snapshotId,

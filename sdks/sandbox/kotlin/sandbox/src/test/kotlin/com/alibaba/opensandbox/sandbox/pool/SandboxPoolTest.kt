@@ -362,6 +362,7 @@ class SandboxPoolTest {
                 .env { put("ENV_2", "value-2") }
                 .metadata("meta-1", "value-1")
                 .metadata { put("meta-2", "value-2") }
+                .secureAccess()
                 .networkPolicy {
                     defaultAction(NetworkPolicy.DefaultAction.DENY)
                     addEgress(
@@ -384,6 +385,7 @@ class SandboxPoolTest {
         assertEquals("value-2", spec.env["ENV_2"])
         assertEquals("value-1", spec.metadata["meta-1"])
         assertEquals("value-2", spec.metadata["meta-2"])
+        assertEquals(true, spec.secureAccess)
         assertEquals(NetworkPolicy.DefaultAction.DENY, spec.networkPolicy?.defaultAction)
         assertEquals("pypi.org", spec.networkPolicy?.egress?.firstOrNull()?.target)
         assertEquals(2, spec.volumes?.size)

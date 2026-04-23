@@ -277,6 +277,7 @@ class Sandbox internal constructor(
          * @param readyTimeout Timeout for waiting for sandbox readiness
          * @param resource Resource limits (optional)
          * @param networkPolicy Optional outbound network policy (egress)
+         * @param secureAccess Whether to enable secured access for sandbox endpoints
          * @param connectionConfig Connection configuration
          * @param healthCheck Custom health check function (optional)
          * @param healthCheckPollingInterval Polling interval for readiness/health check
@@ -296,6 +297,7 @@ class Sandbox internal constructor(
             resource: Map<String, String>,
             platform: PlatformSpec?,
             networkPolicy: NetworkPolicy?,
+            secureAccess: Boolean,
             connectionConfig: ConnectionConfig,
             healthCheck: ((Sandbox) -> Boolean)? = null,
             healthCheckPollingInterval: Duration,
@@ -324,6 +326,7 @@ class Sandbox internal constructor(
                         extensions,
                         volumes,
                         platform,
+                        secureAccess,
                         snapshotId,
                     )
                 InitializationResult.NewSandbox(response.id)
@@ -808,6 +811,11 @@ class Sandbox internal constructor(
         private var networkPolicy: NetworkPolicy? = null
 
         /**
+         * Enables secured access for sandbox endpoints.
+         */
+        private var secureAccess: Boolean = false
+
+        /**
          * Optional runtime platform constraint used for sandbox provisioning.
          */
         private var platform: PlatformSpec? = null
@@ -1027,6 +1035,18 @@ class Sandbox internal constructor(
         }
 
         /**
+         * Enables or disables secured access for sandbox endpoints.
+         *
+         * Default is false for backward compatibility. When true, the server may
+         * return required endpoint headers that SDK calls must include.
+         */
+        @JvmOverloads
+        fun secureAccess(enabled: Boolean = true): Builder {
+            this.secureAccess = enabled
+            return this
+        }
+
+        /**
          * Sets an explicit runtime platform constraint.
          */
         fun platform(platform: PlatformSpec): Builder {
@@ -1235,6 +1255,7 @@ class Sandbox internal constructor(
                 resource = resource,
                 platform = platform,
                 networkPolicy = networkPolicy,
+                secureAccess = secureAccess,
                 extensions = extensions,
                 connectionConfig = connectionConfig ?: ConnectionConfig.builder().build(),
                 healthCheckPollingInterval = healthCheckPollingInterval,

@@ -125,6 +125,7 @@ class SandboxesAdapter(Sandboxes):
         extensions: dict[str, str],
         volumes: list[Volume] | None,
         platform: PlatformSpec | None = None,
+        secure_access: bool = False,
         snapshot_id: str | None = None,
     ) -> SandboxCreateResponse:
         """Create a new sandbox instance with the specified configuration."""
@@ -147,6 +148,7 @@ class SandboxesAdapter(Sandboxes):
                 network_policy=network_policy,
                 extensions=extensions,
                 volumes=volumes,
+                secure_access=secure_access,
                 snapshot_id=snapshot_id,
             )
 

@@ -760,6 +760,7 @@ internal fun PoolCreationSpec.applyToBuilder(builder: Sandbox.Builder): Sandbox.
             .metadata(metadata)
             .extensions(extensions)
             .volumes(volumes ?: emptyList())
+            .secureAccess(secureAccess)
 
     return networkPolicy?.let { configuredBuilder.networkPolicy(it) } ?: configuredBuilder
 }
