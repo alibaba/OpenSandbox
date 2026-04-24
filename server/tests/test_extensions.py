@@ -22,9 +22,7 @@ from opensandbox_server.extensions import (
     ACCESS_RENEW_EXTEND_SECONDS_MIN,
     apply_access_renew_extend_seconds_to_mapping,
     apply_extensions_to_annotations,
-    validate_extensions,
-    EXTENSIONS_ANNOTATION_PREFIX,
-    ANNOTATION_METADATA_PREFIX,
+    validate_extensions
 )
 
 
