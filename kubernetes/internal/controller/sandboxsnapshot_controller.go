@@ -75,6 +75,9 @@ type SandboxSnapshotReconciler struct {
 
 	// SnapshotPushSecret is the K8s Secret name for pushing to registry (from Controller Manager startup params)
 	SnapshotPushSecret string
+
+	// SnapshotRegistryInsecure controls whether image-committer uses insecure registry mode.
+	SnapshotRegistryInsecure bool
 }
 
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=sandboxsnapshots,verbs=get;list;watch;create;update;patch;delete

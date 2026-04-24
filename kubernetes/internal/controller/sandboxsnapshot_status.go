@@ -131,6 +131,7 @@ func (r *SandboxSnapshotReconciler) updateSnapshotStatus(
 
 func ptrToInt64(v int64) *int64            { return &v }
 func ptrToInt32(v int32) *int32            { return &v }
+func ptrToBool(v bool) *bool               { return &v }
 func ptrToTime(v metav1.Time) *metav1.Time { return &v }
 
 func (r *SandboxSnapshotReconciler) getCommitJobTimeout() time.Duration {

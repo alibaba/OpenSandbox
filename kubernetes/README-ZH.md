@@ -108,18 +108,20 @@ OpenSandbox 支持通过将容器根文件系统持久化为 OCI 镜像来实现
 | `--resume-pull-secret` | `""` | 恢复后沙箱拉取镜像时注入的 Secret 名称 |
 | `--image-committer-image` | `image-committer:dev` | 用于 commit 操作的镜像（必须包含 `nerdctl` 工具） |
 | `--commit-job-timeout` | `10m` | commit Job 的超时时间 |
+| `--snapshot-registry-insecure` | `false` | 是否让快照 commit Job 使用 insecure registry 模式 |
 
-这些参数在控制器启动时配置。`image-committer-image` 必须是包含 `nerdctl` 的容器镜像，以执行 rootfs commit 和推送操作。
+这些参数在控制器启动时配置。`image-committer-image` 必须是受信任的、包含 `nerdctl` 的容器镜像，以执行 rootfs commit 和推送操作。Commit Job 会在源 Pod 所在节点挂载宿主机 containerd socket，因此该镜像实际拥有节点级 runtime 访问能力。生产环境建议使用 digest pinning，或通过镜像仓库/准入策略限制来源。
 
 本地开发时，示例 manager manifest 会直接传入这些 registry 和 secret 参数：
 
 ```yaml
 - --snapshot-registry=<your-registry>/sandboxes
+- --snapshot-registry-insecure=true # 仅用于 HTTP 或自签名证书的本地 registry
 - --snapshot-push-secret=registry-snapshot-push-secret
 - --resume-pull-secret=registry-pull-secret
 ```
 
-当前 Helm chart 已直接暴露 `controller.snapshot.*` 这组 values，包括 `imageCommitterImage`、`commitJobTimeout`、`registry`、`snapshotPushSecret` 和 `resumePullSecret`。
+当前 Helm chart 已直接暴露 `controller.snapshot.*` 这组 values，包括 `imageCommitterImage`、`commitJobTimeout`、`registry`、`registryInsecure`、`snapshotPushSecret` 和 `resumePullSecret`。
 
 **源码 / Kustomize 部署：**
 
@@ -149,9 +151,12 @@ kubectl create secret docker-registry registry-pull-secret \
 
 ```yaml
 - --snapshot-registry=<your-registry>/sandboxes
+- --snapshot-registry-insecure=true # 仅用于 HTTP 或自签名证书的本地 registry
 - --snapshot-push-secret=registry-snapshot-push-secret
 - --resume-pull-secret=registry-pull-secret
 ```
+
+快照镜像的保留策略由 registry 管理。删除 `SandboxSnapshot` 只会清理 Kubernetes commit/unpause Job，不会删除已经推送到 registry 的 OCI 镜像。请根据环境为 `snap-gen<N>` 这类标签配置 registry retention/GC。
 
 ### CRD 清理
 

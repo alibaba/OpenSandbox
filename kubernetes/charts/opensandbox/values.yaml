@@ -12,6 +12,7 @@ opensandbox-controller:
       imageCommitterImage: image-committer:dev
       commitJobTimeout: 10m
       registry: ""
+      registryInsecure: false
       snapshotPushSecret: ""
       resumePullSecret: ""
 

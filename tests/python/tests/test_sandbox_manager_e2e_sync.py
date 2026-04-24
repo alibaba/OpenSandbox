@@ -36,7 +36,11 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
 )
 
-from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
+from tests.base_e2e_test import (
+    create_connection_config_sync,
+    get_sandbox_image,
+    is_kubernetes_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,26 +95,30 @@ class TestSandboxManagerE2ESync:
             assert s3.is_healthy() is True
 
             s3_paused = False
-            try:
-                manager.pause_sandbox(s3.id)
-                deadline = time.time() + 180
-                while time.time() < deadline:
-                    info = manager.get_sandbox_info(s3.id)
-                    if info.status.state == "Paused":
-                        break
-                    time.sleep(1)
-                assert manager.get_sandbox_info(s3.id).status.state == "Paused"
-                s3_paused = True
-            except SandboxApiException as exc:
-                # pause.snapshot_registry is not configured in this E2E environment;
-                # server returns 400. Keep all sandboxes Running and relax state-filter asserts.
-                if exc.status_code == 400:
-                    logger.warning(
-                        "pause_sandbox not configured (HTTP %s); manager state-filter E2E uses all-Running sandboxes",
-                        exc.status_code,
-                    )
-                else:
-                    raise
+            if is_kubernetes_runtime():
+                logger.warning(
+                    "Skipping pause in Kubernetes manager E2E; mini suite does not provision snapshot infra"
+                )
+            else:
+                try:
+                    manager.pause_sandbox(s3.id)
+                    deadline = time.time() + 180
+                    while time.time() < deadline:
+                        info = manager.get_sandbox_info(s3.id)
+                        if info.status.state == "Paused":
+                            break
+                        time.sleep(1)
+                    assert manager.get_sandbox_info(s3.id).status.state == "Paused"
+                    s3_paused = True
+                except SandboxApiException as exc:
+                    # Some runtimes may not enable pause. Keep all sandboxes Running and relax state-filter asserts.
+                    if exc.status_code == 400:
+                        logger.warning(
+                            "pause_sandbox not configured (HTTP %s); manager state-filter E2E uses all-Running sandboxes",
+                            exc.status_code,
+                        )
+                    else:
+                        raise
 
             # OR states (broad: K8s lifecycle is not only Running/Paused)
             both = manager.list_sandbox_infos(

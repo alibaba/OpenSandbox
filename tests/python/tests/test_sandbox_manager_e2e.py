@@ -38,7 +38,11 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
 )
 
-from tests.base_e2e_test import create_connection_config, get_sandbox_image
+from tests.base_e2e_test import (
+    create_connection_config,
+    get_sandbox_image,
+    is_kubernetes_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +100,7 @@ class TestSandboxManagerE2E:
     s1: Sandbox | None = None
     s2: Sandbox | None = None
     s3: Sandbox | None = None
-    #: True if s3 was paused successfully (Docker); False if pause is unsupported (e.g. Kubernetes HTTP 501).
+    #: True if s3 was paused successfully; False when pause is unsupported or intentionally skipped.
     s3_paused: bool = False
 
     @pytest.fixture(scope="class", autouse=True)
@@ -111,7 +115,8 @@ class TestSandboxManagerE2E:
         # Create 3 sandboxes with controlled metadata.
         # s1: tag + team=t1 + env=prod
         # s2: tag + team=t1 + env=dev
-        # s3: tag + env=prod (no team), then pause to get Paused state
+        # s3: tag + env=prod (no team). Docker pauses it to cover Paused filters;
+        # Kubernetes mini keeps it active because the suite does not provision snapshot infra.
         cls.s1 = await _create_sandbox(
             connection_config=cls.connection_config,
             image=get_sandbox_image(),
@@ -142,20 +147,26 @@ class TestSandboxManagerE2E:
         assert await cls.s3.is_healthy() is True
 
         cls.s3_paused = False
-        try:
-            await cls.manager.pause_sandbox(cls.s3.id)
-            await _wait_for_state(manager=cls.manager, sandbox_id=cls.s3.id, expected_state="Paused")
-            cls.s3_paused = True
-        except SandboxApiException as exc:
-            # pause.snapshot_registry is not configured in this E2E environment;
-            # server returns 400. Keep all sandboxes Running and relax state-filter asserts.
-            if exc.status_code == 400:
-                logger.warning(
-                    "pause_sandbox not configured (HTTP %s); manager state-filter E2E uses all-Running sandboxes",
-                    exc.status_code,
+        if is_kubernetes_runtime():
+            logger.warning(
+                "Skipping pause in Kubernetes manager E2E; mini suite does not provision snapshot infra"
+            )
+        else:
+            try:
+                await cls.manager.pause_sandbox(cls.s3.id)
+                await _wait_for_state(
+                    manager=cls.manager, sandbox_id=cls.s3.id, expected_state="Paused"
                 )
-            else:
-                raise
+                cls.s3_paused = True
+            except SandboxApiException as exc:
+                # Some runtimes may not enable pause. Keep all sandboxes Running and relax state-filter asserts.
+                if exc.status_code == 400:
+                    logger.warning(
+                        "pause_sandbox not configured (HTTP %s); manager state-filter E2E uses all-Running sandboxes",
+                        exc.status_code,
+                    )
+                else:
+                    raise
 
         try:
             yield

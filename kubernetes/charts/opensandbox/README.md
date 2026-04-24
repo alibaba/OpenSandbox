@@ -68,6 +68,7 @@ opensandbox-controller:
     replicaCount: 2
     snapshot:
       registry: my-registry/snapshots
+      registryInsecure: false
       snapshotPushSecret: registry-snapshot-push-secret
       resumePullSecret: registry-pull-secret
 

@@ -138,6 +138,54 @@ func TestSandboxSnapshotHandleCommitting_KeepsRetryingWhenJobHasNotTerminallyFai
 	assert.Equal(t, sandboxv1alpha1.SandboxSnapshotPhaseCommitting, updated.Status.Phase)
 }
 
+func TestSandboxSnapshotHandleCommitting_CreatesUnpauseJobWhenCommitJobFailed(t *testing.T) {
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-snapshot",
+			Namespace: "default",
+		},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase:          sandboxv1alpha1.SandboxSnapshotPhaseCommitting,
+			SourcePodName:  "source-pod",
+			SourceNodeName: "node-a",
+			Containers: []sandboxv1alpha1.ContainerSnapshot{
+				{ContainerName: "main", ImageURI: "registry/test-main:tag"},
+				{ContainerName: "sidecar", ImageURI: "registry/test-sidecar:tag"},
+			},
+		},
+	}
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-snapshot-commit",
+			Namespace: "default",
+		},
+		Status: batchv1.JobStatus{
+			Conditions: []batchv1.JobCondition{
+				{
+					Type:    batchv1.JobFailed,
+					Status:  corev1.ConditionTrue,
+					Reason:  "DeadlineExceeded",
+					Message: "Job was active longer than specified deadline",
+				},
+			},
+		},
+	}
+
+	r := newTestSnapshotReconciler(snapshot, job)
+
+	result, err := r.handleCommitting(context.Background(), snapshot)
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	cleanupJob := &batchv1.Job{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "test-snapshot-unpause", Namespace: "default"}, cleanupJob))
+	require.Len(t, cleanupJob.Spec.Template.Spec.Containers, 1)
+	cleanupContainer := cleanupJob.Spec.Template.Spec.Containers[0]
+	assert.Equal(t, []string{"/usr/local/bin/image-committer"}, cleanupContainer.Command)
+	assert.Equal(t, []string{"unpause", "source-pod", "default", "main", "sidecar"}, cleanupContainer.Args)
+	assert.Equal(t, "node-a", cleanupJob.Spec.Template.Spec.NodeName)
+}
+
 func TestSandboxSnapshotHandlePending_MissingRegistrySetsFailedCondition(t *testing.T) {
 	snapshot := &sandboxv1alpha1.SandboxSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
@@ -257,4 +305,44 @@ func TestBuildCommitJob_SetsBoundedBackoffLimit(t *testing.T) {
 	require.NotNil(t, job.Spec.BackoffLimit)
 	assert.Equal(t, DefaultCommitJobBackoffLimit, *job.Spec.BackoffLimit)
 	assert.Equal(t, fmt.Sprintf("%s-commit", snapshot.Name), job.Name)
+}
+
+func TestBuildCommitJob_ExecutesImageCommitterDirectlyWithIsolatedArgs(t *testing.T) {
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-snapshot",
+			Namespace: "default",
+		},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			SourcePodName:  "pod-with-shell-chars-$(touch /tmp/nope)",
+			SourceNodeName: "node-1",
+			Containers: []sandboxv1alpha1.ContainerSnapshot{
+				{
+					ContainerName: "main;echo nope",
+					ImageURI:      "registry.example.com/test:tag",
+				},
+			},
+		},
+	}
+
+	r := newTestSnapshotReconciler(snapshot)
+	r.SnapshotRegistryInsecure = true
+
+	job, err := r.buildCommitJob(snapshot)
+	require.NoError(t, err)
+	require.Len(t, job.Spec.Template.Spec.Containers, 1)
+
+	container := job.Spec.Template.Spec.Containers[0]
+	assert.Equal(t, []string{"/usr/local/bin/image-committer"}, container.Command)
+	assert.Equal(t, []string{
+		"pod-with-shell-chars-$(touch /tmp/nope)",
+		"default",
+		"main;echo nope:registry.example.com/test:tag",
+	}, container.Args)
+	assert.Contains(t, container.Env, corev1.EnvVar{Name: "SNAPSHOT_REGISTRY_INSECURE", Value: "true"})
+	require.NotNil(t, container.SecurityContext)
+	require.NotNil(t, container.SecurityContext.AllowPrivilegeEscalation)
+	assert.False(t, *container.SecurityContext.AllowPrivilegeEscalation)
+	require.NotNil(t, container.SecurityContext.Capabilities)
+	assert.Equal(t, []corev1.Capability{"ALL"}, container.SecurityContext.Capabilities.Drop)
 }

@@ -17,7 +17,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -147,6 +146,9 @@ func (r *SandboxSnapshotReconciler) handleCommitting(ctx context.Context, snapsh
 			message = failedCond.Message
 		}
 		log.Info("Commit job failed", "job", jobName, "message", message)
+		if err := r.ensureUnpauseJob(ctx, snapshot); err != nil {
+			log.Error(err, "Failed to create best-effort unpause job")
+		}
 		r.Recorder.Eventf(snapshot, corev1.EventTypeWarning, "JobFailed", "Commit job failed")
 		_ = r.updateSnapshotStatus(ctx, snapshot, sandboxv1alpha1.SandboxSnapshotPhaseFailed, "CommitJobFailed", message)
 		return ctrl.Result{}, nil
@@ -176,6 +178,15 @@ func (r *SandboxSnapshotReconciler) handleDeletion(ctx context.Context, snapshot
 			return ctrl.Result{}, deleteErr
 		}
 		log.Info("Deleted commit job", "job", jobName)
+	}
+
+	unpauseJobName := r.getUnpauseJobName(snapshot)
+	unpauseJob := &batchv1.Job{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: snapshot.Namespace, Name: unpauseJobName}, unpauseJob); err == nil {
+		if deleteErr := r.Delete(ctx, unpauseJob, client.PropagationPolicy(metav1.DeletePropagationBackground)); deleteErr != nil && !errors.IsNotFound(deleteErr) {
+			return ctrl.Result{}, deleteErr
+		}
+		log.Info("Deleted unpause job", "job", unpauseJobName)
 	}
 
 	if controllerutil.ContainsFinalizer(snapshot, SandboxSnapshotFinalizer) {
@@ -224,12 +235,26 @@ func (r *SandboxSnapshotReconciler) findPodForSandbox(ctx context.Context, bs *s
 	return nil, fmt.Errorf("no running pod found for BatchSandbox %s", bs.Name)
 }
 
+func (r *SandboxSnapshotReconciler) imageCommitterImage() string {
+	if r.ImageCommitterImage != "" {
+		return r.ImageCommitterImage
+	}
+	return "image-committer:dev"
+}
+
+func commitJobSecurityContext() *corev1.SecurityContext {
+	return &corev1.SecurityContext{
+		RunAsUser:                ptrToInt64(0),
+		AllowPrivilegeEscalation: ptrToBool(false),
+		Capabilities: &corev1.Capabilities{
+			Drop: []corev1.Capability{"ALL"},
+		},
+	}
+}
+
 func (r *SandboxSnapshotReconciler) buildCommitJob(snapshot *sandboxv1alpha1.SandboxSnapshot) (*batchv1.Job, error) {
 	jobName := r.getJobName(snapshot)
-	imageCommitterImage := r.ImageCommitterImage
-	if imageCommitterImage == "" {
-		imageCommitterImage = "image-committer:dev"
-	}
+	imageCommitterImage := r.imageCommitterImage()
 
 	volumeMounts := []corev1.VolumeMount{
 		{Name: "containerd-sock", MountPath: ContainerdSocketPath},
@@ -264,17 +289,20 @@ func (r *SandboxSnapshotReconciler) buildCommitJob(snapshot *sandboxv1alpha1.San
 	for _, cs := range snapshot.Status.Containers {
 		containerSpecs = append(containerSpecs, fmt.Sprintf("%s:%s", cs.ContainerName, cs.ImageURI))
 	}
-	fullCommand := fmt.Sprintf("/usr/local/bin/image-committer %s %s %s",
-		snapshot.Status.SourcePodName,
-		snapshot.Namespace,
-		strings.Join(containerSpecs, " "),
-	)
+	args := append([]string{snapshot.Status.SourcePodName, snapshot.Namespace}, containerSpecs...)
+	env := []corev1.EnvVar{{Name: "CONTAINERD_SOCKET", Value: ContainerdSocketPath}}
+	if r.SnapshotRegistryInsecure {
+		env = append(env, corev1.EnvVar{Name: "SNAPSHOT_REGISTRY_INSECURE", Value: "true"})
+	}
 
 	job := &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      jobName,
 			Namespace: snapshot.Namespace,
-			Labels:    map[string]string{LabelSandboxSnapshotName: snapshot.Name},
+			Labels: map[string]string{
+				LabelSandboxSnapshotName:                        snapshot.Name,
+				"sandbox.opensandbox.io/privileged-node-access": "true",
+			},
 		},
 		Spec: batchv1.JobSpec{
 			BackoffLimit:            ptrToInt32(DefaultCommitJobBackoffLimit),
@@ -288,15 +316,11 @@ func (r *SandboxSnapshotReconciler) buildCommitJob(snapshot *sandboxv1alpha1.San
 							Name:            CommitJobContainerName,
 							Image:           imageCommitterImage,
 							ImagePullPolicy: corev1.PullIfNotPresent,
-							Command:         []string{"/bin/sh", "-c"},
-							Args:            []string{fullCommand},
+							Command:         []string{"/usr/local/bin/image-committer"},
+							Args:            args,
 							VolumeMounts:    volumeMounts,
-							Env: []corev1.EnvVar{
-								{Name: "CONTAINERD_SOCKET", Value: ContainerdSocketPath},
-							},
-							SecurityContext: &corev1.SecurityContext{
-								RunAsUser: ptrToInt64(0),
-							},
+							Env:             env,
+							SecurityContext: commitJobSecurityContext(),
 						},
 					},
 					Volumes:  volumes,
@@ -312,6 +336,89 @@ func (r *SandboxSnapshotReconciler) buildCommitJob(snapshot *sandboxv1alpha1.San
 	return job, nil
 }
 
+func (r *SandboxSnapshotReconciler) ensureUnpauseJob(ctx context.Context, snapshot *sandboxv1alpha1.SandboxSnapshot) error {
+	if snapshot.Status.SourcePodName == "" || snapshot.Status.SourceNodeName == "" || len(snapshot.Status.Containers) == 0 {
+		return nil
+	}
+
+	jobName := r.getUnpauseJobName(snapshot)
+	existingJob := &batchv1.Job{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: snapshot.Namespace, Name: jobName}, existingJob); err == nil {
+		return nil
+	} else if !errors.IsNotFound(err) {
+		return err
+	}
+
+	job, err := r.buildUnpauseJob(snapshot)
+	if err != nil {
+		return err
+	}
+	return r.Create(ctx, job)
+}
+
+func (r *SandboxSnapshotReconciler) buildUnpauseJob(snapshot *sandboxv1alpha1.SandboxSnapshot) (*batchv1.Job, error) {
+	var containerNames []string
+	for _, cs := range snapshot.Status.Containers {
+		containerNames = append(containerNames, cs.ContainerName)
+	}
+	args := append([]string{"unpause", snapshot.Status.SourcePodName, snapshot.Namespace}, containerNames...)
+
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      r.getUnpauseJobName(snapshot),
+			Namespace: snapshot.Namespace,
+			Labels: map[string]string{
+				LabelSandboxSnapshotName:                        snapshot.Name,
+				"sandbox.opensandbox.io/privileged-node-access": "true",
+			},
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            ptrToInt32(0),
+			TTLSecondsAfterFinished: ptrToInt32(int32(DefaultTTLSecondsAfterFinished)),
+			ActiveDeadlineSeconds:   ptrToInt64(int64(r.getCommitJobTimeout().Seconds())),
+			Template: corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:            CommitJobContainerName,
+							Image:           r.imageCommitterImage(),
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Command:         []string{"/usr/local/bin/image-committer"},
+							Args:            args,
+							VolumeMounts: []corev1.VolumeMount{
+								{Name: "containerd-sock", MountPath: ContainerdSocketPath},
+							},
+							Env: []corev1.EnvVar{
+								{Name: "CONTAINERD_SOCKET", Value: ContainerdSocketPath},
+							},
+							SecurityContext: commitJobSecurityContext(),
+						},
+					},
+					Volumes: []corev1.Volume{
+						{
+							Name: "containerd-sock",
+							VolumeSource: corev1.VolumeSource{
+								HostPath: &corev1.HostPathVolumeSource{Path: ContainerdSocketPath},
+							},
+						},
+					},
+					NodeName: snapshot.Status.SourceNodeName,
+				},
+			},
+		},
+	}
+
+	if err := ctrl.SetControllerReference(snapshot, job, r.Scheme); err != nil {
+		return nil, fmt.Errorf("failed to set controller reference: %w", err)
+	}
+	return job, nil
+}
+
 func (r *SandboxSnapshotReconciler) getJobName(snapshot *sandboxv1alpha1.SandboxSnapshot) string {
 	return fmt.Sprintf("%s-commit", snapshot.Name)
+}
+
+func (r *SandboxSnapshotReconciler) getUnpauseJobName(snapshot *sandboxv1alpha1.SandboxSnapshot) string {
+	return fmt.Sprintf("%s-unpause", snapshot.Name)
 }

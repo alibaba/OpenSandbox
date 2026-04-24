@@ -196,6 +196,9 @@ func main() {
 	var snapshotRegistry string
 	flag.StringVar(&snapshotRegistry, "snapshot-registry", "", "OCI registry for snapshot images (e.g., registry.example.com/snapshots).")
 
+	var snapshotRegistryInsecure bool
+	flag.BoolVar(&snapshotRegistryInsecure, "snapshot-registry-insecure", false, "Use insecure registry mode when pushing snapshot images.")
+
 	var snapshotPushSecret string
 	flag.StringVar(&snapshotPushSecret, "snapshot-push-secret", "", "K8s Secret name for pushing snapshots to registry.")
 
@@ -376,13 +379,14 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.SandboxSnapshotReconciler{
-		Client:              mgr.GetClient(),
-		Scheme:              mgr.GetScheme(),
-		Recorder:            mgr.GetEventRecorderFor("sandboxsnapshot-controller"),
-		ImageCommitterImage: imageCommitterImage,
-		CommitJobTimeout:    commitJobTimeout,
-		SnapshotRegistry:    snapshotRegistry,
-		SnapshotPushSecret:  snapshotPushSecret,
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		Recorder:                 mgr.GetEventRecorderFor("sandboxsnapshot-controller"),
+		ImageCommitterImage:      imageCommitterImage,
+		CommitJobTimeout:         commitJobTimeout,
+		SnapshotRegistry:         snapshotRegistry,
+		SnapshotRegistryInsecure: snapshotRegistryInsecure,
+		SnapshotPushSecret:       snapshotPushSecret,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SandboxSnapshot")
 		os.Exit(1)

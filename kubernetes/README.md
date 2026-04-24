@@ -108,13 +108,15 @@ The snapshot controller supports the following command-line flags:
 | `--resume-pull-secret` | `""` | Secret name injected into resumed sandboxes for image pulls |
 | `--image-committer-image` | `image-committer:dev` | Image used for commit operations (must contain `nerdctl` tool) |
 | `--commit-job-timeout` | `10m` | Timeout duration for commit jobs |
+| `--snapshot-registry-insecure` | `false` | Pass insecure registry mode to snapshot commit Jobs |
 
-These flags are configured at controller startup. The `image-committer-image` must be a container image with `nerdctl` to perform rootfs commit and push operations.
+These flags are configured at controller startup. The `image-committer-image` must be a trusted container image with `nerdctl` to perform rootfs commit and push operations. Commit Jobs mount the host containerd socket on the source node, so the image effectively has node-level runtime access. Pin the image by digest or enforce a trusted registry/admission policy in production.
 
 For local development, the sample manager manifest wires the registry and secret flags directly:
 
 ```yaml
 - --snapshot-registry=<your-registry>/sandboxes
+- --snapshot-registry-insecure=true # only for HTTP/self-signed local registries
 - --snapshot-push-secret=registry-snapshot-push-secret
 - --resume-pull-secret=registry-pull-secret
 ```
@@ -149,9 +151,12 @@ Then configure the controller manager with:
 
 ```yaml
 - --snapshot-registry=<your-registry>/sandboxes
+- --snapshot-registry-insecure=true # only for HTTP/self-signed local registries
 - --snapshot-push-secret=registry-snapshot-push-secret
 - --resume-pull-secret=registry-pull-secret
 ```
+
+Snapshot image retention is registry-managed. Deleting a `SandboxSnapshot` removes the Kubernetes commit/unpause Jobs, but it does not delete pushed OCI images from the registry. Configure registry retention/GC for tags such as `snap-gen<N>` according to your environment.
 
 ### CRD cleanup
 

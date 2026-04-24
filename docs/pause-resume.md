@@ -133,6 +133,7 @@ Configure the controller manager deployment with snapshot flags:
 
 ```yaml
 - --snapshot-registry=registry.example.com/sandboxes
+- --snapshot-registry-insecure=false
 - --snapshot-push-secret=registry-snapshot-push-secret
 - --resume-pull-secret=registry-pull-secret
 ```
@@ -142,6 +143,7 @@ Configure the controller manager deployment with snapshot flags:
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `--snapshot-registry` | string | `""` | **Required.** OCI registry prefix. Images are stored as `<registry>/<sandboxName>-<container>:snap-gen<N>`. |
+| `--snapshot-registry-insecure` | bool | `false` | Enables insecure registry mode for snapshot push operations. Use only for HTTP or self-signed local registries. |
 | `--snapshot-push-secret` | string | `""` | Kubernetes Secret name for pushing snapshots. Must be `kubernetes.io/dockerconfigjson` type. |
 | `--resume-pull-secret` | string | `""` | Kubernetes Secret name injected into resumed sandboxes for pulling snapshot images. Can be the same as push secret. |
 | `--image-committer-image` | string | `"image-committer:dev"` | Image used by commit Jobs. |
@@ -154,6 +156,7 @@ The `opensandbox-controller` Helm chart now exposes the snapshot-related control
 - `controller.snapshot.imageCommitterImage`
 - `controller.snapshot.commitJobTimeout`
 - `controller.snapshot.registry`
+- `controller.snapshot.registryInsecure`
 - `controller.snapshot.snapshotPushSecret`
 - `controller.snapshot.resumePullSecret`
 
@@ -289,6 +292,12 @@ The controller creates a short-lived Kubernetes `Job` for each pause:
 - **Timeout**: 10 minutes (`ActiveDeadlineSeconds`)
 - **TTL**: 5 minutes after completion (`TTLSecondsAfterFinished`)
 - **Image**: `image-committer` (configurable via controller `--image-committer-image` flag)
+
+The commit Job mounts the host containerd socket from the source node and runs as UID 0. This gives the `image-committer` image node-level container runtime access. Use only a trusted image, preferably pinned by digest or controlled by an admission policy.
+
+If the commit Job fails, the controller creates a best-effort `<snapshotName>-unpause` Job on the same node to unpause any source containers that may have been left paused by an abrupt committer exit.
+
+Deleting a `SandboxSnapshot` cleans up Kubernetes commit/unpause Jobs, but does not delete pushed OCI images from the registry. Repeated pause cycles create tags such as `snap-gen<N>`; configure registry retention or garbage collection externally.
 
 ### Monitoring
 

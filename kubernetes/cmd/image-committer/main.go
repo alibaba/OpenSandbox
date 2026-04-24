@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -78,6 +79,11 @@ func main() {
 			panic(r)
 		}
 	}()
+
+	if len(args) > 0 && args[0] == "unpause" {
+		runUnpause(args[1:])
+		return
+	}
 
 	// Parse arguments using unified format:
 	// <pod_name> <namespace> <container1:uri1> [container2:uri2...]
@@ -238,6 +244,36 @@ func main() {
 	fmt.Printf("SNAPSHOT_DIGEST=%s\n", firstDigest)
 }
 
+func runUnpause(args []string) {
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "ERROR: Missing required parameters")
+		fmt.Fprintln(os.Stderr, "Usage: image-committer unpause <pod_name> <namespace> <container_name> [container_name...]")
+		os.Exit(1)
+	}
+
+	podName := args[0]
+	namespace := args[1]
+	containerNames := args[2:]
+	errors := 0
+
+	for _, containerName := range containerNames {
+		containerID, err := getContainerIDByNerdctl(podName, namespace, containerName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: Failed to find container '%s': %v\n", containerName, err)
+			errors++
+			continue
+		}
+		if err := resumeContainer(containerID); err != nil {
+			fmt.Fprintf(os.Stderr, "ERROR: Failed to unpause container '%s': %v\n", containerName, err)
+			errors++
+		}
+	}
+
+	if errors > 0 {
+		os.Exit(1)
+	}
+}
+
 // parseContainerSpec parses a "container:uri" string into ContainerSpec
 func parseContainerSpec(specStr string) (ContainerSpec, error) {
 	parts := strings.SplitN(specStr, ":", 2)
@@ -356,11 +392,7 @@ func pushImage(targetImage string) error {
 	}
 	registryHost := imageParts[0]
 
-	isInsecure := strings.Contains(registryHost, "local") ||
-		strings.Contains(registryHost, "localhost") ||
-		strings.HasPrefix(registryHost, "127.") ||
-		strings.HasPrefix(registryHost, "10.") ||
-		strings.HasPrefix(registryHost, "192.168.")
+	isInsecure := shouldUseInsecureRegistry(registryHost)
 
 	// Try to login using credentials from mounted secret
 	credDir := "/var/run/opensandbox/registry"
@@ -454,6 +486,36 @@ func nerdctlLogin(configPath, registryHost string, insecure bool) error {
 
 	fmt.Printf("Login succeeded for %s\n", registryHost)
 	return nil
+}
+
+func shouldUseInsecureRegistry(registryHost string) bool {
+	if raw := strings.TrimSpace(os.Getenv("SNAPSHOT_REGISTRY_INSECURE")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err == nil {
+			return value
+		}
+		fmt.Fprintf(os.Stderr, "WARNING: invalid SNAPSHOT_REGISTRY_INSECURE=%q, falling back to registry host heuristic\n", raw)
+	}
+
+	return strings.Contains(registryHost, "local") ||
+		strings.Contains(registryHost, "localhost") ||
+		strings.HasPrefix(registryHost, "127.") ||
+		strings.HasPrefix(registryHost, "10.") ||
+		strings.HasPrefix(registryHost, "192.168.") ||
+		isPrivate172Registry(registryHost)
+}
+
+func isPrivate172Registry(registryHost string) bool {
+	host := strings.Split(registryHost, ":")[0]
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 || parts[0] != "172" {
+		return false
+	}
+	secondOctet, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return false
+	}
+	return secondOctet >= 16 && secondOctet <= 31
 }
 
 // getImageDigest uses nerdctl to get the digest of the image
