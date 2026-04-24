@@ -66,8 +66,13 @@ func (r *SandboxSnapshotReconciler) handlePending(ctx context.Context, snapshot 
 	sourcePodName := pod.Name
 	sourceNodeName := pod.Spec.NodeName
 
+	sourceContainers := pod.Spec.Containers
+	if bs.Spec.Template != nil {
+		sourceContainers = bs.Spec.Template.Spec.Containers
+	}
+
 	var containers []sandboxv1alpha1.ContainerSnapshot
-	for _, c := range bs.Spec.Template.Spec.Containers {
+	for _, c := range sourceContainers {
 		imageURI := fmt.Sprintf("%s/%s-%s:snap-gen%d", r.SnapshotRegistry, bs.Name, c.Name, bs.Generation)
 		containers = append(containers, sandboxv1alpha1.ContainerSnapshot{
 			ContainerName: c.Name,

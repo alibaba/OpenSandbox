@@ -639,6 +639,83 @@ func TestContinueResume_PoolMode(t *testing.T) {
 	assert.Equal(t, "", updated.Spec.PoolRef)
 }
 
+func TestContinueResume_UsesPatchedTemplateWhenCacheReturnsStaleObject(t *testing.T) {
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-pause",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.SandboxSnapshotSpec{SandboxName: "test-bs"},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase: sandboxv1alpha1.SandboxSnapshotPhaseSucceed,
+			Containers: []sandboxv1alpha1.ContainerSnapshot{
+				{ContainerName: "main", ImageURI: "registry/test-bs-main:snap-gen1"},
+			},
+		},
+	}
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(false),
+			PoolRef:  "test-pool",
+			Replicas: ptr.To(int32(0)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "old-img"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 2,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhaseResuming,
+		},
+	}
+	staleBatchSandbox := bs.DeepCopy()
+	returnStaleBatchSandbox := false
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(testscheme).
+		WithStatusSubresource(&sandboxv1alpha1.BatchSandbox{}, &sandboxv1alpha1.SandboxSnapshot{}).
+		WithObjects(bs.DeepCopy(), snapshot).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				err := c.Patch(ctx, obj, patch, opts...)
+				if err == nil && obj.GetNamespace() == "default" && obj.GetName() == "test-bs" {
+					returnStaleBatchSandbox = true
+				}
+				return err
+			},
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if returnStaleBatchSandbox && key.Namespace == "default" && key.Name == "test-bs" {
+					if target, ok := obj.(*sandboxv1alpha1.BatchSandbox); ok {
+						staleBatchSandbox.DeepCopyInto(target)
+						return nil
+					}
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	r := &BatchSandboxReconciler{
+		Client:   fakeClient,
+		Scheme:   testscheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	result, err := r.continueResume(context.Background(), bs)
+	require.NoError(t, err)
+	assert.True(t, result.RequeueAfter > 0)
+	require.NotNil(t, bs.Spec.Template)
+	assert.Equal(t, "registry/test-bs-main:snap-gen1", bs.Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, "", bs.Spec.PoolRef)
+	require.NotNil(t, bs.Spec.Replicas)
+	assert.Equal(t, int32(1), *bs.Spec.Replicas)
+}
+
 func TestContinueResume_SnapshotNotFound(t *testing.T) {
 	// continueResume without snapshot → rollback to Paused with ResumeFailed, spec.pause unchanged
 	bs := &sandboxv1alpha1.BatchSandbox{

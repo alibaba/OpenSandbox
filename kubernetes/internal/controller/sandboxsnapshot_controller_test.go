@@ -171,6 +171,66 @@ func TestSandboxSnapshotHandlePending_MissingRegistrySetsFailedCondition(t *test
 	assert.True(t, foundFailed, "Failed condition should be set when registry config is missing")
 }
 
+func TestSandboxSnapshotHandlePending_UsesSourcePodContainersWhenTemplateMissing(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			PoolRef: "test-pool",
+		},
+	}
+	setSandboxAllocation(bs, SandboxAllocation{Pods: []string{"pool-pod"}})
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pool-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-a",
+			Containers: []corev1.Container{
+				{Name: "sandbox-container", Image: "pool-image:latest"},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-snapshot",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.SandboxSnapshotSpec{
+			SandboxName: "test-bs",
+		},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase: sandboxv1alpha1.SandboxSnapshotPhasePending,
+		},
+	}
+
+	r := newTestSnapshotReconciler(bs, pod, snapshot)
+	r.SnapshotRegistry = "registry.default.svc.cluster.local:5000"
+
+	result, err := r.handlePending(context.Background(), snapshot)
+	require.NoError(t, err)
+	assert.Equal(t, time.Second, result.RequeueAfter)
+
+	updated := &sandboxv1alpha1.SandboxSnapshot{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "test-snapshot", Namespace: "default"}, updated))
+	assert.Equal(t, sandboxv1alpha1.SandboxSnapshotPhaseCommitting, updated.Status.Phase)
+	assert.Equal(t, "pool-pod", updated.Status.SourcePodName)
+	assert.Equal(t, "node-a", updated.Status.SourceNodeName)
+	require.Len(t, updated.Status.Containers, 1)
+	assert.Equal(t, "sandbox-container", updated.Status.Containers[0].ContainerName)
+	assert.Equal(t, "registry.default.svc.cluster.local:5000/test-bs-sandbox-container:snap-gen2", updated.Status.Containers[0].ImageURI)
+
+	job := &batchv1.Job{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "test-snapshot-commit", Namespace: "default"}, job))
+}
+
 func TestBuildCommitJob_SetsBoundedBackoffLimit(t *testing.T) {
 	snapshot := &sandboxv1alpha1.SandboxSnapshot{
 		ObjectMeta: metav1.ObjectMeta{

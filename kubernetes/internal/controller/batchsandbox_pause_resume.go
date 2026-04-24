@@ -441,6 +441,7 @@ func (r *BatchSandboxReconciler) continueResume(ctx context.Context, bs *sandbox
 		imageMap[c.ContainerName] = c.ImageURI
 	}
 
+	var patched *sandboxv1alpha1.BatchSandbox
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		latest := &sandboxv1alpha1.BatchSandbox{}
 		if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: bs.Name}, latest); err != nil {
@@ -463,13 +464,18 @@ func (r *BatchSandboxReconciler) continueResume(ctx context.Context, bs *sandbox
 			latest.Spec.PoolRef = ""
 		}
 
-		return r.Patch(ctx, latest, patch)
+		if err := r.Patch(ctx, latest, patch); err != nil {
+			return err
+		}
+		patched = latest.DeepCopy()
+		return nil
 	}); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: bs.Name}, bs); err != nil {
-		return ctrl.Result{}, err
+	if patched != nil {
+		bs.ObjectMeta = patched.ObjectMeta
+		bs.Spec = patched.Spec
 	}
 
 	return ctrl.Result{RequeueAfter: time.Second}, nil
