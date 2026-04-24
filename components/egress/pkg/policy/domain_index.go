@@ -71,6 +71,9 @@ func (idx *compiledDomainIndex) match(domain string) (string, bool) {
 	matched := false
 
 	if rule, ok := idx.exact[domain]; ok {
+		if rule.index == 0 {
+			return rule.action, true
+		}
 		best = rule
 		matched = true
 	}
@@ -82,6 +85,9 @@ func (idx *compiledDomainIndex) match(domain string) (string, bool) {
 		}
 		suffix := cursor[dot:]
 		if rule, ok := idx.wildcard[suffix]; ok {
+			if rule.index == 0 {
+				return rule.action, true
+			}
 			if !matched || rule.index < best.index {
 				best = rule
 				matched = true
