@@ -54,6 +54,16 @@ def _app_config_with_execd_resources(execd_init_resources: ExecdInitResources) -
         ),
     )
 
+def _app_config_with_image_pull_policy(image_pull_policy: str) -> AppConfig:
+    """Build an AppConfig with image_pull_policy set."""
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="execd:test"),
+        kubernetes=KubernetesRuntimeConfig(
+            namespace="test-ns",
+            image_pull_policy=image_pull_policy,
+        ),
+    )
+
 def _app_config_with_egress_disable_ipv6(disable_ipv6: bool = True) -> AppConfig:
     """Build an AppConfig with ``egress.disable_ipv6`` set (privileged execd init when egress is used)."""
     return AppConfig(
@@ -273,6 +283,31 @@ spec:
         init_container = body["spec"]["template"]["spec"]["initContainers"][0]
         assert init_container["resources"]["limits"] == {"cpu": "100m", "memory": "128Mi"}
         assert init_container["resources"]["requests"] == {"cpu": "50m", "memory": "64Mi"}
+
+    def test_create_workload_sets_configured_image_pull_policy(self, mock_k8s_client):
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_image_pull_policy("Always"),
+        )
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test", "uid": "uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:test",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        main_container = body["spec"]["template"]["spec"]["containers"][0]
+        assert main_container["imagePullPolicy"] == "Always"
     
     def test_create_workload_wraps_entrypoint_with_bootstrap(self, mock_k8s_client):
         provider = BatchSandboxProvider(mock_k8s_client)

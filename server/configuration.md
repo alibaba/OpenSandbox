@@ -115,6 +115,7 @@ If `runtime.type = "kubernetes"` and the `[kubernetes]` table is absent, the ser
 | `service_account` | string \| omitted | `null` | ServiceAccount name bound to workload pods. |
 | `workload_provider` | string \| omitted | `null` | One of: **`batchsandbox`**, **`agent-sandbox`**. If omitted, the **first registered** provider is used (currently **`batchsandbox`**). |
 | `batchsandbox_template_file` | string \| omitted | `null` | Path to **BatchSandbox** CR YAML template when `workload_provider = "batchsandbox"`. |
+| `image_pull_policy` | string \| omitted | `"IfNotPresent"` | Image pull policy for the BatchSandbox main container. Values: **`Always`**, **`IfNotPresent`**, **`Never`**. |
 | `sandbox_create_timeout_seconds` | integer | `60` | Max time to wait for a new sandbox to become ready (e.g. IP assigned), in seconds. |
 | `sandbox_create_poll_interval_seconds` | float | `1.0` | Poll interval while waiting for readiness. |
 | `informer_enabled` | boolean | `true` | **[Beta]** Use informer/watch cache for reads to reduce API load. |
@@ -134,9 +135,10 @@ Kubernetes workloads are created by a **workload provider**. There is **no** `[b
 |--|--------------------------------------|--------------------------------------------------------------------------------------------------------|
 | `kubernetes.workload_provider` | `"batchsandbox"` or **omit** (factory default is `batchsandbox`) | `"agent-sandbox"` |
 | Template file | **`kubernetes.batchsandbox_template_file`** — path to **BatchSandbox** CR YAML | **`agent_sandbox.template_file`** in [`[agent_sandbox]`](#agent_sandbox--only-with-kubernetes--agent-sandbox) |
+| Image pull policy | **`kubernetes.image_pull_policy`** — writes `imagePullPolicy` into the BatchSandbox pod template main container | Not currently used |
 | Extra TOML table | None | **`[agent_sandbox]`** is required (see below) |
 
-**BatchSandbox-only config key in `config.py`:** `batchsandbox_template_file` on `KubernetesRuntimeConfig`. Everything else in the `[kubernetes]` table (namespace, kubeconfig, informer, API QPS, `sandbox_create_*`, `execd_init_resources`, …) applies to **whichever** provider you select.
+**BatchSandbox-only config keys in `config.py`:** `batchsandbox_template_file` and `image_pull_policy` on `KubernetesRuntimeConfig`. Everything else in the `[kubernetes]` table (namespace, kubeconfig, informer, API QPS, `sandbox_create_*`, `execd_init_resources`, …) applies to **whichever** provider you select.
 
 ### `kubernetes.execd_init_resources`
 

@@ -37,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -154,26 +155,13 @@ func (r *PoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	batchSandboxes := make([]*sandboxv1alpha1.BatchSandbox, 0, len(batchSandboxList.Items))
 	for i := range batchSandboxList.Items {
 		batchSandbox := batchSandboxList.Items[i]
-		if !shouldManageBatchSandboxInPool(&batchSandbox) {
+		if batchSandbox.Spec.Template != nil {
 			continue
 		}
 		batchSandboxes = append(batchSandboxes, &batchSandbox)
 	}
 	log.Info("Pool reconcile", "pool", pool.Name, "pods", len(pods), "batchSandboxes", len(batchSandboxes))
 	return r.reconcilePool(ctx, pool, batchSandboxes, pods)
-}
-
-func shouldManageBatchSandboxInPool(batchSandbox *sandboxv1alpha1.BatchSandbox) bool {
-	if batchSandbox == nil {
-		return false
-	}
-	if batchSandbox.Spec.PoolRef == "" {
-		return false
-	}
-	// Pause solidifies the pool template onto the BatchSandbox before the snapshot commits.
-	// Keep the sandbox visible to pool scheduling until resume detaches it by clearing poolRef,
-	// otherwise the source pool pod can be GC'd and recycled mid-snapshot.
-	return true
 }
 
 // reconcilePool contains the main reconciliation logic
@@ -312,6 +300,32 @@ func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconci
 		}
 	}
 
+	filterBatchSandboxDetached := predicate.Funcs{
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldObj, okOld := e.ObjectOld.(*sandboxv1alpha1.BatchSandbox)
+			newObj, okNew := e.ObjectNew.(*sandboxv1alpha1.BatchSandbox)
+			if !okOld || !okNew {
+				return false
+			}
+			return oldObj.Spec.PoolRef != "" && newObj.Spec.PoolRef == ""
+		},
+	}
+
+	enqueueOldPoolForDetachedBatchSandbox := handler.Funcs{
+		UpdateFunc: func(_ context.Context, e event.UpdateEvent, q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			oldObj, ok := e.ObjectOld.(*sandboxv1alpha1.BatchSandbox)
+			if !ok || oldObj.Spec.PoolRef == "" {
+				return
+			}
+			q.Add(reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: oldObj.Namespace,
+					Name:      oldObj.Spec.PoolRef,
+				},
+			})
+		},
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&sandboxv1alpha1.Pool{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.Pod{}).
@@ -319,6 +333,11 @@ func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconci
 			&sandboxv1alpha1.BatchSandbox{},
 			handler.EnqueueRequestsFromMapFunc(findPoolForBatchSandbox),
 			builder.WithPredicates(filterBatchSandbox),
+		).
+		Watches(
+			&sandboxv1alpha1.BatchSandbox{},
+			enqueueOldPoolForDetachedBatchSandbox,
+			builder.WithPredicates(filterBatchSandboxDetached),
 		).
 		Named("pool").
 		WithOptions(controller.Options{MaxConcurrentReconciles: maxConcurrentReconciles}).

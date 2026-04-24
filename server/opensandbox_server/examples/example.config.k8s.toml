@@ -57,6 +57,10 @@ informer_watch_timeout_seconds = 60
 # If not specified, uses the first registered provider (typically "batchsandbox")
 workload_provider = "batchsandbox"
 
+# Image pull policy for the BatchSandbox main container.
+# Values: "Always", "IfNotPresent", "Never".
+image_pull_policy = "IfNotPresent"
+
 # Path to the BatchSandbox template file
 batchsandbox_template_file = "~/batchsandbox-template.yaml"
 

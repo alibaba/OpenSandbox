@@ -16,7 +16,6 @@ package controller
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -62,6 +61,42 @@ func snapshotFailureMessage(snapshot *sandboxv1alpha1.SandboxSnapshot) string {
 		}
 	}
 	return "snapshot failed"
+}
+
+func copyPodTemplateMap(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	copied := make(map[string]string, len(values))
+	for key, value := range values {
+		copied[key] = value
+	}
+	if len(copied) == 0 {
+		return nil
+	}
+	return copied
+}
+
+func sourcePodTemplateForPause(pod *corev1.Pod) *corev1.PodTemplateSpec {
+	if pod == nil {
+		return nil
+	}
+	labels := copyPodTemplateMap(pod.Labels)
+	delete(labels, LabelPoolName)
+	delete(labels, LabelPoolRevision)
+	delete(labels, LabelBatchSandboxNameKey)
+	delete(labels, LabelBatchSandboxPodIndexKey)
+
+	spec := *pod.Spec.DeepCopy()
+	spec.NodeName = ""
+
+	return &corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels:      labels,
+			Annotations: copyPodTemplateMap(pod.Annotations),
+		},
+		Spec: spec,
+	}
 }
 
 func (r *BatchSandboxReconciler) deleteInternalPauseSnapshot(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox) error {
@@ -173,56 +208,10 @@ func (r *BatchSandboxReconciler) dispatchPauseResume(ctx context.Context, bs *sa
 }
 
 // handlePause implements the pause flow:
-// 1. Pool mode: solidify template from Pool CR
-// 2. ACK (pauseObservedGeneration + phase=Pausing)
-// 3. Create SandboxSnapshot child resource
+// 1. ACK (pauseObservedGeneration + phase=Pausing)
+// 2. Create SandboxSnapshot child resource
 func (r *BatchSandboxReconciler) handlePause(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-
-	if bs.Spec.Template == nil && bs.Spec.PoolRef != "" {
-		pool := &sandboxv1alpha1.Pool{}
-		if err := r.Get(ctx, types.NamespacedName{Name: bs.Spec.PoolRef, Namespace: bs.Namespace}, pool); err != nil {
-			msg := fmt.Sprintf("pool CR %s not found: %v", bs.Spec.PoolRef, err)
-			log.Error(err, msg)
-			phase := sandboxv1alpha1.BatchSandboxPhaseSucceed
-			reason := "PoolTemplateMissing"
-			if _, podErr := r.findPodForSandbox(ctx, bs); podErr != nil {
-				phase = sandboxv1alpha1.BatchSandboxPhaseFailed
-				reason = "PodNotFound"
-			}
-			_ = r.ackPauseWithPhase(ctx, bs, phase, "")
-			_ = r.setCondition(ctx, bs, sandboxv1alpha1.BatchSandboxConditionPauseFailed, sandboxv1alpha1.ConditionTrue, reason, msg)
-			return ctrl.Result{}, nil
-		}
-		if pool.Spec.Template == nil {
-			msg := fmt.Sprintf("pool CR %s has nil template", bs.Spec.PoolRef)
-			log.Error(nil, msg)
-			phase := sandboxv1alpha1.BatchSandboxPhaseSucceed
-			reason := "PoolTemplateMissing"
-			if _, podErr := r.findPodForSandbox(ctx, bs); podErr != nil {
-				phase = sandboxv1alpha1.BatchSandboxPhaseFailed
-				reason = "PodNotFound"
-			}
-			_ = r.ackPauseWithPhase(ctx, bs, phase, "")
-			_ = r.setCondition(ctx, bs, sandboxv1alpha1.BatchSandboxConditionPauseFailed, sandboxv1alpha1.ConditionTrue, reason, msg)
-			return ctrl.Result{}, nil
-		}
-		if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			latest := &sandboxv1alpha1.BatchSandbox{}
-			if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: bs.Name}, latest); err != nil {
-				return err
-			}
-			patch := client.MergeFrom(latest.DeepCopy())
-			latest.Spec.Template = pool.Spec.Template.DeepCopy()
-			return r.Patch(ctx, latest, patch)
-		}); err != nil {
-			return ctrl.Result{}, err
-		}
-		if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: bs.Name}, bs); err != nil {
-			return ctrl.Result{}, err
-		}
-		log.Info("Solidified Pool template", "pool", bs.Spec.PoolRef)
-	}
 
 	snapshot := &sandboxv1alpha1.SandboxSnapshot{}
 	snapshotName := internalPauseSnapshotName(bs.Name)
@@ -333,12 +322,47 @@ func (r *BatchSandboxReconciler) syncPauseOrClear(ctx context.Context, bs *sandb
 // completePause finalizes the pause operation:
 //  1. Set phase=Paused
 //  2. Normal mode: delete all Pods (cascade via OwnerRef)
-//  3. Pool mode: set alloc-release annotation (Pool Controller will release Pods)
+//  3. Pool mode: solidify the source Pod template and clear poolRef. Pool Controller GC
+//     then releases and deletes the old allocated pool Pod.
 //  4. spec.pause remains unchanged; the next external request (or server retry bridge)
 //     is responsible for changing it.
 func (r *BatchSandboxReconciler) completePause(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox) error {
 	log := logf.FromContext(ctx)
 	poolStrategy := strategy.NewPoolStrategy(bs)
+
+	pods, err := r.listPods(ctx, poolStrategy, bs)
+	if err != nil {
+		return err
+	}
+
+	var pooledTemplate *corev1.PodTemplateSpec
+	if poolStrategy.IsPooledMode() {
+		if len(pods) == 0 {
+			return fmt.Errorf("no allocated pods found for pooled BatchSandbox %s/%s", bs.Namespace, bs.Name)
+		}
+		pooledTemplate = sourcePodTemplateForPause(pods[0])
+		if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			latest := &sandboxv1alpha1.BatchSandbox{}
+			if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: bs.Name}, latest); err != nil {
+				return err
+			}
+			patch := client.MergeFrom(latest.DeepCopy())
+			latest.Spec.Template = pooledTemplate.DeepCopy()
+			latest.Spec.PoolRef = ""
+			if latest.Annotations != nil {
+				delete(latest.Annotations, AnnoAllocReleaseKey)
+			}
+			return r.Patch(ctx, latest, patch)
+		}); err != nil {
+			return err
+		}
+		bs.Spec.Template = pooledTemplate.DeepCopy()
+		bs.Spec.PoolRef = ""
+		if bs.Annotations != nil {
+			delete(bs.Annotations, AnnoAllocReleaseKey)
+		}
+		log.Info("Detached pooled BatchSandbox after pause", "sourcePod", pods[0].Name)
+	}
 
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		latest := &sandboxv1alpha1.BatchSandbox{}
@@ -352,42 +376,11 @@ func (r *BatchSandboxReconciler) completePause(ctx context.Context, bs *sandboxv
 		return err
 	}
 
-	pods, err := r.listPods(ctx, poolStrategy, bs)
-	if err != nil {
-		return err
-	}
-
 	controllerKey := controllerutils.GetControllerKey(bs)
 	BatchSandboxScaleExpectations.DeleteExpectations(controllerKey)
 	log.Info("Cleared scale expectations before pod deletion", "controllerKey", controllerKey)
 
 	if poolStrategy.IsPooledMode() {
-		if len(pods) > 0 {
-			podNames := make([]string, 0, len(pods))
-			for _, pod := range pods {
-				podNames = append(podNames, pod.Name)
-			}
-			release := AllocationRelease{Pods: podNames}
-			raw, err := json.Marshal(release)
-			if err != nil {
-				return fmt.Errorf("failed to marshal alloc-release: %v", err)
-			}
-			if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-				latest := &sandboxv1alpha1.BatchSandbox{}
-				if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: bs.Name}, latest); err != nil {
-					return err
-				}
-				patch := client.MergeFrom(latest.DeepCopy())
-				if latest.Annotations == nil {
-					latest.Annotations = make(map[string]string)
-				}
-				latest.Annotations[AnnoAllocReleaseKey] = string(raw)
-				return r.Patch(ctx, latest, patch)
-			}); err != nil {
-				return err
-			}
-			log.Info("Set alloc-release annotation for Pool mode pause", "pods", podNames)
-		}
 		r.deleteTaskScheduler(ctx, bs)
 		return nil
 	}

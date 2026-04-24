@@ -164,6 +164,7 @@ class BatchSandboxProvider(WorkloadProvider):
             resource_limits=resource_limits,
             include_execd_volume=True,
             has_network_policy=network_policy is not None,
+            image_pull_policy=self.image_pull_policy,
         )
         
         containers = [_container_to_dict(main_container)]

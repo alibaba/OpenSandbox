@@ -82,6 +82,7 @@ def _build_main_container(
     *,
     include_execd_volume: bool,
     has_network_policy: bool = False,
+    image_pull_policy: Optional[str] = None,
 ) -> V1Container:
     env_vars = [V1EnvVar(name=k, value=v) for k, v in env.items()]
     env_vars.append(V1EnvVar(name="EXECD", value="/opt/opensandbox/bin/execd"))
@@ -110,6 +111,7 @@ def _build_main_container(
     return V1Container(
         name="sandbox",
         image=image_spec.uri,
+        image_pull_policy=image_pull_policy,
         command=["/opt/opensandbox/bin/bootstrap.sh"] + entrypoint,
         env=env_vars if env_vars else None,
         resources=resources,
@@ -123,6 +125,8 @@ def _container_to_dict(container: V1Container) -> Dict[str, Any]:
         "name": container.name,
         "image": container.image,
     }
+    if container.image_pull_policy:
+        result["imagePullPolicy"] = container.image_pull_policy
     if container.command:
         result["command"] = container.command
     if container.args:

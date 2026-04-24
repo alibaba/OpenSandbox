@@ -18,9 +18,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -242,7 +242,7 @@ func (r *BatchSandboxReconciler) persistRuntimeView(
 	if err := r.patchBatchSandboxEndpoints(ctx, batchSbx, view.endpointIPs); err != nil {
 		aggErrors = append(aggErrors, err)
 	}
-	if reflect.DeepEqual(view.status, batchSbx.Status) {
+	if equality.Semantic.DeepEqual(*view.status, batchSbx.Status) {
 		return aggErrors
 	}
 

@@ -57,6 +57,10 @@ informer_watch_timeout_seconds = 60
 # If not specified, uses the first registered provider (typically "batchsandbox")
 workload_provider = "batchsandbox"
 
+# BatchSandbox 主容器的镜像拉取策略。
+# 可选值："Always"、"IfNotPresent"、"Never"。
+image_pull_policy = "IfNotPresent"
+
 # Path to the BatchSandbox template file
 # Replace with your path
 batchsandbox_template_file = "~/batchsandbox-template.yaml"

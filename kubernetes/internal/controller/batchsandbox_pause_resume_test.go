@@ -31,6 +31,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	taskscheduler "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/scheduler"
@@ -305,7 +306,7 @@ func TestHandlePause_NormalFlow(t *testing.T) {
 }
 
 func TestHandlePause_PoolMode(t *testing.T) {
-	// Pool mode: verify template solidified from Pool CR before creating snapshot
+	// Pool mode: pause should snapshot the allocated pod without mutating poolRef/template first.
 	pool := &sandboxv1alpha1.Pool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pool",
@@ -347,8 +348,8 @@ func TestHandlePause_PoolMode(t *testing.T) {
 	// Verify template was solidified from Pool
 	updated := &sandboxv1alpha1.BatchSandbox{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
-	require.NotNil(t, updated.Spec.Template)
-	assert.Equal(t, "pool-image:latest", updated.Spec.Template.Spec.Containers[0].Image)
+	assert.Nil(t, updated.Spec.Template)
+	assert.Equal(t, "test-pool", updated.Spec.PoolRef)
 
 	// Verify SandboxSnapshot was created under the reserved internal name
 	snap := &sandboxv1alpha1.SandboxSnapshot{}
@@ -356,8 +357,8 @@ func TestHandlePause_PoolMode(t *testing.T) {
 	assert.Equal(t, "test-bs", snap.Spec.SandboxName)
 }
 
-func TestHandlePause_PoolNotFound(t *testing.T) {
-	// Pool CR not found → Phase=Failed + PauseFailed condition, spec.pause remains unchanged
+func TestHandlePause_PoolModeDoesNotRequirePoolCR(t *testing.T) {
+	// The source pod allocation is enough to snapshot a pooled BatchSandbox.
 	bs := &sandboxv1alpha1.BatchSandbox{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "test-bs",
@@ -375,32 +376,31 @@ func TestHandlePause_PoolNotFound(t *testing.T) {
 			PauseObservedGeneration: 1,
 		},
 	}
-	// No Pod created - simulates Pod not found scenario (non-retryable)
-	r := newTestReconciler(bs)
+	setSandboxAllocation(bs, SandboxAllocation{Pods: []string{"pool-pod"}})
+	poolPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pool-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main", Image: "pool-image:latest"}},
+		},
+	}
+	r := newTestReconciler(bs, poolPod)
 
 	result, err := r.handlePause(context.Background(), bs)
 	require.NoError(t, err)
-	assert.Equal(t, ctrl.Result{}, result)
+	assert.True(t, result.RequeueAfter > 0)
 
-	// Verify Phase=Failed with PauseFailed condition (Pod not found, so non-retryable)
 	updated := &sandboxv1alpha1.BatchSandbox{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
-	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhaseFailed, updated.Status.Phase)
-	require.NotNil(t, updated.Spec.Pause)
-	assert.True(t, *updated.Spec.Pause)
+	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhasePausing, updated.Status.Phase)
+	assert.Nil(t, updated.Spec.Template)
+	assert.Equal(t, "nonexistent-pool", updated.Spec.PoolRef)
 
-	// Verify PauseFailed condition is set
-	foundCondition := false
-	for _, cond := range updated.Status.Conditions {
-		if cond.Type == sandboxv1alpha1.BatchSandboxConditionPauseFailed {
-			foundCondition = true
-			assert.Equal(t, sandboxv1alpha1.ConditionTrue, cond.Status)
-			assert.Equal(t, "PodNotFound", cond.Reason)
-			assert.Contains(t, cond.Message, "pool CR nonexistent-pool not found")
-			break
-		}
-	}
-	assert.True(t, foundCondition, "PauseFailed condition should be set")
+	snap := &sandboxv1alpha1.SandboxSnapshot{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs-pause"}, snap))
+	assert.Equal(t, "test-bs", snap.Spec.SandboxName)
 }
 
 func TestHandlePause_FailedRetry(t *testing.T) {
@@ -1059,6 +1059,9 @@ func TestCompletePause_PooledModeClearsTaskScheduler(t *testing.T) {
 			Name:      "pool-pod",
 			Namespace: "default",
 		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main", Image: "pool-image:latest"}},
+		},
 		Status: corev1.PodStatus{
 			PodIP: "10.0.0.8",
 		},
@@ -1074,7 +1077,10 @@ func TestCompletePause_PooledModeClearsTaskScheduler(t *testing.T) {
 	updated := &sandboxv1alpha1.BatchSandbox{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: bs.Namespace, Name: bs.Name}, updated))
 	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhasePaused, updated.Status.Phase)
-	assert.Equal(t, `{"pods":["pool-pod"]}`, updated.Annotations[AnnoAllocReleaseKey])
+	assert.Equal(t, "", updated.Spec.PoolRef)
+	require.NotNil(t, updated.Spec.Template)
+	assert.Equal(t, "pool-image:latest", updated.Spec.Template.Spec.Containers[0].Image)
+	assert.NotContains(t, updated.Annotations, AnnoAllocReleaseKey)
 
 	_, ok := r.taskSchedulers.Load(key)
 	assert.False(t, ok, "completePause should clear the stale in-memory task scheduler")
@@ -1171,6 +1177,83 @@ func TestPersistRuntimeView_PreservesPauseFailedConditionFromLatestStatus(t *tes
 		}
 	}
 	assert.True(t, foundPauseFailed, "persistRuntimeView should preserve latest PauseFailed condition")
+}
+
+func TestPersistRuntimeView_SkipsStatusUpdateWhenRuntimeStatusUnchanged(t *testing.T) {
+	transitionTime := metav1.NewTime(time.Now().Add(-5 * time.Minute))
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 3,
+			UID:        "test-uid",
+			Annotations: map[string]string{
+				AnnotationSandboxEndpoints: `["10.0.0.10"]`,
+			},
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Replicas: ptr.To(int32(1)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "img"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			ObservedGeneration: 3,
+			Phase:              sandboxv1alpha1.BatchSandboxPhaseSucceed,
+			Replicas:           1,
+			Allocated:          1,
+			Ready:              1,
+			Conditions: []sandboxv1alpha1.BatchSandboxCondition{
+				{
+					Type:               sandboxv1alpha1.BatchSandboxConditionReady,
+					Status:             sandboxv1alpha1.ConditionTrue,
+					Reason:             "PodsReady",
+					Message:            "Sandbox is running",
+					LastTransitionTime: &transitionTime,
+				},
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-0",
+			Namespace: "default",
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			PodIP: "10.0.0.10",
+			Conditions: []corev1.PodCondition{
+				{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+			},
+		},
+	}
+
+	statusUpdates := 0
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(testscheme).
+		WithStatusSubresource(&sandboxv1alpha1.BatchSandbox{}).
+		WithObjects(bs).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				if subResourceName == "status" {
+					statusUpdates++
+				}
+				return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	r := &BatchSandboxReconciler{
+		Client:   fakeClient,
+		Scheme:   testscheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	view := buildRuntimeView(bs.DeepCopy(), []*corev1.Pod{pod})
+	errs := r.persistRuntimeView(context.Background(), bs.DeepCopy(), view)
+	require.Empty(t, errs)
+	assert.Equal(t, 0, statusUpdates, "unchanged runtime status should not be persisted again")
 }
 
 func TestBuildRuntimeView_AggregatesPodFailuresInSteadyState(t *testing.T) {
@@ -1448,7 +1531,7 @@ func TestCompletePause(t *testing.T) {
 	assert.True(t, *updated.Spec.Pause)
 }
 
-func TestCompletePause_PooledSandboxReleasesAllocatedPods(t *testing.T) {
+func TestCompletePause_PooledSandboxDetachesForPoolGC(t *testing.T) {
 	bs := &sandboxv1alpha1.BatchSandbox{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "test-bs",
@@ -1472,6 +1555,11 @@ func TestCompletePause_PooledSandboxReleasesAllocatedPods(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "pool-pod-1",
 			Namespace: "default",
+			Labels: map[string]string{
+				LabelPoolName:     "test-pool",
+				LabelPoolRevision: "rev-1",
+				"app":             "demo",
+			},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: sandboxv1alpha1.SchemeBuilder.GroupVersion.String(),
@@ -1480,6 +1568,10 @@ func TestCompletePause_PooledSandboxReleasesAllocatedPods(t *testing.T) {
 					UID:        "test-pool-uid",
 				},
 			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName:   "node-a",
+			Containers: []corev1.Container{{Name: "main", Image: "pool-image:latest"}},
 		},
 	}
 
@@ -1491,13 +1583,14 @@ func TestCompletePause_PooledSandboxReleasesAllocatedPods(t *testing.T) {
 	updated := &sandboxv1alpha1.BatchSandbox{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
 	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhasePaused, updated.Status.Phase)
-
-	release, err := parseSandboxReleased(updated)
-	require.NoError(t, err)
-	assert.Equal(t, []string{"pool-pod-1"}, release.Pods)
-
-	stillPresent := &corev1.Pod{}
-	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pool-pod-1"}, stillPresent))
+	assert.Equal(t, "", updated.Spec.PoolRef)
+	require.NotNil(t, updated.Spec.Template)
+	assert.Equal(t, "pool-image:latest", updated.Spec.Template.Spec.Containers[0].Image)
+	assert.Equal(t, "demo", updated.Spec.Template.Labels["app"])
+	assert.NotContains(t, updated.Spec.Template.Labels, LabelPoolName)
+	assert.NotContains(t, updated.Spec.Template.Labels, LabelPoolRevision)
+	assert.Equal(t, "", updated.Spec.Template.Spec.NodeName)
+	assert.NotContains(t, updated.Annotations, AnnoAllocReleaseKey)
 }
 
 // ---------- syncPauseOrClear tests ----------

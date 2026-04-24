@@ -496,7 +496,7 @@ var _ = Describe("Pool allocate", func() {
 			Expect(k8sClient.Delete(ctx, batchSandbox)).To(Succeed())
 		})
 
-		It("should keep an allocated pod while a pooled BatchSandbox solidifies its template", func() {
+		It("should GC allocation when a pooled BatchSandbox detaches from its pool", func() {
 			pool := &sandboxv1alpha1.Pool{}
 			bsbxNamespaceName := types.NamespacedName{
 				Name:      "batch-sandbox-solidify-test-" + rand.String(8),
@@ -531,6 +531,7 @@ var _ = Describe("Pool allocate", func() {
 					return err
 				}
 				latest.Spec.Template = pool.Spec.Template.DeepCopy()
+				latest.Spec.PoolRef = ""
 				return k8sClient.Update(ctx, latest)
 			})).To(Succeed())
 
@@ -546,18 +547,22 @@ var _ = Describe("Pool allocate", func() {
 				return k8sClient.Update(ctx, latestPool)
 			})).To(Succeed())
 
-			Consistently(func(g Gomega) {
+			Eventually(func(g Gomega) {
 				g.Expect(k8sClient.Get(ctx, typeNamespacedName, pool)).To(Succeed())
 				allocation, err := getPoolAllocation(pool)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(allocation.PodAllocation).To(HaveKeyWithValue(allocatedPod, batchSandbox.Name))
+				g.Expect(allocation.PodAllocation).NotTo(HaveKey(allocatedPod))
 
 				pod := &v1.Pod{}
-				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+				err = k8sClient.Get(ctx, types.NamespacedName{
 					Name:      allocatedPod,
 					Namespace: typeNamespacedName.Namespace,
-				}, pod)).To(Succeed())
-				g.Expect(pod.DeletionTimestamp).To(BeNil())
+				}, pod)
+				if err == nil {
+					g.Expect(pod.DeletionTimestamp).NotTo(BeNil())
+				} else {
+					g.Expect(errors.IsNotFound(err)).To(BeTrue())
+				}
 			}, 5*time.Second, interval).Should(Succeed())
 
 			Expect(k8sClient.Delete(ctx, batchSandbox)).To(Succeed())

@@ -26,7 +26,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -176,7 +175,6 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	runtimeView := buildRuntimeView(batchSbx, pods)
-	aggErrors = append(aggErrors, r.persistRuntimeView(ctx, batchSbx, runtimeView)...)
 
 	if batchSbx.Status.Phase == sandboxv1alpha1.BatchSandboxPhasePaused {
 		r.deleteTaskScheduler(ctx, batchSbx)
@@ -187,35 +185,15 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err != nil {
 			aggErrors = append(aggErrors, err)
 		} else if ts != nil {
-			newStatus.TaskRunning = ts.Running
-			newStatus.TaskFailed = ts.Failed
-			newStatus.TaskSucceed = ts.Succeed
-			newStatus.TaskUnknown = ts.Unknown
-			newStatus.TaskPending = ts.Pending
+			runtimeView.status.TaskRunning = ts.Running
+			runtimeView.status.TaskFailed = ts.Failed
+			runtimeView.status.TaskSucceed = ts.Succeed
+			runtimeView.status.TaskUnknown = ts.Unknown
+			runtimeView.status.TaskPending = ts.Pending
 		}
 	}
 
-	if !equality.Semantic.DeepEqual(*newStatus, batchSbx.Status) {
-		log.Info("To update BatchSandbox status", "replicas", newStatus.Replicas, "allocated", newStatus.Allocated, "ready", newStatus.Ready)
-		patchData, err := json.Marshal(map[string]any{
-			"status": map[string]any{
-				"replicas":           newStatus.Replicas,
-				"allocated":          newStatus.Allocated,
-				"ready":              newStatus.Ready,
-				"observedGeneration": newStatus.ObservedGeneration,
-				"taskRunning":        newStatus.TaskRunning,
-				"taskFailed":         newStatus.TaskFailed,
-				"taskSucceed":        newStatus.TaskSucceed,
-				"taskUnknown":        newStatus.TaskUnknown,
-				"taskPending":        newStatus.TaskPending,
-			},
-		})
-		if err != nil {
-			aggErrors = append(aggErrors, err)
-		} else if err := r.Status().Patch(ctx, batchSbx, client.RawPatch(types.MergePatchType, patchData)); err != nil {
-			aggErrors = append(aggErrors, err)
-		}
-	}
+	aggErrors = append(aggErrors, r.persistRuntimeView(ctx, batchSbx, runtimeView)...)
 
 	return reconcile.Result{RequeueAfter: DurationStore.Pop(req.String())}, gerrors.Join(aggErrors...)
 }
