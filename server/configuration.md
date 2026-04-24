@@ -60,7 +60,7 @@ Example files in this repository:
 |-----|------|---------|-------------|
 | `host` | string | `"0.0.0.0"` | Bind address for the HTTP API. |
 | `port` | integer | `8080` | Listen port (1–65535). |
-| `api_key` | string \| omitted | `null` | If set to a non-empty string, requests must send header `OPEN-SANDBOX-API-KEY` with this value (except documented public routes such as `/health`, `/docs`, `/redoc`). If omitted or empty, API key checks are skipped (typical for local dev only). |
+| `api_key` | string \| omitted | `null` | If set to a non-empty string, requests must send header `OPEN-SANDBOX-API-KEY` with this value (except documented public routes such as `/health`, `/docs`, `/redoc`). If omitted or empty, API key checks are skipped, but startup now requires explicit risk acknowledgment: interactive TTY confirmation (`YES`) or `OPENSANDBOX_INSECURE_SERVER=YES`. |
 | `eip` | string \| omitted | `null` | Public IP or hostname used as the **host part** when the server returns sandbox endpoint URLs (notably Docker runtime). |
 | `max_sandbox_timeout_seconds` | integer \| omitted | `null` | Upper bound on sandbox TTL in seconds for **create** requests that specify `timeout`. Must be ≥ **60** if set. Omit to disable the server-side cap. |
 | `timeout_keep_alive` | integer | `30` | Idle keep-alive timeout (seconds) passed to uvicorn. |
@@ -164,6 +164,7 @@ Used with the **kubernetes-sigs/agent-sandbox** Sandbox CRD provider.
 ## `[ingress]`
 
 Controls how **ingress exposure** is described for sandbox endpoints (especially behind gateways). **When `runtime.type = "docker"`, only `mode = "direct"` is allowed.**
+`secureAccess` is currently supported only for **Kubernetes** sandboxes when **`ingress.mode = "gateway"`**.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
@@ -215,7 +216,7 @@ Host-side storage related to **volume mounts** (host bind allowlist and OSSFS mo
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `allowed_host_paths` | list of strings | `[]` | Absolute path **prefixes** allowed for **host** bind mounts. If **empty**, all host paths are allowed (**unsafe for production**). |
+| `allowed_host_paths` | list of strings | `[]` | Absolute path **prefixes** allowed for **host** bind mounts. If **empty**, all host bind mounts are rejected (secure-by-default). |
 | `ossfs_mount_root` | string | `"/mnt/ossfs"` | Host directory under which OSSFS-backed mounts are resolved (`<root>/<bucket>/...`). |
 | `volume_default_size` | string | `"1Gi"` | Default storage size for auto-created Kubernetes PVCs when the caller does not specify a size in the PVC provisioning hints. |
 

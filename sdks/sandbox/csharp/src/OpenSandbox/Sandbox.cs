@@ -162,6 +162,7 @@ public sealed class Sandbox : IAsyncDisposable
             Timeout = options.ManualCleanup ? null : options.TimeoutSeconds ?? Constants.DefaultTimeoutSeconds,
             ResourceLimits = options.Resource ?? Constants.DefaultResourceLimits,
             Env = options.Env,
+            SecureAccess = options.SecureAccess,
             Metadata = options.Metadata,
             Platform = options.Platform,
             NetworkPolicy = options.NetworkPolicy != null

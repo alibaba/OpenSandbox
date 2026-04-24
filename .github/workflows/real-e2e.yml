@@ -134,6 +134,7 @@ jobs:
       - name: Run tests
         env:
           GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-user-home
+          OPENSANDBOX_TEST_SECURE_ACCESS_VERIFIABLE: "false"
         run: |
           set -e
           export GRADLE_OPTS="-Dorg.gradle.java.installations.auto-detect=true -Dorg.gradle.java.installations.auto-download=false -Dorg.gradle.java.installations.paths=${JAVA_HOME_8_X64},${JAVA_HOME_17_X64}"

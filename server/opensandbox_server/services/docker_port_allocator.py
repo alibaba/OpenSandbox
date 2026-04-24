@@ -23,6 +23,28 @@ from fastapi import HTTPException, status
 from opensandbox_server.services.constants import SandboxErrorCodes
 
 
+def normalize_container_port_spec(port_spec: str) -> str:
+    token = str(port_spec).strip()
+    if token.endswith("/tcp"):
+        return token[:-4]
+    return token
+
+
+def normalize_port_bindings(
+    port_bindings: dict[str, tuple[str, int]],
+) -> dict[str, tuple[str, int]]:
+    """
+    Normalize binding keys to docker-py canonical forms.
+
+    Docker port bindings accept "port" for tcp and "port/udp" for udp.
+    """
+    normalized: dict[str, tuple[str, int]] = {}
+    for container_port, binding in port_bindings.items():
+        normalized_key = normalize_container_port_spec(container_port)
+        normalized[normalized_key] = binding
+    return normalized
+
+
 def allocate_host_port(
     min_port: int = 40000,
     max_port: int = 60000,

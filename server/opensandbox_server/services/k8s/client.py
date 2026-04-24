@@ -113,7 +113,7 @@ class K8sClient:
                 try:
                     informer.start()
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.warning("Failed to start informer for %s/%s: %s", plural, namespace, exc)
+                    logger.warning(f"Failed to start informer for {plural}/{namespace}: {exc}")
                     self._informers.pop(key, None)
                     return None
         return informer

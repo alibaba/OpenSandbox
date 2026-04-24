@@ -595,7 +595,10 @@ export interface components {
          *     OS and CPU architecture for sandbox execution.
          *
          *     Behavioral notes:
-         *     - If omitted, runtime uses existing default behavior (backward compatible).
+         *     - If omitted, the runtime applies its own default platform selection behavior.
+         *       For Docker, requests are created without an explicit platform override.
+         *       For Kubernetes, no `kubernetes.io/os` or `kubernetes.io/arch` constraint
+         *       is injected unless provided by request or workload template.
          *     - If provided and cannot be satisfied by runtime/template/pool constraints,
          *       request must fail explicitly.
          */
@@ -603,13 +606,15 @@ export interface components {
             /**
              * @description Target operating system (for example `linux`).
              * @example linux
+             * @enum {string}
              */
-            os: string;
+            os: "linux";
             /**
              * @description Target CPU architecture (for example `amd64` or `arm64`).
              * @example arm64
+             * @enum {string}
              */
-            arch: string;
+            arch: "amd64" | "arm64";
         };
         /**
          * @description Request to create a new sandbox from a container image.
@@ -622,8 +627,9 @@ export interface components {
             /**
              * @description Optional platform constraint for sandbox scheduling/runtime selection.
              *
-             *     If omitted, runtime default behavior applies. If specified, the runtime
-             *     must satisfy this constraint or fail explicitly.
+             *     If omitted, runtime default behavior applies (runtime-specific and not
+             *     a fixed architecture guarantee). If specified, the runtime must satisfy
+             *     this constraint or fail explicitly.
              *     This field is only meaningful when scheduling constraints are set.
              */
             platform?: components["schemas"]["PlatformSpec"];
@@ -689,6 +695,18 @@ export interface components {
              *     the sidecar starts in allow-all mode until updated.
              */
             networkPolicy?: components["schemas"]["NetworkPolicy"];
+            /**
+             * @description Opts the sandbox into secured access for endpoint access.
+             *     This is currently supported only for Kubernetes sandboxes exposed
+             *     through ingress gateway mode. When enabled, the server provisions
+             *     access credentials and returns the required request headers with
+             *     endpoint responses. Clients must include those endpoint headers when
+             *     calling the sandbox. When omitted or false, endpoints remain
+             *     accessible without the additional access token for backward
+             *     compatibility.
+             * @default false
+             */
+            secureAccess: boolean;
             /**
              * @description Storage mounts for the sandbox. Each volume entry specifies a named backend-specific
              *     storage source and common mount settings. Exactly one backend type must be specified
@@ -871,7 +889,7 @@ export interface components {
              *     fails with an error.
              * @default true
              */
-            createIfNotExists?: boolean;
+            createIfNotExists: boolean;
             /**
              * @description When true, the volume is automatically removed when the sandbox
              *     is deleted. Only applies to volumes that were auto-created by the
@@ -880,7 +898,7 @@ export interface components {
              *     the StorageClass reclaim policy.
              * @default false
              */
-            deleteOnSandboxTermination?: boolean;
+            deleteOnSandboxTermination: boolean;
             /**
              * @description Kubernetes StorageClass name for auto-created PVCs. Null means
              *     use the cluster default. Ignored for Docker volumes.

@@ -163,6 +163,108 @@ class TestBatchSandboxProvider:
         assert node_selector["kubernetes.io/os"] == "linux"
         assert node_selector["kubernetes.io/arch"] == "arm64"
 
+    def test_create_workload_windows_profile_uses_windows_runtime_shape(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["cmd", "/c", "echo hello"],
+            env={"VERSION": "11"},
+            resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+            labels={"opensandbox.io/id": "test-id"},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="windows", arch="amd64"),
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        # windows profile should enforce requested arch, but not force os=windows.
+        node_selector = pod_spec.get("nodeSelector", {})
+        assert node_selector["kubernetes.io/arch"] == "amd64"
+        assert "kubernetes.io/os" not in node_selector
+
+        init_container = pod_spec["initContainers"][0]
+        assert init_container["command"] == ["/bin/sh", "-c"]
+        assert "install.bat" in init_container["args"][0]
+        assert "execd.exe" in init_container["args"][0]
+
+        main_container = pod_spec["containers"][0]
+        assert main_container["command"] == ["cmd", "/c", "echo hello"]
+        assert "resources" not in main_container
+
+        env_dict = {item["name"]: item["value"] for item in main_container.get("env", [])}
+        assert env_dict["VERSION"] == "11"
+        assert env_dict["CPU_CORES"] == "4"
+        assert env_dict["RAM_SIZE"] == "8G"
+        assert env_dict["DISK_SIZE"] == "64G"
+        assert env_dict["USER_PORTS"] == "44772,8080,3389,8006"
+
+        volume_names = {volume["name"] for volume in pod_spec.get("volumes", [])}
+        assert "opensandbox-win-oem" in volume_names
+        assert "opensandbox-win-kvm" in volume_names
+        assert "opensandbox-win-tun" in volume_names
+
+    def test_create_workload_windows_profile_merges_user_ports(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["cmd", "/c", "echo hello"],
+            env={"VERSION": "11", "USER_PORTS": "3000,44772"},
+            resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+            labels={"opensandbox.io/id": "test-id"},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="windows", arch="amd64"),
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        main_container = pod_spec["containers"][0]
+        env_dict = {item["name"]: item["value"] for item in main_container.get("env", [])}
+        assert env_dict["USER_PORTS"] == "3000,44772,8080,3389,8006"
+
+    def test_create_workload_windows_profile_rejects_arch_conflict_with_template_selector(
+        self, mock_k8s_client, tmp_path
+    ):
+        template_file = tmp_path / "template.yaml"
+        template_file.write_text(
+            """
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+"""
+        )
+        provider = BatchSandboxProvider(mock_k8s_client, _app_config_with_template(str(template_file)))
+
+        with pytest.raises(ValueError, match="platform conflict with template nodeSelector"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="dockurr/windows:latest"),
+                entrypoint=["cmd", "/c", "echo hello"],
+                env={"VERSION": "11"},
+                resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+                labels={"opensandbox.io/id": "test-id"},
+                expires_at=None,
+                execd_image="execd:latest",
+                platform=PlatformSpec(os="windows", arch="amd64"),
+            )
+
     def test_create_workload_rejects_platform_conflict_with_template_selector(self, mock_k8s_client, tmp_path):
         template_file = tmp_path / "template.yaml"
         template_file.write_text(
@@ -1434,6 +1536,47 @@ class TestBatchSandboxProviderEgress:
         execd_init = inits[0]
         assert execd_init["name"] == "execd-installer"
         assert execd_init["image"] == "execd:latest"
+        assert execd_init.get("securityContext", {}).get("privileged") is True
+        assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
+
+    def test_create_workload_windows_profile_with_network_policy_keeps_ipv6_disable(self, mock_k8s_client):
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_egress_disable_ipv6(),
+        )
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["cmd", "/c", "echo hello"],
+            env={"VERSION": "11"},
+            resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="windows", arch="amd64"),
+            network_policy=NetworkPolicy(default_action="deny", egress=[]),
+            egress_image="opensandbox/egress:v1.0.8",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        sidecar = next((c for c in pod_spec["containers"] if c["name"] == "egress"), None)
+        assert sidecar is not None
+
+        main_container = next((c for c in pod_spec["containers"] if c["name"] == "sandbox"), None)
+        assert main_container is not None
+        main_caps = main_container.get("securityContext", {}).get("capabilities", {})
+        assert "NET_ADMIN" in main_caps.get("add", [])
+        assert "NET_RAW" in main_caps.get("add", [])
+        assert "NET_ADMIN" not in main_caps.get("drop", [])
+
+        execd_init = pod_spec["initContainers"][0]
         assert execd_init.get("securityContext", {}).get("privileged") is True
         assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
 

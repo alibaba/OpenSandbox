@@ -21,6 +21,9 @@ from typing import Any, TypeVar
 
 from attrs import define as _attrs_define
 
+from ..models.platform_spec_arch import PlatformSpecArch
+from ..models.platform_spec_os import PlatformSpecOs
+
 T = TypeVar("T", bound="PlatformSpec")
 
 
@@ -32,22 +35,25 @@ class PlatformSpec:
     OS and CPU architecture for sandbox execution.
 
     Behavioral notes:
-    - If omitted, runtime uses existing default behavior (backward compatible).
+    - If omitted, the runtime applies its own default platform selection behavior.
+      For Docker, requests are created without an explicit platform override.
+      For Kubernetes, no `kubernetes.io/os` or `kubernetes.io/arch` constraint
+      is injected unless provided by request or workload template.
     - If provided and cannot be satisfied by runtime/template/pool constraints,
       request must fail explicitly.
 
         Attributes:
-            os (str): Target operating system (for example `linux`). Example: linux.
-            arch (str): Target CPU architecture (for example `amd64` or `arm64`). Example: arm64.
+            os (PlatformSpecOs): Target operating system (for example `linux`). Example: linux.
+            arch (PlatformSpecArch): Target CPU architecture (for example `amd64` or `arm64`). Example: arm64.
     """
 
-    os: str
-    arch: str
+    os: PlatformSpecOs
+    arch: PlatformSpecArch
 
     def to_dict(self) -> dict[str, Any]:
-        os = self.os
+        os = self.os.value
 
-        arch = self.arch
+        arch = self.arch.value
 
         field_dict: dict[str, Any] = {}
 
@@ -63,9 +69,9 @@ class PlatformSpec:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        os = d.pop("os")
+        os = PlatformSpecOs(d.pop("os"))
 
-        arch = d.pop("arch")
+        arch = PlatformSpecArch(d.pop("arch"))
 
         platform_spec = cls(
             os=os,

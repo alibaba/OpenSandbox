@@ -124,6 +124,23 @@ class TestAgentSandboxProvider:
         assert selector["kubernetes.io/os"] == "linux"
         assert selector["kubernetes.io/arch"] == "arm64"
 
+    def test_create_workload_rejects_windows_platform(self, mock_k8s_client):
+        provider = AgentSandboxProvider(mock_k8s_client, _app_config())
+
+        with pytest.raises(ValueError, match="agent-sandbox does not support platform.os=windows"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="dockurr/windows:latest"),
+                entrypoint=["cmd", "/c", "echo hello"],
+                env={},
+                resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+                labels={"opensandbox.io/id": "test-id"},
+                expires_at=None,
+                execd_image="execd:latest",
+                platform=PlatformSpec(os="windows", arch="amd64"),
+            )
+
     def test_create_workload_rejects_platform_conflict_with_template_selector(self, mock_k8s_client, tmp_path):
         template_file = tmp_path / "agent_template.yaml"
         template_file.write_text(

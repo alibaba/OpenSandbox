@@ -48,6 +48,8 @@ jobs:
       matrix:
         network: [host, bridge]
     runs-on: ubuntu-latest
+    env:
+      OPENSANDBOX_INSECURE_SERVER: YES
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

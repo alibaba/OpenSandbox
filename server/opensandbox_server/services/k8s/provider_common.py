@@ -32,8 +32,6 @@ from opensandbox_server.services.k8s.security_context import (
     build_security_context_from_dict,
     serialize_security_context_to_dict,
 )
-
-
 def _build_execd_init_container(
     execd_image: str,
     execd_init_resources: Any,
@@ -80,7 +78,6 @@ def _build_main_container(
     env: Dict[str, str],
     resource_limits: Dict[str, str],
     *,
-    include_execd_volume: bool,
     has_network_policy: bool = False,
     image_pull_policy: Optional[str] = None,
 ) -> V1Container:
@@ -94,14 +91,12 @@ def _build_main_container(
             requests=resource_limits,
         )
 
-    volume_mounts = None
-    if include_execd_volume:
-        volume_mounts = [
-            V1VolumeMount(
-                name="opensandbox-bin",
-                mount_path="/opt/opensandbox/bin",
-            )
-        ]
+    volume_mounts = [
+        V1VolumeMount(
+            name="opensandbox-bin",
+            mount_path="/opt/opensandbox/bin",
+        )
+    ]
 
     security_context = None
     if has_network_policy:

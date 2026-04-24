@@ -23,6 +23,9 @@ max_sandbox_timeout_seconds = 86400
 
 # 可选：取消注释以启用 API Key 认证
 # api_key = "your-secret-api-key"
+# 若 api_key 为空，启动时需要显式确认：
+# - 交互式 TTY：按提示输入 YES
+# - 非交互环境：设置 OPENSANDBOX_INSECURE_SERVER=YES
 
 [log]
 level = "INFO"

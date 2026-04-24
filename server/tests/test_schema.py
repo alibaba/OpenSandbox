@@ -314,6 +314,22 @@ class TestCreateSandboxRequestWithVolumes:
             entrypoint=["python", "-c", "print('hello')"],
         )
         assert request.volumes is None
+        assert request.secure_access is False
+
+    def test_request_with_secure_access(self):
+        request = CreateSandboxRequest.model_validate(
+            {
+                "image": {"uri": "python:3.11"},
+                "timeout": 3600,
+                "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+                "entrypoint": ["python", "-c", "print('hello')"],
+                "secureAccess": True,
+            }
+        )
+        assert request.secure_access is True
+
+        data = request.model_dump(by_alias=True, exclude_none=True)
+        assert data["secureAccess"] is True
 
     def test_request_with_empty_volumes(self):
         request = CreateSandboxRequest(

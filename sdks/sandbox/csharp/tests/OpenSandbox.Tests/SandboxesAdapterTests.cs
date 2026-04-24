@@ -14,6 +14,7 @@
 
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using OpenSandbox.Adapters;
 using OpenSandbox.Internal;
@@ -107,6 +108,27 @@ public class SandboxesAdapterTests
         response.Platform!.Arch.Should().Be("arm64");
     }
 
+    [Fact]
+    public async Task CreateSandboxAsync_ShouldSerializeSecureAccess()
+    {
+        var handler = new CaptureCreateRequestHandler();
+        var client = new HttpClient(handler);
+        var wrapper = new HttpClientWrapper(client, "http://localhost:8080/v1");
+        var adapter = new SandboxesAdapter(wrapper);
+
+        _ = await adapter.CreateSandboxAsync(new CreateSandboxRequest
+        {
+            Image = new ImageSpec { Uri = "python:3.11" },
+            ResourceLimits = new Dictionary<string, string>(),
+            Entrypoint = new List<string> { "python" },
+            SecureAccess = true
+        });
+
+        handler.RequestBody.Should().NotBeNullOrEmpty();
+        using var json = JsonDocument.Parse(handler.RequestBody!);
+        json.RootElement.GetProperty("secureAccess").GetBoolean().Should().BeTrue();
+    }
+
     private static SandboxesAdapter CreateAdapterWithJsonResponse(string payload)
     {
         var handler = new StaticJsonHandler(payload);
@@ -140,6 +162,31 @@ public class SandboxesAdapterTests
                 Content = new StringContent(payload, Encoding.UTF8, "application/json")
             };
             return Task.FromResult(response);
+        }
+    }
+
+    private sealed class CaptureCreateRequestHandler : HttpMessageHandler
+    {
+        public string? RequestBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestBody = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync();
+            var payload = """
+            {
+              "id": "sbx-3",
+              "status": { "state": "Pending" },
+              "createdAt": "2026-03-14T12:00:00Z",
+              "entrypoint": ["python"]
+            }
+            """;
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(payload, Encoding.UTF8, "application/json")
+            };
+            return response;
         }
     }
 }

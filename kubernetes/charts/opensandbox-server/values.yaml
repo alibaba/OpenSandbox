@@ -9,6 +9,9 @@ fullnameOverride: "opensandbox-server"
 # -- Override the namespace (default: opensandbox-system)
 namespaceOverride: ""
 
+# -- Image pull secrets for the server deployment. Each entry: {name: <secret-name>}.
+imagePullSecrets: []
+
 # Server configuration
 server:
   # -- Server image configuration

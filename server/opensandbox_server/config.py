@@ -486,7 +486,7 @@ class StorageConfig(BaseModel):
         default_factory=list,
         description=(
             "Allowlist of host path prefixes permitted for host bind mounts. "
-            "If empty, all host paths are allowed (not recommended for production). "
+            "If empty, host bind mounts are rejected. "
             "Each entry must be an absolute path (e.g., '/data/opensandbox')."
         ),
     )

@@ -172,7 +172,7 @@ configToml: |
   [server]
   host = "0.0.0.0"
   port = 80
-  api_key = ""
+  api_key = "kubernetes-e2e"
 
   [log]
   level = "INFO"

@@ -20,6 +20,7 @@ and configuration for the sandbox lifecycle management service.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -32,6 +33,7 @@ from fastapi.responses import JSONResponse
 from opensandbox_server.config import load_config
 from opensandbox_server.integrations.renew_intent import start_renew_intent_consumer
 from opensandbox_server.logging_config import configure_logging
+from opensandbox_server.startup_guard import api_key_confirm
 
 # Load configuration before initializing routers/middleware
 app_config = load_config()
@@ -53,6 +55,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        api_key_confirm(configured_api_key=app_config.server.api_key)
+    except Exception as exc:
+        logger.error("API key startup confirmation failed: %s", exc)
+        os._exit(1)
+
     app.state.http_client = httpx.AsyncClient(timeout=180.0)
 
     # Validate secure runtime configuration at startup

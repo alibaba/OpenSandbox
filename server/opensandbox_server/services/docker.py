@@ -63,7 +63,11 @@ from opensandbox_server.api.schema import (
 )
 from opensandbox_server.config import AppConfig, get_config
 from opensandbox_server.services.docker_diagnostics import DockerDiagnosticsMixin
-from opensandbox_server.services.docker_port_allocator import allocate_port_bindings
+from opensandbox_server.services.docker_port_allocator import (
+    allocate_port_bindings,
+    normalize_container_port_spec,
+    normalize_port_bindings,
+)
 from opensandbox_server.services.docker_windows_profile import (
     apply_windows_runtime_host_config_defaults,
     fetch_execd_install_bat,
@@ -844,7 +848,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             [
                 "#!/bin/sh",
                 "set -e",
-                f"{execd_binary} >/tmp/execd.log 2>&1 &",
+                f"  {execd_binary} >/tmp/execd.log 2>&1 &",
                 'exec "$@"',
                 "",
             ]
@@ -911,6 +915,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             request.timeout,
             self.app_config.server.max_sandbox_timeout_seconds,
         )
+        self._ensure_secure_access_support(request)
         self._ensure_network_policy_support(request)
         self._validate_network_exists()
         pvc_inspect_cache, auto_created_volumes = self._validate_volumes(request)
@@ -1196,26 +1201,40 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             volume_binds = self._build_volume_binds(request.volumes, pvc_inspect_cache)
 
             host_config_kwargs: Dict[str, Any]
-            exposed_ports: Optional[list[str]] = None
+            exposed_ports: Optional[list[str]] = ["44772", "8080"]
+            if requested_windows_profile:
+                # dockur/windows exposes RDP and noVNC/web UI on these ports.
+                # https://github.com/dockur/windows/blob/master/Dockerfile
+                exposed_ports.extend(["3389/tcp", "3389/udp", "8006/tcp"])
+            container_exposed_ports: Optional[list[str]] = exposed_ports
 
             if request.network_policy:
                 egress_token = generate_egress_token()
                 labels[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] = egress_token
-                sidecar_port_bindings = allocate_port_bindings(["44772", "8080"])
+                sidecar_port_bindings = allocate_port_bindings(exposed_ports)
                 host_execd_port = sidecar_port_bindings["44772"][1]
                 host_http_port = sidecar_port_bindings["8080"][1]
+                extra_sidecar_port_bindings = {
+                    port: binding
+                    for port, binding in sidecar_port_bindings.items()
+                    if port not in {"44772", "8080"}
+                }
                 sidecar_container = self._start_egress_sidecar(
                     sandbox_id=sandbox_id,
                     network_policy=request.network_policy,
                     egress_token=egress_token,
                     host_execd_port=host_execd_port,
                     host_http_port=host_http_port,
+                    extra_port_bindings=extra_sidecar_port_bindings,
                 )
                 labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                 labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
                 host_config_kwargs = self._base_host_config_kwargs(
                     effective_mem_limit, effective_nano_cpus, f"container:{sidecar_container.id}"
                 )
+                # Container network namespace is shared with sidecar. Docker rejects
+                # exposing ports on the main container in "container:<id>" mode.
+                container_exposed_ports = None
                 # Drop NET_ADMIN for the main container; only the sidecar should keep it
                 cap_drop = set(host_config_kwargs.get("cap_drop") or [])
                 cap_drop.add("NET_ADMIN")
@@ -1226,17 +1245,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     effective_mem_limit, effective_nano_cpus, self.network_mode
                 )
                 if self.network_mode != HOST_NETWORK_MODE:
-                    exposed_ports = ["44772", "8080"]
-                    if requested_windows_profile:
-                        # dockur/windows exposes RDP and noVNC/web UI on these ports.
-                        # https://github.com/dockur/windows/blob/master/Dockerfile
-                        exposed_ports.extend(["3389/tcp", "3389/udp", "8006/tcp"])
                     port_bindings = allocate_port_bindings(exposed_ports)
                     host_execd_port = port_bindings["44772"][1]
                     host_http_port = port_bindings["8080"][1]
-                    host_config_kwargs["port_bindings"] = port_bindings
+                    host_config_kwargs["port_bindings"] = normalize_port_bindings(port_bindings)
                     labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                     labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
+                else:
+                    exposed_ports = None
 
             # Inject volume bind mounts into Docker host config
             if volume_binds:
@@ -1259,7 +1275,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 labels,
                 environment,
                 host_config_kwargs,
-                exposed_ports,
+                container_exposed_ports,
                 request.platform,
             )
         except Exception:
@@ -1366,6 +1382,22 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         # Common validation: egress.image must be configured
         ensure_egress_configured(request.network_policy, self.app_config.egress)
 
+    def _ensure_secure_access_support(self, request: CreateSandboxRequest) -> None:
+        """Validate that secure access can be honored under the current Docker runtime."""
+        if not request.secure_access:
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    "secureAccess is not supported when runtime.type='docker'. "
+                    "Use the Kubernetes runtime to create secured sandboxes."
+                ),
+            },
+        )
+
     def _validate_volumes(
         self, request: CreateSandboxRequest
     ) -> tuple[dict[str, dict], list[str]]:
@@ -1396,7 +1428,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             return {}, []
 
         # Shared validation: names, mount paths, sub paths, backend count, host path allowlist
-        allowed_prefixes = self.app_config.storage.allowed_host_paths or None
+        allowed_prefixes = self.app_config.storage.allowed_host_paths
         ensure_volumes_valid(request.volumes, allowed_host_prefixes=allowed_prefixes)
 
         pvc_inspect_cache: dict[str, dict] = {}
@@ -2066,10 +2098,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if self.network_mode == HOST_NETWORK_MODE:
             endpoint = Endpoint(endpoint=f"{public_host}:{port}")
             container = self._get_container_by_sandbox_id(sandbox_id)
-            self._attach_egress_auth_headers(
-                endpoint,
-                (container.attrs.get("Config", {}).get("Labels") or {}),
-            )
+            labels = container.attrs.get("Config", {}).get("Labels") or {}
+            self._attach_egress_auth_headers(endpoint, labels)
             return endpoint
 
         # non-host mode (bridge / user-defined network)
@@ -2101,7 +2131,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                         "message": "Missing host port mapping for container port 8080.",
                     },
                 )
-            return Endpoint(endpoint=f"{public_host}:{http_host_port}")
+            endpoint = Endpoint(endpoint=f"{public_host}:{http_host_port}")
+            self._attach_egress_auth_headers(endpoint, labels)
+            return endpoint
 
         if execd_host_port is None:
             raise HTTPException(
@@ -2319,6 +2351,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         egress_token: str,
         host_execd_port: int,
         host_http_port: int,
+        extra_port_bindings: Optional[dict[str, tuple[str, int]]] = None,
     ):
         sidecar_name = f"sandbox-egress-{sandbox_id}"
         sidecar_labels = {
@@ -2340,13 +2373,17 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             f"{OPENSANDBOX_EGRESS_TOKEN}={egress_token}",
         ]
 
+        sidecar_port_bindings: dict[str, tuple[str, int]] = {
+            "44772": ("0.0.0.0", host_execd_port),
+            "8080": ("0.0.0.0", host_http_port),
+        }
+        if extra_port_bindings:
+            sidecar_port_bindings.update(extra_port_bindings)
+
         sidecar_host_config_kwargs: dict[str, Any] = {
             "network_mode": BRIDGE_NETWORK_MODE,
             "cap_add": ["NET_ADMIN"],
-            "port_bindings": {
-                "44772": ("0.0.0.0", host_execd_port),
-                "8080": ("0.0.0.0", host_http_port),
-            },
+            "port_bindings": normalize_port_bindings(sidecar_port_bindings),
         }
         if self.app_config.egress.disable_ipv6:
             # Optional: disable IPv6 in the shared namespace when egress.disable_ipv6 is set.
@@ -2371,7 +2408,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     labels=sidecar_labels,
                     environment=sidecar_env,
                     # Expose the ports that have host bindings so Docker publishes them in bridge mode.
-                    ports=["44772", "8080"],
+                    ports=[normalize_container_port_spec(p) for p in sidecar_port_bindings.keys()],
                 )
             sidecar_container_id = sidecar_resp.get("Id")
             if not sidecar_container_id:
@@ -2443,7 +2480,11 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 container_kwargs = {
                     "image": image_uri,
                     "command": bootstrap_command,
-                    "ports": exposed_ports,
+                    "ports": (
+                        [normalize_container_port_spec(p) for p in exposed_ports]
+                        if exposed_ports
+                        else None
+                    ),
                     "name": f"sandbox-{sandbox_id}",
                     "environment": environment,
                     "labels": labels,

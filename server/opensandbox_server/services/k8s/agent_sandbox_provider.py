@@ -39,6 +39,7 @@ from opensandbox_server.services.k8s.provider_common import (
 )
 from opensandbox_server.services.k8s.volume_helper import apply_volumes_to_pod_spec
 from opensandbox_server.services.k8s.workload_provider import WorkloadProvider
+from opensandbox_server.services.k8s.windows_profile import is_windows_profile
 from opensandbox_server.services.runtime_resolver import SecureRuntimeResolver
 
 logger = logging.getLogger(__name__)
@@ -140,12 +141,11 @@ class AgentSandboxProvider(WorkloadProvider):
         egress_mode: str = EGRESS_MODE_DNS,
     ) -> Dict[str, Any]:
         """Create an agent-sandbox Sandbox CRD workload."""
+        if is_windows_profile(platform):
+            raise ValueError("agent-sandbox does not support platform.os=windows.")
+
         if self.runtime_class:
-            logger.info(
-                "Using Kubernetes RuntimeClass '%s' for sandbox %s",
-                self.runtime_class,
-                sandbox_id,
-            )
+            logger.info(f"Using Kubernetes RuntimeClass '{self.runtime_class}' for sandbox {sandbox_id}")
 
         pod_spec = self._build_pod_spec(
             image_spec=image_spec,
@@ -260,7 +260,6 @@ class AgentSandboxProvider(WorkloadProvider):
             entrypoint=entrypoint,
             env=env,
             resource_limits=resource_limits,
-            include_execd_volume=True,
             has_network_policy=network_policy is not None,
         )
         
@@ -363,7 +362,7 @@ class AgentSandboxProvider(WorkloadProvider):
         try:
             return datetime.fromisoformat(shutdown_time_str.replace("Z", "+00:00"))
         except (ValueError, TypeError) as e:
-            logger.warning("Invalid shutdownTime format: %s, error: %s", shutdown_time_str, e)
+            logger.warning(f"Invalid shutdownTime format: {shutdown_time_str}, error: {e}")
             return None
 
     def get_status(self, workload: Dict[str, Any]) -> Dict[str, Any]:
@@ -515,7 +514,7 @@ class AgentSandboxProvider(WorkloadProvider):
                     if pod.status and pod.status.pod_ip and pod.status.phase == "Running":
                         return Endpoint(endpoint=f"{pod.status.pod_ip}:{port}")
             except Exception as e:
-                logger.warning("Failed to resolve pod endpoint: %s", e)
+                logger.warning(f"Failed to resolve pod endpoint: {e}")
 
         service_fqdn = status.get("serviceFQDN")
         if service_fqdn:

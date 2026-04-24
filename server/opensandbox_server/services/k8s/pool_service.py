@@ -119,7 +119,7 @@ class PoolService:
                 plural=_PLURAL,
                 body=manifest,
             )
-            logger.info("Created pool: name=%s, namespace=%s", request.name, self._namespace)
+            logger.info(f"Created pool: name={request.name}, namespace={self._namespace}")
             return self._pool_from_raw(created)
 
         except ApiException as e:
@@ -131,7 +131,7 @@ class PoolService:
                         "message": f"Pool '{request.name}' already exists.",
                     },
                 ) from e
-            logger.error("Kubernetes API error creating pool %s: %s", request.name, e)
+            logger.error(f"Kubernetes API error creating pool {request.name}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -140,7 +140,7 @@ class PoolService:
                 },
             ) from e
         except Exception as e:
-            logger.error("Unexpected error creating pool %s: %s", request.name, e)
+            logger.error(f"Unexpected error creating pool {request.name}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -170,7 +170,7 @@ class PoolService:
                         "message": f"Pool '{pool_name}' not found.",
                     },
                 ) from e
-            logger.error("Kubernetes API error getting pool %s: %s", pool_name, e)
+            logger.error(f"Kubernetes API error getting pool {pool_name}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -181,7 +181,7 @@ class PoolService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error("Unexpected error getting pool %s: %s", pool_name, e)
+            logger.error(f"Unexpected error getting pool {pool_name}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -209,7 +209,7 @@ class PoolService:
                 # CRD not installed — return empty list gracefully
                 logger.warning("Pool CRD not found (404); returning empty list.")
                 return ListPoolsResponse(items=[])
-            logger.error("Kubernetes API error listing pools: %s", e)
+            logger.error(f"Kubernetes API error listing pools: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -218,7 +218,7 @@ class PoolService:
                 },
             ) from e
         except Exception as e:
-            logger.error("Unexpected error listing pools: %s", e)
+            logger.error(f"Unexpected error listing pools: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -249,7 +249,7 @@ class PoolService:
                 name=pool_name,
                 body=patch_body,
             )
-            logger.info("Updated pool capacity: name=%s", pool_name)
+            logger.info(f"Updated pool capacity: name={pool_name}")
             return self._pool_from_raw(updated)
 
         except ApiException as e:
@@ -261,7 +261,7 @@ class PoolService:
                         "message": f"Pool '{pool_name}' not found.",
                     },
                 ) from e
-            logger.error("Kubernetes API error updating pool %s: %s", pool_name, e)
+            logger.error(f"Kubernetes API error updating pool {pool_name}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -272,7 +272,7 @@ class PoolService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error("Unexpected error updating pool %s: %s", pool_name, e)
+            logger.error(f"Unexpected error updating pool {pool_name}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -292,7 +292,7 @@ class PoolService:
                 name=pool_name,
                 grace_period_seconds=0,
             )
-            logger.info("Deleted pool: name=%s, namespace=%s", pool_name, self._namespace)
+            logger.info(f"Deleted pool: name={pool_name}, namespace={self._namespace}")
 
         except ApiException as e:
             if e.status == 404:
@@ -303,7 +303,7 @@ class PoolService:
                         "message": f"Pool '{pool_name}' not found.",
                     },
                 ) from e
-            logger.error("Kubernetes API error deleting pool %s: %s", pool_name, e)
+            logger.error(f"Kubernetes API error deleting pool {pool_name}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -314,7 +314,7 @@ class PoolService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error("Unexpected error deleting pool %s: %s", pool_name, e)
+            logger.error(f"Unexpected error deleting pool {pool_name}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={

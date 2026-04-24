@@ -90,6 +90,34 @@ internal class SandboxesAdapter(
         volumes: List<Volume>?,
         platform: PlatformSpec?,
     ): SandboxCreateResponse {
+        return createSandbox(
+            spec = spec,
+            entrypoint = entrypoint,
+            env = env,
+            metadata = metadata,
+            timeout = timeout,
+            resource = resource,
+            networkPolicy = networkPolicy,
+            extensions = extensions,
+            volumes = volumes,
+            platform = platform,
+            secureAccess = false,
+        )
+    }
+
+    override fun createSandbox(
+        spec: SandboxImageSpec,
+        entrypoint: List<String>,
+        env: Map<String, String>,
+        metadata: Map<String, String>,
+        timeout: Duration?,
+        resource: Map<String, String>,
+        networkPolicy: NetworkPolicy?,
+        extensions: Map<String, String>,
+        volumes: List<Volume>?,
+        platform: PlatformSpec?,
+        secureAccess: Boolean,
+    ): SandboxCreateResponse {
         logger.info("Creating sandbox with image: {}", spec.image)
 
         return try {
@@ -103,6 +131,7 @@ internal class SandboxesAdapter(
                     resource = resource,
                     platform = platform,
                     networkPolicy = networkPolicy,
+                    secureAccess = secureAccess,
                     extensions = extensions,
                     volumes = volumes,
                 )

@@ -40,17 +40,17 @@ from opensandbox_server.api.schema import (
     Sandbox,
     SandboxStatus,
 )
-from opensandbox_server.config import AppConfig, get_config
+from opensandbox_server.config import AppConfig, INGRESS_MODE_GATEWAY, get_config
 from opensandbox_server.services.constants import (
     SANDBOX_ID_LABEL,
     SandboxErrorCodes,
 )
-from opensandbox_server.services.endpoint_auth import generate_egress_token
+from opensandbox_server.services.endpoint_auth import generate_egress_token, generate_secure_access_token
 from opensandbox_server.services.extension_service import ExtensionService
 from opensandbox_server.services.k8s.create_helpers import _build_create_workload_context
 from opensandbox_server.services.k8s.error_helpers import _build_k8s_api_error
 from opensandbox_server.services.k8s.k8s_diagnostics import K8sDiagnosticsMixin
-from opensandbox_server.services.k8s.endpoint_resolver import _attach_egress_auth_headers
+from opensandbox_server.services.k8s.endpoint_resolver import _attach_egress_auth_headers, _attach_secure_access_headers
 from opensandbox_server.services.k8s.list_helpers import _build_list_sandboxes_response
 from opensandbox_server.services.k8s.status_helpers import (
     _is_unschedulable_status,
@@ -268,6 +268,23 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             },
         )
 
+    def _ensure_secure_access_support(self, request: CreateSandboxRequest) -> None:
+        """Validate that secure access can be enforced for the configured exposure mode."""
+        if not request.secure_access:
+            return
+        if self.ingress_config and self.ingress_config.mode == INGRESS_MODE_GATEWAY:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    "secureAccess is currently supported only for Kubernetes sandboxes exposed "
+                    "through ingress.mode='gateway'. Configure ingress gateway mode or disable secureAccess."
+                ),
+            },
+        )
+
     def _ensure_pvc_volumes(self, volumes: list) -> None:
         """
         Ensure that PVC volumes exist before creating the workload.
@@ -299,14 +316,13 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             except ApiException as e:
                 if e.status == 403:
                     logger.warning(
-                        "No RBAC permission to read PVC '%s', skipping auto-create. "
-                        "Grant 'get' and 'create' on 'persistentvolumeclaims' to enable.",
-                        claim_name,
+                        f"No RBAC permission to read PVC '{claim_name}', skipping auto-create. "
+                        "Grant 'get' and 'create' on 'persistentvolumeclaims' to enable."
                     )
                     return  # Skip all remaining PVCs — same SA, same permissions
                 raise
             if existing is not None:
-                logger.debug("PVC '%s' already exists in namespace '%s'", claim_name, self.namespace)
+                logger.debug(f"PVC '{claim_name}' already exists in namespace '{self.namespace}'")
                 continue
 
             storage = vol.pvc.storage or default_size
@@ -329,18 +345,17 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             try:
                 self.k8s_client.create_pvc(self.namespace, pvc_body)
                 logger.info(
-                    "Auto-created PVC '%s' (size=%s, class=%s) in namespace '%s'",
-                    claim_name, storage, storage_class or "<default>", self.namespace,
+                    f"Auto-created PVC '{claim_name}' (size={storage}, class={storage_class or '<default>'}) "
+                    f"in namespace '{self.namespace}'"
                 )
             except ApiException as e:
                 if e.status == 409:
                     # Race condition: another request created it between our check and create
-                    logger.info("PVC '%s' was created concurrently, proceeding", claim_name)
+                    logger.info(f"PVC '{claim_name}' was created concurrently, proceeding")
                 elif e.status == 403:
                     logger.warning(
-                        "No RBAC permission to create PVC '%s', skipping. "
-                        "The PVC must be pre-created or RBAC must be updated.",
-                        claim_name,
+                        f"No RBAC permission to create PVC '{claim_name}', skipping. "
+                        "The PVC must be pre-created or RBAC must be updated."
                     )
                 elif e.status in (400, 422):
                     # Invalid PVC spec from user-provided hints
@@ -354,7 +369,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                         },
                     ) from e
                 else:
-                    logger.error("Failed to create PVC '%s': %s", claim_name, e)
+                    logger.error(f"Failed to create PVC '{claim_name}': {e}")
                     raise HTTPException(
                         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail={
@@ -385,6 +400,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             request.timeout,
             self.app_config.server.max_sandbox_timeout_seconds,
         )
+        self._ensure_secure_access_support(request)
         self._ensure_network_policy_support(request)
         self._ensure_image_auth_support(request)
 
@@ -397,6 +413,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             sandbox_id=sandbox_id,
             created_at=created_at,
             egress_token_factory=generate_egress_token,
+            secure_access_token_factory=generate_secure_access_token,
         )
         
         try:
@@ -404,7 +421,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
 
             ensure_volumes_valid(
                 request.volumes,
-                self.app_config.storage.allowed_host_paths or None,
+                self.app_config.storage.allowed_host_paths,
             )
             
 
@@ -779,6 +796,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                         "message": "Pod IP is not yet available. The Pod may still be starting.",
                     },
                 )
+            _attach_secure_access_headers(endpoint, workload)
             _attach_egress_auth_headers(endpoint, workload)
             return endpoint
             
@@ -787,4 +805,3 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         except Exception as e:
             logger.error(f"Error getting endpoint for {sandbox_id}:{port}: {e}")
             raise _build_k8s_api_error("get endpoint", e) from e
-

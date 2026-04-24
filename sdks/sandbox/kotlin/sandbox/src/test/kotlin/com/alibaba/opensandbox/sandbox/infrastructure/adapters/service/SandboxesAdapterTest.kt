@@ -113,6 +113,7 @@ class SandboxesAdapterTest {
                 networkPolicy = networkPolicy,
                 extensions = extensions,
                 volumes = null,
+                secureAccess = true,
             )
 
         // Verify request
@@ -141,6 +142,7 @@ class SandboxesAdapterTest {
         assertNotNull(gotPlatform, "platform should be present in createSandbox request")
         assertEquals("linux", gotPlatform!!["os"]!!.jsonPrimitive.content)
         assertEquals("arm64", gotPlatform["arch"]!!.jsonPrimitive.content)
+        assertEquals("true", payload["secureAccess"]!!.jsonPrimitive.content)
 
         // Verify response
         assertEquals("550e8400-e29b-41d4-a716-446655440000", result.id)
@@ -177,6 +179,10 @@ class SandboxesAdapterTest {
             )
 
         assertEquals("manual-sbx", result.id)
+
+        val request = mockWebServer.takeRequest()
+        val payload = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertEquals("false", payload["secureAccess"]!!.jsonPrimitive.content)
     }
 
     @Test
