@@ -251,8 +251,15 @@ class SecureAccessConfig(BaseModel):
 
     @model_validator(mode="after")
     def ensure_active_key_exists(self) -> "SecureAccessConfig":
-        key_ids = {k.key_id for k in self.keys}
-        if self.active_key not in key_ids:
+        seen = set()
+        for k in self.keys:
+            if k.key_id in seen:
+                raise ValueError(
+                    f"duplicate secure_access key_id {k.key_id!r}; "
+                    "each key_id must be unique"
+                )
+            seen.add(k.key_id)
+        if self.active_key not in seen:
             raise ValueError(
                 f"active_key {self.active_key!r} not found in secure_access.keys; "
                 f"available keys: {sorted(key_ids)}"

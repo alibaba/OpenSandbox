@@ -1045,6 +1045,16 @@ class TestSecureAccessConfig:
         with pytest.raises(ValidationError):
             SecureAccessConfig(active_key="a", keys=[])
 
+    def test_rejects_duplicate_key_ids(self) -> None:
+        import base64
+
+        keys = [
+            SecureAccessKey(key_id="a", key=base64.b64encode(b"key-a").decode()),
+            SecureAccessKey(key_id="a", key=base64.b64encode(b"key-a-dup").decode()),
+        ]
+        with pytest.raises(ValidationError, match="duplicate secure_access key_id"):
+            SecureAccessConfig(active_key="a", keys=keys)
+
 
 class TestSecureAccessInIngressConfig:
     def test_secure_access_requires_gateway_mode(self) -> None:
