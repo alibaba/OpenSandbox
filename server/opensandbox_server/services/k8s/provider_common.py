@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Optional
 
+from fastapi import HTTPException, status
 from kubernetes.client import (
     V1Container,
     V1EnvVar,
@@ -24,6 +25,8 @@ from kubernetes.client import (
 )
 
 from opensandbox_server.api.schema import ImageSpec
+from opensandbox_server.services.constants import SandboxErrorCodes
+from opensandbox_server.services.helpers import parse_gpu_request
 from opensandbox_server.services.k8s.egress_helper import (
     build_security_context_for_sandbox_container,
     prep_execd_init_for_egress,
@@ -32,6 +35,76 @@ from opensandbox_server.services.k8s.security_context import (
     build_security_context_from_dict,
     serialize_security_context_to_dict,
 )
+
+_GPU_RESOURCE_LIMIT_KEY = "gpu"
+# Canonical extended-resource name advertised by the NVIDIA device plugin.
+# Hardcoded for parity with the Docker runtime fix (#775), which targets
+# NVIDIA only via DeviceRequest capabilities=[["gpu"]]. Other vendor keys
+# (e.g. amd.com/gpu, gpu.intel.com/i915) can be added as a follow-up.
+_K8S_NVIDIA_GPU_RESOURCE = "nvidia.com/gpu"
+
+
+def _translate_resource_limits_for_k8s(
+    resource_limits: Dict[str, str],
+) -> Dict[str, str]:
+    """Translate request-level resource limits into Kubernetes resource keys.
+
+    The lifecycle API exposes a portable ``gpu`` key on ``resourceLimits``.
+    Kubernetes requires the canonical extended-resource name
+    (``nvidia.com/gpu``) so the device plugin can schedule the request;
+    otherwise the value is silently treated as an unknown extended resource.
+
+    Args:
+        resource_limits: Raw resource limits from the create request.
+
+    Returns:
+        A new dict with the ``gpu`` key translated to ``nvidia.com/gpu``
+        and any unparseable GPU value dropped. Other keys (cpu, memory, ...)
+        are passed through unchanged.
+
+    Raises:
+        HTTPException: If ``gpu`` is the ``"all"`` sentinel. Docker accepts
+            ``"all"`` (mapped to an unbounded DeviceRequest), but Kubernetes
+            extended resources require an integer count, so we surface a
+            400 rather than silently scheduling without a GPU.
+    """
+    if not resource_limits:
+        return {}
+
+    translated: Dict[str, str] = {
+        key: value
+        for key, value in resource_limits.items()
+        if key != _GPU_RESOURCE_LIMIT_KEY
+    }
+
+    raw_gpu = resource_limits.get(_GPU_RESOURCE_LIMIT_KEY)
+    if raw_gpu is None:
+        return translated
+
+    if raw_gpu.strip().lower() == "all":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    "Kubernetes runtime requires resourceLimits.gpu to be a "
+                    "positive integer; 'all' is not supported."
+                ),
+            },
+        )
+
+    gpu_count = parse_gpu_request(raw_gpu)
+    if gpu_count is None or gpu_count <= 0:
+        # parse_gpu_request already logged a warning; drop the value rather
+        # than emitting an invalid extended-resource key onto the pod.
+        return translated
+
+    # str(int) is intentional: V1ResourceRequirements is typed Dict[str, str]
+    # in this codebase (cpu/memory are already strings like "1" / "512Mi"),
+    # and the Kubernetes API server's quantity parser accepts string integers
+    # for extended resources.
+    translated[_K8S_NVIDIA_GPU_RESOURCE] = str(gpu_count)
+    return translated
 def _build_execd_init_container(
     execd_image: str,
     execd_init_resources: Any,
@@ -83,11 +156,12 @@ def _build_main_container(
     env_vars = [V1EnvVar(name=k, value=v) for k, v in env.items()]
     env_vars.append(V1EnvVar(name="EXECD", value="/opt/opensandbox/bin/execd"))
 
+    translated_limits = _translate_resource_limits_for_k8s(resource_limits)
     resources = None
-    if resource_limits:
+    if translated_limits:
         resources = V1ResourceRequirements(
-            limits=resource_limits,
-            requests=resource_limits,
+            limits=translated_limits,
+            requests=translated_limits,
         )
 
     volume_mounts = [
