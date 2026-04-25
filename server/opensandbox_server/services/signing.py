@@ -179,29 +179,12 @@ def compute_signature(
     return compute_hex8(secret_bytes, canonical_bytes) + key_id
 
 
-def build_signed_route_token(
-    sandbox_id: str,
-    port: int,
-    expires_b36: str,
-    signature: str,
-) -> str:
-    """Assemble the signed route token.
-
-    Format: ``{sandbox_id}-{port}-{expires_b36}-{signature}``
-
-    This is the raw token that gets embedded in the endpoint URL
-    (wildcard Host, Header value, or URI prefix).
-    """
-    return f"{sandbox_id}-{port}-{expires_b36}-{signature}"
-
-
 __all__ = [
     "encode_expires_b36",
     "decode_expires_b36",
     "build_canonical_bytes",
     "compute_hex8",
     "compute_signature",
-    "build_signed_route_token",
     "MAX_EXPIRES_B36_LEN",
     "MAX_UINT64",
 ]

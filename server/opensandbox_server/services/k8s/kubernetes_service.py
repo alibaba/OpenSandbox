@@ -63,7 +63,6 @@ from opensandbox_server.services.k8s.workload_mapper import (
 )
 from opensandbox_server.services.signing import (
     build_canonical_bytes,
-    build_signed_route_token,
     compute_signature,
     encode_expires_b36,
 )
@@ -737,7 +736,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 Requires ingress gateway mode with secure_access keys configured.
 
         Returns:
-            Endpoint: Endpoint information (with optional route_token when signed)
+            Endpoint: Endpoint information
 
         Raises:
             HTTPException: If endpoint not available or signed routes unsupported
@@ -794,7 +793,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             raise _build_k8s_api_error("get endpoint", e) from e
 
     def _build_signed_endpoint(self, sandbox_id: str, port: int, expires: int) -> Endpoint:
-        """Build a signed ingress endpoint with route token per OSEP-0011."""
+        """Build a signed ingress endpoint per OSEP-0011."""
         secure_cfg = self._get_secure_access_config()
 
         expires_b36 = encode_expires_b36(expires)
@@ -802,7 +801,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         active_key = secure_cfg.active_key
         canonical = build_canonical_bytes(sandbox_id, port, expires_b36)
         signature = compute_signature(secret, active_key, canonical)
-        route_token = build_signed_route_token(sandbox_id, port, expires_b36, signature)
 
         endpoint = format_ingress_endpoint(
             self.ingress_config, sandbox_id, port,
@@ -819,7 +817,6 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     ),
                 },
             )
-        endpoint.route_token = route_token
         return endpoint
 
     def _get_secure_access_config(self) -> SecureAccessConfig:

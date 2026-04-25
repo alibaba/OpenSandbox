@@ -621,16 +621,6 @@ class Endpoint(BaseModel):
         default=None,
         description="Optional headers required when accessing the endpoint (e.g., for header-based routing).",
     )
-    route_token: Optional[str] = Field(
-        default=None,
-        alias="routeToken",
-        description=(
-            "Signed route token for secure access. Present only when an ``expires`` "
-            "query parameter was provided to GetEndpoint. The token embeds sandbox_id, "
-            "port, base36-encoded expiration, and a cryptographic signature."
-        ),
-    )
-
     class Config:
         populate_by_name = True
 

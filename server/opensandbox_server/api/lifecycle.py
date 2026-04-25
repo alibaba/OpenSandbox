@@ -391,7 +391,7 @@ async def get_sandbox_endpoint(
         x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
-        Endpoint: Public endpoint URL (with optional routeToken when signed)
+        Endpoint: Public endpoint URL
 
     Raises:
         HTTPException: If sandbox not found, endpoint not available, or signed

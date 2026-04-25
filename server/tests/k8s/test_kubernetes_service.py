@@ -1080,7 +1080,7 @@ class TestSignedEndpoint:
             ),
         )
 
-    def test_signed_endpoint_returns_route_token(self, k8s_service):
+    def test_signed_endpoint_embeds_token_in_url(self, k8s_service):
         self._setup_gateway_with_secure_access(k8s_service)
         k8s_service.workload_provider.get_workload.return_value = {
             "metadata": {"annotations": {}},
@@ -1090,10 +1090,9 @@ class TestSignedEndpoint:
 
         assert endpoint.endpoint.startswith("sbx-001-8080-")
         assert endpoint.endpoint.endswith(".sandbox.example.com")
-        assert endpoint.route_token is not None
-        assert endpoint.route_token.count("-") >= 3
-        # route_token should be embedded in the endpoint
-        assert endpoint.route_token in endpoint.endpoint
+        # The signature should be embedded in the endpoint URL (right-split for hyphenated sandbox_id)
+        parts = endpoint.endpoint.split(".")[0].rsplit("-", 3)
+        assert len(parts) == 4  # sandbox_id-port-b36-signature
 
     def test_signed_endpoint_attaches_secure_access_header(self, k8s_service):
         self._setup_gateway_with_secure_access(k8s_service)
@@ -1107,7 +1106,6 @@ class TestSignedEndpoint:
 
         endpoint = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
 
-        assert endpoint.route_token is not None
         assert endpoint.headers is not None
         assert endpoint.headers[OPEN_SANDBOX_SECURE_ACCESS_HEADER] == "static-token"
 
@@ -1120,10 +1118,11 @@ class TestSignedEndpoint:
         endpoint = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
 
         assert endpoint.endpoint == "gateway.sandbox.example.com"
-        assert endpoint.route_token is not None
         assert endpoint.headers is not None
         ingress_val = endpoint.headers.get("OpenSandbox-Ingress-To", "")
-        assert endpoint.route_token in ingress_val
+        # Header value should contain the signed route: {sid}-{port}-{b36}-{sig}
+        parts = ingress_val.rsplit("-", 3)
+        assert len(parts) == 4
 
     def test_signed_endpoint_uri_mode(self, k8s_service):
         self._setup_gateway_with_secure_access(k8s_service, route_mode="uri")
@@ -1133,8 +1132,7 @@ class TestSignedEndpoint:
 
         endpoint = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
 
-        assert endpoint.route_token is not None
-        # URI mode: endpoint is {addr}/{sid}/{port}/{b36}/{sig}, route_token is {sid}-{port}-{b36}-{sig}
+        # URI mode: endpoint is {addr}/{sid}/{port}/{b36}/{sig}
         assert "x2qxvk" in endpoint.endpoint
         assert "0ff8cd39a" in endpoint.endpoint
 
@@ -1192,8 +1190,8 @@ class TestSignedEndpoint:
         assert exc.value.status_code == 400
         assert "secure_access" in exc.value.detail["message"].lower()
 
-    def test_unsigned_endpoint_no_route_token(self, k8s_service):
-        """Without expires, route_token should be None."""
+    def test_unsigned_endpoint_no_expires(self, k8s_service):
+        """Without expires, the unsigned endpoint should be returned."""
         self._setup_gateway_with_secure_access(k8s_service)
         k8s_service.workload_provider.get_workload.return_value = {
             "metadata": {"annotations": {}},
@@ -1204,10 +1202,9 @@ class TestSignedEndpoint:
 
         endpoint = k8s_service.get_endpoint("sbx-001", 8080)
 
-        assert endpoint.route_token is None
         assert endpoint.endpoint == "sbx-001-8080.sandbox.example.com"
 
-    def test_signed_endpoint_different_expires_produces_different_tokens(self, k8s_service):
+    def test_signed_endpoint_different_expires_produces_different_endpoints(self, k8s_service):
         self._setup_gateway_with_secure_access(k8s_service)
         k8s_service.workload_provider.get_workload.return_value = {
             "metadata": {"annotations": {}},
@@ -1216,4 +1213,4 @@ class TestSignedEndpoint:
         ep1 = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
         ep2 = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000500)
 
-        assert ep1.route_token != ep2.route_token
+        assert ep1.endpoint != ep2.endpoint

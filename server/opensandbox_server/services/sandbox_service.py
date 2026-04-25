@@ -267,7 +267,7 @@ class SandboxService(ABC):
                 Requires ingress gateway mode with secure_access keys configured.
 
         Returns:
-            Endpoint: Public endpoint URL (with optional route_token when signed)
+            Endpoint: Public endpoint URL
 
         Raises:
             HTTPException: If sandbox not found, endpoint not available,

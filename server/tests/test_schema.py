@@ -17,7 +17,6 @@ from pydantic import ValidationError
 
 from opensandbox_server.api.schema import (
     CreateSandboxRequest,
-    Endpoint,
     Host,
     ImageSpec,
     OSSFS,
@@ -513,22 +512,3 @@ class TestCreateSandboxRequestWithVolumes:
         assert request.timeout == 172800
 
 
-class TestEndpointRouteToken:
-    def test_route_token_defaults_to_none(self):
-        ep = Endpoint(endpoint="sandbox.example.com")
-        assert ep.route_token is None
-
-    def test_route_token_accepts_via_alias(self):
-        ep = Endpoint(endpoint="sandbox.example.com", routeToken="sid-8080-x2qxvk-aabbccddk")
-        assert ep.route_token == "sid-8080-x2qxvk-aabbccddk"
-
-    def test_route_token_in_json_when_set(self):
-        ep = Endpoint(endpoint="sandbox.example.com", routeToken="tok-123")
-        data = ep.model_dump(by_alias=True)
-        assert data["routeToken"] == "tok-123"
-        assert data["endpoint"] == "sandbox.example.com"
-
-    def test_route_token_omitted_from_json_when_none(self):
-        ep = Endpoint(endpoint="sandbox.example.com")
-        data = ep.model_dump(mode="json")
-        assert "routeToken" not in data

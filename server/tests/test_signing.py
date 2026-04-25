@@ -25,7 +25,6 @@ from opensandbox_server.services.signing import (
     MAX_EXPIRES_B36_LEN,
     MAX_UINT64,
     build_canonical_bytes,
-    build_signed_route_token,
     compute_hex8,
     compute_signature,
     decode_expires_b36,
@@ -231,30 +230,6 @@ class TestComputeSignature:
         assert sig == compute_hex8(b"secret", b"canonical") + key_id
 
 
-# ============================================================
-# build_signed_route_token
-# ============================================================
-
-
-class TestBuildSignedRouteToken:
-    def test_format(self) -> None:
-        token = build_signed_route_token("my-sandbox", 8080, "x2qxvk", "aabbccddk")
-        assert token == "my-sandbox-8080-x2qxvk-aabbccddk"
-
-    def test_with_hyphenated_sandbox_id(self) -> None:
-        token = build_signed_route_token("sbx-001", 44772, "abc123", "12345678a")
-        assert token == "sbx-001-44772-abc123-12345678a"
-
-    def test_token_segments_count(self) -> None:
-        token = build_signed_route_token("s", 80, "0", "00000000a")
-        assert token.count("-") == 3
-        segments = token.split("-")
-        assert len(segments) == 4
-        assert segments[0] == "s"
-        assert segments[1] == "80"
-        assert segments[2] == "0"
-        assert segments[3] == "00000000a"
-
 
 # ============================================================
 # Integration: end-to-end signing flow
@@ -263,11 +238,7 @@ class TestBuildSignedRouteToken:
 
 class TestEndToEndSigning:
     def test_sign_and_verify_flow(self) -> None:
-        """Simulate the full server-side token generation.
-
-        Per OSEP-0011 the route token is parsed right-to-left:
-        signature (9 chars) | expires_b36 | port | sandbox_id (rest).
-        """
+        """Verify the full signing pipeline: expires_b36 -> canonical -> signature."""
         sandbox_id = "my-sandbox"
         port = 8080
         expires_sec = 2000000000
@@ -284,18 +255,7 @@ class TestEndToEndSigning:
         assert len(signature) == 9
         assert signature[-1] == key_id
 
-        token = build_signed_route_token(sandbox_id, port, expires_b36, signature)
-        assert token == f"my-sandbox-8080-x2qxvk-{signature}"
-
-        # Right-to-left parsing (sandbox_id may contain hyphens)
-        parts = token.rsplit("-", 3)
-        assert len(parts) == 4
-        assert parts[0] == sandbox_id
-        assert parts[1] == str(port)
-        assert parts[2] == expires_b36
-        assert parts[3] == signature
-
-    def test_different_secrets_produce_different_tokens(self) -> None:
+    def test_different_secrets_produce_different_signatures(self) -> None:
         sandbox_id = "s"
         port = 80
         expires_b36 = "abc"
@@ -304,6 +264,4 @@ class TestEndToEndSigning:
         sig_a = compute_signature(b"secret-a", "a", canonical)
         sig_b = compute_signature(b"secret-b", "b", canonical)
 
-        token_a = build_signed_route_token(sandbox_id, port, expires_b36, sig_a)
-        token_b = build_signed_route_token(sandbox_id, port, expires_b36, sig_b)
-        assert token_a != token_b
+        assert sig_a != sig_b
