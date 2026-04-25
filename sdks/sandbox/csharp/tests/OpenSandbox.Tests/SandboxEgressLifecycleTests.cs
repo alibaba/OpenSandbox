@@ -236,6 +236,20 @@ public class SandboxEgressLifecycleTests
                 }
             });
         }
+
+        public Task<Endpoint> GetSignedSandboxEndpointAsync(string sandboxId, int port, long expires, bool useServerProxy = false, CancellationToken cancellationToken = default)
+        {
+            EndpointCalls.Add(port);
+            return Task.FromResult(new Endpoint
+            {
+                EndpointAddress = $"127.0.0.1:{port}",
+                Headers = new Dictionary<string, string>
+                {
+                    ["X-Port"] = port.ToString(),
+                    ["X-Route-Token"] = $"sig:{expires}"
+                }
+            });
+        }
     }
 
     private sealed class StubEgress : IEgress
