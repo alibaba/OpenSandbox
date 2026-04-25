@@ -761,6 +761,14 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                         "message": f"expires ({expires}) must be greater than current time ({now}).",
                     },
                 )
+            if expires > 18446744073709551615:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": "expires exceeds uint64 maximum value.",
+                    },
+                )
 
         try:
             workload = _get_workload_or_404(
