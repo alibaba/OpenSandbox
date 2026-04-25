@@ -54,6 +54,14 @@ server:
       requests:
         cpu: "1"
         memory: 4Gi
+    # OSEP-0011 signing keys shared between server and ingress.
+    # When keys are provided, the server signs route tokens with the active key
+    # and the ingress gateway verifies them.
+    secureAccess:
+      activeKey: ""
+      # List of signing keys. Each entry: { key_id: "a", key: "<base64-secret>" }.
+      # key_id must be exactly one character in [0-9a-z].
+      keys: []
 
 # -- Server config (TOML). Mounted at /etc/opensandbox/config.toml.
 configToml: |

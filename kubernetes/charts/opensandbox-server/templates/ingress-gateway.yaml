@@ -76,6 +76,9 @@ spec:
             - "--provider-type={{ .Values.server.gateway.providerType }}"
             - "--mode={{ .Values.server.gateway.gatewayRouteMode }}"
             - "--log-level={{ .Values.server.gateway.logLevel }}"
+{{- if .Values.server.gateway.secureAccess.keys }}
+            - "--secure-access-keys={{- range $i, $k := .Values.server.gateway.secureAccess.keys }}{{ if $i }},{{ end }}{{ $k.key_id }}={{ $k.key }}{{- end }}"
+{{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.server.gateway.port }}
