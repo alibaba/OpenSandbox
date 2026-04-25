@@ -135,9 +135,19 @@ func newWithRotate(cfg Config, extra ...zapcore.Core) (Logger, error) {
 		core = zapcore.NewTee(append([]zapcore.Core{core}, extra...)...)
 	}
 
-	base := zap.New(core, zap.WrapCore(func(c zapcore.Core) zapcore.Core {
-		return zapcore.NewSamplerWithOptions(c, time.Second, 100, 100)
-	}))
+	// Wire error output paths into zap's internal error sink (encoder/sync
+	// failures, etc.) so they respect the same rotation config as regular logs.
+	var errSinks []zapcore.WriteSyncer
+	for _, path := range cfg.ErrorOutputPaths {
+		errSinks = append(errSinks, rotateWriter(path, cfg.Rotate))
+	}
+
+	base := zap.New(core,
+		zap.ErrorOutput(zapcore.NewMultiWriteSyncer(errSinks...)),
+		zap.WrapCore(func(c zapcore.Core) zapcore.Core {
+			return zapcore.NewSamplerWithOptions(c, time.Second, 100, 100)
+		}),
+	)
 	return &zapLogger{base: base, sugar: base.Sugar()}, nil
 }
 
