@@ -245,8 +245,7 @@ public class SandboxEgressLifecycleTests
                 EndpointAddress = $"127.0.0.1:{port}",
                 Headers = new Dictionary<string, string>
                 {
-                    ["X-Port"] = port.ToString(),
-                    ["X-Route-Token"] = $"sig:{expires}"
+                    ["X-Port"] = port.ToString()
                 }
             });
         }
