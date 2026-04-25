@@ -288,7 +288,12 @@ class TestSandboxE2E:
             assert signed_ep.headers != unsigned_ep.headers or signed_ep.endpoint != unsigned_ep.endpoint, (
                 "Signed endpoint should differ from unsigned endpoint in headers or URL"
             )
-            logger.info(f"✓ Signed endpoint obtained (headers={bool(signed_ep.headers)})")
+            logger.info(f"✓ Signed endpoint obtained: {signed_ep.endpoint}")
+            if signed_ep.headers:
+                for k, v in signed_ep.headers.items():
+                    logger.info(f"  Header: {k}: {v}")
+            else:
+                logger.info("  (no headers in signed response)")
 
             # Use the signed endpoint to make an actual request to execd /ping
             # through the ingress gateway, verifying the route token is accepted.
