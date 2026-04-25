@@ -16,6 +16,14 @@
 
 set -e
 
+_forward_signal() {
+	sig="$1"
+	pid="$2"
+	kill "-$sig" "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+	exit 0
+}
+
 # Returns 0 if the value looks like a boolean "true" (1, true, yes, on).
 is_truthy() {
 	case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -155,11 +163,17 @@ fi
 
 set -x
 if [ "$CMD" != "" ]; then
-	exec "$SHELL_BIN" -c "$CMD"
+	"$SHELL_BIN" -c "$CMD" &
+	CMD_PID=$!
+elif [ $# -eq 0 ]; then
+	"$SHELL_BIN" &
+	CMD_PID=$!
+else
+	"$@" &
+	CMD_PID=$!
 fi
 
-if [ $# -eq 0 ]; then
-	exec "$SHELL_BIN"
-fi
+trap '_forward_signal TERM "$CMD_PID"' TERM
 
-exec "$@"
+wait "$CMD_PID" 2>/dev/null
+exit $?
