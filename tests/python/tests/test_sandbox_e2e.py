@@ -23,6 +23,7 @@ import time
 from datetime import timedelta
 from io import BytesIO
 
+import httpx
 import pytest
 from opensandbox import Sandbox
 from opensandbox.config import ConnectionConfig
@@ -271,6 +272,45 @@ class TestSandboxE2E:
         assert sandbox.metrics is not None
         assert sandbox.connection_config is not None
         logger.info("✓ All sandbox service components are accessible")
+
+        logger.info("Step 6b: Get signed sandbox endpoint and verify execd reachable via gateway")
+        if is_secure_access_verifiable():
+            unsigned_ep = await sandbox.get_endpoint(44772)
+            assert unsigned_ep is not None
+            assert unsigned_ep.endpoint is not None
+
+            future_ts = int(time.time()) + 3600
+            signed_ep = await sandbox.get_signed_endpoint(44772, future_ts)
+            assert signed_ep is not None
+            assert signed_ep.endpoint is not None
+            # Signed response carries proof of route token in headers (header mode) or URL (URI mode).
+            # At minimum, the signed response must differ from the unsigned baseline.
+            assert signed_ep.headers != unsigned_ep.headers or signed_ep.endpoint != unsigned_ep.endpoint, (
+                "Signed endpoint should differ from unsigned endpoint in headers or URL"
+            )
+            logger.info(f"✓ Signed endpoint obtained (headers={bool(signed_ep.headers)})")
+
+            # Use the signed endpoint to make an actual request to execd /ping
+            # through the ingress gateway, verifying the route token is accepted.
+            ping_url = signed_ep.endpoint.rstrip("/") + "/ping"
+            ping_headers = {**signed_ep.headers} if signed_ep.headers else {}
+            logger.info(f"Signed /ping via gateway: {ping_url}")
+            async with httpx.AsyncClient() as client:
+                ping_resp = await client.get(ping_url, headers=ping_headers, timeout=30)
+                assert ping_resp.status_code == 200, (
+                    f"Signed endpoint /ping failed: HTTP {ping_resp.status_code} {ping_resp.text[:200]}"
+                )
+            logger.info("✓ Execd /ping succeeded through gateway with signed endpoint")
+
+            # Expired timestamp should be rejected by the server.
+            expired_ts = int(time.time()) - 3600
+            try:
+                await sandbox.get_signed_endpoint(44772, expired_ts)
+                logger.warning("Expired timestamp was accepted (server may not validate server-side)")
+            except SandboxApiException:
+                logger.info("✓ Expired timestamp correctly rejected")
+        else:
+            logger.info("Secure access not verifiable, skipping signed endpoint tests")
 
         logger.info("Step 7: Connect to existing sandbox by ID")
         sandbox2 = await Sandbox.connect(

@@ -131,6 +131,9 @@ EOF
 }
 
 k8s_e2e_write_server_helm_values() {
+  local signing_key
+  signing_key=$(openssl rand -base64 32 | tr -d '\n')
+
   {
     cat <<EOF
 server:
@@ -165,6 +168,11 @@ EOF
       requests:
         cpu: "250m"
         memory: 512Mi
+    secureAccess:
+      activeKey: "a"
+      keys:
+        - key_id: "a"
+          key: "${signing_key}"
 EOF
     fi
     cat <<EOF
