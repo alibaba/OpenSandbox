@@ -604,11 +604,11 @@ export interface components {
          */
         PlatformSpec: {
             /**
-             * @description Target operating system (for example `linux`).
+             * @description Target operating system (for example `linux` or `windows`).
              * @example linux
              * @enum {string}
              */
-            os: "linux";
+            os: "linux" | "windows";
             /**
              * @description Target CPU architecture (for example `amd64` or `arm64`).
              * @example arm64
