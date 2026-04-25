@@ -120,7 +120,7 @@ func (m *Manager) AddResolvedIPs(ctx context.Context, ips []ResolvedIP) error {
 	return err
 }
 
-// RemoveEnforcement deletes the inet opensandbox table (output filter hook and sets). Idempotent if the table is missing.
+// RemoveEnforcement drops inet opensandbox; missing table is not an error.
 func (m *Manager) RemoveEnforcement(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -166,7 +166,6 @@ func buildRuleset(p *policy.NetworkPolicy, opts Options) (string, error) {
 	}
 
 	var b strings.Builder
-	// Reset and re-create table, sets, and chain.
 	fmt.Fprintf(&b, "delete table inet %s\n", tableName)
 	fmt.Fprintf(&b, "add table inet %s\n", tableName)
 

@@ -27,7 +27,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
 )
 
-// createNftManager returns an nft manager when the mode includes the nft token (dns+nft), or nil otherwise.
+// createNftManager is non-nil only when mode includes the nft token (e.g. dns+nft).
 func createNftManager(mode string) nftApplier {
 	if !constants.ModeUsesNft(mode) {
 		return nil
@@ -35,9 +35,8 @@ func createNftManager(mode string) nftApplier {
 	return nftables.NewManagerWithOptions(parseNftOptions())
 }
 
-// setupNft applies static policy to nft and wires DNS-resolved IPs into the proxy when nft is enabled.
-// nameserverIPs are merged into the allow set at startup so system DNS works (client + proxy upstream, e.g. private DNS).
-// alwaysDeny/alwaysAllow are optional file-based rules merged ahead of initialPolicy (not persisted).
+// setupNft: apply static policy to nft, then wire allowed DNS answers to AddResolvedIPs (dynamic allow sets).
+// nameserverIPs and always-deny/allow follow the same merge rules as the policy API (MergeAlwaysOverlay + WithExtraAllowIPs).
 func setupNft(ctx context.Context, nftMgr nftApplier, initialPolicy *policy.NetworkPolicy, proxy *dnsproxy.Proxy, nameserverIPs []netip.Addr, alwaysDeny, alwaysAllow []policy.EgressRule) {
 	if nftMgr == nil {
 		log.Warnf("nftables disabled (dns-only mode)")

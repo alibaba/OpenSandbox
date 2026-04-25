@@ -29,7 +29,7 @@ const (
 	alwaysAllowFilePath = "/var/egress/rules/allow.always"
 )
 
-// LoadAlwaysRuleFiles reads optional deny/allow lists from the standard paths.
+// LoadAlwaysRuleFiles loads optional /var/egress/rules/deny|allow.always (ignore if missing); errors on unreadable.
 func LoadAlwaysRuleFiles() (deny, allow []EgressRule, err error) {
 	deny, err = loadAlwaysRuleFile(alwaysDenyFilePath, ActionDeny)
 	if err != nil {
@@ -77,7 +77,6 @@ func parseAlwaysRuleLines(data []byte, action, pathForErr string) ([]EgressRule,
 	return out, nil
 }
 
-// ParseValidatedEgressRule builds one normalized egress rule (domain/IP/CIDR).
 func ParseValidatedEgressRule(action, target string) (EgressRule, error) {
 	p := NetworkPolicy{
 		DefaultAction: ActionDeny,

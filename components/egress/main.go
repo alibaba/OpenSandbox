@@ -106,7 +106,6 @@ func main() {
 
 	setupNft(ctx, nftMgr, initialRules, proxy, allowIPs, alwaysDeny, alwaysAllow)
 
-	// start policy server
 	httpAddr := envOrDefault(constants.EnvEgressHTTPAddr, constants.DefaultEgressServerAddr)
 	mitmGate := mitmproxy.NewHealthGate()
 	policySrv, err := startPolicyServer(proxy, nftMgr, mode, httpAddr, os.Getenv(constants.EnvEgressToken), allowIPs, os.Getenv(constants.EnvEgressPolicyFile), alwaysDeny, alwaysAllow, mitmGate)
@@ -132,7 +131,7 @@ func withLogger(ctx context.Context) context.Context {
 	level := envOrDefault(constants.EnvEgressLogLevel, "info")
 	cfg := slogger.Config{Level: level}
 	base := slogger.MustNew(cfg)
-	// Fixed dimensions for every log line (sandbox_id, optional OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS).
+	// Baseline log fields (e.g. sandbox_id, OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS) for every line.
 	if extra := telemetry.EgressLogFields(); len(extra) > 0 {
 		base = base.With(extra...)
 	}

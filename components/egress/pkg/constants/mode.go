@@ -19,9 +19,7 @@ import (
 	"strings"
 )
 
-// ParseEgressMode parses OPENSANDBOX_EGRESS_MODE into a canonical string.
-// Tokens are + -separated, order-independent. Allowed tokens: dns (required), nft.
-// Empty or unset means dns-only.
+// ParseEgressMode: tokens "dns" (required) and "nft", joined with +, order-free. Empty env → dns-only.
 func ParseEgressMode(raw string) (string, error) {
 	seen, err := parseModeTokens(raw)
 	if err != nil {
@@ -62,7 +60,6 @@ func normalizeMode(seen map[string]bool) string {
 	return PolicyDnsNft
 }
 
-// ModeUsesNft reports whether the normalized mode enables nftables.
 func ModeUsesNft(mode string) bool {
 	seen, err := parseModeTokens(mode)
 	if err != nil {

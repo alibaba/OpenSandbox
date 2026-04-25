@@ -22,10 +22,8 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 )
 
-// AllowIPsForNft returns the list of IPs to merge into the nft allow set for DNS in dns+nft mode:
-// 127.0.0.1 (proxy listen / iptables redirect target) plus validated, capped nameserver IPs from resolvPath.
-// Validation: skips unspecified (0.0.0.0, ::) and loopback (127.x, ::1).
-// Cap: at most constants.ResolvNameserverCap nameservers from resolv.conf.
+// AllowIPsForNft builds the extra allow-IP list for dns+nft: 127.0.0.1 (local DNS listen after REDIRECT),
+// then up to ResolvNameserverCap non-loopback / non-0.0.0.0 nameservers from resolvPath.
 func AllowIPsForNft(resolvPath string) []netip.Addr {
 	raw, _ := dnsproxy.ResolvNameserverIPs(resolvPath)
 	maxNsCount := constants.ResolvNameserverCap
@@ -41,8 +39,7 @@ func AllowIPsForNft(resolvPath string) []netip.Addr {
 		validated = append(validated, ip)
 	}
 
-	// 127.0.0.1 first so packets redirected to proxy are accepted by nft.
-	out := make([]netip.Addr, 0, 1+len(validated))
+	out := make([]netip.Addr, 0, 1+len(validated)) // 127.0.0.1 first: redirect target must be allowed
 	out = append(out, netip.MustParseAddr("127.0.0.1"))
 	out = append(out, validated...)
 
@@ -84,7 +81,7 @@ func allowIps() []netip.Addr {
 		}
 	}
 
-	// Merge nameserver exempt IPs into nft allow set so proxy traffic to them (no SO_MARK) is allowed in dns+nft mode.
+	// Exempt destinations: proxy dials them without SO_MARK; they must still be allowed by nft.
 	for _, addr := range dnsproxy.ParseNameserverExemptList() {
 		if !containsAddr(allowIPs, addr) {
 			allowIPs = append(allowIPs, addr)

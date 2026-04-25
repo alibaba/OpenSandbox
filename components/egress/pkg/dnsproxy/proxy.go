@@ -56,16 +56,14 @@ type Proxy struct {
 	servers                 []*dns.Server
 	shutdownOnce            sync.Once
 
-	// optional; called in goroutine when A/AAAA are present
+	// When set, called synchronously for allowed A/AAAA answers (dns+nft: program nft before client connects).
 	onResolved func(domain string, ips []nftables.ResolvedIP)
-
-	// optional broadcaster to notify blocked hostnames
+	// Optional: async fan-out for denied lookups (e.g. webhook).
 	blockedBroadcaster *events.Broadcaster
 }
 
-// New builds a proxy with resolved upstream; listenAddr can be empty for default.
-// alwaysDeny and alwaysAllow are optional operator rules merged ahead of user egress
-// (see policy.MergeAlwaysOverlay); they are not persisted via the policy API.
+// New constructs the DNS proxy: discovers upstreams, default listen 127.0.0.1:15353 if listenAddr is "".
+// alwaysDeny/alwaysAllow are merged via policy.MergeAlwaysOverlay; they are file/operator rules, not persisted by POST /policy.
 func New(p *policy.NetworkPolicy, listenAddr string, alwaysDeny, alwaysAllow []policy.EgressRule) (*Proxy, error) {
 	if listenAddr == "" {
 		listenAddr = defaultListenAddr
@@ -136,7 +134,7 @@ func (p *Proxy) Start(ctx context.Context) error {
 	case err := <-errCh:
 		return fmt.Errorf("dns proxy failed: %w", err)
 	case <-timer.C:
-		// listeners bound; start upstream probes only after DNS servers are up
+		// Start upstream probes only after listeners are up, so the first probe does not fail on "not listening".
 	}
 
 	safego.Go(func() { p.runUpstreamProbes(ctx) })
@@ -144,7 +142,7 @@ func (p *Proxy) Start(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown stops UDP/TCP DNS listeners. Safe to call more than once.
+// Shutdown stops UDP and TCP DNS listeners. Safe to call more than once.
 func (p *Proxy) Shutdown() error {
 	var outErr error
 	p.shutdownOnce.Do(func() {
@@ -159,7 +157,7 @@ func (p *Proxy) Shutdown() error {
 
 func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	if len(r.Question) == 0 {
-		_ = w.WriteMsg(new(dns.Msg)) // empty response
+		_ = w.WriteMsg(new(dns.Msg))
 		return
 	}
 	q := r.Question[0]
@@ -196,8 +194,8 @@ func (p *Proxy) serveDNS(w dns.ResponseWriter, r *dns.Msg) {
 	_ = w.WriteMsg(resp)
 }
 
-// maybeNotifyResolved calls onResolved synchronously when resp contains A/AAAA,
-// so that IPs are in nft before the client receives the DNS response and connects.
+// maybeNotifyResolved calls onResolved before w.WriteMsg so dynamic nft allows are installed
+// before the client receives the answer and may open a connection.
 func (p *Proxy) maybeNotifyResolved(domain string, resp *dns.Msg) {
 	if p.onResolved == nil {
 		return
@@ -240,9 +238,8 @@ func (p *Proxy) forward(r *dns.Msg) (*dns.Msg, error) {
 	return nil, fmt.Errorf("no upstream resolvers configured")
 }
 
-// shouldFailoverAfterResponse returns whether to try the next upstream.
-//
-// NXDOMAIN and NOERROR are both accepted as final DNS responses (no retry).
+// shouldFailoverAfterResponse: treat NXDOMAIN and NOERROR as final (no retry). Other rcodes may
+// move to the next upstream (e.g. SERVFAIL).
 func (p *Proxy) shouldFailoverAfterResponse(resp *dns.Msg) (tryNext bool, reason string) {
 	if resp == nil {
 		return true, "nil response"
@@ -261,7 +258,6 @@ func (p *Proxy) shouldFailoverAfterResponse(resp *dns.Msg) (tryNext bool, reason
 	}
 }
 
-// UpstreamHost returns the host part of the first upstream resolver used for forwarding, empty on parse error.
 func (p *Proxy) UpstreamHost() string {
 	list := p.forwardUpstreams()
 	if len(list) == 0 {
@@ -274,8 +270,7 @@ func (p *Proxy) UpstreamHost() string {
 	return host
 }
 
-// UpdatePolicy swaps the user-facing policy (without always-deny/allow file overlay).
-// Passing nil reverts to the default deny-all policy.
+// UpdatePolicy replaces the user policy from POST/GET /policy (not the always file overlay). Nil → default deny-all.
 func (p *Proxy) UpdatePolicy(newPolicy *policy.NetworkPolicy) {
 	p.policyMu.Lock()
 	defer p.policyMu.Unlock()
@@ -284,7 +279,7 @@ func (p *Proxy) UpdatePolicy(newPolicy *policy.NetworkPolicy) {
 	p.refreshEffectivePolicy()
 }
 
-// UpdateAlwaysRules swaps always-deny/always-allow overlays used by DNS evaluation.
+// UpdateAlwaysRules replaces the always-deny/always-allow file overlay used only for evaluation (merged in refreshEffectivePolicy).
 func (p *Proxy) UpdateAlwaysRules(alwaysDeny, alwaysAllow []policy.EgressRule) {
 	p.policyMu.Lock()
 	defer p.policyMu.Unlock()
@@ -294,7 +289,7 @@ func (p *Proxy) UpdateAlwaysRules(alwaysDeny, alwaysAllow []policy.EgressRule) {
 	p.refreshEffectivePolicy()
 }
 
-// CurrentPolicy returns the user policy (POST/PATCH/GET), not the always-deny/allow overlay.
+// CurrentPolicy is the last user policy from the API, without always file overlay in the struct (overlay is in effectivePolicy).
 func (p *Proxy) CurrentPolicy() *policy.NetworkPolicy {
 	p.policyMu.RLock()
 	defer p.policyMu.RUnlock()
@@ -302,13 +297,12 @@ func (p *Proxy) CurrentPolicy() *policy.NetworkPolicy {
 	return p.userPolicy
 }
 
-// SetOnResolved sets the callback invoked when an allowed domain resolves to A/AAAA.
-// Called in a goroutine; pass nil to disable. Only used when L2 dynamic IP is enabled (e.g. dns+nft mode).
+// SetOnResolved registers the dns+nft path (nil in dns-only). Invoked on the same goroutine as serveDNS, before WriteMsg.
 func (p *Proxy) SetOnResolved(fn func(domain string, ips []nftables.ResolvedIP)) {
 	p.onResolved = fn
 }
 
-// SetBlockedBroadcaster wires a broadcaster used to notify blocked hostnames.
+// SetBlockedBroadcaster wires the optional publisher for policy-denied lookups.
 func (p *Proxy) SetBlockedBroadcaster(b *events.Broadcaster) {
 	p.blockedBroadcaster = b
 }
@@ -328,10 +322,7 @@ func (p *Proxy) publishBlocked(domain string) {
 	})
 }
 
-// extractResolvedIPs parses A and AAAA records from resp.Answer into ResolvedIP slice.
-//
-// Uses netip.ParseAddr(v.A.String()) which allocates a temporary string per record; typically
-// one or a few records per resolution, so the cost is small compared to DNS RTT and nft writes.
+// extractResolvedIPs collects A/AAAA from resp.Answer with TTLs for dynamic nft elements.
 func extractResolvedIPs(resp *dns.Msg) []nftables.ResolvedIP {
 	if resp == nil || len(resp.Answer) == 0 {
 		return nil
@@ -365,7 +356,7 @@ func extractResolvedIPs(resp *dns.Msg) []nftables.ResolvedIP {
 
 const fallbackUpstream = "8.8.8.8:53"
 
-// DiscoverUpstreams returns the same ordered resolver chain used by the DNS proxy (env or /etc/resolv.conf).
+// DiscoverUpstreams is env OPENSANDBOX_EGRESS_DNS_UPSTREAM if set, else /etc/resolv.conf (with caps/fallbacks).
 func DiscoverUpstreams() ([]string, error) {
 	raw := strings.TrimSpace(os.Getenv(constants.EnvDNSUpstream))
 	if raw != "" {
@@ -374,7 +365,7 @@ func DiscoverUpstreams() ([]string, error) {
 	return discoverUpstreamsFromResolv()
 }
 
-// parseEnvDNSUpstreams parses OPENSANDBOX_EGRESS_DNS_UPSTREAM (comma-separated).
+// parseEnvDNSUpstreams splits OPENSANDBOX_EGRESS_DNS_UPSTREAM (comma-separated); each entry must pass normalizeEnvUpstreamAddr.
 func parseEnvDNSUpstreams(raw string) ([]string, error) {
 	var out []string
 	for _, part := range strings.Split(raw, ",") {
@@ -394,9 +385,8 @@ func parseEnvDNSUpstreams(raw string) ([]string, error) {
 	return dedupeUpstreamAddrs(out), nil
 }
 
-// normalizeEnvUpstreamAddr parses a single OPENSANDBOX_EGRESS_DNS_UPSTREAM entry into host:port (default 53).
-// Only literal IPv4/IPv6 addresses are allowed. Hostnames are rejected: resolving them would use port 53,
-// which iptables redirects back into this proxy and causes recursive lookup failure.
+// normalizeEnvUpstreamAddr requires a literal IP (optional :port). Resolving a hostname to :53 would hit
+// OUTPUT REDIRECT to this proxy again and recurse.
 func normalizeEnvUpstreamAddr(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -472,7 +462,7 @@ func dedupeUpstreamAddrs(addrs []string) []string {
 	return out
 }
 
-// AllowIPsFromUpstreamAddrs extracts literal resolver IPs from normalized upstream addresses (host:port).
+// AllowIPsFromUpstreamAddrs collects literal resolver IPs from the host:port upstream list (nft allow, deduped).
 func AllowIPsFromUpstreamAddrs(upstreams []string) []netip.Addr {
 	var out []netip.Addr
 	seen := make(map[netip.Addr]struct{})
@@ -494,8 +484,8 @@ func AllowIPsFromUpstreamAddrs(upstreams []string) []netip.Addr {
 	return out
 }
 
-// ResolvNameserverIPs reads nameserver lines from resolvPath and returns parsed IPv4/IPv6 addresses.
-// Used at startup to whitelist the system DNS so client traffic to it is allowed and proxy can use it as upstream.
+// ResolvNameserverIPs parses resolvPath nameserver lines; used to allow the system resolver IPs in nft
+// and align client vs. proxy forward path.
 func ResolvNameserverIPs(resolvPath string) ([]netip.Addr, error) {
 	cfg, err := dns.ClientConfigFromFile(resolvPath)
 	if err != nil || len(cfg.Servers) == 0 {

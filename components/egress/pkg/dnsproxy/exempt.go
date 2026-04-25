@@ -29,8 +29,8 @@ var (
 	exemptSet      map[netip.Addr]struct{}
 )
 
-// ParseNameserverExemptList returns IPs from OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT (comma-separated).
-// Only single IPs are accepted; invalid or CIDR entries are skipped. Result is cached. Used for nft allow set, iptables, and UpstreamInExemptList.
+// ParseNameserverExemptList returns IPs from OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT (comma-separated);
+// only single-IP entries are kept; list is parsed once and cached. Used for nft, iptables RETURN, and dialer.
 func ParseNameserverExemptList() []netip.Addr {
 	exemptListOnce.Do(func() { parseNameserverExemptListUncached() })
 	return exemptAddrs
@@ -62,8 +62,7 @@ func parseNameserverExemptListUncached() {
 	exemptSet = set
 }
 
-// UpstreamInExemptList returns true when upstreamHost is in the nameserver exempt list (exact IP match).
-// When true, the proxy should not set SO_MARK so upstream traffic follows normal routing (e.g. via tun).
+// If true, dialer omits SO_MARK; exempt dst also skips REDIRECT in iptables.
 func UpstreamInExemptList(upstreamHost string) bool {
 	addr, err := netip.ParseAddr(upstreamHost)
 	if err != nil {

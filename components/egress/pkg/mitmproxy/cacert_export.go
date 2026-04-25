@@ -33,8 +33,7 @@ const (
 	waitCACert     = 20 * time.Second
 )
 
-// candidateCACertPaths lists possible locations for mitmproxy-ca-cert.pem depending on
-// whether --set confdir was used and how mitmproxy lays out its data directory.
+// candidateCACertPaths: mitm may place mitmproxy-ca-cert.pem in confdir, .mitmproxy under confdir, or home.
 func candidateCACertPaths(confDirEnv, home string) []string {
 	confDirEnv = strings.TrimSpace(confDirEnv)
 	var out []string

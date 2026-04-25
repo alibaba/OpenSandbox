@@ -16,16 +16,13 @@ package policy
 
 import "strings"
 
-// compiledDomainRule stores the original egress order and effective action.
-// The smallest index wins to preserve "first match wins" semantics.
+// compiledDomainRule records first-seen index for a pattern; match() picks lowest index on conflicts.
 type compiledDomainRule struct {
 	index  int
 	action string
 }
 
-// compiledDomainIndex accelerates domain evaluate while preserving rule order semantics.
-// - exact holds exact-domain patterns (e.g. "api.example.com")
-// - wildcard holds wildcard suffix patterns (e.g. ".example.com" for "*.example.com")
+// compiledDomainIndex: exact map + wildcard suffix map; order in Evaluate follows merged egress order.
 type compiledDomainIndex struct {
 	exact    map[string]compiledDomainRule
 	wildcard map[string]compiledDomainRule

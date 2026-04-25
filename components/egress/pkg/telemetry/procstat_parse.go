@@ -19,8 +19,7 @@ import (
 	"strings"
 )
 
-// procStatCPUJiffies parses the aggregate "cpu" line from /proc/stat.
-// idle includes idle + iowait (indices 3 and 4). total is the sum of all jiffies fields.
+// procStatCPUJiffies parses the aggregate "cpu" line; idle counts idle+iowait (fields 4–5).
 func procStatCPUJiffies(line string) (total, idle uint64, ok bool) {
 	fields := strings.Fields(line)
 	if len(fields) < 5 || fields[0] != "cpu" {

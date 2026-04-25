@@ -29,7 +29,7 @@ type alwaysRuleFileState struct {
 	rules   []EgressRule
 }
 
-// AlwaysRuleLoader refreshes deny/allow always-rules from files with a minimum check interval.
+// AlwaysRuleLoader polls the standard always-deny/allow file paths at most once per refreshInterval.
 type AlwaysRuleLoader struct {
 	mu              sync.RWMutex
 	refreshInterval time.Duration
@@ -38,7 +38,6 @@ type AlwaysRuleLoader struct {
 	allowState      alwaysRuleFileState
 }
 
-// NewAlwaysRuleLoader creates a loader for standard always-rule files.
 func NewAlwaysRuleLoader(refreshInterval time.Duration) *AlwaysRuleLoader {
 	return newAlwaysRuleLoader(refreshInterval, alwaysDenyFilePath, alwaysAllowFilePath)
 }
@@ -54,8 +53,7 @@ func newAlwaysRuleLoader(refreshInterval time.Duration, denyPath, allowPath stri
 	}
 }
 
-// RefreshIfDue refreshes rules at most once per refreshInterval.
-// It returns changed=true only when deny/allow content state changed.
+// RefreshIfDue reloads from disk when the interval elapsed; changed is true only if file content actually differed.
 func (l *AlwaysRuleLoader) RefreshIfDue(now time.Time) (deny, allow []EgressRule, changed bool, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -77,7 +75,6 @@ func (l *AlwaysRuleLoader) RefreshIfDue(now time.Time) (deny, allow []EgressRule
 	return cloneRules(l.denyState.rules), cloneRules(l.allowState.rules), changed, nil
 }
 
-// CurrentRules returns the latest cached deny/allow rules without refreshing.
 func (l *AlwaysRuleLoader) CurrentRules() (deny, allow []EgressRule) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
@@ -85,7 +82,6 @@ func (l *AlwaysRuleLoader) CurrentRules() (deny, allow []EgressRule) {
 	return cloneRules(l.denyState.rules), cloneRules(l.allowState.rules)
 }
 
-// SetCurrentRules seeds/overrides the in-memory cached rules.
 func (l *AlwaysRuleLoader) SetCurrentRules(deny, allow []EgressRule) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -12,14 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package hooks is a blank-import anchor for egress startup extensions.
-//
-// Add Go files that call startup.Register or startup.RegisterFunc from init().
-// Hooks run in RunPost — after transparent mitmdump setup returns (see main).
-//
-//	func init() {
-//		startup.RegisterFunc("example", func(ctx context.Context) error { return nil })
-//	}
-//
-// main imports this package so those init functions run before main().
+// Package hooks: side-effect import target. Add files here whose init() registers startup.Register/RegisterFunc;
+// hooks run in startup.RunPost after the MITM/iptables path in main, before blocking on signal.
 package hooks

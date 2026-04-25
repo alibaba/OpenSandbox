@@ -1,5 +1,6 @@
 # Example mitmproxy addon: add a static header to every request.
 # Use: OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT=/opt/opensandbox/mitmscripts/add_header.py
+# Optional addon: OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT can point to this file.
 from mitmproxy import http
 
 HEADER_NAME = "X-OpenSandbox-Egress"

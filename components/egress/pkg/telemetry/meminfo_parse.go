@@ -19,8 +19,7 @@ import (
 	"strings"
 )
 
-// meminfoUsedBytesFromContent returns approximate system RAM in use (bytes) from /proc/meminfo text.
-// Prefer MemTotal−MemAvailable when both exist; else MemTotal−MemFree. Values in meminfo are kB.
+// meminfoUsedBytesFromContent approximates used RAM from kB fields (MemTotal−MemAvailable preferred).
 func meminfoUsedBytesFromContent(data []byte) int64 {
 	var memTotal, memAvail, memFree int64
 	var haveT, haveA, haveF bool
