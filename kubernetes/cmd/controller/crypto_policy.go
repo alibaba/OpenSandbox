@@ -151,7 +151,9 @@ func ensureCertMeetsNISTMinimums(cert *x509.Certificate) error {
 }
 
 func isSelfSignedCA(cert *x509.Certificate) bool {
-	return cert != nil && cert.IsCA && bytes.Equal(cert.RawSubject, cert.RawIssuer)
+	return cert != nil && cert.IsCA &&
+		bytes.Equal(cert.RawSubject, cert.RawIssuer) &&
+		cert.CheckSignatureFrom(cert) == nil
 }
 
 func validateCertificateKeyPair(certFile, keyFile string) error {
