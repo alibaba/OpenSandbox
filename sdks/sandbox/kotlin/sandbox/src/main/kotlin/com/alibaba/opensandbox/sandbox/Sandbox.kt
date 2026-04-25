@@ -426,7 +426,10 @@ class Sandbox internal constructor(
      * @param expires Unix epoch seconds for the signed route token expiry
      * @return Signed endpoint information
      */
-    fun getSignedEndpoint(port: Int, expires: Long): SandboxEndpoint {
+    fun getSignedEndpoint(
+        port: Int,
+        expires: Long,
+    ): SandboxEndpoint {
         return sandboxService.getSignedSandboxEndpoint(id, port, expires, httpClientProvider.config.useServerProxy)
     }
 
