@@ -76,3 +76,30 @@ func TestHandleError_JSONBodyStillParsed(t *testing.T) {
 	require.True(t, ok, "expected *APIError, got %T", err)
 	require.Equal(t, "RATE_LIMIT", apiErr.Response.Code)
 }
+
+func TestNewClient_DefaultTransportEnforcesNISTKeylengthPolicy(t *testing.T) {
+	client := NewClient("https://example.com", "key", "OPEN-SANDBOX-API-KEY")
+	require.NotNil(t, client.httpClient)
+	require.NotNil(t, client.httpClient.Transport)
+
+	tr, ok := client.httpClient.Transport.(*http.Transport)
+	require.True(t, ok, "expected *http.Transport, got %T", client.httpClient.Transport)
+	require.NotNil(t, tr.TLSClientConfig)
+	require.NotNil(t, tr.TLSClientConfig.VerifyConnection)
+}
+
+func TestNewClient_NilCustomHTTPClientFallsBackToDefaultSecureTransport(t *testing.T) {
+	client := NewClient(
+		"https://example.com",
+		"key",
+		"OPEN-SANDBOX-API-KEY",
+		WithHTTPClient(nil),
+	)
+	require.NotNil(t, client.httpClient)
+	require.NotNil(t, client.httpClient.Transport)
+
+	tr, ok := client.httpClient.Transport.(*http.Transport)
+	require.True(t, ok, "expected *http.Transport, got %T", client.httpClient.Transport)
+	require.NotNil(t, tr.TLSClientConfig)
+	require.NotNil(t, tr.TLSClientConfig.VerifyConnection)
+}

@@ -62,7 +62,7 @@ type ConnectionConfig struct {
 	Retry *RetryConfig
 
 	// Transport configures HTTP connection pooling. If nil and HTTPClient
-	// is also nil, Go's http.DefaultTransport is used.
+	// is also nil, the SDK uses DefaultTransport().
 	// Use DefaultTransportConfig() for tuned pool settings.
 	Transport *TransportConfig
 

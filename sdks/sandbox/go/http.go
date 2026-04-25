@@ -88,17 +88,30 @@ func NewClient(baseURL, apiKey, authHeader string, opts ...Option) *Client {
 		baseURL:    baseURL,
 		apiKey:     apiKey,
 		authHeader: authHeader,
-		httpClient: &http.Client{Timeout: defaultTimeout},
+		httpClient: &http.Client{
+			Timeout:   defaultTimeout,
+			Transport: DefaultTransport(),
+		},
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	if c.httpClient == nil {
+		c.httpClient = &http.Client{
+			Timeout:   defaultTimeout,
+			Transport: DefaultTransport(),
+		}
+	} else if c.httpClient.Transport == nil {
+		// Clone the caller's client to avoid mutating shared instances
+		// (e.g. http.DefaultClient) which would leak the SDK's transport
+		// settings into unrelated traffic in the same process.
+		cloned := *c.httpClient
+		cloned.Transport = DefaultTransport()
+		c.httpClient = &cloned
+	}
 	// Apply deferred timeout after all options so it works regardless of
 	// WithHTTPClient ordering and guards against a nil httpClient.
 	if c.timeout != nil {
-		if c.httpClient == nil {
-			c.httpClient = &http.Client{}
-		}
 		c.httpClient.Timeout = *c.timeout
 	}
 	return c
