@@ -26,7 +26,7 @@ ACR_REPO="sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox"
 # Component specific settings
 if [ "$COMPONENT" == "controller" ]; then
     IMAGE_NAME="controller"
-    BUILD_ARG="--build-arg PACKAGE=cmd/controller/main.go"
+    BUILD_ARG="--build-arg PACKAGE=./cmd/controller"
 elif [ "$COMPONENT" == "task-executor" ]; then
     IMAGE_NAME="task-executor"
     BUILD_ARG="--build-arg PACKAGE=cmd/task-executor/main.go --build-arg USERID=0"
