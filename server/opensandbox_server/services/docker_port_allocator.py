@@ -22,8 +22,11 @@ from fastapi import HTTPException, status
 
 from opensandbox_server.services.constants import SandboxErrorCodes
 
-PORT_PROBE_HOST = "127.0.0.1"
 DOCKER_PUBLISH_HOST = "0.0.0.0"
+# The probe is a short-lived availability check and must match Docker's
+# publish scope; probing only localhost can miss ports bound on other host
+# interfaces that Docker would later fail to publish.
+PORT_PROBE_HOST = DOCKER_PUBLISH_HOST
 
 
 def normalize_container_port_spec(port_spec: str) -> str:
@@ -59,6 +62,7 @@ def allocate_host_port(
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
+                # codeql[py/bind-socket-all-network-interfaces]
                 sock.bind((PORT_PROBE_HOST, port))
             except OSError:
                 continue
