@@ -73,9 +73,9 @@ def api_key_confirm(
 
     if env.get(ALLOW_NO_API_KEY_ENV) == ALLOW_NO_API_KEY_CONFIRMATION:
         logger.warning(
-            "server.api_key is not configured. Proceeding only because %s=%s.",
+            "server.api_key is not configured. Proceeding because %s explicitly acknowledges "
+            "the insecure server mode.",
             ALLOW_NO_API_KEY_ENV,
-            ALLOW_NO_API_KEY_CONFIRMATION,
         )
         return
 

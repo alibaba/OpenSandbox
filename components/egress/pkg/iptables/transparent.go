@@ -26,9 +26,9 @@ import (
 
 // transparentHTTPRules returns argv lines for transparent OUTPUT redirect (append or delete via op).
 // op must be "-A" or "-D".
-func transparentHTTPRules(localPort, mitmUID int, op string) [][]string {
+func transparentHTTPRules(localPort int, mitmUID uint32, op string) [][]string {
 	target := strconv.Itoa(localPort)
-	uid := strconv.Itoa(mitmUID)
+	uid := strconv.FormatUint(uint64(mitmUID), 10)
 	loopRules := [][]string{
 		{"iptables", "-t", "nat", op, "OUTPUT", "-p", "tcp", "-d", "127.0.0.0/8", "-j", "RETURN"},
 	}
@@ -47,16 +47,16 @@ func transparentHTTPRules(localPort, mitmUID int, op string) [][]string {
 // whose UID is not mitmUID.
 //
 // IPv4 only.
-func SetupTransparentHTTP(localPort, mitmUID int) error {
+func SetupTransparentHTTP(localPort int, mitmUID uint32) error {
 	if runtime.GOOS != "linux" {
 		return fmt.Errorf("iptables transparent: only supported on linux")
 	}
 
-	if localPort <= 0 || mitmUID < 0 {
+	if localPort <= 0 {
 		return fmt.Errorf("iptables transparent: invalid port or uid")
 	}
 	target := strconv.Itoa(localPort)
-	uid := strconv.Itoa(mitmUID)
+	uid := strconv.FormatUint(uint64(mitmUID), 10)
 	log.Infof("installing iptables transparent: OUTPUT tcp dport 80,443 -> 127.0.0.1:%s (skip uid %s)", target, uid)
 
 	rules := transparentHTTPRules(localPort, mitmUID, "-A")
@@ -71,11 +71,11 @@ func SetupTransparentHTTP(localPort, mitmUID int) error {
 
 // RemoveTransparentHTTP deletes rules installed by SetupTransparentHTTP with the same port and mitmUID.
 // Deletion order is reverse of insertion. Missing rules are ignored so teardown is best-effort.
-func RemoveTransparentHTTP(localPort, mitmUID int) {
+func RemoveTransparentHTTP(localPort int, mitmUID uint32) {
 	if runtime.GOOS != "linux" {
 		return
 	}
-	if localPort <= 0 || mitmUID < 0 {
+	if localPort <= 0 {
 		return
 	}
 	rules := transparentHTTPRules(localPort, mitmUID, "-D")

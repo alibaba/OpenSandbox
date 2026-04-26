@@ -16,7 +16,6 @@ package mitmproxy
 
 import (
 	"fmt"
-	"math"
 	"os"
 	"os/exec"
 	"os/user"
@@ -52,7 +51,7 @@ type Running struct {
 	done chan error
 }
 
-func LookupUser(userName string) (uid, gid int, home string, err error) {
+func LookupUser(userName string) (uid, gid uint32, home string, err error) {
 	if strings.TrimSpace(userName) == "" {
 		userName = RunAsUser
 	}
@@ -68,13 +67,7 @@ func LookupUser(userName string) (uid, gid int, home string, err error) {
 	if err != nil {
 		return 0, 0, "", err
 	}
-	if uid64 > uint64(math.MaxInt) {
-		return 0, 0, "", fmt.Errorf("mitmproxy: UID %d overflows int", uid64)
-	}
-	if gid64 > uint64(math.MaxInt) {
-		return 0, 0, "", fmt.Errorf("mitmproxy: GID %d overflows int", gid64)
-	}
-	return int(uid64), int(gid64), u.HomeDir, nil
+	return uint32(uid64), uint32(gid64), u.HomeDir, nil
 }
 
 // Launch starts mitmdump and returns immediately after the process is running.
@@ -130,7 +123,7 @@ func Launch(cfg Config) (*Running, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{Uid: uint32(uid), Gid: uint32(gid)},
+		Credential: &syscall.Credential{Uid: uid, Gid: gid},
 	}
 	cmd.Env = append(os.Environ(), "HOME="+homeEnv)
 

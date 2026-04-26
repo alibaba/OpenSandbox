@@ -90,6 +90,18 @@ func TestVerifySignature_OKAnd401(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestVerifySignature_ExpiryComparisonAvoidsUint64Overflow(t *testing.T) {
+	secret := []byte("test-secret-bytes")
+	sb := "my-sandbox"
+	port := 9000
+	exp := strconv.FormatUint(^uint64(0), 36)
+	hex8 := ExpectedHex8(Inner(secret, CanonicalBytes(sb, port, exp)))
+	sig := hex8 + "z"
+
+	v := &Verifier{Keys: map[string][]byte{"z": secret}}
+	assert.NoError(t, v.VerifySignature(sig, sb, port, exp))
+}
+
 func TestHTTPStatusForErr(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, HTTPStatusForErr(fmt.Errorf("%w: x", ErrUnauthorized)))
 	assert.Equal(t, http.StatusUnauthorized, HTTPStatusForErr(ErrAccessExpired))

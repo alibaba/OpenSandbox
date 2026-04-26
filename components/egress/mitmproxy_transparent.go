@@ -29,7 +29,7 @@ import (
 type mitmTransparent struct {
 	running *mitmproxy.Running
 	port    int
-	uid     int
+	uid     uint32
 }
 
 // startMitmproxyTransparentIfEnabled launches Python mitmdump in transparent mode and installs iptables.

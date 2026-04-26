@@ -168,6 +168,7 @@ class TestAgentSandboxServiceBuildSandbox:
             "metadata": {
                 "labels": {
                     "opensandbox.io/id": "sandbox-id",
+                    "opensandbox.io.evil/key": "public",
                     "team": "platform",
                 },
                 "creationTimestamp": "2025-12-31T09:00:00Z",
@@ -192,6 +193,6 @@ class TestAgentSandboxServiceBuildSandbox:
         assert sandbox.id == "sandbox-id"
         assert sandbox.image.uri == "python:3.11"
         assert sandbox.entrypoint == ["/bin/bash"]
-        assert sandbox.metadata == {"team": "platform"}
+        assert sandbox.metadata == {"opensandbox.io.evil/key": "public", "team": "platform"}
         assert isinstance(sandbox.status, SandboxStatus)
         assert sandbox.status.state == "Running"

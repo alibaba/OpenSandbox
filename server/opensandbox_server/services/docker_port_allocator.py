@@ -22,6 +22,9 @@ from fastapi import HTTPException, status
 
 from opensandbox_server.services.constants import SandboxErrorCodes
 
+PORT_PROBE_HOST = "127.0.0.1"
+DOCKER_PUBLISH_HOST = "0.0.0.0"
+
 
 def normalize_container_port_spec(port_spec: str) -> str:
     token = str(port_spec).strip()
@@ -56,7 +59,7 @@ def allocate_host_port(
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                sock.bind(("0.0.0.0", port))
+                sock.bind((PORT_PROBE_HOST, port))
             except OSError:
                 continue
             return port
@@ -82,6 +85,6 @@ def allocate_port_bindings(
                 )
             if host_port not in allocated_ports:
                 allocated_ports.add(host_port)
-                bindings[container_port] = ("0.0.0.0", host_port)
+                bindings[container_port] = (DOCKER_PUBLISH_HOST, host_port)
                 break
     return bindings

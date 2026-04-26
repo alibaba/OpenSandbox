@@ -271,6 +271,17 @@ class OSSFSMixin:
         return ["ossfs2", "mount", backend_path, "-c", conf_file]
 
     @staticmethod
+    def _write_ossfs_private_config_file(file_path: str, content: str) -> None:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        fd = os.open(file_path, flags, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            # OSSFS requires credentials in a local config/passwd file; the file
+            # is created mode 0600 with an unpredictable UUID name and removed
+            # immediately after the mount command completes.
+            # codeql[py/clear-text-storage-sensitive-data]
+            f.write(content)
+
+    @staticmethod
     def _run_ossfs_mount_command(cmd: list[str], volume_name: str) -> None:
         result = subprocess.run(
             cmd,
@@ -323,10 +334,10 @@ class OSSFSMixin:
                     tempfile.gettempdir(),
                     f"opensandbox-ossfs-inline-{uuid4().hex}",
                 )
-                with open(passwd_file, "w", encoding="utf-8") as f:
-                    # ossfs passwd_file format: bucket:accessKeyId:accessKeySecret
-                    f.write(f"{bucket}:{access_key_id}:{access_key_secret}")
-                os.chmod(passwd_file, 0o600)
+                self._write_ossfs_private_config_file(
+                    passwd_file,
+                    f"{bucket}:{access_key_id}:{access_key_secret}",
+                )
                 cmd = self._build_ossfs_v1_command(
                     volume=volume,
                     source=source,
@@ -344,9 +355,7 @@ class OSSFSMixin:
                     tempfile.gettempdir(),
                     f"opensandbox-ossfs2-{uuid4().hex}.conf",
                 )
-                with open(conf_file, "w", encoding="utf-8") as f:
-                    f.write("\n".join(conf_lines) + "\n")
-                os.chmod(conf_file, 0o600)
+                self._write_ossfs_private_config_file(conf_file, "\n".join(conf_lines) + "\n")
                 cmd = self._build_ossfs_v2_mount_command(backend_path, conf_file)
             else:
                 raise HTTPException(

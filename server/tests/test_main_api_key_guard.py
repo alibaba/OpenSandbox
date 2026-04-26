@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
 import time
+
+import pytest
 
 from opensandbox_server.startup_guard import (
     ALLOW_NO_API_KEY_CONFIRMATION,
@@ -65,6 +66,28 @@ def test_env_ack_allows_non_interactive_start(monkeypatch):
         configured_api_key=None,
         stdin=_NonTTY(),
     )
+
+
+def test_env_ack_warning_does_not_log_confirmation_value(monkeypatch):
+    monkeypatch.setenv(ALLOW_NO_API_KEY_ENV, ALLOW_NO_API_KEY_CONFIRMATION)
+    calls = []
+
+    def _capture_warning(message: str, *args) -> None:
+        calls.append(message % args)
+
+    monkeypatch.setattr(
+        "opensandbox_server.startup_guard.logger.warning",
+        _capture_warning,
+    )
+
+    api_key_confirm(
+        configured_api_key=None,
+        stdin=_NonTTY(),
+    )
+
+    assert len(calls) == 1
+    assert ALLOW_NO_API_KEY_ENV in calls[0]
+    assert f"{ALLOW_NO_API_KEY_ENV}={ALLOW_NO_API_KEY_CONFIRMATION}" not in calls[0]
 
 
 def test_tty_requires_exact_yes(monkeypatch):

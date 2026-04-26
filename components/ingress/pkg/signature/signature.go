@@ -213,7 +213,8 @@ func (v *Verifier) VerifySignature(signature, sandboxID string, port int, expire
 	if err != nil {
 		return err
 	}
-	if time.Now().Unix() > int64(expiresSec) {
+	nowSec := time.Now().Unix()
+	if nowSec < 0 || uint64(nowSec) > expiresSec {
 		return ErrAccessExpired
 	}
 	hex8 := signature[:8]

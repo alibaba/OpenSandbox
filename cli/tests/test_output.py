@@ -110,7 +110,7 @@ class TestTableOutput:
         fmt = OutputFormatter("table", color=False)
         fmt.print_dict({"host": "example.com", "port": 8080}, title="Config")
         captured = capsys.readouterr()
-        assert "example.com" in captured.out
+        assert any(cell == "example.com" for cell in captured.out.split())
         assert "8080" in captured.out
         assert "Config" in captured.out
 
