@@ -32,7 +32,7 @@ class _FakeSocket:
         self._bound_addresses.append(address)
 
 
-def test_allocate_host_port_probes_loopback_only(monkeypatch) -> None:
+def test_allocate_host_port_probes_docker_publish_address(monkeypatch) -> None:
     bound_addresses: list[tuple[str, int]] = []
 
     monkeypatch.setattr(docker_port_allocator.random, "randint", lambda min_port, max_port: 45678)
