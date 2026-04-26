@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.25.9-bookworm AS builder
 
 WORKDIR /workspace
 
