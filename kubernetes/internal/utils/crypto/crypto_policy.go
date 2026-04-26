@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package crypto
 
 import (
 	"bytes"
@@ -156,15 +156,17 @@ func isSelfSignedCA(cert *x509.Certificate) bool {
 		cert.CheckSignatureFrom(cert) == nil
 }
 
-func validateCertificateKeyPair(certFile, keyFile string) error {
+// ValidateCertificateKeyPair loads and validates a TLS certificate/key pair.
+func ValidateCertificateKeyPair(certFile, keyFile string) error {
 	certPair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return fmt.Errorf("load TLS key pair (%s, %s): %w", certFile, keyFile, err)
 	}
-	return validateTLSCertificate(certFile, &certPair)
+	return ValidateTLSCertificate(certFile, &certPair)
 }
 
-func validateTLSCertificate(certName string, certPair *tls.Certificate) error {
+// ValidateTLSCertificate checks the certificate chain against NIST minimum key/hash requirements.
+func ValidateTLSCertificate(certName string, certPair *tls.Certificate) error {
 	if certPair == nil {
 		return fmt.Errorf("TLS certificate is nil for %s", certName)
 	}

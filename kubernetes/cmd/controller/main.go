@@ -40,6 +40,7 @@ import (
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller"
+	cryptoutil "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/crypto"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/fieldindex"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/logging"
 	// +kubebuilder:scaffold:imports
@@ -240,7 +241,7 @@ func main() {
 		webhookCertFile := filepath.Join(webhookCertPath, webhookCertName)
 		webhookKeyFile := filepath.Join(webhookCertPath, webhookCertKey)
 		if !allowWeakTLSKeyLengths {
-			if err := validateCertificateKeyPair(webhookCertFile, webhookKeyFile); err != nil {
+			if err := cryptoutil.ValidateCertificateKeyPair(webhookCertFile, webhookKeyFile); err != nil {
 				setupLog.Error(err, "Webhook certificate does not meet NIST minimum key/hash requirements",
 					"webhook-cert-file", webhookCertFile, "webhook-key-file", webhookKeyFile)
 				os.Exit(1)
@@ -269,7 +270,7 @@ func main() {
 				if allowWeakTLSKeyLengths {
 					return cert, nil
 				}
-				if err := validateTLSCertificate(webhookCertFile, cert); err != nil {
+				if err := cryptoutil.ValidateTLSCertificate(webhookCertFile, cert); err != nil {
 					return nil, err
 				}
 				return cert, nil
@@ -311,7 +312,7 @@ func main() {
 		metricsCertFile := filepath.Join(metricsCertPath, metricsCertName)
 		metricsKeyFile := filepath.Join(metricsCertPath, metricsCertKey)
 		if !allowWeakTLSKeyLengths && metricsAddr != "0" && secureMetrics {
-			if err := validateCertificateKeyPair(metricsCertFile, metricsKeyFile); err != nil {
+			if err := cryptoutil.ValidateCertificateKeyPair(metricsCertFile, metricsKeyFile); err != nil {
 				setupLog.Error(err, "Metrics certificate does not meet NIST minimum key/hash requirements",
 					"metrics-cert-file", metricsCertFile, "metrics-key-file", metricsKeyFile)
 				os.Exit(1)
@@ -340,7 +341,7 @@ func main() {
 				if allowWeakTLSKeyLengths {
 					return cert, nil
 				}
-				if err := validateTLSCertificate(metricsCertFile, cert); err != nil {
+				if err := cryptoutil.ValidateTLSCertificate(metricsCertFile, cert); err != nil {
 					return nil, err
 				}
 				return cert, nil

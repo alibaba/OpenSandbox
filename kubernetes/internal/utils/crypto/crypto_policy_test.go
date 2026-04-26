@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package crypto
 
 import (
 	"bytes"
@@ -102,7 +102,7 @@ func TestValidateCertificateKeyPair_RejectsWeakRSA(t *testing.T) {
 	certFile := writeTempFile(t, "weak-cert-*.pem", certPEM)
 	keyFile := writeTempFile(t, "weak-key-*.pem", keyPEM)
 
-	require.Error(t, validateCertificateKeyPair(certFile, keyFile))
+	require.Error(t, ValidateCertificateKeyPair(certFile, keyFile))
 }
 
 func TestValidateCertificateKeyPair_AcceptsRSA2048(t *testing.T) {
@@ -124,7 +124,7 @@ func TestValidateCertificateKeyPair_AcceptsRSA2048(t *testing.T) {
 	certFile := writeTempFile(t, "good-cert-*.pem", certPEM)
 	keyFile := writeTempFile(t, "good-key-*.pem", keyPEM)
 
-	require.NoError(t, validateCertificateKeyPair(certFile, keyFile))
+	require.NoError(t, ValidateCertificateKeyPair(certFile, keyFile))
 }
 
 func TestValidateTLSCertificate_RejectsWeakRSAFromTLSObject(t *testing.T) {
@@ -142,7 +142,7 @@ func TestValidateTLSCertificate_RejectsWeakRSAFromTLSObject(t *testing.T) {
 	require.NoError(t, err)
 
 	pair := &tls.Certificate{Certificate: [][]byte{der}}
-	require.Error(t, validateTLSCertificate("weak-rotated-cert", pair))
+	require.Error(t, ValidateTLSCertificate("weak-rotated-cert", pair))
 }
 
 func TestValidateTLSCertificate_AcceptsStrongCertFromTLSObject(t *testing.T) {
@@ -160,7 +160,7 @@ func TestValidateTLSCertificate_AcceptsStrongCertFromTLSObject(t *testing.T) {
 	require.NoError(t, err)
 
 	pair := &tls.Certificate{Certificate: [][]byte{der}}
-	require.NoError(t, validateTLSCertificate("strong-rotated-cert", pair))
+	require.NoError(t, ValidateTLSCertificate("strong-rotated-cert", pair))
 }
 
 func TestValidateTLSCertificate_RejectsWeakIntermediate(t *testing.T) {
@@ -213,7 +213,7 @@ func TestValidateTLSCertificate_RejectsWeakIntermediate(t *testing.T) {
 	require.NoError(t, err)
 
 	pair := &tls.Certificate{Certificate: [][]byte{leafDER, intermediateDER, rootDER}}
-	err = validateTLSCertificate("chain-with-weak-intermediate", pair)
+	err = ValidateTLSCertificate("chain-with-weak-intermediate", pair)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "[1]")
 }
@@ -249,7 +249,7 @@ func TestValidateTLSCertificate_RejectsWeakRootKey(t *testing.T) {
 	require.NoError(t, err)
 
 	pair := &tls.Certificate{Certificate: [][]byte{leafDER, rootDER}}
-	err = validateTLSCertificate("chain-with-weak-root", pair)
+	err = ValidateTLSCertificate("chain-with-weak-root", pair)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "[1]")
 }
