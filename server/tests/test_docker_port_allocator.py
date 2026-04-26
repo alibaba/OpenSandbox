@@ -32,7 +32,7 @@ class _FakeSocket:
         self._bound_addresses.append(address)
 
 
-def test_allocate_host_port_probes_docker_publish_scope(monkeypatch) -> None:
+def test_allocate_host_port_probes_loopback_only(monkeypatch) -> None:
     bound_addresses: list[tuple[str, int]] = []
 
     monkeypatch.setattr(docker_port_allocator.random, "randint", lambda min_port, max_port: 45678)
@@ -45,4 +45,12 @@ def test_allocate_host_port_probes_docker_publish_scope(monkeypatch) -> None:
     port = docker_port_allocator.allocate_host_port(min_port=45678, max_port=45678, attempts=1)
 
     assert port == 45678
-    assert bound_addresses == [(docker_port_allocator.DOCKER_PUBLISH_HOST, 45678)]
+    assert bound_addresses == [(docker_port_allocator.PORT_PROBE_HOST, 45678)]
+
+
+def test_allocate_port_bindings_keep_docker_publish_host(monkeypatch) -> None:
+    monkeypatch.setattr(docker_port_allocator, "allocate_host_port", lambda: 45678)
+
+    bindings = docker_port_allocator.allocate_port_bindings(["8080"])
+
+    assert bindings == {"8080": (docker_port_allocator.DOCKER_PUBLISH_HOST, 45678)}

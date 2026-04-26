@@ -1,0 +1,67 @@
+name: CodeQL Java/Kotlin
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/codeql-java-kotlin.yml"
+      - "sdks/**/kotlin/**"
+      - "tests/java/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/codeql-java-kotlin.yml"
+      - "sdks/**/kotlin/**"
+      - "tests/java/**"
+  schedule:
+    - cron: "27 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze Java/Kotlin
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: java-kotlin
+          build-mode: manual
+          queries: +security-extended,security-and-quality
+
+      - name: Publish sandbox Kotlin SDK locally
+        working-directory: sdks/sandbox/kotlin
+        run: ./gradlew --no-daemon publishToMavenLocal
+
+      - name: Publish code interpreter Kotlin SDK locally
+        working-directory: sdks/code-interpreter/kotlin
+        run: ./gradlew --no-daemon publishToMavenLocal
+
+      - name: Compile Java E2E tests
+        working-directory: tests/java
+        run: ./gradlew --no-daemon testClasses
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:java-kotlin"
