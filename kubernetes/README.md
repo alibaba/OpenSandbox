@@ -77,6 +77,8 @@ Sandbox lifecycle:   [Running]--[Pausing]--[Paused]--[Resuming]--[Running]
 1. **Pause**: The server patches `BatchSandbox.spec.pause=true`. The controller creates an internal `SandboxSnapshot`, runs a commit Job on the same node, commits the container rootfs, and pushes it to the configured OCI registry. After the snapshot is ready, the controller transitions the same `BatchSandbox` to `Paused` and releases runtime Pods / pooled allocations.
 2. **Resume**: The server patches `BatchSandbox.spec.pause=false`. The controller reads the latest `SandboxSnapshot`, rewrites the `BatchSandbox` template images to the snapshot image URIs, recreates the runtime, and transitions the sandbox back to `Running`. The public `sandboxId` remains stable across pause/resume cycles.
 
+Current pause/resume support is limited to `BatchSandbox.spec.replicas=1`. The OpenSandbox server creates Kubernetes sandboxes with `replicas: 1`; direct `BatchSandbox` CRs with any other replica count are rejected by the controller pause entry because the internal pause snapshot records one source Pod's container images.
+
 ### The SandboxSnapshot CRD
 
 The `SandboxSnapshot` CR is the central resource for pause/resume lifecycle:

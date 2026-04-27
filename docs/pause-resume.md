@@ -25,6 +25,7 @@ This guide explains how to use the pause and resume features for Kubernetes-back
 | **Pause** | Creates an internal `SandboxSnapshot`, commits the running container root filesystem as an OCI image, then quiesces the sandbox runtime and releases Pods / pooled allocations |
 | **Resume** | Reuses the same `BatchSandbox`, rewrites its template to the latest snapshot image, and recreates the runtime from that image |
 | **sandboxId** | Stable across pause/resume cycles — callers use the same ID throughout the sandbox lifetime |
+| **Replica support** | Currently limited to `BatchSandbox.spec.replicas=1`. Server-created Kubernetes sandboxes use `replicas: 1`; direct CRs with another replica count are rejected by the controller pause entry. |
 
 ### Key Design Principle
 
@@ -69,6 +70,8 @@ The Lifecycle API exposes only the coarse-grained sandbox states above. For deta
 | Environment variables | ✅ Yes — from BatchSandbox template |
 | Running processes / memory | ❌ No — process state is not checkpointed |
 | Explicit volume mounts | Depends on volume type |
+
+Pause/resume is currently single-replica only. The internal pause snapshot records one source Pod's container images and does not store per-replica state, so the Kubernetes controller rejects pause requests unless `BatchSandbox.spec.replicas=1`.
 
 ---
 

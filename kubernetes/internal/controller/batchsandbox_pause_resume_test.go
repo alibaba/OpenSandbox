@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
@@ -138,7 +139,7 @@ func TestDispatchPauseResume_Case2_PauseFalse(t *testing.T) {
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
 			Pause:    ptr.To(false),
-			Replicas: ptr.To(int32(0)),
+			Replicas: ptr.To(int32(1)),
 			Template: &corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{Name: "main", Image: "old-img"}},
@@ -305,6 +306,56 @@ func TestHandlePause_NormalFlow(t *testing.T) {
 	assert.Equal(t, "test-bs", snap.OwnerReferences[0].Name)
 }
 
+func TestHandlePause_RejectsUnsupportedReplicas(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			Replicas: ptr.To(int32(2)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "img"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 1,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhaseSucceed,
+		},
+	}
+	r := newTestReconciler(bs)
+
+	result, err := r.handlePause(context.Background(), bs)
+	require.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, result)
+
+	updated := &sandboxv1alpha1.BatchSandbox{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
+	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhaseSucceed, updated.Status.Phase)
+	assert.Equal(t, int64(2), updated.Status.PauseObservedGeneration)
+
+	var pauseFailed *sandboxv1alpha1.BatchSandboxCondition
+	for i := range updated.Status.Conditions {
+		if updated.Status.Conditions[i].Type == sandboxv1alpha1.BatchSandboxConditionPauseFailed {
+			pauseFailed = &updated.Status.Conditions[i]
+			break
+		}
+	}
+	require.NotNil(t, pauseFailed)
+	assert.Equal(t, sandboxv1alpha1.ConditionTrue, pauseFailed.Status)
+	assert.Equal(t, "UnsupportedReplicas", pauseFailed.Reason)
+	assert.Contains(t, pauseFailed.Message, "spec.replicas=1")
+
+	snap := &sandboxv1alpha1.SandboxSnapshot{}
+	err = r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs-pause"}, snap)
+	assert.True(t, apierrors.IsNotFound(err), "unsupported replicas should be rejected before creating a snapshot")
+}
+
 func TestHandlePause_PoolMode(t *testing.T) {
 	// Pool mode: pause should snapshot the allocated pod without mutating poolRef/template first.
 	pool := &sandboxv1alpha1.Pool{
@@ -464,6 +515,56 @@ func TestHandlePause_FailedRetry(t *testing.T) {
 	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhaseSucceed, updated.Status.Phase, "retry cleanup should not transition to Pausing yet")
 }
 
+func TestHandlePause_SucceededSnapshotRetry(t *testing.T) {
+	// Old snapshot is Succeed from a previous resume cleanup failure. It must be
+	// deleted before ACKing a new pause attempt, otherwise pause reuses stale state.
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			Replicas: ptr.To(int32(1)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "img"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 1,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhaseSucceed,
+		},
+	}
+	oldSnapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-pause",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.SandboxSnapshotSpec{SandboxName: "test-bs"},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase: sandboxv1alpha1.SandboxSnapshotPhaseSucceed,
+		},
+	}
+	r := newTestReconciler(bs, oldSnapshot)
+
+	result, err := r.handlePause(context.Background(), bs)
+	require.NoError(t, err)
+	assert.True(t, result.RequeueAfter > 0)
+
+	snap := &sandboxv1alpha1.SandboxSnapshot{}
+	err = r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs-pause"}, snap)
+	assert.True(t, apierrors.IsNotFound(err), "old Succeed snapshot should be deleted before retrying pause")
+
+	updated := &sandboxv1alpha1.BatchSandbox{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
+	assert.Equal(t, int64(1), updated.Status.PauseObservedGeneration, "retry cleanup should not ACK until stale succeeded snapshot is removed")
+	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhaseSucceed, updated.Status.Phase, "retry cleanup should not transition to Pausing yet")
+}
+
 // ---------- handleResume tests ----------
 
 func TestHandleResume_NormalFlow(t *testing.T) {
@@ -498,7 +599,7 @@ func TestHandleResume_NormalFlow(t *testing.T) {
 }
 
 func TestContinueResume_NormalFlow(t *testing.T) {
-	// continueResume does the actual work: read snapshot, replace images, scale up, delete snapshot
+	// continueResume does the actual work: read snapshot and replace images without changing replicas.
 	snapshot := &sandboxv1alpha1.SandboxSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-bs-pause",
@@ -521,7 +622,7 @@ func TestContinueResume_NormalFlow(t *testing.T) {
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
 			Pause:    ptr.To(false),
-			Replicas: ptr.To(int32(0)),
+			Replicas: ptr.To(int32(1)),
 			Template: &corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{Name: "main", Image: "old-img"}},
@@ -544,7 +645,7 @@ func TestContinueResume_NormalFlow(t *testing.T) {
 	updated := &sandboxv1alpha1.BatchSandbox{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
 	assert.Equal(t, "registry/test-bs-main:snap-gen1", updated.Spec.Template.Spec.Containers[0].Image)
-	// Verify replicas scaled up
+	// Verify replicas are preserved.
 	assert.Equal(t, int32(1), *updated.Spec.Replicas)
 	// Verify controller does not clear spec.pause
 	require.NotNil(t, updated.Spec.Pause)
@@ -557,6 +658,53 @@ func TestContinueResume_NormalFlow(t *testing.T) {
 		}
 	}
 	assert.True(t, found, "imagePullSecrets should contain resume-pull-secret")
+}
+
+func TestContinueResume_PreservesExistingReplicas(t *testing.T) {
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-pause",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.SandboxSnapshotSpec{SandboxName: "test-bs"},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase: sandboxv1alpha1.SandboxSnapshotPhaseSucceed,
+			Containers: []sandboxv1alpha1.ContainerSnapshot{
+				{ContainerName: "main", ImageURI: "registry/test-bs-main:snap-gen1"},
+			},
+		},
+	}
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(false),
+			Replicas: ptr.To(int32(2)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "old-img"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 2,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhaseResuming,
+		},
+	}
+	r := newTestReconciler(bs, snapshot)
+
+	result, err := r.continueResume(context.Background(), bs)
+	require.NoError(t, err)
+	assert.True(t, result.RequeueAfter > 0)
+
+	updated := &sandboxv1alpha1.BatchSandbox{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
+	assert.Equal(t, int32(2), *updated.Spec.Replicas)
+	assert.Equal(t, "registry/test-bs-main:snap-gen1", updated.Spec.Template.Spec.Containers[0].Image)
 }
 
 func TestHandleResume_PoolMode(t *testing.T) {
@@ -591,7 +739,7 @@ func TestHandleResume_PoolMode(t *testing.T) {
 }
 
 func TestContinueResume_PoolMode(t *testing.T) {
-	// continueResume clears poolRef
+	// continueResume clears poolRef without changing replicas.
 	snapshot := &sandboxv1alpha1.SandboxSnapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-bs-pause",
@@ -615,7 +763,7 @@ func TestContinueResume_PoolMode(t *testing.T) {
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
 			Pause:    ptr.To(false),
 			PoolRef:  "test-pool",
-			Replicas: ptr.To(int32(0)),
+			Replicas: ptr.To(int32(1)),
 			Template: &corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{Name: "main", Image: "old-img"}},
@@ -663,7 +811,7 @@ func TestContinueResume_UsesPatchedTemplateWhenCacheReturnsStaleObject(t *testin
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
 			Pause:    ptr.To(false),
 			PoolRef:  "test-pool",
-			Replicas: ptr.To(int32(0)),
+			Replicas: ptr.To(int32(1)),
 			Template: &corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{Name: "main", Image: "old-img"}},
@@ -1333,6 +1481,57 @@ func TestPersistRuntimeView_SkipsStatusUpdateWhenRuntimeStatusUnchanged(t *testi
 	assert.Equal(t, 0, statusUpdates, "unchanged runtime status should not be persisted again")
 }
 
+func TestPersistRuntimeView_RetriesSucceededPauseSnapshotCleanup(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 3,
+			UID:        "test-uid",
+			Annotations: map[string]string{
+				AnnotationSandboxEndpoints: "null",
+			},
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(false),
+			Replicas: ptr.To(int32(1)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "img"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			ObservedGeneration:      3,
+			PauseObservedGeneration: 3,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhaseSucceed,
+			Replicas:                1,
+			Allocated:               1,
+			Ready:                   1,
+		},
+	}
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-pause",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.SandboxSnapshotSpec{SandboxName: "test-bs"},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase: sandboxv1alpha1.SandboxSnapshotPhaseSucceed,
+		},
+	}
+	r := newTestReconciler(bs, snapshot)
+
+	status := bs.Status
+	view := runtimeView{status: &status}
+	errs := r.persistRuntimeView(context.Background(), bs.DeepCopy(), view)
+	require.Empty(t, errs)
+
+	stillPresent := &sandboxv1alpha1.SandboxSnapshot{}
+	err := r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs-pause"}, stillPresent)
+	assert.True(t, apierrors.IsNotFound(err), "successful internal pause snapshot cleanup should be retried after resume")
+}
+
 func TestBuildRuntimeView_AggregatesPodFailuresInSteadyState(t *testing.T) {
 	bs := &sandboxv1alpha1.BatchSandbox{
 		ObjectMeta: metav1.ObjectMeta{
@@ -1560,7 +1759,7 @@ func TestBuildRuntimeView_AddsPausedConditionFromEmptyConditions(t *testing.T) {
 // ---------- completePause test ----------
 
 func TestCompletePause(t *testing.T) {
-	// completePause: status.phase=Paused FIRST, controller does not clear spec.pause
+	// completePause: status.phase=Paused, controller does not clear spec.pause
 	bs := &sandboxv1alpha1.BatchSandbox{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "test-bs",
@@ -1606,6 +1805,73 @@ func TestCompletePause(t *testing.T) {
 	// Pause remains true until the next external request changes it
 	require.NotNil(t, updated.Spec.Pause)
 	assert.True(t, *updated.Spec.Pause)
+}
+
+func TestCompletePause_DeleteFailureLeavesPhasePausing(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			Replicas: ptr.To(int32(1)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "img"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 2,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhasePausing,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-0",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: sandboxv1alpha1.SchemeBuilder.GroupVersion.String(),
+					Kind:       "BatchSandbox",
+					Name:       "test-bs",
+					UID:        "test-uid",
+				},
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main", Image: "img"}},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(testscheme).
+		WithIndex(&corev1.Pod{}, fieldindex.IndexNameForOwnerRefUID, fieldindex.OwnerIndexFunc).
+		WithStatusSubresource(&sandboxv1alpha1.BatchSandbox{}).
+		WithObjects(bs, pod).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if obj.GetNamespace() == "default" && obj.GetName() == "test-bs-0" {
+					return fmt.Errorf("delete failed")
+				}
+				return c.Delete(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	r := &BatchSandboxReconciler{
+		Client:   fakeClient,
+		Scheme:   testscheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	err := r.completePause(context.Background(), bs)
+	require.ErrorContains(t, err, "delete failed")
+
+	updated := &sandboxv1alpha1.BatchSandbox{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
+	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhasePausing, updated.Status.Phase)
 }
 
 func TestCompletePause_PooledSandboxDetachesForPoolGC(t *testing.T) {
@@ -1668,6 +1934,220 @@ func TestCompletePause_PooledSandboxDetachesForPoolGC(t *testing.T) {
 	assert.NotContains(t, updated.Spec.Template.Labels, LabelPoolRevision)
 	assert.Equal(t, "", updated.Spec.Template.Spec.NodeName)
 	assert.NotContains(t, updated.Annotations, AnnoAllocReleaseKey)
+}
+
+func TestCompletePause_PooledSandboxDoesNotDeleteSourcePod(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-bs-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			PoolRef:  "test-pool",
+			Replicas: ptr.To(int32(1)),
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 2,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhasePausing,
+		},
+	}
+	setSandboxAllocation(bs, SandboxAllocation{Pods: []string{"pool-pod-1"}})
+
+	poolPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pool-pod-1",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: sandboxv1alpha1.SchemeBuilder.GroupVersion.String(),
+					Kind:       "Pool",
+					Name:       "test-pool",
+					UID:        "test-pool-uid",
+				},
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main", Image: "pool-image:latest"}},
+		},
+	}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(testscheme).
+		WithStatusSubresource(&sandboxv1alpha1.BatchSandbox{}).
+		WithObjects(bs, poolPod).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+				if obj.GetNamespace() == "default" && obj.GetName() == "pool-pod-1" {
+					return fmt.Errorf("batchsandbox reconciler must not delete pooled source pod")
+				}
+				return c.Delete(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	r := &BatchSandboxReconciler{
+		Client:   fakeClient,
+		Scheme:   testscheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	err := r.completePause(context.Background(), bs)
+	require.NoError(t, err)
+
+	stillPresent := &corev1.Pod{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "pool-pod-1"}, stillPresent))
+}
+
+func TestCompletePause_PooledSandboxAcknowledgesSpecPatchGeneration(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-bs-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			PoolRef:  "test-pool",
+			Replicas: ptr.To(int32(1)),
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 2,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhasePausing,
+		},
+	}
+	setSandboxAllocation(bs, SandboxAllocation{Pods: []string{"pool-pod-1"}})
+
+	poolPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pool-pod-1",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: sandboxv1alpha1.SchemeBuilder.GroupVersion.String(),
+					Kind:       "Pool",
+					Name:       "test-pool",
+					UID:        "test-pool-uid",
+				},
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main", Image: "pool-image:latest"}},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(testscheme).
+		WithStatusSubresource(&sandboxv1alpha1.BatchSandbox{}).
+		WithObjects(bs, poolPod).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				if err := c.Patch(ctx, obj, patch, opts...); err != nil {
+					return err
+				}
+				if obj.GetNamespace() == "default" && obj.GetName() == "test-bs" {
+					latest := &sandboxv1alpha1.BatchSandbox{}
+					if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-bs"}, latest); err != nil {
+						return err
+					}
+					latest.Generation = 3
+					return c.Update(ctx, latest)
+				}
+				return nil
+			},
+		}).
+		Build()
+	r := &BatchSandboxReconciler{
+		Client:   fakeClient,
+		Scheme:   testscheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	require.NoError(t, r.completePause(context.Background(), bs))
+
+	updated := &sandboxv1alpha1.BatchSandbox{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
+	assert.Equal(t, int64(3), updated.Generation)
+	assert.Equal(t, updated.Generation, updated.Status.PauseObservedGeneration)
+	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhasePaused, updated.Status.Phase)
+}
+
+func TestCompletePause_DoesNotAcknowledgeQueuedResumeGeneration(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-bs-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			PoolRef:  "test-pool",
+			Replicas: ptr.To(int32(1)),
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 2,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhasePausing,
+		},
+	}
+	setSandboxAllocation(bs, SandboxAllocation{Pods: []string{"pool-pod-1"}})
+
+	poolPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pool-pod-1",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion: sandboxv1alpha1.SchemeBuilder.GroupVersion.String(),
+					Kind:       "Pool",
+					Name:       "test-pool",
+					UID:        "test-pool-uid",
+				},
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main", Image: "pool-image:latest"}},
+		},
+	}
+
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(testscheme).
+		WithStatusSubresource(&sandboxv1alpha1.BatchSandbox{}).
+		WithObjects(bs, poolPod).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+				if err := c.Patch(ctx, obj, patch, opts...); err != nil {
+					return err
+				}
+				if obj.GetNamespace() == "default" && obj.GetName() == "test-bs" {
+					latest := &sandboxv1alpha1.BatchSandbox{}
+					if err := c.Get(ctx, types.NamespacedName{Namespace: "default", Name: "test-bs"}, latest); err != nil {
+						return err
+					}
+					latest.Generation = 3
+					latest.Spec.Pause = ptr.To(false)
+					return c.Update(ctx, latest)
+				}
+				return nil
+			},
+		}).
+		Build()
+	r := &BatchSandboxReconciler{
+		Client:   fakeClient,
+		Scheme:   testscheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	require.NoError(t, r.completePause(context.Background(), bs))
+
+	updated := &sandboxv1alpha1.BatchSandbox{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
+	assert.Equal(t, int64(3), updated.Generation)
+	assert.NotNil(t, updated.Spec.Pause)
+	assert.False(t, *updated.Spec.Pause)
+	assert.Equal(t, int64(2), updated.Status.PauseObservedGeneration)
+	assert.Equal(t, sandboxv1alpha1.BatchSandboxPhasePaused, updated.Status.Phase)
 }
 
 // ---------- syncPauseOrClear tests ----------
@@ -1776,6 +2256,61 @@ func TestSyncPauseOrClear_SnapshotFailed(t *testing.T) {
 		}
 	}
 	assert.True(t, foundCondition, "PauseFailed condition should be set")
+}
+
+func TestSyncPauseOrClear_SnapshotFailedReturnsStatusUpdateError(t *testing.T) {
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-pause",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.SandboxSnapshotSpec{SandboxName: "test-bs"},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase: sandboxv1alpha1.SandboxSnapshotPhaseFailed,
+		},
+	}
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			Replicas: ptr.To(int32(1)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "img"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 2,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhasePausing,
+		},
+	}
+	fakeClient := fake.NewClientBuilder().
+		WithScheme(testscheme).
+		WithStatusSubresource(&sandboxv1alpha1.BatchSandbox{}, &sandboxv1alpha1.SandboxSnapshot{}).
+		WithObjects(bs, snapshot).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+				if subResourceName == "status" && obj.GetNamespace() == "default" && obj.GetName() == "test-bs" {
+					return fmt.Errorf("status update failed")
+				}
+				return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+			},
+		}).
+		Build()
+	r := &BatchSandboxReconciler{
+		Client:   fakeClient,
+		Scheme:   testscheme,
+		Recorder: record.NewFakeRecorder(10),
+	}
+
+	result, err := r.syncPauseOrClear(context.Background(), bs)
+	require.ErrorContains(t, err, "status update failed")
+	assert.Equal(t, ctrl.Result{}, result)
 }
 
 func TestSyncPauseOrClear_SnapshotCommitting(t *testing.T) {

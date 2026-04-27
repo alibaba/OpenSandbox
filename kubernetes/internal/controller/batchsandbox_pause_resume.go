@@ -37,9 +37,17 @@ import (
 )
 
 const internalPauseSnapshotSuffix = "-pause"
+const supportedPauseReplicas int32 = 1
 
 func internalPauseSnapshotName(batchSandboxName string) string {
 	return batchSandboxName + internalPauseSnapshotSuffix
+}
+
+func unsupportedPauseReplicasMessage(replicas *int32) string {
+	if replicas == nil {
+		return "pause/resume currently supports only BatchSandbox spec.replicas=1; spec.replicas is unset"
+	}
+	return fmt.Sprintf("pause/resume currently supports only BatchSandbox spec.replicas=1; got spec.replicas=%d", *replicas)
 }
 
 func ensureImagePullSecret(template *corev1.PodTemplateSpec, secretName string) {
@@ -107,6 +115,9 @@ func (r *BatchSandboxReconciler) deleteInternalPauseSnapshot(ctx context.Context
 			return nil
 		}
 		return err
+	}
+	if snapshot.Status.Phase != sandboxv1alpha1.SandboxSnapshotPhaseSucceed {
+		return nil
 	}
 	if err := r.Delete(ctx, snapshot); err != nil && !errors.IsNotFound(err) {
 		return err
@@ -213,6 +224,24 @@ func (r *BatchSandboxReconciler) dispatchPauseResume(ctx context.Context, bs *sa
 func (r *BatchSandboxReconciler) handlePause(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	// The pause snapshot format records one source pod's container images, so this
+	// controller only supports rootfs pause/resume for single-replica sandboxes.
+	if bs.Spec.Replicas == nil || *bs.Spec.Replicas != supportedPauseReplicas {
+		msg := unsupportedPauseReplicasMessage(bs.Spec.Replicas)
+		log.Info("Rejecting pause for unsupported replica count", "message", msg)
+		phase := bs.Status.Phase
+		if phase == "" {
+			phase = sandboxv1alpha1.BatchSandboxPhaseSucceed
+		}
+		if err := r.ackPauseWithPhase(ctx, bs, phase, ""); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.setCondition(ctx, bs, sandboxv1alpha1.BatchSandboxConditionPauseFailed, sandboxv1alpha1.ConditionTrue, "UnsupportedReplicas", msg); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
 	snapshot := &sandboxv1alpha1.SandboxSnapshot{}
 	snapshotName := internalPauseSnapshotName(bs.Name)
 	err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: snapshotName}, snapshot)
@@ -220,8 +249,8 @@ func (r *BatchSandboxReconciler) handlePause(ctx context.Context, bs *sandboxv1a
 		log.Info("Waiting for stale SandboxSnapshot deletion before retrying pause", "snapshot", snapshotName)
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
-	if err == nil && snapshot.Status.Phase == sandboxv1alpha1.SandboxSnapshotPhaseFailed {
-		log.Info("Deleting Failed SandboxSnapshot for retry", "snapshot", snapshotName)
+	if err == nil && (snapshot.Status.Phase == sandboxv1alpha1.SandboxSnapshotPhaseFailed || snapshot.Status.Phase == sandboxv1alpha1.SandboxSnapshotPhaseSucceed) {
+		log.Info("Deleting terminal SandboxSnapshot for retry", "snapshot", snapshotName, "phase", snapshot.Status.Phase)
 		if err := r.Delete(ctx, snapshot); err != nil && !errors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
@@ -308,8 +337,12 @@ func (r *BatchSandboxReconciler) syncPauseOrClear(ctx context.Context, bs *sandb
 			reason = "PodNotFound"
 		}
 
-		_ = r.ackPauseWithPhase(ctx, bs, phase, "")
-		_ = r.setCondition(ctx, bs, sandboxv1alpha1.BatchSandboxConditionPauseFailed, sandboxv1alpha1.ConditionTrue, reason, msg)
+		if err := r.ackPauseWithPhase(ctx, bs, phase, ""); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.setCondition(ctx, bs, sandboxv1alpha1.BatchSandboxConditionPauseFailed, sandboxv1alpha1.ConditionTrue, reason, msg); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, nil
 	case sandboxv1alpha1.SandboxSnapshotPhasePending, sandboxv1alpha1.SandboxSnapshotPhaseCommitting:
 		log.Info("SandboxSnapshot in progress", "phase", snapshot.Status.Phase)
@@ -320,15 +353,16 @@ func (r *BatchSandboxReconciler) syncPauseOrClear(ctx context.Context, bs *sandb
 }
 
 // completePause finalizes the pause operation:
-//  1. Set phase=Paused
-//  2. Normal mode: delete all Pods (cascade via OwnerRef)
-//  3. Pool mode: solidify the source Pod template and clear poolRef. Pool Controller GC
+//  1. Normal mode: delete all Pods (cascade via OwnerRef)
+//  2. Pool mode: solidify the source Pod template and clear poolRef. Pool Controller GC
 //     then releases and deletes the old allocated pool Pod.
+//  3. Set phase=Paused only after pod deletion/release is accepted.
 //  4. spec.pause remains unchanged; the next external request (or server retry bridge)
 //     is responsible for changing it.
 func (r *BatchSandboxReconciler) completePause(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox) error {
 	log := logf.FromContext(ctx)
 	poolStrategy := strategy.NewPoolStrategy(bs)
+	wasPooled := poolStrategy.IsPooledMode()
 
 	pods, err := r.listPods(ctx, poolStrategy, bs)
 	if err != nil {
@@ -336,7 +370,7 @@ func (r *BatchSandboxReconciler) completePause(ctx context.Context, bs *sandboxv
 	}
 
 	var pooledTemplate *corev1.PodTemplateSpec
-	if poolStrategy.IsPooledMode() {
+	if wasPooled {
 		if len(pods) == 0 {
 			return fmt.Errorf("no allocated pods found for pooled BatchSandbox %s/%s", bs.Namespace, bs.Name)
 		}
@@ -364,36 +398,40 @@ func (r *BatchSandboxReconciler) completePause(ctx context.Context, bs *sandboxv
 		log.Info("Detached pooled BatchSandbox after pause", "sourcePod", pods[0].Name)
 	}
 
+	controllerKey := controllerutils.GetControllerKey(bs)
+	BatchSandboxScaleExpectations.DeleteExpectations(controllerKey)
+	log.Info("Cleared scale expectations before pod deletion", "controllerKey", controllerKey)
+
+	if !wasPooled {
+		for _, pod := range pods {
+			if err := r.Delete(ctx, pod); err != nil && !errors.IsNotFound(err) {
+				log.Error(err, "Failed to delete pod during pause", "pod", pod.Name)
+				return err
+			}
+			log.Info("Deleted pod during pause", "pod", pod.Name)
+		}
+	}
+
+	r.deleteTaskScheduler(ctx, bs)
+
 	if err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		latest := &sandboxv1alpha1.BatchSandbox{}
 		if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: bs.Name}, latest); err != nil {
 			return err
 		}
 		latest.Status.Phase = sandboxv1alpha1.BatchSandboxPhasePaused
+		// Pool pause rewrites spec.template and clears spec.poolRef, which advances generation.
+		// Acknowledge that controller-owned spec change only while pause is still requested,
+		// so spec.pause=true is not replayed and a queued resume request is still observed.
+		if latest.Spec.Pause != nil && *latest.Spec.Pause {
+			latest.Status.PauseObservedGeneration = latest.Generation
+		}
 		applyBatchSandboxPhaseConditions(&latest.Status)
 		return r.Status().Update(ctx, latest)
 	}); err != nil {
 		return err
 	}
 
-	controllerKey := controllerutils.GetControllerKey(bs)
-	BatchSandboxScaleExpectations.DeleteExpectations(controllerKey)
-	log.Info("Cleared scale expectations before pod deletion", "controllerKey", controllerKey)
-
-	if poolStrategy.IsPooledMode() {
-		r.deleteTaskScheduler(ctx, bs)
-		return nil
-	}
-
-	for _, pod := range pods {
-		if err := r.Delete(ctx, pod); err != nil && !errors.IsNotFound(err) {
-			log.Error(err, "Failed to delete pod during pause", "pod", pod.Name)
-			return err
-		}
-		log.Info("Deleted pod during pause", "pod", pod.Name)
-	}
-
-	r.deleteTaskScheduler(ctx, bs)
 	return nil
 }
 
@@ -401,8 +439,8 @@ func (r *BatchSandboxReconciler) completePause(ctx context.Context, bs *sandboxv
 //  1. Read SandboxSnapshot status for image URIs
 //  2. Replace template container images
 //  3. Pool mode: clear poolRef
-//  4. Scale up replicas, leaving spec.pause untouched; a future external request is
-//     responsible for changing it.
+//  4. Leave spec.pause and spec.replicas untouched; normal reconciliation recreates
+//     the single supported runtime replica from the rewritten template.
 func (r *BatchSandboxReconciler) continueResume(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -458,8 +496,6 @@ func (r *BatchSandboxReconciler) continueResume(ctx context.Context, bs *sandbox
 			ensureImagePullSecret(latest.Spec.Template, r.ResumePullSecret)
 		}
 
-		replicas := int32(1)
-		latest.Spec.Replicas = &replicas
 		if latest.Spec.PoolRef != "" {
 			latest.Spec.PoolRef = ""
 		}

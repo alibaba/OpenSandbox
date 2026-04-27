@@ -77,6 +77,8 @@ OpenSandbox 支持通过将容器根文件系统持久化为 OCI 镜像来实现
 1. **暂停**：服务器 patch `BatchSandbox.spec.pause=true`。控制器创建内部 `SandboxSnapshot`，在同一节点上启动 commit Job，提交容器 rootfs 并推送到配置的 OCI registry。快照就绪后，控制器将同一个 `BatchSandbox` 置为 `Paused`，并释放运行时 Pod / 池化分配。
 2. **恢复**：服务器 patch `BatchSandbox.spec.pause=false`。控制器读取最新的 `SandboxSnapshot`，把 `BatchSandbox` 模板镜像重写为快照镜像 URI，重建运行时，并将沙箱恢复到 `Running`。公共 `sandboxId` 在暂停/恢复周期中保持稳定。
 
+当前暂停/恢复仅支持 `BatchSandbox.spec.replicas=1`。OpenSandbox server 创建的 Kubernetes 沙箱会固定使用 `replicas: 1`；如果直接创建 `BatchSandbox` CR 并设置为其他副本数，控制器会在 pause 入口拒绝请求，因为内部 pause snapshot 只记录一个源 Pod 的容器镜像状态。
+
 ### SandboxSnapshot CRD
 
 `SandboxSnapshot` CR 是暂停/恢复生命周期的核心资源：

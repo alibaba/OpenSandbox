@@ -103,6 +103,38 @@ func TestSandboxSnapshotHandleCommitting_SetsSucceedReadyCondition(t *testing.T)
 	assert.True(t, foundReady, "Ready condition should be set after successful commit")
 }
 
+func TestUpdateSnapshotStatus_DoesNotDowngradeSucceededSnapshot(t *testing.T) {
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-snapshot",
+			Namespace: "default",
+		},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase: sandboxv1alpha1.SandboxSnapshotPhaseSucceed,
+			Conditions: []sandboxv1alpha1.SandboxSnapshotCondition{
+				{
+					Type:   sandboxv1alpha1.SandboxSnapshotConditionReady,
+					Status: sandboxv1alpha1.ConditionTrue,
+					Reason: "SnapshotReady",
+				},
+			},
+		},
+	}
+	r := newTestSnapshotReconciler(snapshot)
+
+	err := r.updateSnapshotStatus(context.Background(), snapshot, sandboxv1alpha1.SandboxSnapshotPhaseFailed, "CommitJobFailed", "late failure")
+	require.NoError(t, err)
+
+	updated := &sandboxv1alpha1.SandboxSnapshot{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "test-snapshot", Namespace: "default"}, updated))
+	assert.Equal(t, sandboxv1alpha1.SandboxSnapshotPhaseSucceed, updated.Status.Phase)
+	for _, cond := range updated.Status.Conditions {
+		if cond.Type == sandboxv1alpha1.SandboxSnapshotConditionFailed {
+			assert.NotEqual(t, sandboxv1alpha1.ConditionTrue, cond.Status)
+		}
+	}
+}
+
 func TestSandboxSnapshotHandleCommitting_KeepsRetryingWhenJobHasNotTerminallyFailed(t *testing.T) {
 	snapshot := &sandboxv1alpha1.SandboxSnapshot{
 		ObjectMeta: metav1.ObjectMeta{

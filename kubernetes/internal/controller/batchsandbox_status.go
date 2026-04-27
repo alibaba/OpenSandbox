@@ -239,24 +239,24 @@ func (r *BatchSandboxReconciler) persistRuntimeView(
 	view runtimeView,
 ) []error {
 	var aggErrors []error
+	log := logf.FromContext(ctx)
 	if err := r.patchBatchSandboxEndpoints(ctx, batchSbx, view.endpointIPs); err != nil {
 		aggErrors = append(aggErrors, err)
 	}
-	if equality.Semantic.DeepEqual(*view.status, batchSbx.Status) {
-		return aggErrors
+	statusChanged := !equality.Semantic.DeepEqual(*view.status, batchSbx.Status)
+	if statusChanged {
+		log.Info("To update BatchSandbox status",
+			"replicas", view.status.Replicas,
+			"allocated", view.status.Allocated,
+			"ready", view.status.Ready,
+		)
+		if err := r.updateStatus(batchSbx, view.status); err != nil {
+			aggErrors = append(aggErrors, err)
+			return aggErrors
+		}
 	}
 
-	log := logf.FromContext(ctx)
-	log.Info("To update BatchSandbox status",
-		"replicas", view.status.Replicas,
-		"allocated", view.status.Allocated,
-		"ready", view.status.Ready,
-	)
-	if err := r.updateStatus(batchSbx, view.status); err != nil {
-		aggErrors = append(aggErrors, err)
-		return aggErrors
-	}
-	if view.resumeCompleted {
+	if view.status.Phase == sandboxv1alpha1.BatchSandboxPhaseSucceed {
 		if err := r.deleteInternalPauseSnapshot(ctx, batchSbx); err != nil {
 			log.Error(err, "Failed to delete SandboxSnapshot after successful resume")
 			aggErrors = append(aggErrors, err)

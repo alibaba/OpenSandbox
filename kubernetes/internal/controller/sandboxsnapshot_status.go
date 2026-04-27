@@ -78,6 +78,10 @@ func applySnapshotPhaseConditions(status *sandboxv1alpha1.SandboxSnapshotStatus,
 	}
 }
 
+func isTerminalSnapshotPhase(phase sandboxv1alpha1.SandboxSnapshotPhase) bool {
+	return phase == sandboxv1alpha1.SandboxSnapshotPhaseSucceed || phase == sandboxv1alpha1.SandboxSnapshotPhaseFailed
+}
+
 func (r *SandboxSnapshotReconciler) ackGeneration(ctx context.Context, snapshot *sandboxv1alpha1.SandboxSnapshot) error {
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		latest := &sandboxv1alpha1.SandboxSnapshot{}
@@ -122,6 +126,9 @@ func (r *SandboxSnapshotReconciler) updateSnapshotStatus(
 		latest := &sandboxv1alpha1.SandboxSnapshot{}
 		if err := r.Get(ctx, types.NamespacedName{Namespace: snapshot.Namespace, Name: snapshot.Name}, latest); err != nil {
 			return err
+		}
+		if isTerminalSnapshotPhase(latest.Status.Phase) && latest.Status.Phase != phase {
+			return nil
 		}
 		latest.Status.Phase = phase
 		applySnapshotPhaseConditions(&latest.Status, reason, message)
