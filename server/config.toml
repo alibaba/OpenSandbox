@@ -1,0 +1,44 @@
+# OpenSandbox Server — Docker runtime configuration
+# Full reference: https://github.com/alibaba/OpenSandbox/blob/main/server/configuration.md
+
+[server]
+host = "0.0.0.0"
+port = 8090
+max_sandbox_timeout_seconds = 86400
+api_key = "EMPTY"
+
+[log]
+level = "INFO"
+
+[runtime]
+type = "docker"
+execd_image = "opensandbox/execd:local"
+
+[storage]
+# Allowlist of host path prefixes permitted for bind mounts.
+# If empty, all host paths are allowed (not recommended for production).
+allowed_host_paths = []
+volume_default_size = "1Gi"
+
+[docker]
+network_mode = "bridge"
+drop_capabilities = [
+    "AUDIT_WRITE",
+    "MKNOD",
+    "NET_ADMIN",
+    "NET_RAW",
+    "SYS_MODULE",
+    "SYS_PTRACE",
+    "SYS_TIME",
+    "SYS_TTY_CONFIG",
+]
+no_new_privileges = true
+pids_limit = 4096
+privileged = true
+
+[ingress]
+mode = "direct"
+
+[egress]
+image = "opensandbox/egress:local"
+mode = "dns"

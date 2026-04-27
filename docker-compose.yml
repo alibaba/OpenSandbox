@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2025 Weibo, Inc.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+services:
+
+  opensandbox-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    image: opensandbox/server:local
+    container_name: opensandbox-server
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./server/config.toml:/etc/opensandbox/config.toml:ro
+    environment:
+      - SANDBOX_CONFIG_PATH=/etc/opensandbox/config.toml
+
+  # Build-only services for sandbox runtime images.
+  # These images are spawned dynamically by opensandbox-server at runtime (not fixed services).
+  # Run `docker compose build execd egress code-interpreter` once before starting the stack.
+  execd:
+    build:
+      context: .
+      dockerfile: components/execd/Dockerfile
+      platforms:
+        - linux/amd64
+    image: opensandbox/execd:local
+    profiles: [ sandbox-images ]
+    entrypoint: [ "true" ]
+
+  egress:
+    build:
+      context: .
+      dockerfile: components/egress/Dockerfile
+      platforms:
+        - linux/amd64
+    image: opensandbox/egress:local
+    profiles: [ sandbox-images ]
+    entrypoint: [ "true" ]
+
+  code-interpreter:
+    build:
+      context: .
+      dockerfile: sandboxes/sandbox-base/Dockerfile
+      platforms:
+        - linux/amd64
+    image: opensandbox/code-interpreter:local
+    profiles: [ sandbox-images ]
+    entrypoint: [ "true" ]
+
+  console:
+    build:
+      context: ./console
+      dockerfile: Dockerfile
+    image: opensandbox/console:local
+    container_name: opensandbox-console
+    restart: unless-stopped
+    ports:
+      - "${CONSOLE_PORT:-4173}:4173"

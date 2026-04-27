@@ -1,0 +1,846 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "claude-agent-server",
+    "version": "0.1.0",
+    "description": "Minimal HTTP wrapper around Claude Code using the stable Claude Agent SDK."
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health.get",
+        "summary": "Get server health",
+        "responses": {
+          "200": {
+            "description": "Healthy response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions": {
+      "get": {
+        "operationId": "sessions.list",
+        "summary": "List Claude sessions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dir",
+            "schema": { "type": "string" }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": { "type": "integer", "minimum": 0 }
+          },
+          {
+            "in": "query",
+            "name": "includeWorktrees",
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessions": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Session" }
+                    }
+                  },
+                  "required": ["sessions"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "sessions.create",
+        "summary": "Create a new Claude session by sending the first prompt",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created session and completed first run",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PromptRunResponse" }
+              }
+            }
+          },
+          "200": {
+            "description": "SSE stream for first run",
+            "content": {
+              "text/event-stream": {
+                "schema": { "$ref": "#/components/schemas/SseEvent" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}": {
+      "get": {
+        "operationId": "sessions.get",
+        "summary": "Get session metadata",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "in": "query",
+            "name": "dir",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session": { "$ref": "#/components/schemas/SessionWithRuntime" }
+                  },
+                  "required": ["session"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "sessions.update",
+        "summary": "Rename or tag a session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session": { "$ref": "#/components/schemas/SessionWithRuntime" }
+                  },
+                  "required": ["session"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/messages": {
+      "get": {
+        "operationId": "sessions.messages.list",
+        "summary": "Get session messages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "in": "query",
+            "name": "dir",
+            "schema": { "type": "string" }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "schema": { "type": "integer", "minimum": 1 }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "schema": { "type": "integer", "minimum": 0 }
+          },
+          {
+            "in": "query",
+            "name": "includeSystemMessages",
+            "schema": { "type": "boolean" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "messages": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/SessionMessage" }
+                    }
+                  },
+                  "required": ["messages"]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "sessions.messages.create",
+        "summary": "Send a prompt to an existing session",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SendMessageRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Completed prompt run or SSE stream",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PromptRunResponse" }
+              },
+              "text/event-stream": {
+                "schema": { "$ref": "#/components/schemas/SseEvent" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/abort": {
+      "post": {
+        "operationId": "sessions.abort",
+        "summary": "Interrupt an active session run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Abort acknowledged",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": { "type": "boolean", "const": true }
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/fork": {
+      "post": {
+        "operationId": "sessions.fork",
+        "summary": "Fork a session into a new branch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ForkSessionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Forked session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "session": { "$ref": "#/components/schemas/SessionWithRuntime" }
+                  },
+                  "required": ["session"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{sessionId}/rewind": {
+      "post": {
+        "operationId": "sessions.rewind",
+        "summary": "Rewind file changes to a prior user message turn",
+        "description": "Rolls back file changes to the state at a specific user message. Requires the session to have been started with options.enableFileCheckpointing=true and to have an active run.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RewindRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rewind result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RewindResult" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/sessions/{sessionId}/commands": {
+      "get": {
+        "operationId": "sessions.commands",
+        "summary": "List slash commands supported by the active session",
+        "description": "Returns slash commands available in the running Claude Code process. Requires an active run.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supported commands",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "commands": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/SlashCommand" }
+                    }
+                  },
+                  "required": ["commands"]
+                }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/sessions/{sessionId}/models": {
+      "get": {
+        "operationId": "sessions.models",
+        "summary": "List models available in the active session",
+        "description": "Returns model info from the running Claude Code process. Requires an active run.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Available models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "models": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ModelInfo" }
+                    }
+                  },
+                  "required": ["models"]
+                }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/sessions/{sessionId}/agents": {
+      "get": {
+        "operationId": "sessions.agents",
+        "summary": "List agents available in the active session",
+        "description": "Returns agent info from the running Claude Code process. Requires an active run.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Available agents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "agents": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/AgentInfo" }
+                    }
+                  },
+                  "required": ["agents"]
+                }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/sessions/{sessionId}/context": {
+      "get": {
+        "operationId": "sessions.context",
+        "summary": "Get context-window token usage for the active session",
+        "description": "Returns a token usage breakdown by category. Requires an active run.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Context usage",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ContextUsage" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/sessions/{sessionId}/subagents": {
+      "get": {
+        "operationId": "sessions.subagents.list",
+        "summary": "List subagents (not yet implemented)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "501": { "description": "Not implemented" }
+        }
+      }
+    },
+    "/sessions/{sessionId}/subagents/{agentId}/messages": {
+      "get": {
+        "operationId": "sessions.subagents.messages",
+        "summary": "Get subagent messages (not yet implemented)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "501": { "description": "Not implemented" }
+        }
+      }
+    },
+    "/sessions/{sessionId}/model": {
+      "patch": {
+        "operationId": "sessions.setModel",
+        "summary": "Hot-swap model on a running session (not yet implemented)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "501": { "description": "Not implemented" }
+        }
+      }
+    },
+    "/sessions/{sessionId}/permission-mode": {
+      "patch": {
+        "operationId": "sessions.setPermissionMode",
+        "summary": "Change permission mode on a running session (not yet implemented)",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sessionId",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "501": { "description": "Not implemented" }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "properties": {
+          "healthy": { "type": "boolean", "const": true },
+          "service": { "type": "string" },
+          "host": { "type": "string" },
+          "port": { "type": "integer" },
+          "timestamp": { "type": "string", "format": "date-time" }
+        },
+        "required": ["healthy", "service", "host", "port", "timestamp"]
+      },
+      "Runtime": {
+        "type": ["object", "null"],
+        "properties": {
+          "sessionId": { "type": "string" },
+          "status": { "type": "string", "enum": ["running", "stopping"] },
+          "startedAt": { "type": "integer" }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "properties": {
+          "sessionId": { "type": "string" },
+          "summary": { "type": "string" },
+          "lastModified": { "type": "integer" },
+          "fileSize": { "type": ["integer", "null"] },
+          "customTitle": { "type": ["string", "null"] },
+          "firstPrompt": { "type": ["string", "null"] },
+          "gitBranch": { "type": ["string", "null"] },
+          "cwd": { "type": ["string", "null"] },
+          "tag": { "type": ["string", "null"] },
+          "createdAt": { "type": ["integer", "null"] }
+        },
+        "required": ["sessionId", "summary", "lastModified", "fileSize", "customTitle", "firstPrompt", "gitBranch", "cwd", "tag", "createdAt"]
+      },
+      "SessionWithRuntime": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Session" },
+          {
+            "type": "object",
+            "properties": {
+              "runtime": { "$ref": "#/components/schemas/Runtime" }
+            },
+            "required": ["runtime"]
+          }
+        ]
+      },
+      "SessionMessage": {
+        "type": "object",
+        "properties": {
+          "type": { "type": "string", "enum": ["user", "assistant", "system"] },
+          "uuid": { "type": "string" },
+          "sessionId": { "type": "string" },
+          "message": {},
+          "parentToolUseId": { "type": ["string", "null"] }
+        },
+        "required": ["type", "uuid", "sessionId", "message", "parentToolUseId"]
+      },
+      "QueryOptions": {
+        "type": "object",
+        "properties": {
+          "cwd": { "type": "string" },
+          "model": { "type": "string" },
+          "permissionMode": { "type": "string", "enum": ["default", "acceptEdits", "plan", "dontAsk", "auto"] },
+          "settingSources": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["user", "project", "local"] }
+          },
+          "systemPrompt": { "type": "string" },
+          "appendSystemPrompt": { "type": "string" },
+          "allowedTools": { "type": "array", "items": { "type": "string" } },
+          "disallowedTools": { "type": "array", "items": { "type": "string" } },
+          "additionalDirectories": { "type": "array", "items": { "type": "string" } },
+          "tools": {
+            "oneOf": [
+              { "type": "array", "items": { "type": "string" } },
+              {
+                "type": "object",
+                "properties": {
+                  "type": { "type": "string", "const": "preset" },
+                  "preset": { "type": "string", "const": "claude_code" }
+                },
+                "required": ["type", "preset"]
+              }
+            ]
+          },
+          "maxTurns": { "type": "integer", "minimum": 1 },
+          "enableFileCheckpointing": { "type": "boolean", "description": "Snapshot files before each tool execution, enabling POST /sessions/:id/rewind" }
+        }
+      },
+      "CreateSessionRequest": {
+        "type": "object",
+        "properties": {
+          "prompt": { "type": "string" },
+          "stream": { "type": "boolean" },
+          "includePartialMessages": { "type": "boolean" },
+          "options": { "$ref": "#/components/schemas/QueryOptions" }
+        },
+        "required": ["prompt"]
+      },
+      "SendMessageRequest": {
+        "type": "object",
+        "properties": {
+          "prompt": { "type": "string" },
+          "stream": { "type": "boolean" },
+          "includePartialMessages": { "type": "boolean" },
+          "forkSession": { "type": "boolean" },
+          "options": { "$ref": "#/components/schemas/QueryOptions" }
+        },
+        "required": ["prompt"]
+      },
+      "UpdateSessionRequest": {
+        "type": "object",
+        "properties": {
+          "dir": { "type": "string" },
+          "title": { "type": "string" },
+          "tag": { "type": ["string", "null"] }
+        }
+      },
+      "ForkSessionRequest": {
+        "type": "object",
+        "properties": {
+          "dir": { "type": "string" },
+          "title": { "type": "string" },
+          "upToMessageId": { "type": "string" }
+        }
+      },
+      "PromptRunResponse": {
+        "type": "object",
+        "properties": {
+          "sessionId": { "type": "string" },
+          "result": {},
+          "events": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SseEvent" }
+          }
+        },
+        "required": ["sessionId", "result", "events"]
+      },
+      "SseEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string" },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "RewindRequest": {
+        "type": "object",
+        "properties": {
+          "userMessageId": { "type": "string", "description": "UUID of the user message to rewind to" },
+          "dryRun": { "type": "boolean", "description": "Report changes without modifying files" }
+        },
+        "required": ["userMessageId"]
+      },
+      "RewindResult": {
+        "type": "object",
+        "properties": {
+          "canRewind": { "type": "boolean" },
+          "filesChanged": { "type": "array", "items": { "type": "string" } },
+          "insertions": { "type": "integer" },
+          "deletions": { "type": "integer" },
+          "error": { "type": "string" }
+        },
+        "required": ["canRewind"]
+      },
+      "SlashCommand": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "argumentHint": { "type": "string" }
+        },
+        "required": ["name", "description", "argumentHint"]
+      },
+      "ModelInfo": {
+        "type": "object",
+        "properties": {
+          "value": { "type": "string" },
+          "displayName": { "type": "string" },
+          "description": { "type": "string" },
+          "supportsEffort": { "type": "boolean" },
+          "supportedEffortLevels": {
+            "type": "array",
+            "items": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] }
+          }
+        },
+        "required": ["value", "displayName", "description"]
+      },
+      "AgentInfo": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        },
+        "required": ["name"]
+      },
+      "ContextUsageCategory": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "tokens": { "type": "integer" },
+          "color": { "type": "string" },
+          "isDeferred": { "type": "boolean" }
+        },
+        "required": ["name", "tokens", "color"]
+      },
+      "ContextUsage": {
+        "type": "object",
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ContextUsageCategory" }
+          },
+          "totalTokens": { "type": "integer" },
+          "maxTokens": { "type": "integer" },
+          "rawMaxTokens": { "type": "integer" },
+          "percentage": { "type": "number" },
+          "model": { "type": "string" },
+          "memoryFiles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": { "type": "string" },
+                "type": { "type": "string" },
+                "tokens": { "type": "integer" }
+              }
+            }
+          }
+        },
+        "required": ["categories", "totalTokens", "maxTokens", "percentage", "model"]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "message": { "type": "string" },
+              "details": {}
+            },
+            "required": ["message"]
+          }
+        },
+        "required": ["error"]
+      }
+    },
+    "responses": {
+      "NotFound": {
+        "description": "Session not found",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Session has no active run (start a prompt first)",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      }
+    }
+  }
+}
