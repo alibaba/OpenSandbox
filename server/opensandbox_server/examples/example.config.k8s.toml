@@ -32,7 +32,7 @@ level = "INFO"
 
 [runtime]
 type = "kubernetes"
-execd_image = "opensandbox/execd:v1.0.13"
+execd_image = "opensandbox/execd:v1.0.14"
 
 [storage]
 # Allowlist of host path prefixes permitted for bind mounts.

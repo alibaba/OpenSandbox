@@ -10,8 +10,8 @@ configs:
 
       [runtime]
       type = "docker"
-      # execd_image = "opensandbox/execd:v1.0.13"
-      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.13"
+      # execd_image = "opensandbox/execd:v1.0.14"
+      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.14"
 
       [egress]
       image = "opensandbox/egress:v1.0.9"
