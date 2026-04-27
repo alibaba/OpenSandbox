@@ -47,15 +47,18 @@ func NewProxy(_ context.Context, sandboxProvider sandbox.Provider, mode Mode, re
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
-		if err := recover(); err != nil {
-			Logger.With(slogger.Field{Key: "error", Value: err}).Errorf("Proxy: proxy causes panic")
-			var errMsg string
-			if e, ok := err.(error); ok {
-				errMsg = e.Error()
-			} else {
-				errMsg = fmt.Sprintf("%v", err)
+		if rcv := recover(); rcv != nil {
+			panicErr := "unknown panic"
+			if err, ok := rcv.(error); ok {
+				panicErr = err.Error()
 			}
-			http.Error(w, errMsg, http.StatusBadGateway)
+			Logger.With(
+				slogger.Field{Key: "error", Value: panicErr},
+				slogger.Field{Key: "uri", Value: r.RequestURI},
+				slogger.Field{Key: "host", Value: r.Host},
+				slogger.Field{Key: "method", Value: r.Method},
+			).Errorf("ingress: proxy causes panic")
+			http.Error(w, panicErr, http.StatusBadGateway)
 		}
 	}()
 
