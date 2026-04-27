@@ -16,6 +16,7 @@ package logging
 
 import (
 	"os"
+	"time"
 
 	"github.com/go-logr/logr"
 	zap2 "go.uber.org/zap"
@@ -23,6 +24,11 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
+
+// localTimeEncoder encodes time in local timezone with nanosecond precision
+func localTimeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(t.Local().Format("2006-01-02T15:04:05.000000000Z07:00"))
+}
 
 // Options contains configuration for the logger
 type Options struct {
@@ -63,6 +69,22 @@ func DefaultOptions() Options {
 // NewLoggerWithZapOptions creates a logger using controller-runtime's zap options
 // and adds file output support
 func NewLoggerWithZapOptions(opts Options) logr.Logger {
+	// Create encoder config with nanosecond timestamp
+	encoderConfig := zapcore.EncoderConfig{
+		MessageKey:     "msg",
+		LevelKey:       "level",
+		TimeKey:        "ts",
+		NameKey:        "logger",
+		CallerKey:      "caller",
+		FunctionKey:    zapcore.OmitKey,
+		StacktraceKey:  "stacktrace",
+		LineEnding:     zapcore.DefaultLineEnding,
+		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeTime:     localTimeEncoder,
+		EncodeDuration: zapcore.StringDurationEncoder,
+		EncodeCaller:   zapcore.ShortCallerEncoder,
+	}
+
 	// Add AddCaller option to include file and line number in logs
 	if opts.ZapOptions.ZapOpts == nil {
 		opts.ZapOptions.ZapOpts = []zap2.Option{}
@@ -71,7 +93,10 @@ func NewLoggerWithZapOptions(opts Options) logr.Logger {
 
 	// If file output is not enabled, use the default zap logger
 	if !opts.EnableFileOutput {
-		return zap.New(zap.UseFlagOptions(&opts.ZapOptions))
+		return zap.New(
+			zap.UseFlagOptions(&opts.ZapOptions),
+			zap.Encoder(zapcore.NewJSONEncoder(encoderConfig)),
+		)
 	}
 
 	// Create file writer with rotation
@@ -93,6 +118,7 @@ func NewLoggerWithZapOptions(opts Options) logr.Logger {
 	// Create logger with multi-writer
 	return zap.New(
 		zap.UseFlagOptions(&opts.ZapOptions),
+		zap.Encoder(zapcore.NewJSONEncoder(encoderConfig)),
 		zap.WriteTo(multiWriter),
 	)
 }

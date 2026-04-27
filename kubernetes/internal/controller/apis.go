@@ -24,9 +24,10 @@ import (
 )
 
 const (
-	AnnoAllocStatusKey           = "sandbox.opensandbox.io/alloc-status"
-	AnnoAllocReleaseKey          = "sandbox.opensandbox.io/alloc-release"
-	LabelBatchSandboxPodIndexKey = "batch-sandbox.sandbox.opensandbox.io/pod-index"
+	AnnoAllocStatusKey               = "sandbox.opensandbox.io/alloc-status"
+	AnnoAllocReleaseKey              = "sandbox.opensandbox.io/alloc-release"
+	AnnotationEndpointsLastTransTime = "sandbox.opensandbox.io/endpoints-last-trans-time"
+	LabelBatchSandboxPodIndexKey     = "batch-sandbox.sandbox.opensandbox.io/pod-index"
 
 	FinalizerTaskCleanup = "batch-sandbox.sandbox.opensandbox.io/task-cleanup"
 )
