@@ -1,15 +1,39 @@
 import { useState, useRef } from 'react'
 
+const PERMISSION_MODES = [
+  { value: 'acceptEdits', label: 'Accept Edits' },
+  { value: 'auto', label: 'Auto' },
+  { value: 'default', label: 'Prompt' },
+  { value: 'plan', label: 'Plan' },
+] as const
+
 interface Props {
   disabled: boolean
   port: number
   onPortChange: (port: number) => void
+  cwd: string
+  onCwdChange: (cwd: string) => void
+  permissionMode: string
+  onPermissionModeChange: (mode: string) => void
+  sessionStarted: boolean
   onSubmit: (prompt: string) => void
   onClear: () => void
   onExport: () => void
 }
 
-export function PromptInput({ disabled, port, onPortChange, onSubmit, onClear, onExport }: Props) {
+export function PromptInput({
+  disabled,
+  port,
+  onPortChange,
+  cwd,
+  onCwdChange,
+  permissionMode,
+  onPermissionModeChange,
+  sessionStarted,
+  onSubmit,
+  onClear,
+  onExport,
+}: Props) {
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -31,7 +55,7 @@ export function PromptInput({ disabled, port, onPortChange, onSubmit, onClear, o
   return (
     <div className="border-t border-neutral-800 bg-neutral-950">
       {/* Toolbar */}
-      <div className="flex items-center gap-3 px-3 pt-2 pb-1">
+      <div className="flex items-center gap-3 px-3 pt-2 pb-1 flex-wrap">
         <div className="flex items-center gap-1.5 text-xs text-neutral-500">
           <span>Port:</span>
           <input
@@ -41,7 +65,29 @@ export function PromptInput({ disabled, port, onPortChange, onSubmit, onClear, o
             className="w-16 bg-neutral-800 border border-neutral-700 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-blue-500"
           />
         </div>
-        <div className="flex-1" />
+        <div className="flex items-center gap-1.5 text-xs text-neutral-500 flex-1 min-w-0">
+          <span className="shrink-0">CWD:</span>
+          <input
+            type="text"
+            value={cwd}
+            onChange={(e) => onCwdChange(e.target.value)}
+            disabled={sessionStarted}
+            title={sessionStarted ? 'Working directory is fixed for the current session. Clear transcript to change.' : 'Working directory for new session'}
+            className="flex-1 min-w-0 bg-neutral-800 border border-neutral-700 rounded px-1.5 py-0.5 text-xs text-white font-mono focus:outline-none focus:border-blue-500 disabled:opacity-40 disabled:cursor-not-allowed"
+          />
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-neutral-500">
+          <span className="shrink-0">Perms:</span>
+          <select
+            value={permissionMode}
+            onChange={(e) => onPermissionModeChange(e.target.value)}
+            className="bg-neutral-800 border border-neutral-700 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-blue-500"
+          >
+            {PERMISSION_MODES.map((m) => (
+              <option key={m.value} value={m.value}>{m.label}</option>
+            ))}
+          </select>
+        </div>
         <button
           onClick={onExport}
           className="text-xs text-neutral-500 hover:text-neutral-300 px-2 py-0.5 rounded hover:bg-neutral-800"

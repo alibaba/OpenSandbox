@@ -713,12 +713,293 @@
         "required": ["sessionId", "result", "events"]
       },
       "SseEvent": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/SseSessionInitEvent" },
+          { "$ref": "#/components/schemas/SseSessionStatusEvent" },
+          { "$ref": "#/components/schemas/SseMessageAssistantEvent" },
+          { "$ref": "#/components/schemas/SseMessageDeltaEvent" },
+          { "$ref": "#/components/schemas/SseResultEvent" },
+          { "$ref": "#/components/schemas/SseTaskStartedEvent" },
+          { "$ref": "#/components/schemas/SseTaskProgressEvent" },
+          { "$ref": "#/components/schemas/SseTaskNotificationEvent" },
+          { "$ref": "#/components/schemas/SseSessionCompletedEvent" },
+          { "$ref": "#/components/schemas/SseErrorEvent" },
+          { "$ref": "#/components/schemas/SseMessageRawEvent" }
+        ],
+        "discriminator": { "propertyName": "event" }
+      },
+      "SseSessionInitEvent": {
         "type": "object",
         "properties": {
-          "event": { "type": "string" },
+          "event": { "type": "string", "const": "session.init" },
           "data": {
             "type": "object",
-            "additionalProperties": true
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "cwd": { "type": "string" },
+              "model": { "type": "string" },
+              "tools": { "type": "array", "items": { "type": "string" } },
+              "permissionMode": { "type": "string" },
+              "slashCommands": { "type": "array", "items": { "type": "string" } },
+              "skills": { "type": "array", "items": { "type": "string" } },
+              "mcpServers": { "type": "array", "items": {} },
+              "claudeCodeVersion": { "type": "string" }
+            },
+            "required": ["sessionId", "uuid", "cwd", "model", "tools", "permissionMode", "slashCommands", "skills", "mcpServers", "claudeCodeVersion"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseSessionStatusEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "const": "session.status" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "status": { "type": "string" },
+              "permissionMode": { "type": ["string", "null"] },
+              "compactResult": {},
+              "compactError": {}
+            },
+            "required": ["sessionId", "uuid", "status", "permissionMode", "compactResult", "compactError"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "AnthropicContentBlock": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "const": "text" },
+              "text": { "type": "string" }
+            },
+            "required": ["type", "text"]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": { "type": "string", "const": "tool_use" },
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "input": { "type": "object", "additionalProperties": true }
+            },
+            "required": ["type", "id", "name", "input"]
+          }
+        ]
+      },
+      "SseMessageAssistantEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "const": "message.assistant" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "text": { "type": "string", "description": "Concatenated text from all text content blocks" },
+              "message": {
+                "type": "object",
+                "description": "Full Anthropic API message object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "type": { "type": "string", "const": "message" },
+                  "role": { "type": "string", "const": "assistant" },
+                  "model": { "type": "string" },
+                  "content": {
+                    "type": "array",
+                    "items": { "$ref": "#/components/schemas/AnthropicContentBlock" }
+                  },
+                  "stop_reason": { "type": ["string", "null"] },
+                  "stop_sequence": { "type": ["string", "null"] },
+                  "usage": {
+                    "type": "object",
+                    "properties": {
+                      "input_tokens": { "type": "integer" },
+                      "output_tokens": { "type": "integer" },
+                      "cache_creation_input_tokens": { "type": "integer" },
+                      "cache_read_input_tokens": { "type": "integer" }
+                    }
+                  }
+                },
+                "required": ["id", "type", "role", "model", "content"]
+              },
+              "parentToolUseId": { "type": ["string", "null"], "description": "Set when this message is a sub-agent response triggered by a tool_use block" },
+              "error": {}
+            },
+            "required": ["sessionId", "uuid", "text", "message", "parentToolUseId", "error"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseMessageDeltaEvent": {
+        "type": "object",
+        "description": "Streaming delta — only emitted when includePartialMessages is true",
+        "properties": {
+          "event": { "type": "string", "const": "message.delta" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "event": {
+                "type": "object",
+                "description": "Raw Anthropic stream event (content_block_start, content_block_delta, content_block_stop, message_delta, message_start, message_stop)",
+                "properties": {
+                  "type": { "type": "string" },
+                  "index": { "type": "integer" },
+                  "delta": {
+                    "type": "object",
+                    "properties": {
+                      "type": { "type": "string", "enum": ["text_delta", "input_json_delta"] },
+                      "text": { "type": "string", "description": "Present when delta.type is text_delta" },
+                      "partial_json": { "type": "string", "description": "Present when delta.type is input_json_delta" }
+                    }
+                  }
+                },
+                "required": ["type"]
+              },
+              "parentToolUseId": { "type": ["string", "null"] },
+              "ttftMs": { "type": ["integer", "null"], "description": "Time to first token in milliseconds" }
+            },
+            "required": ["sessionId", "uuid", "event", "parentToolUseId", "ttftMs"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseResultEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "const": "result" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "subtype": { "type": "string", "enum": ["success", "error_max_turns", "error_during_execution"] },
+              "isError": { "type": "boolean" },
+              "result": { "type": ["string", "null"], "description": "Final result text; populated when subtype is success" },
+              "errors": { "type": ["array", "null"], "items": {}, "description": "Error objects; populated when subtype is not success" },
+              "stopReason": { "type": "string" },
+              "terminalReason": { "type": ["string", "null"] },
+              "durationMs": { "type": "integer" },
+              "durationApiMs": { "type": "integer" },
+              "numTurns": { "type": "integer" },
+              "totalCostUsd": { "type": "number" }
+            },
+            "required": ["sessionId", "uuid", "subtype", "isError", "result", "errors", "stopReason", "terminalReason", "durationMs", "durationApiMs", "numTurns", "totalCostUsd"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseTaskStartedEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "const": "task.started" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "taskId": { "type": "string" },
+              "description": { "type": "string" },
+              "taskType": { "type": ["string", "null"] },
+              "toolUseId": { "type": ["string", "null"] }
+            },
+            "required": ["sessionId", "uuid", "taskId", "description", "taskType", "toolUseId"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseTaskProgressEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "const": "task.progress" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "taskId": { "type": "string" },
+              "description": { "type": "string" },
+              "toolUseId": { "type": ["string", "null"] },
+              "usage": { "type": "object", "additionalProperties": true },
+              "lastToolName": { "type": ["string", "null"] },
+              "summary": { "type": ["string", "null"] }
+            },
+            "required": ["sessionId", "uuid", "taskId", "description", "toolUseId", "usage", "lastToolName", "summary"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseTaskNotificationEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "const": "task.notification" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "taskId": { "type": "string" },
+              "toolUseId": { "type": ["string", "null"] },
+              "status": { "type": "string" },
+              "outputFile": {},
+              "summary": { "type": "string" },
+              "usage": {}
+            },
+            "required": ["sessionId", "uuid", "taskId", "toolUseId", "status", "outputFile", "summary", "usage"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseSessionCompletedEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "const": "session.completed" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "subtype": { "type": ["string", "null"] }
+            },
+            "required": ["sessionId", "subtype"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseErrorEvent": {
+        "type": "object",
+        "properties": {
+          "event": { "type": "string", "const": "error" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": { "type": "string" },
+              "code": { "type": "integer", "description": "HTTP status code, default 500" }
+            },
+            "required": ["message", "code"]
+          }
+        },
+        "required": ["event", "data"]
+      },
+      "SseMessageRawEvent": {
+        "type": "object",
+        "description": "Catch-all for unrecognized SDK message types",
+        "properties": {
+          "event": { "type": "string", "const": "message.raw" },
+          "data": {
+            "type": "object",
+            "properties": {
+              "sessionId": { "type": "string" },
+              "uuid": { "type": "string" },
+              "message": { "description": "Raw unrecognized SDK message object" }
+            },
+            "required": ["sessionId", "uuid", "message"]
           }
         },
         "required": ["event", "data"]

@@ -9,7 +9,7 @@ async function fetchText(path: string): Promise<string> {
   const url = `${settings.serverUrl.replace(/\/$/, '')}${path}`
   const headers: Record<string, string> = {}
   if (settings.authToken) {
-    headers['Authorization'] = `Bearer ${settings.authToken}`
+    headers['OPEN-SANDBOX-API-KEY'] = settings.authToken
   }
   const res = await fetch(url, { headers })
   if (!res.ok) {

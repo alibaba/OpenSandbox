@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { createSandbox } from '@/api/sandboxes.ts'
 import type {
   CreateSandboxRequest,
@@ -13,7 +14,6 @@ import type {
 interface Props {
   onClose: () => void
   onCreated: () => void
-  toast: (msg: string, v?: 'success' | 'error' | 'info') => void
 }
 
 type Tab = 'basic' | 'resources' | 'environment' | 'network' | 'volumes' | 'advanced'
@@ -89,7 +89,7 @@ const labelCls = 'block text-xs text-neutral-400 mb-1'
 const selectCls =
   'bg-neutral-800 border border-neutral-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500'
 
-export function CreateSandboxModal({ onClose, onCreated, toast }: Props) {
+export function CreateSandboxModal({ onClose, onCreated }: Props) {
   const qc = useQueryClient()
   const [tab, setTab] = useState<Tab>('basic')
 
@@ -126,10 +126,10 @@ export function CreateSandboxModal({ onClose, onCreated, toast }: Props) {
     mutationFn: (req: CreateSandboxRequest) => createSandbox(req),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['sandboxes'] })
-      toast('Sandbox created', 'success')
+      toast.success('Sandbox created')
       onCreated()
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err: Error) => toast.error(err.message),
   })
 
   function kvToRecord(rows: KVRow[]): Record<string, string> | null {

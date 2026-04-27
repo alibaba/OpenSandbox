@@ -1,3 +1,6 @@
+import { Badge } from '@/components/ui/badge'
+import { cn } from '@/lib/utils'
+
 interface Props {
   state: string
 }
@@ -15,8 +18,8 @@ const stateColors: Record<string, string> = {
 export function StatusBadge({ state }: Props) {
   const cls = stateColors[state] ?? 'bg-neutral-500/20 text-neutral-400 border-neutral-500/40'
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono border ${cls}`}>
+    <Badge variant="outline" className={cn('font-mono', cls)}>
       {state}
-    </span>
+    </Badge>
   )
 }

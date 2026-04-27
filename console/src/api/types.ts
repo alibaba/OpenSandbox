@@ -71,6 +71,7 @@ export interface Sandbox {
   image: ImageSpec
   status: SandboxStatus
   metadata?: Record<string, string>
+  env?: Record<string, string>
   entrypoint: string[]
   expiresAt?: string
   createdAt: string

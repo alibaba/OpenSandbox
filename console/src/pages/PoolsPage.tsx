@@ -1,17 +1,17 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { listPools, deletePool, updatePool } from '@/api/pools.ts'
 import type { PoolResponse } from '@/api/types.ts'
 import { ConfirmDialog } from '@/components/ConfirmDialog.tsx'
 import { CreatePoolModal } from '@/components/CreatePoolModal.tsx'
 import { SkeletonTable } from '@/components/Skeleton.tsx'
 import { PoolDetailDrawer } from '@/features/pools/PoolDetailDrawer.tsx'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
-interface Props {
-  toast: (msg: string, v?: 'success' | 'error' | 'info') => void
-}
-
-export function PoolsPage({ toast }: Props) {
+export function PoolsPage() {
   const qc = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
@@ -27,9 +27,9 @@ export function PoolsPage({ toast }: Props) {
     mutationFn: (name: string) => deletePool(name),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['pools'] })
-      toast('Pool deleted', 'success')
+      toast.success('Pool deleted')
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err: Error) => toast.error(err.message),
   })
 
   const resizeMutation = useMutation({
@@ -44,9 +44,9 @@ export function PoolsPage({ toast }: Props) {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['pools'] })
-      toast('Pool resized', 'success')
+      toast.success('Pool resized')
     },
-    onError: (err: Error) => toast(err.message, 'error'),
+    onError: (err: Error) => toast.error(err.message),
   })
 
   function commitResize(pool: PoolResponse) {
@@ -54,7 +54,7 @@ export function PoolsPage({ toast }: Props) {
     if (!raw) return
     const n = parseInt(raw, 10)
     if (isNaN(n) || n < 1) {
-      toast('Desired size must be ≥ 1', 'error')
+      toast.error('Desired size must be ≥ 1')
       return
     }
     resizeMutation.mutate({ name: pool.name, bufferMax: n })
@@ -71,29 +71,25 @@ export function PoolsPage({ toast }: Props) {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-lg font-semibold">Pools</h1>
         <div className="flex gap-2">
-          <button
-            onClick={() => void refetch()}
-            className="px-3 py-1.5 text-xs rounded border border-neutral-700 text-neutral-400 hover:text-white hover:bg-neutral-800"
-          >
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
             Refresh
-          </button>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-3 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white font-medium"
-          >
+          </Button>
+          <Button size="sm" onClick={() => setShowCreate(true)}>
             + New Pool
-          </button>
+          </Button>
         </div>
       </div>
 
       {/* Error */}
       {isError && (
-        <div className="mb-4 flex items-center gap-3 px-4 py-3 rounded border border-red-700 bg-red-950/40 text-red-300 text-sm">
-          <span className="flex-1">{(error as Error).message}</span>
-          <button onClick={() => void refetch()} className="text-xs underline">
-            Retry
-          </button>
-        </div>
+        <Alert variant="destructive" className="mb-4">
+          <AlertDescription className="flex items-center justify-between">
+            <span>{(error as Error).message}</span>
+            <button onClick={() => void refetch()} className="text-xs underline">
+              Retry
+            </button>
+          </AlertDescription>
+        </Alert>
       )}
 
       {/* Table */}
@@ -128,37 +124,39 @@ export function PoolsPage({ toast }: Props) {
                     {pool.status?.available ?? '—'}
                   </td>
                   <td className="px-4 py-3">
-                    {/* Inline resize */}
                     <div
                       className="flex items-center gap-2"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <input
+                      <Input
                         type="number"
                         min={1}
                         value={editingSize[pool.name] ?? pool.capacitySpec.bufferMax}
                         onChange={(e) =>
                           setEditingSize((prev) => ({ ...prev, [pool.name]: e.target.value }))
                         }
-                        className="w-16 bg-neutral-800 border border-neutral-700 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-blue-500"
+                        className="w-16 h-7 text-xs px-2"
                       />
                       {editingSize[pool.name] !== undefined && (
-                        <button
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
                           onClick={() => commitResize(pool)}
-                          className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded"
                         >
                           Apply
-                        </button>
+                        </Button>
                       )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-destructive hover:text-destructive h-7"
                       onClick={() => setDeleteTarget(pool.name)}
-                      className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded hover:bg-neutral-800"
                     >
                       Delete
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -168,7 +166,7 @@ export function PoolsPage({ toast }: Props) {
       </div>
 
       {/* Modals */}
-      {showCreate && <CreatePoolModal onClose={() => setShowCreate(false)} toast={toast} />}
+      {showCreate && <CreatePoolModal onClose={() => setShowCreate(false)} />}
 
       {deleteTarget && (
         <ConfirmDialog

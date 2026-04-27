@@ -6,9 +6,9 @@ import { Layout } from './components/Layout.tsx'
 import { DashboardPage } from './pages/DashboardPage.tsx'
 import { PoolsPage } from './pages/PoolsPage.tsx'
 import { SettingsPanel } from './components/SettingsPanel.tsx'
-import { ToastContainer } from './components/ToastContainer.tsx'
+import { Toaster } from './components/ui/sonner.tsx'
+import { TooltipProvider } from './components/ui/tooltip.tsx'
 import { useSettings } from './hooks/useSettings.ts'
-import { useToast } from './hooks/useToast.ts'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,7 +21,6 @@ const queryClient = new QueryClient({
 
 export function App() {
   const { settings, updateSettings } = useSettings()
-  const { toasts, push: toast, dismiss } = useToast()
   const [showSettings, setShowSettings] = useState(false)
 
   // Auto-open settings when no server URL configured
@@ -33,32 +32,28 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route
-            element={<Layout onOpenSettings={() => setShowSettings(true)} />}
-          >
+      <TooltipProvider>
+        <BrowserRouter>
+          <Routes>
             <Route
-              index
-              element={<DashboardPage toast={toast} />}
-            />
-            <Route
-              path="pools"
-              element={<PoolsPage toast={toast} />}
-            />
-          </Route>
-        </Routes>
+              element={<Layout onOpenSettings={() => setShowSettings(true)} />}
+            >
+              <Route index element={<DashboardPage />} />
+              <Route path="pools" element={<PoolsPage />} />
+            </Route>
+          </Routes>
 
-        {showSettings && (
-          <SettingsPanel
-            initial={settings}
-            onSave={updateSettings}
-            onClose={() => setShowSettings(false)}
-          />
-        )}
+          {showSettings && (
+            <SettingsPanel
+              initial={settings}
+              onSave={updateSettings}
+              onClose={() => setShowSettings(false)}
+            />
+          )}
 
-        <ToastContainer toasts={toasts} onDismiss={dismiss} />
-      </BrowserRouter>
+          <Toaster />
+        </BrowserRouter>
+      </TooltipProvider>
     </QueryClientProvider>
   )
 }
