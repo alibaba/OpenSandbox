@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"time"
 
@@ -60,8 +61,13 @@ func main() {
 	controller.InitCodeRunner()
 	engine := web.NewRouter(flag.ServerAccessToken)
 	addr := fmt.Sprintf(":%d", flag.ServerPort)
-	log.Info("execd listening on %s", addr)
-	if err := engine.Run(addr); err != nil {
+	listener, err := net.Listen("tcp4", addr)
+	if err != nil {
+		log.Error("failed to listen on %s: %v", addr, err)
+		os.Exit(1)
+	}
+	log.Info("execd listening on %s (IPv4)", addr)
+	if err := engine.RunListener(listener); err != nil {
 		log.Error("failed to start execd server: %v", err)
 		os.Exit(1)
 	}
