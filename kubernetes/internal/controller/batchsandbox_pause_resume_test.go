@@ -80,6 +80,54 @@ func (f *forbiddenTaskScheduler) StopTask() []taskscheduler.Task {
 	return nil
 }
 
+type fakeSchedulerTask struct {
+	name     string
+	state    taskscheduler.TaskState
+	podName  string
+	released bool
+}
+
+func (f fakeSchedulerTask) GetName() string {
+	return f.name
+}
+
+func (f fakeSchedulerTask) GetState() taskscheduler.TaskState {
+	return f.state
+}
+
+func (f fakeSchedulerTask) GetPodName() string {
+	return f.podName
+}
+
+func (f fakeSchedulerTask) IsResourceReleased() bool {
+	return f.released
+}
+
+type recordingTaskScheduler struct {
+	updatePodsCalls int
+	scheduleCalls   int
+	stopCalls       int
+	tasks           []taskscheduler.Task
+}
+
+func (r *recordingTaskScheduler) Schedule() error {
+	r.scheduleCalls++
+	return nil
+}
+
+func (r *recordingTaskScheduler) UpdatePods(_ []*corev1.Pod) {
+	r.updatePodsCalls++
+}
+
+func (r *recordingTaskScheduler) ListTask() []taskscheduler.Task {
+	return r.tasks
+}
+
+func (r *recordingTaskScheduler) StopTask() []taskscheduler.Task {
+	r.stopCalls++
+	return r.tasks
+}
+
 // ---------- dispatchPauseResume 5-case tests ----------
 
 func TestDispatchPauseResume_Case1_PauseTrue(t *testing.T) {
@@ -304,6 +352,131 @@ func TestHandlePause_NormalFlow(t *testing.T) {
 	assert.Equal(t, "test-bs", snap.Spec.SandboxName)
 	// Verify OwnerRef
 	assert.Equal(t, "test-bs", snap.OwnerReferences[0].Name)
+}
+
+func TestHandlePause_WaitsForTaskCleanupBeforeCreatingSnapshot(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			Replicas: ptr.To(int32(1)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "img"}},
+				},
+			},
+			TaskTemplate: &sandboxv1alpha1.TaskTemplateSpec{
+				Spec: sandboxv1alpha1.TaskSpec{
+					Process: &sandboxv1alpha1.ProcessTask{Command: []string{"sleep", "3600"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 1,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhaseSucceed,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-0",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: sandboxv1alpha1.GroupVersion.String(),
+				Kind:       "BatchSandbox",
+				Name:       "test-bs",
+				UID:        "test-uid",
+			}},
+		},
+		Status: corev1.PodStatus{PodIP: "10.0.0.1"},
+	}
+	r := newTestReconciler(bs, pod)
+	scheduler := &recordingTaskScheduler{
+		tasks: []taskscheduler.Task{fakeSchedulerTask{
+			name:     "test-bs-0",
+			state:    taskscheduler.RunningTaskState,
+			podName:  "test-bs-0",
+			released: false,
+		}},
+	}
+	r.taskSchedulers.Store(types.NamespacedName{Namespace: "default", Name: "test-bs"}.String(), scheduler)
+
+	result, err := r.handlePause(context.Background(), bs)
+
+	require.NoError(t, err)
+	assert.True(t, result.RequeueAfter > 0)
+	assert.Equal(t, 1, scheduler.updatePodsCalls)
+	assert.Equal(t, 1, scheduler.stopCalls)
+	assert.Equal(t, 1, scheduler.scheduleCalls)
+	snap := &sandboxv1alpha1.SandboxSnapshot{}
+	err = r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs-pause"}, snap)
+	assert.True(t, apierrors.IsNotFound(err), "snapshot must wait until tasks are released")
+}
+
+func TestHandlePause_CreatesSnapshotAfterTaskCleanup(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 2,
+			UID:        "test-uid",
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Pause:    ptr.To(true),
+			Replicas: ptr.To(int32(1)),
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{Name: "main", Image: "img"}},
+				},
+			},
+			TaskTemplate: &sandboxv1alpha1.TaskTemplateSpec{
+				Spec: sandboxv1alpha1.TaskSpec{
+					Process: &sandboxv1alpha1.ProcessTask{Command: []string{"sleep", "3600"}},
+				},
+			},
+		},
+		Status: sandboxv1alpha1.BatchSandboxStatus{
+			PauseObservedGeneration: 1,
+			Phase:                   sandboxv1alpha1.BatchSandboxPhaseSucceed,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-0",
+			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: sandboxv1alpha1.GroupVersion.String(),
+				Kind:       "BatchSandbox",
+				Name:       "test-bs",
+				UID:        "test-uid",
+			}},
+		},
+		Status: corev1.PodStatus{PodIP: "10.0.0.1"},
+	}
+	r := newTestReconciler(bs, pod)
+	scheduler := &recordingTaskScheduler{
+		tasks: []taskscheduler.Task{fakeSchedulerTask{
+			name:     "test-bs-0",
+			state:    taskscheduler.RunningTaskState,
+			podName:  "test-bs-0",
+			released: true,
+		}},
+	}
+	r.taskSchedulers.Store(types.NamespacedName{Namespace: "default", Name: "test-bs"}.String(), scheduler)
+
+	result, err := r.handlePause(context.Background(), bs)
+
+	require.NoError(t, err)
+	assert.True(t, result.RequeueAfter > 0)
+	assert.Equal(t, 1, scheduler.stopCalls)
+	assert.Equal(t, 1, scheduler.scheduleCalls)
+	snap := &sandboxv1alpha1.SandboxSnapshot{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs-pause"}, snap))
+	assert.Equal(t, "test-bs", snap.Spec.SandboxName)
 }
 
 func TestHandlePause_RejectsUnsupportedReplicas(t *testing.T) {
@@ -2348,7 +2521,7 @@ func TestSyncPauseOrClear_SnapshotCommitting(t *testing.T) {
 }
 
 func TestSyncPauseOrClear_NoSnapshot(t *testing.T) {
-	// No snapshot → requeue (wait for handlePause to create it)
+	// No snapshot while already Pausing → create it and requeue.
 	bs := &sandboxv1alpha1.BatchSandbox{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:       "test-bs",
@@ -2368,6 +2541,10 @@ func TestSyncPauseOrClear_NoSnapshot(t *testing.T) {
 	result, err := r.syncPauseOrClear(context.Background(), bs)
 	require.NoError(t, err)
 	assert.True(t, result.RequeueAfter > 0, "no snapshot should requeue")
+
+	snap := &sandboxv1alpha1.SandboxSnapshot{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs-pause"}, snap))
+	assert.Equal(t, "test-bs", snap.Spec.SandboxName)
 }
 
 // ---------- Phase update bug fix verification ----------

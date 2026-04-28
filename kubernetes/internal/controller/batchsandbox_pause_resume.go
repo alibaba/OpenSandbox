@@ -40,6 +40,7 @@ const internalPauseSnapshotSuffix = "-pause"
 const supportedPauseReplicas int32 = 1
 
 func internalPauseSnapshotName(batchSandboxName string) string {
+	// TODO: handle Kubernetes resource name length limits for long BatchSandbox names.
 	return batchSandboxName + internalPauseSnapshotSuffix
 }
 
@@ -161,7 +162,7 @@ func (r *BatchSandboxReconciler) hasReadyResumePod(ctx context.Context, bs *sand
 	}
 
 	pod := &corev1.Pod{}
-	if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: fmt.Sprintf("%s-0", bs.Name)}, pod); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: fmt.Sprintf("%s-%d", bs.Name, batchSandboxFirstPodIndex)}, pod); err != nil {
 		if errors.IsNotFound(err) {
 			return false, nil
 		}
@@ -220,7 +221,8 @@ func (r *BatchSandboxReconciler) dispatchPauseResume(ctx context.Context, bs *sa
 
 // handlePause implements the pause flow:
 // 1. ACK (pauseObservedGeneration + phase=Pausing)
-// 2. Create SandboxSnapshot child resource
+// 2. Stop task-executor tasks, if any, while keeping the source Pod allocated
+// 3. Create SandboxSnapshot child resource
 func (r *BatchSandboxReconciler) handlePause(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -267,25 +269,81 @@ func (r *BatchSandboxReconciler) handlePause(ctx context.Context, bs *sandboxv1a
 	}
 
 	if errors.IsNotFound(err) {
-		snapshot = &sandboxv1alpha1.SandboxSnapshot{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      snapshotName,
-				Namespace: bs.Namespace,
-			},
-			Spec: sandboxv1alpha1.SandboxSnapshotSpec{
-				SandboxName: bs.Name,
-			},
-		}
-		if err := controllerutil.SetControllerReference(bs, snapshot, r.Scheme); err != nil {
+		if created, err := r.ensureInternalPauseSnapshot(ctx, bs, snapshotName); err != nil {
 			return ctrl.Result{}, err
+		} else if !created {
+			log.Info("Waiting for task cleanup before creating SandboxSnapshot", "snapshot", snapshotName)
 		}
-		if err := r.Create(ctx, snapshot); err != nil && !errors.IsAlreadyExists(err) {
-			return ctrl.Result{}, err
-		}
-		log.Info("Created SandboxSnapshot", "snapshot", snapshotName)
 	}
 
 	return ctrl.Result{RequeueAfter: time.Second}, nil
+}
+
+func (r *BatchSandboxReconciler) ensureInternalPauseSnapshot(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox, snapshotName string) (bool, error) {
+	log := logf.FromContext(ctx)
+
+	tasksStopped, err := r.stopTasksBeforePause(ctx, bs)
+	if err != nil {
+		return false, err
+	}
+	if !tasksStopped {
+		return false, nil
+	}
+
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      snapshotName,
+			Namespace: bs.Namespace,
+		},
+		Spec: sandboxv1alpha1.SandboxSnapshotSpec{
+			SandboxName: bs.Name,
+		},
+	}
+	if err := controllerutil.SetControllerReference(bs, snapshot, r.Scheme); err != nil {
+		return false, err
+	}
+	if err := r.Create(ctx, snapshot); err != nil {
+		if errors.IsAlreadyExists(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	log.Info("Created SandboxSnapshot", "snapshot", snapshotName)
+	return true, nil
+}
+
+func (r *BatchSandboxReconciler) stopTasksBeforePause(ctx context.Context, bs *sandboxv1alpha1.BatchSandbox) (bool, error) {
+	log := logf.FromContext(ctx)
+	taskStrategy := strategy.NewTaskSchedulingStrategy(bs)
+	if !taskStrategy.NeedTaskScheduling() {
+		return true, nil
+	}
+
+	poolStrategy := strategy.NewPoolStrategy(bs)
+	pods, err := r.listPods(ctx, poolStrategy, bs)
+	if err != nil {
+		return false, err
+	}
+	sch, err := r.getTaskScheduler(ctx, bs, pods)
+	if err != nil {
+		return false, err
+	}
+
+	stoppingTasks := sch.StopTask()
+	if len(stoppingTasks) > 0 {
+		log.Info("Stopping tasks before pause", "count", len(stoppingTasks))
+	}
+
+	if err := sch.Schedule(); err != nil {
+		return false, fmt.Errorf("failed to stop tasks before pause: %w", err)
+	}
+	unfinishedTasks := r.getTasksCleanupUnfinished(bs, sch)
+	if len(unfinishedTasks) > 0 {
+		log.Info("Task cleanup before pause is unfinished", "unfinishedCount", len(unfinishedTasks))
+		return false, nil
+	}
+	log.Info("Task cleanup before pause is finished")
+	return true, nil
 }
 
 // handleResume implements the resume flow:
@@ -312,7 +370,12 @@ func (r *BatchSandboxReconciler) syncPauseOrClear(ctx context.Context, bs *sandb
 	snapshot := &sandboxv1alpha1.SandboxSnapshot{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: bs.Namespace, Name: internalPauseSnapshotName(bs.Name)}, snapshot)
 	if errors.IsNotFound(err) {
-		log.Info("SandboxSnapshot not found yet, waiting")
+		snapshotName := internalPauseSnapshotName(bs.Name)
+		if created, createErr := r.ensureInternalPauseSnapshot(ctx, bs, snapshotName); createErr != nil {
+			return ctrl.Result{}, createErr
+		} else if !created {
+			log.Info("SandboxSnapshot not created yet; waiting for task cleanup", "snapshot", snapshotName)
+		}
 		return ctrl.Result{RequeueAfter: time.Second}, nil
 	}
 	if err != nil {

@@ -56,6 +56,8 @@ var (
 	DurationStore                 = requeueduration.DurationStore{}
 )
 
+const batchSandboxFirstPodIndex = 0
+
 type taskScheduleResult struct {
 	Running, Failed, Succeed, Unknown, Pending int32
 }

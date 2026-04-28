@@ -28,6 +28,7 @@ const (
 	AnnoAllocReleaseKey          = "sandbox.opensandbox.io/alloc-release"
 	LabelBatchSandboxPodIndexKey = "batch-sandbox.sandbox.opensandbox.io/pod-index"
 	LabelBatchSandboxNameKey     = "batch-sandbox.sandbox.opensandbox.io/name"
+	LabelPrivilegedNodeAccess    = "sandbox.opensandbox.io/privileged-node-access"
 
 	FinalizerTaskCleanup = "batch-sandbox.sandbox.opensandbox.io/task-cleanup"
 )

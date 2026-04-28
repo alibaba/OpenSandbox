@@ -642,6 +642,15 @@ var _ = Describe("PauseResume", Ordered, func() {
 				g.Expect(output).To(Equal("Succeed"))
 			}, 3*time.Minute).Should(Succeed())
 
+			By("verifying the snapshot records the pushed image digest")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "sandboxsnapshot", sandboxName+"-pause",
+					"-n", pauseResumeNamespace, "-o", "jsonpath={.status.containers[0].imageDigest}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(HavePrefix("sha256:"))
+			}, 30*time.Second, time.Second).Should(Succeed())
+
 			By("verifying template was solidified from Pool CR")
 			cmd = exec.Command("kubectl", "get", "batchsandbox", sandboxName,
 				"-n", pauseResumeNamespace, "-o", "jsonpath={.spec.template.spec.containers[0].name}")

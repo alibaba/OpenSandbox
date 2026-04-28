@@ -15,19 +15,23 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
-
-	"encoding/base64"
-	"io/ioutil"
-	"os/signal"
 )
+
+var commandCombinedOutput = func(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).CombinedOutput()
+}
+
+var terminationMessagePath = "/dev/termination-log"
 
 // containerdSocket returns the containerd socket address from env or default
 func containerdSocket() string {
@@ -53,6 +57,16 @@ func nerdctlBaseArgs() []string {
 type ContainerSpec struct {
 	Name string
 	URI  string
+}
+
+type snapshotResult struct {
+	Containers []snapshotContainerResult `json:"containers"`
+}
+
+type snapshotContainerResult struct {
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	Digest string `json:"digest"`
 }
 
 // Global tracking of paused containers for cleanup
@@ -215,8 +229,8 @@ func main() {
 		if _, ok := committedImages[spec.Name]; ok {
 			digest, err := getImageDigest(spec.URI)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "WARN: Failed to extract digest for %s: %v\n", spec.URI, err)
-				digest = "sha256:placeholder" // fallback digest
+				fmt.Fprintf(os.Stderr, "ERROR: Failed to extract digest for %s: %v\n", spec.URI, err)
+				os.Exit(1)
 			}
 
 			digests[spec.Name] = digest
@@ -240,8 +254,34 @@ func main() {
 		}
 	}
 
+	if err := writeSnapshotResult(containerSpecs, digests); err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: Failed to write snapshot result to termination message: %v\n", err)
+	}
+
 	// Legacy single-digest output for backward compatibility
 	fmt.Printf("SNAPSHOT_DIGEST=%s\n", firstDigest)
+}
+
+func writeSnapshotResult(containerSpecs []ContainerSpec, digests map[string]string) error {
+	result := snapshotResult{
+		Containers: make([]snapshotContainerResult, 0, len(digests)),
+	}
+	for _, spec := range containerSpecs {
+		digest, ok := digests[spec.Name]
+		if !ok {
+			continue
+		}
+		result.Containers = append(result.Containers, snapshotContainerResult{
+			Name:   spec.Name,
+			Image:  spec.URI,
+			Digest: digest,
+		})
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(terminationMessagePath, append(data, '\n'), 0644)
 }
 
 func runUnpause(args []string) {
@@ -424,7 +464,7 @@ func pushImage(targetImage string) error {
 
 // nerdctlLogin extracts credentials from a Docker config.json and runs nerdctl login.
 func nerdctlLogin(configPath, registryHost string, insecure bool) error {
-	data, err := ioutil.ReadFile(configPath)
+	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return fmt.Errorf("failed to read config: %w", err)
 	}
@@ -521,16 +561,13 @@ func isPrivate172Registry(registryHost string) bool {
 // getImageDigest uses nerdctl to get the digest of the image
 func getImageDigest(imageRef string) (string, error) {
 	args := append(nerdctlBaseArgs(), "inspect", "--format", "{{.Id}}", imageRef)
-	cmd := exec.Command("nerdctl", args...)
-	output, err := cmd.Output()
-	if err == nil {
-		digest := strings.TrimSpace(string(output))
-		if digest != "" {
-			return digest, nil
-		}
+	output, err := commandCombinedOutput("nerdctl", args...)
+	if err != nil {
+		return "", fmt.Errorf("nerdctl inspect failed for image %s: %w, output: %s", imageRef, err, strings.TrimSpace(string(output)))
 	}
-
-	// If primary method fails (due to formatting, API changes, etc), return placeholder
-	// The shell script had more complex fallback mechanisms but this covers the essential use case
-	return "sha256:placeholder", nil
+	digest := strings.TrimSpace(string(output))
+	if digest == "" {
+		return "", fmt.Errorf("nerdctl inspect returned empty digest for image %s", imageRef)
+	}
+	return digest, nil
 }

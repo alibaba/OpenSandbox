@@ -16,7 +16,9 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -24,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -136,8 +139,11 @@ func (r *SandboxSnapshotReconciler) handleCommitting(ctx context.Context, snapsh
 
 	if job.Status.Succeeded > 0 {
 		log.Info("Commit job succeeded", "job", jobName)
+		if err := r.updateSnapshotStatusFromSucceededCommitJob(ctx, snapshot, job); err != nil {
+			return ctrl.Result{}, err
+		}
 		r.Recorder.Eventf(snapshot, corev1.EventTypeNormal, "JobSucceeded", "Commit job succeeded")
-		return ctrl.Result{}, r.updateSnapshotStatus(ctx, snapshot, sandboxv1alpha1.SandboxSnapshotPhaseSucceed, "", "")
+		return ctrl.Result{}, nil
 	}
 
 	if failedCond := findJobCondition(job.Status.Conditions, batchv1.JobFailed); failedCond != nil {
@@ -224,7 +230,7 @@ func (r *SandboxSnapshotReconciler) findPodForSandbox(ctx context.Context, bs *s
 		}
 	}
 
-	podName := fmt.Sprintf("%s-0", bs.Name)
+	podName := fmt.Sprintf("%s-%d", bs.Name, batchSandboxFirstPodIndex)
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, types.NamespacedName{Namespace: namespace, Name: podName}, pod); err == nil {
 		if pod.Status.Phase == corev1.PodRunning {
@@ -300,8 +306,8 @@ func (r *SandboxSnapshotReconciler) buildCommitJob(snapshot *sandboxv1alpha1.San
 			Name:      jobName,
 			Namespace: snapshot.Namespace,
 			Labels: map[string]string{
-				LabelSandboxSnapshotName:                        snapshot.Name,
-				"sandbox.opensandbox.io/privileged-node-access": "true",
+				LabelSandboxSnapshotName:  snapshot.Name,
+				LabelPrivilegedNodeAccess: "true",
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -368,8 +374,8 @@ func (r *SandboxSnapshotReconciler) buildUnpauseJob(snapshot *sandboxv1alpha1.Sa
 			Name:      r.getUnpauseJobName(snapshot),
 			Namespace: snapshot.Namespace,
 			Labels: map[string]string{
-				LabelSandboxSnapshotName:                        snapshot.Name,
-				"sandbox.opensandbox.io/privileged-node-access": "true",
+				LabelSandboxSnapshotName:  snapshot.Name,
+				LabelPrivilegedNodeAccess: "true",
 			},
 		},
 		Spec: batchv1.JobSpec{
@@ -413,6 +419,93 @@ func (r *SandboxSnapshotReconciler) buildUnpauseJob(snapshot *sandboxv1alpha1.Sa
 		return nil, fmt.Errorf("failed to set controller reference: %w", err)
 	}
 	return job, nil
+}
+
+type commitJobResult struct {
+	Containers []commitJobContainerResult `json:"containers"`
+}
+
+type commitJobContainerResult struct {
+	Name   string `json:"name"`
+	Image  string `json:"image"`
+	Digest string `json:"digest"`
+}
+
+func (r *SandboxSnapshotReconciler) updateSnapshotStatusFromSucceededCommitJob(ctx context.Context, snapshot *sandboxv1alpha1.SandboxSnapshot, job *batchv1.Job) error {
+	result, found, err := r.getCommitJobResult(ctx, snapshot.Namespace, job.Name)
+	if err != nil {
+		return err
+	}
+	digests := map[string]string{}
+	if found {
+		digests = make(map[string]string, len(result.Containers))
+		for _, container := range result.Containers {
+			if container.Name == "" || container.Digest == "" {
+				continue
+			}
+			digests[container.Name] = container.Digest
+		}
+	}
+
+	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		latest := &sandboxv1alpha1.SandboxSnapshot{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: snapshot.Namespace, Name: snapshot.Name}, latest); err != nil {
+			return err
+		}
+		if isTerminalSnapshotPhase(latest.Status.Phase) && latest.Status.Phase != sandboxv1alpha1.SandboxSnapshotPhaseSucceed {
+			return nil
+		}
+		for i := range latest.Status.Containers {
+			if digest, ok := digests[latest.Status.Containers[i].ContainerName]; ok {
+				latest.Status.Containers[i].ImageDigest = digest
+			}
+		}
+		latest.Status.Phase = sandboxv1alpha1.SandboxSnapshotPhaseSucceed
+		applySnapshotPhaseConditions(&latest.Status, "", "")
+		return r.Status().Update(ctx, latest)
+	})
+}
+
+func (r *SandboxSnapshotReconciler) getCommitJobResult(ctx context.Context, namespace, jobName string) (*commitJobResult, bool, error) {
+	for _, labelKey := range []string{"job-name", "batch.kubernetes.io/job-name"} {
+		podList := &corev1.PodList{}
+		if err := r.List(ctx, podList,
+			client.InNamespace(namespace),
+			client.MatchingLabels{labelKey: jobName},
+		); err != nil {
+			return nil, false, err
+		}
+		for i := range podList.Items {
+			if result, found, err := snapshotResultFromPod(&podList.Items[i]); found || err != nil {
+				return result, found, err
+			}
+		}
+	}
+	return nil, false, nil
+}
+
+func snapshotResultFromPod(pod *corev1.Pod) (*commitJobResult, bool, error) {
+	if pod == nil {
+		return nil, false, nil
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Name != CommitJobContainerName || status.State.Terminated == nil {
+			continue
+		}
+		if status.State.Terminated.ExitCode != 0 {
+			continue
+		}
+		message := strings.TrimSpace(status.State.Terminated.Message)
+		if message == "" {
+			return nil, false, nil
+		}
+		var result commitJobResult
+		if err := json.Unmarshal([]byte(message), &result); err != nil {
+			return nil, false, fmt.Errorf("failed to parse commit job termination message from pod %s: %w", pod.Name, err)
+		}
+		return &result, true, nil
+	}
+	return nil, false, nil
 }
 
 func (r *SandboxSnapshotReconciler) getJobName(snapshot *sandboxv1alpha1.SandboxSnapshot) string {
