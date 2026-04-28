@@ -37,6 +37,7 @@ import (
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	taskscheduler "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/scheduler"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/fieldindex"
+	taskexecutor "github.com/alibaba/OpenSandbox/sandbox-k8s/pkg/task-executor"
 )
 
 // newTestReconciler creates a BatchSandboxReconciler with a fake client for testing.
@@ -77,6 +78,11 @@ func (f *forbiddenTaskScheduler) ListTask() []taskscheduler.Task {
 
 func (f *forbiddenTaskScheduler) StopTask() []taskscheduler.Task {
 	f.t.Fatalf("task scheduler should not stop tasks while sandbox is paused")
+	return nil
+}
+
+func (f *forbiddenTaskScheduler) AddTasks(_ []*taskexecutor.Task) error {
+	f.t.Fatalf("task scheduler should not add tasks while sandbox is paused")
 	return nil
 }
 
@@ -126,6 +132,10 @@ func (r *recordingTaskScheduler) ListTask() []taskscheduler.Task {
 func (r *recordingTaskScheduler) StopTask() []taskscheduler.Task {
 	r.stopCalls++
 	return r.tasks
+}
+
+func (r *recordingTaskScheduler) AddTasks(_ []*taskexecutor.Task) error {
+	return nil
 }
 
 // ---------- dispatchPauseResume 5-case tests ----------
@@ -932,6 +942,7 @@ func TestContinueResume_PoolMode(t *testing.T) {
 			Namespace:  "default",
 			Generation: 2,
 			UID:        "test-uid",
+			Finalizers: []string{FinalizerPoolAllocation},
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
 			Pause:    ptr.To(false),
@@ -958,6 +969,7 @@ func TestContinueResume_PoolMode(t *testing.T) {
 	updated := &sandboxv1alpha1.BatchSandbox{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "test-bs"}, updated))
 	assert.Equal(t, "", updated.Spec.PoolRef)
+	assert.NotContains(t, updated.Finalizers, FinalizerPoolAllocation)
 }
 
 func TestContinueResume_UsesPatchedTemplateWhenCacheReturnsStaleObject(t *testing.T) {
@@ -2054,6 +2066,7 @@ func TestCompletePause_PooledSandboxDetachesForPoolGC(t *testing.T) {
 			Namespace:  "default",
 			Generation: 2,
 			UID:        "test-bs-uid",
+			Finalizers: []string{FinalizerPoolAllocation},
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
 			Pause:    ptr.To(true),
@@ -2107,6 +2120,7 @@ func TestCompletePause_PooledSandboxDetachesForPoolGC(t *testing.T) {
 	assert.NotContains(t, updated.Spec.Template.Labels, LabelPoolRevision)
 	assert.Equal(t, "", updated.Spec.Template.Spec.NodeName)
 	assert.NotContains(t, updated.Annotations, AnnoAllocReleaseKey)
+	assert.NotContains(t, updated.Finalizers, FinalizerPoolAllocation)
 }
 
 func TestCompletePause_PooledSandboxDoesNotDeleteSourcePod(t *testing.T) {

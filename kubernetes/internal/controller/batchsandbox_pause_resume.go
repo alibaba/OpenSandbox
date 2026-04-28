@@ -446,6 +446,7 @@ func (r *BatchSandboxReconciler) completePause(ctx context.Context, bs *sandboxv
 			patch := client.MergeFrom(latest.DeepCopy())
 			latest.Spec.Template = pooledTemplate.DeepCopy()
 			latest.Spec.PoolRef = ""
+			controllerutil.RemoveFinalizer(latest, FinalizerPoolAllocation)
 			if latest.Annotations != nil {
 				delete(latest.Annotations, AnnoAllocReleaseKey)
 			}
@@ -455,6 +456,7 @@ func (r *BatchSandboxReconciler) completePause(ctx context.Context, bs *sandboxv
 		}
 		bs.Spec.Template = pooledTemplate.DeepCopy()
 		bs.Spec.PoolRef = ""
+		controllerutil.RemoveFinalizer(bs, FinalizerPoolAllocation)
 		if bs.Annotations != nil {
 			delete(bs.Annotations, AnnoAllocReleaseKey)
 		}
@@ -561,6 +563,7 @@ func (r *BatchSandboxReconciler) continueResume(ctx context.Context, bs *sandbox
 
 		if latest.Spec.PoolRef != "" {
 			latest.Spec.PoolRef = ""
+			controllerutil.RemoveFinalizer(latest, FinalizerPoolAllocation)
 		}
 
 		if err := r.Patch(ctx, latest, patch); err != nil {
