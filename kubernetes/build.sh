@@ -15,10 +15,21 @@
 
 set -e
 
+build_arg_if_set() {
+    local name="$1"
+    if [[ -n "${!name+x}" ]]; then
+        BUILD_ARGS+=(--build-arg "${name}=${!name}")
+    fi
+}
+
 # Default values
 TAG=${TAG:-latest}
 COMPONENT=${COMPONENT:-controller}
 PUSH=${PUSH:-true}
+BUILD_ARGS=()
+for name in GOFLAGS LDFLAGS CGO_ENABLED CC CXX CFLAGS CXXFLAGS CGO_CFLAGS CGO_CXXFLAGS CGO_LDFLAGS; do
+    build_arg_if_set "${name}"
+done
 
 DOCKERHUB_REPO="opensandbox"
 ACR_REPO="sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox"
@@ -51,6 +62,7 @@ if [ "$PUSH" == "true" ]; then
     docker buildx build \
         --platform $PLATFORMS \
         $BUILD_ARG \
+        "${BUILD_ARGS[@]}" \
         -t "${DOCKERHUB_REPO}/${IMAGE_NAME}:${TAG}" \
         -t "${ACR_REPO}/${IMAGE_NAME}:${TAG}" \
         --push \
@@ -67,6 +79,7 @@ else
     docker buildx build \
         --platform linux/amd64 \
         $BUILD_ARG \
+        "${BUILD_ARGS[@]}" \
         -t ${IMAGE_NAME}:${TAG} \
         -f Dockerfile \
         --load \

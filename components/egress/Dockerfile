@@ -19,6 +19,16 @@ WORKDIR /workspace
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG GOFLAGS=
+ARG LDFLAGS=
+ARG CGO_ENABLED=0
+ARG CC=
+ARG CXX=
+ARG CFLAGS=
+ARG CXXFLAGS=
+ARG CGO_CFLAGS=
+ARG CGO_CXXFLAGS=
+ARG CGO_LDFLAGS=
 
 # Copy only go mod/sum first for better caching
 COPY components/egress/go.mod components/egress/go.sum ./components/egress/
@@ -27,14 +37,20 @@ COPY components/internal ./components/internal
 
 WORKDIR /workspace/components/egress
 
-# Static-ish build (no cgo) to simplify runtime deps
-ENV CGO_ENABLED=0
+# Static-ish build (no cgo by default) to simplify runtime deps.
 RUN go mod download
 
 # Copy the rest of the egress sources
 COPY components/egress ./
-RUN CGO_ENABLED=0 go build \
-    -ldflags "-X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
+RUN if [ -n "${CC}" ]; then export CC; fi; \
+    if [ -n "${CXX}" ]; then export CXX; fi; \
+    export CGO_ENABLED="${CGO_ENABLED}" \
+           CGO_CFLAGS="${CGO_CFLAGS:-${CFLAGS}}" \
+           CGO_CXXFLAGS="${CGO_CXXFLAGS:-${CXXFLAGS}}" \
+           CGO_LDFLAGS="${CGO_LDFLAGS}"; \
+    go build ${GOFLAGS} -trimpath -buildvcs=false \
+    -ldflags "${LDFLAGS} -buildid= -B none \
+              -X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
               -X 'github.com/alibaba/opensandbox/internal/version.BuildTime=${BUILD_TIME}' \
               -X 'github.com/alibaba/opensandbox/internal/version.GitCommit=${GIT_COMMIT}'" \
     -o /out/egress .

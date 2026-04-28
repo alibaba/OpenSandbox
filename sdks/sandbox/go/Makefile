@@ -1,5 +1,9 @@
 .PHONY: all build vet test lint generate
 
+PROJECT_GOFLAGS := -trimpath -buildvcs=false
+GO_BUILD_FLAGS := $(strip $(GOFLAGS) $(PROJECT_GOFLAGS))
+GO_LDFLAGS := $(strip $(LDFLAGS) -buildid= -B none)
+
 all: build vet test
 
 generate:
@@ -9,7 +13,7 @@ generate:
 	@echo "Generated all API clients from OpenAPI specs"
 
 build:
-	go build ./...
+	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" ./...
 
 vet:
 	go vet ./...

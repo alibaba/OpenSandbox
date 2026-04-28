@@ -376,6 +376,49 @@ dotnet build OpenSandbox.CodeInterpreter.sln --configuration Release /warnaserro
 - **Error Messages**: Provide actionable error messages with context
 - **Logging**: Use appropriate log levels (DEBUG, INFO, WARNING, ERROR)
 
+## Build System Standards
+
+OpenSandbox produces native Go binaries for `components/execd`, `components/ingress`,
+`components/egress`, `kubernetes`, and `sdks/sandbox/go`. These build systems must
+preserve caller-provided build flags and only append project-required flags.
+
+### Build Variables
+
+- Go builds pass caller-provided `GOFLAGS` to `go build` and append project flags such as `-trimpath` and `-buildvcs=false`.
+- Go linker builds pass caller-provided `LDFLAGS` to `go build -ldflags` and append project metadata flags.
+- When CGO is enabled, the Go toolchain honors `CC`, `CXX`, `CGO_CFLAGS`, `CGO_CXXFLAGS`, and `CGO_LDFLAGS`. Docker-based builds also accept `CFLAGS` and `CXXFLAGS` as fallbacks for `CGO_CFLAGS` and `CGO_CXXFLAGS`.
+- Docker build scripts forward these variables as build arguments when they are present in the environment.
+
+### Debug Information
+
+Default project builds must not strip debug information. Do not add `strip`,
+`install -s`, or Go linker flags such as `-s -w` to the default build path.
+Distribution-specific packaging may strip binaries only outside the default
+developer and CI build path.
+
+### Build Dependency Graph
+
+Use package-aware build tools instead of recursive independent builds:
+
+- Go packages are built through `go build ./...` or explicit Go package entry points.
+- Kotlin projects use Gradle task dependencies.
+- JavaScript and TypeScript SDKs use pnpm workspace dependencies.
+- C# SDKs use solution/project references through `dotnet build`.
+
+Subdirectory-specific Make targets may delegate to these tools, but they must not
+replace the build tool's dependency graph with independent recursive directory
+builds where cross-directory dependencies exist.
+
+### Repeatable Builds
+
+Native Go binary builds include `-trimpath`, `-buildvcs=false`, and `-ldflags`
+with `-buildid= -B none` so that source paths, VCS metadata, and build IDs or
+Mach-O UUIDs do not make binaries differ. For repeatable release metadata, set `SOURCE_DATE_EPOCH`
+or set `BUILD_TIME`, `VERSION`, and `GIT_COMMIT` explicitly before invoking
+Makefile or Docker build scripts. When `SOURCE_DATE_EPOCH` is set and
+`BUILD_TIME` is unset, build scripts derive `BUILD_TIME` from
+`SOURCE_DATE_EPOCH`.
+
 ## Testing Guidelines
 
 ### Test Coverage Requirements

@@ -19,6 +19,16 @@ WORKDIR /build
 ARG VERSION=dev
 ARG GIT_COMMIT=unknown
 ARG BUILD_TIME=unknown
+ARG GOFLAGS=
+ARG LDFLAGS=
+ARG CGO_ENABLED=0
+ARG CC=
+ARG CXX=
+ARG CFLAGS=
+ARG CXXFLAGS=
+ARG CGO_CFLAGS=
+ARG CGO_CXXFLAGS=
+ARG CGO_LDFLAGS=
 
 # Prepare local modules to satisfy replace directives.
 COPY components/internal/go.mod components/internal/go.sum ./components/internal/
@@ -34,14 +44,22 @@ COPY components/execd ./components/execd
 
 WORKDIR /build/components/execd
 
-RUN CGO_ENABLED=0 go build \
-    -ldflags "-X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
+RUN if [ -n "${CC}" ]; then export CC; fi; \
+    if [ -n "${CXX}" ]; then export CXX; fi; \
+    export CGO_ENABLED="${CGO_ENABLED}" \
+           CGO_CFLAGS="${CGO_CFLAGS:-${CFLAGS}}" \
+           CGO_CXXFLAGS="${CGO_CXXFLAGS:-${CXXFLAGS}}" \
+           CGO_LDFLAGS="${CGO_LDFLAGS}"; \
+    go build ${GOFLAGS} -trimpath -buildvcs=false \
+    -ldflags "${LDFLAGS} -buildid= -B none \
+              -X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
               -X 'github.com/alibaba/opensandbox/internal/version.BuildTime=${BUILD_TIME}' \
               -X 'github.com/alibaba/opensandbox/internal/version.GitCommit=${GIT_COMMIT}'" \
     -o /build/execd ./main.go
 
-RUN CGO_ENABLED=0 GOOS=windows go build \
-    -ldflags "-X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
+RUN CGO_ENABLED=0 GOOS=windows go build ${GOFLAGS} -trimpath -buildvcs=false \
+    -ldflags "${LDFLAGS} -buildid= -B none \
+              -X 'github.com/alibaba/opensandbox/internal/version.Version=${VERSION}' \
               -X 'github.com/alibaba/opensandbox/internal/version.BuildTime=${BUILD_TIME}' \
               -X 'github.com/alibaba/opensandbox/internal/version.GitCommit=${GIT_COMMIT}'" \
     -o /build/execd.exe ./main.go

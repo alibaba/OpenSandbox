@@ -246,9 +246,13 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 ##@ Build
 
+PROJECT_GOFLAGS := -trimpath -buildvcs=false
+GO_BUILD_FLAGS := $(strip $(GOFLAGS) $(PROJECT_GOFLAGS))
+GO_LDFLAGS := $(strip $(LDFLAGS) -buildid= -B none)
+
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager ./cmd/controller
+	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o bin/manager ./cmd/controller
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
@@ -256,7 +260,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 
 .PHONY: task-executor-build
 task-executor-build: ## Build task-executor binary.
-	go build -o bin/task-executor ./cmd/task-executor
+	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o bin/task-executor ./cmd/task-executor
 
 .PHONY: task-executor-run
 task-executor-run: ## Run task-executor from your host.

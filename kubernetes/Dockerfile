@@ -16,6 +16,16 @@
 FROM golang:1.24 AS builder
 ARG TARGETOS
 ARG TARGETARCH
+ARG GOFLAGS=
+ARG LDFLAGS=
+ARG CGO_ENABLED=0
+ARG CC=
+ARG CXX=
+ARG CFLAGS=
+ARG CXXFLAGS=
+ARG CGO_CFLAGS=
+ARG CGO_CXXFLAGS=
+ARG CGO_LDFLAGS=
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -38,7 +48,15 @@ COPY internal/ internal/
 # by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
 RUN echo "Building for $TARGETOS/$TARGETARCH"
 ARG PACKAGE=./cmd/controller
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o server ${PACKAGE}
+RUN if [ -n "${CC}" ]; then export CC; fi; \
+    if [ -n "${CXX}" ]; then export CXX; fi; \
+    export CGO_ENABLED="${CGO_ENABLED}" GOOS="${TARGETOS:-linux}" GOARCH="${TARGETARCH}" \
+           CGO_CFLAGS="${CGO_CFLAGS:-${CFLAGS}}" \
+           CGO_CXXFLAGS="${CGO_CXXFLAGS:-${CXXFLAGS}}" \
+           CGO_LDFLAGS="${CGO_LDFLAGS}"; \
+    go build ${GOFLAGS} -trimpath -buildvcs=false \
+    -ldflags "${LDFLAGS} -buildid= -B none" \
+    -o server ${PACKAGE}
 
 # Use golang image as base to ensure nsenter (util-linux) is available
 # distroless does not contain shell or nsenter
