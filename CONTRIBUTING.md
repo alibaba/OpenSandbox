@@ -226,10 +226,37 @@ refactor(sdk): simplify filesystem API
 
 ## Coding Standards
 
-### Python (Server, Python SDKs)
+Contributions are required to generally comply with the coding standards for
+the language and component they touch. Generated files are excluded where the
+local tool configuration excludes them; update the source specification or
+generator and regenerate those files instead of hand-editing generated output.
 
-- **Style Guide**: Follow [PEP 8](https://pep8.org/)
-- **Formatter**: Use `ruff` for formatting and linting
+### Required Style Guides
+
+| Area | Primary language | Required style guide |
+| --- | --- | --- |
+| Server, CLI, Python SDKs, Python tests | Python | [PEP 8](https://peps.python.org/pep-0008/) plus Google-style docstrings for public APIs |
+| Go components, Kubernetes controller, Go SDK | Go | [Effective Go](https://go.dev/doc/effective_go) and [Go Code Review Comments](https://go.dev/wiki/CodeReviewComments) |
+| JavaScript/TypeScript SDKs | JavaScript/TypeScript | [TypeScript ESLint recommended and stylistic rule sets](https://typescript-eslint.io/users/configs/) |
+| Kotlin SDKs | Kotlin | [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html) |
+| C# SDKs | C# | [Microsoft C# coding conventions](https://learn.microsoft.com/dotnet/csharp/fundamentals/coding-style/coding-conventions) |
+
+### Automated Enforcement
+
+| Area | Tooling and CI entry point |
+| --- | --- |
+| Server | `server/pyproject.toml`; `.github/workflows/server-test.yml` runs `uv run ruff check` |
+| CLI and Python SDKs | package `pyproject.toml` files; `.github/workflows/sdk-tests.yml` runs `uv run ruff check` and `uv run pyright` |
+| Go components and Kubernetes | `gofmt`, `go vet`, and `golangci-lint` where configured; component workflows run format, lint, build, and test checks |
+| Go SDK | `.github/workflows/sdk-tests.yml` runs `gofmt`, `go vet`, and tests |
+| JavaScript/TypeScript SDKs | `sdks/eslint.base.mjs` and package `eslint.config.mjs`; `.github/workflows/sdk-tests.yml` runs `pnpm run lint` and `pnpm run typecheck` |
+| Kotlin SDKs | Gradle Spotless with ktlint; `.github/workflows/sdk-tests.yml` runs `./gradlew spotlessCheck ...` |
+| C# SDKs | `.editorconfig`, `Directory.Build.props`, and .NET analyzers; `.github/workflows/sdk-tests.yml` runs `dotnet build ... /warnaserror` |
+
+### Python (Server, CLI, Python SDKs)
+
+- **Style Guide**: Follow [PEP 8](https://peps.python.org/pep-0008/)
+- **Linter/Formatter**: Use `ruff` for linting and formatting
 - **Type Hints**: Always use type hints for function signatures
 - **Docstrings**: Use Google-style docstrings for public APIs
 
@@ -259,13 +286,13 @@ def create_sandbox(
 
 ```bash
 cd server
-uv run ruff check src tests
-uv run ruff format src tests
+uv run ruff check
+uv run ruff format opensandbox_server tests
 ```
 
-### Go (execd)
+### Go (components, Kubernetes, Go SDK)
 
-- **Style Guide**: Follow [Effective Go](https://golang.org/doc/effective_go)
+- **Style Guide**: Follow [Effective Go](https://go.dev/doc/effective_go)
 - **Formatter**: Use `gofmt` for formatting
 - **Imports**: Organize in three groups (stdlib, third-party, internal)
 - **Error Handling**: Always handle errors explicitly
@@ -291,6 +318,20 @@ gofmt -w .
 make fmt
 ```
 
+### JavaScript/TypeScript (SDKs)
+
+- **Style Guide**: Follow the TypeScript ESLint recommended and stylistic rule sets configured in `sdks/eslint.base.mjs`
+- **Linter**: Use `eslint` for JavaScript/TypeScript linting
+- **Type Checking**: Run `tsc` with the package `tsconfig.json`
+
+**Running Checks:**
+
+```bash
+cd sdks
+pnpm run lint:js
+pnpm run typecheck:js
+```
+
 ### Java/Kotlin (Java/Kotlin SDKs)
 
 - **Style Guide**: Follow [Kotlin Coding Conventions](https://kotlinlang.org/docs/coding-conventions.html)
@@ -305,6 +346,22 @@ suspend fun createSandbox(
 ): Sandbox {
     // Implementation
 }
+```
+
+### C# (C# SDKs)
+
+- **Style Guide**: Follow [Microsoft C# coding conventions](https://learn.microsoft.com/dotnet/csharp/fundamentals/coding-style/coding-conventions)
+- **Formatting**: Follow the SDK `.editorconfig` files
+- **Analyzers**: Keep .NET analyzers enabled and treat build warnings as errors in CI
+
+**Running Checks:**
+
+```bash
+cd sdks/sandbox/csharp
+dotnet build OpenSandbox.sln --configuration Release /warnaserror
+
+cd ../../code-interpreter/csharp
+dotnet build OpenSandbox.CodeInterpreter.sln --configuration Release /warnaserror
 ```
 
 ### General Guidelines
