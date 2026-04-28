@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/alibaba-opensandbox-badge.png)](https://mseep.ai/app/alibaba-opensandbox)
+
 <div align="center">
   <img src="docs/assets/logo.svg" alt="OpenSandbox logo" width="150" />
 
