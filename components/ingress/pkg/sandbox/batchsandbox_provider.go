@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
@@ -85,9 +86,7 @@ func (p *BatchSandboxProvider) Start(ctx context.Context) error {
 	return nil
 }
 
-// GetEndpoint retrieves the endpoint IP for a BatchSandbox
-func (p *BatchSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
-	// Global watch mode with informer index lookup.
+func (p *BatchSandboxProvider) findBatchSandbox(sandboxId string) (*sandboxv1alpha1.BatchSandbox, error) {
 	matches := make([]string, 0, 1)
 	indexed := []any{}
 	needScanFallback := p.informer == nil
@@ -95,7 +94,6 @@ func (p *BatchSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
 		var err error
 		indexed, err = p.informer.GetIndexer().ByIndex(sandboxNameIndex, sandboxId)
 		if err != nil {
-			// Fallback only when index query is unavailable/broken, not on normal miss.
 			needScanFallback = true
 		}
 	}
@@ -103,7 +101,7 @@ func (p *BatchSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
 	if needScanFallback {
 		all, err := p.lister.List(labels.Everything())
 		if err != nil {
-			return "", fmt.Errorf("failed to list BatchSandboxes: %w", err)
+			return nil, fmt.Errorf("failed to list BatchSandboxes: %w", err)
 		}
 		indexed = make([]any, 0, len(all))
 		for _, bs := range all {
@@ -124,27 +122,42 @@ func (p *BatchSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
 		}
 	}
 	if len(matches) == 0 {
-		return "", fmt.Errorf("%w: %s", ErrSandboxNotFound, sandboxId)
+		return nil, fmt.Errorf("%w: %s", ErrSandboxNotFound, sandboxId)
 	}
 	if len(matches) > 1 {
-		return "", fmt.Errorf("ambiguous sandbox id %q found in multiple namespaces: %v", sandboxId, matches)
+		return nil, fmt.Errorf("ambiguous sandbox id %q found in multiple namespaces: %v", sandboxId, matches)
 	}
-	batchSandbox := selected
+	return selected, nil
+}
+
+// GetEndpoint retrieves the endpoint IP for a BatchSandbox
+func (p *BatchSandboxProvider) GetEndpoint(sandboxId string) (*EndpointInfo, error) {
+	batchSandbox, err := p.findBatchSandbox(sandboxId)
+	if err != nil {
+		return nil, err
+	}
+	accessToken := ""
+	if batchSandbox.Annotations != nil {
+		accessToken = strings.TrimSpace(batchSandbox.Annotations[AnnotationAccessToken])
+	}
 
 	// Check if BatchSandbox is ready
 	if batchSandbox.Status.Ready < 1 {
-		return "", fmt.Errorf("%w: %s/%s (ready: %d/%d)",
+		return nil, fmt.Errorf("%w: %s/%s (ready: %d/%d)",
 			ErrSandboxNotReady, batchSandbox.Namespace, sandboxId, batchSandbox.Status.Ready, batchSandbox.Status.Replicas)
 	}
 
 	// Get endpoints from BatchSandbox using kubernetes utils
 	endpoints, err := utils.GetEndpoints(batchSandbox)
 	if err != nil {
-		return "", fmt.Errorf("%w: %s/%s: %w", ErrSandboxNotReady, batchSandbox.Namespace, sandboxId, err)
+		return nil, fmt.Errorf("%w: %s/%s: %w", ErrSandboxNotReady, batchSandbox.Namespace, sandboxId, err)
 	}
 
 	// Return the first available endpoint
-	return endpoints[0], nil
+	return &EndpointInfo{
+		Endpoint:          endpoints[0],
+		SecureAccessToken: accessToken,
+	}, nil
 }
 
 var _ Provider = (*BatchSandboxProvider)(nil)

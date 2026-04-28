@@ -29,7 +29,7 @@ def test_get_endpoint_returns_service_result(
 
     class StubService:
         @staticmethod
-        def get_endpoint(sandbox_id: str, port: int) -> Endpoint:
+        def get_endpoint(sandbox_id: str, port: int, **kwargs) -> Endpoint:
             calls.append((sandbox_id, port))
             return Endpoint(endpoint="10.57.1.91:40109/proxy/44772")
 
@@ -52,7 +52,7 @@ def test_get_endpoint_use_server_proxy_rewrites_url(
 ) -> None:
     class StubService:
         @staticmethod
-        def get_endpoint(sandbox_id: str, port: int) -> Endpoint:
+        def get_endpoint(sandbox_id: str, port: int, **kwargs) -> Endpoint:
             return Endpoint(endpoint="10.57.1.91:40109/proxy/44772")
 
     monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
@@ -74,7 +74,7 @@ def test_get_endpoint_use_server_proxy_prefers_server_eip(
 ) -> None:
     class StubService:
         @staticmethod
-        def get_endpoint(sandbox_id: str, port: int) -> Endpoint:
+        def get_endpoint(sandbox_id: str, port: int, **kwargs) -> Endpoint:
             return Endpoint(endpoint="10.57.1.91:40109/proxy/44772")
 
     monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
@@ -104,3 +104,52 @@ def test_get_endpoint_rejects_non_numeric_port(
     )
 
     assert response.status_code == 422
+
+
+def test_get_endpoint_passes_expires_to_service(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, **kwargs) -> Endpoint:
+            captured.update({"sandbox_id": sandbox_id, "port": port, **kwargs})
+            return Endpoint(endpoint="sandbox.example.com")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.get(
+        "/v1/sandboxes/sbx-001/endpoints/44772",
+        params={"expires": "2000000000"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert captured.get("expires") == 2000000000
+
+
+def test_get_endpoint_unsigned_when_expires_omitted(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, **kwargs) -> Endpoint:
+            captured.update(kwargs)
+            return Endpoint(endpoint="sandbox.example.com")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.get(
+        "/v1/sandboxes/sbx-001/endpoints/44772",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert captured.get("expires") is None

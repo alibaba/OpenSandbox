@@ -21,9 +21,9 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 )
 
-// HealthGate coordinates HTTP GET /healthz with transparent mitm readiness (listener, iptables, CA export).
+// HealthGate: /healthz stays 503 until MarkStackReady when transparent mitm is required (env enabled).
 type HealthGate struct {
-	required bool // transparent mitm enabled via env
+	required bool
 	ready    atomic.Bool
 }
 

@@ -1448,6 +1448,32 @@ func TestExecuteCode_SSE(t *testing.T) {
 	}
 }
 
+func TestExecuteCode_SSE_EmptyStream(t *testing.T) {
+	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			assert.Fail(t, fmt.Sprintf("expected POST, got %s", r.Method))
+		}
+		if r.URL.Path != "/code" {
+			assert.Fail(t, fmt.Sprintf("expected /code, got %s", r.URL.Path))
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+	})
+
+	err := client.ExecuteCode(context.Background(), RunCodeRequest{
+		Context: &CodeContext{Language: "python"},
+		Code:    "2+2",
+	}, func(event StreamEvent) error {
+		return nil
+	})
+	if err == nil {
+		require.FailNow(t, "ExecuteCode should fail on empty SSE stream")
+	}
+	if !strings.Contains(err.Error(), "empty sse stream") {
+		assert.Fail(t, fmt.Sprintf("err = %v, want empty sse stream", err))
+	}
+}
+
 func TestExecuteCode_InContext(t *testing.T) {
 	ssePayload := `{"type":"stdout","text":"hello from context","timestamp":1000}` + "\n\n" +
 		`{"type":"execution_complete","timestamp":1001,"execution_time":10}` + "\n\n"

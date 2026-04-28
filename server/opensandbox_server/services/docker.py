@@ -40,6 +40,7 @@ from uuid import uuid4
 
 import docker
 from docker.errors import DockerException, ImageNotFound, NotFound as DockerNotFound
+from docker.types import DeviceRequest
 from fastapi import HTTPException, status
 
 from opensandbox_server.extensions import (
@@ -105,6 +106,7 @@ from opensandbox_server.services.endpoint_auth import (
 )
 from opensandbox_server.services.helpers import (
     matches_filter,
+    parse_gpu_request,
     parse_memory_limit,
     parse_nano_cpus,
     parse_timestamp,
@@ -1170,7 +1172,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 auto_created_volumes, separators=(",", ":"),
             )
         image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
-        mem_limit, nano_cpus = self._resolve_resource_limits(request)
+        mem_limit, nano_cpus, gpu_count = self._resolve_resource_limits(request)
         egress_token: Optional[str] = None
         requested_windows_profile = is_windows_platform(request.platform)
 
@@ -1191,9 +1193,12 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             # For dockur/windows profile, resourceLimits are translated to
             # guest envs (RAM_SIZE/CPU_CORES/DISK_SIZE). Avoid applying
             # container cgroup memory/cpu limits to the outer Linux container,
-            # which can OOM-kill QEMU during installation/runtime.
+            # which can OOM-kill QEMU during installation/runtime. GPU
+            # passthrough is likewise suppressed: the Windows guest runs inside
+            # QEMU and would not see GPUs exposed to the outer container.
             effective_mem_limit = None if requested_windows_profile else mem_limit
             effective_nano_cpus = None if requested_windows_profile else nano_cpus
+            effective_gpu_count = None if requested_windows_profile else gpu_count
 
             # Build volume bind mounts from request volumes.
             # pvc_inspect_cache carries Docker volume inspect data from the
@@ -1230,7 +1235,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                 labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
                 host_config_kwargs = self._base_host_config_kwargs(
-                    effective_mem_limit, effective_nano_cpus, f"container:{sidecar_container.id}"
+                    effective_mem_limit, effective_nano_cpus, f"container:{sidecar_container.id}",
+                    gpu_count=effective_gpu_count,
                 )
                 # Container network namespace is shared with sidecar. Docker rejects
                 # exposing ports on the main container in "container:<id>" mode.
@@ -1242,7 +1248,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     host_config_kwargs["cap_drop"] = list(cap_drop)
             else:
                 host_config_kwargs = self._base_host_config_kwargs(
-                    effective_mem_limit, effective_nano_cpus, self.network_mode
+                    effective_mem_limit, effective_nano_cpus, self.network_mode,
+                    gpu_count=effective_gpu_count,
                 )
                 if self.network_mode != HOST_NETWORK_MODE:
                     port_bindings = allocate_port_bindings(exposed_ports)
@@ -2053,7 +2060,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
         return RenewSandboxExpirationResponse(expires_at=new_expiration)
 
-    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False,
+                     expires: Optional[int] = None) -> Endpoint:
         """
         Get sandbox access endpoint.
 
@@ -2061,13 +2069,27 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             sandbox_id: Unique sandbox identifier
             port: Port number where the service is listening inside the sandbox
             resolve_internal: If True, return the internal container IP (for proxy), ignoring router config.
+            expires: Not supported by Docker runtime.
 
         Returns:
             Endpoint: Public endpoint URL
 
         Raises:
-            HTTPException: If sandbox not found or endpoint not available
+            HTTPException: If sandbox not found, endpoint not available,
+                or expires is provided (Docker does not support signed routes).
         """
+        if expires is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.API_NOT_SUPPORTED,
+                    "message": (
+                        "Signed routes (expires parameter) are not supported when "
+                        "runtime.type='docker'. Use the Kubernetes runtime for signed routes."
+                    ),
+                },
+            )
+
         try:
             self.validate_port(port)
         except ValueError as exc:
@@ -2250,17 +2272,19 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
     def _resolve_resource_limits(
         self, request: CreateSandboxRequest
-    ) -> tuple[Optional[int], Optional[int]]:
+    ) -> tuple[Optional[int], Optional[int], Optional[int]]:
         resource_limits = request.resource_limits.root or {}
         mem_limit = parse_memory_limit(resource_limits.get("memory"))
         nano_cpus = parse_nano_cpus(resource_limits.get("cpu"))
-        return mem_limit, nano_cpus
+        gpu_count = parse_gpu_request(resource_limits.get("gpu"))
+        return mem_limit, nano_cpus, gpu_count
 
     def _base_host_config_kwargs(
         self,
         mem_limit: Optional[int],
         nano_cpus: Optional[int],
         network_mode: str,
+        gpu_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         host_config_kwargs: Dict[str, Any] = {"network_mode": network_mode}
         security_opts: list[str] = []
@@ -2281,6 +2305,13 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             host_config_kwargs["mem_limit"] = mem_limit
         if nano_cpus:
             host_config_kwargs["nano_cpus"] = nano_cpus
+        if gpu_count:
+            # Honors host toolchains such as nvidia-container-toolkit. The Docker
+            # Engine returns a clear error at container create time if the host
+            # cannot satisfy the request, so failure is surfaced rather than silent.
+            host_config_kwargs["device_requests"] = [
+                DeviceRequest(count=gpu_count, capabilities=[["gpu"]])
+            ]
         # Inject secure runtime into host_config
         if self.docker_runtime:
             logger.info(

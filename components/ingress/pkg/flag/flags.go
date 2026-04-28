@@ -32,4 +32,6 @@ var (
 	RenewIntentQueueKey       string
 	RenewIntentQueueMaxLen    int
 	RenewIntentMinIntervalSec int
+
+	SecureAccessKeys string
 )

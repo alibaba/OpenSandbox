@@ -19,7 +19,7 @@ import threading
 
 logger = logging.getLogger(__name__)
 
-ALLOW_NO_API_KEY_ENV = "OPENSANDBOX_INSECURE_SERVER"
+INSECURE_SERVER_ENV_VAR = "OPENSANDBOX_INSECURE_SERVER"
 ALLOW_NO_API_KEY_CONFIRMATION = "YES"
 ANSI_RED = "\033[31m"
 ANSI_RESET = "\033[0m"
@@ -71,11 +71,11 @@ def api_key_confirm(
 
     env = environ if environ is not None else os.environ
 
-    if env.get(ALLOW_NO_API_KEY_ENV) == ALLOW_NO_API_KEY_CONFIRMATION:
+    if env.get(INSECURE_SERVER_ENV_VAR) == ALLOW_NO_API_KEY_CONFIRMATION:
         logger.warning(
-            "server.api_key is not configured. Proceeding only because %s=%s.",
-            ALLOW_NO_API_KEY_ENV,
-            ALLOW_NO_API_KEY_CONFIRMATION,
+            "server.api_key is not configured. Proceeding because %s explicitly acknowledges "
+            "the insecure server mode.",
+            INSECURE_SERVER_ENV_VAR,
         )
         return
 
@@ -112,7 +112,7 @@ def api_key_confirm(
 
     raise RuntimeError(
         "Startup blocked: server.api_key is empty in non-interactive mode. "
-        f"Set {ALLOW_NO_API_KEY_ENV}={ALLOW_NO_API_KEY_CONFIRMATION} to acknowledge the risk. "
+        f"Set {INSECURE_SERVER_ENV_VAR}={ALLOW_NO_API_KEY_CONFIRMATION} to acknowledge the risk. "
         "Strongly recommend setting server.api_key. "
         "See: https://github.com/alibaba/OpenSandbox/issues/750"
     )

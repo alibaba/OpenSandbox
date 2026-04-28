@@ -545,6 +545,20 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: expires
+          in: query
+          required: false
+          description: |
+            Optional. When set, the server **issues a signed** access route (OSEP-0011). The value
+            is **Linux / Unix epoch seconds** — a decimal `uint64` count of **whole seconds** since
+            the Unix epoch (`1970-01-01 00:00:00` UTC, same as POSIX / `time(2)`), not
+            milliseconds. Normalized to `expires_b36` for the four-segment route token. Omit to
+            get the unsigned/legacy response shape.
+          schema:
+            type: string
+            pattern: '^(0|[1-9][0-9]*)$'
+            minLength: 1
+            maxLength: 20
       responses:
         '200':
           description: |
@@ -558,6 +572,8 @@ paths:
           headers:
             X-Request-ID:
               $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -1008,8 +1024,8 @@ components:
       properties:
         os:
           type: string
-          enum: [linux]
-          description: Target operating system (for example `linux`).
+          enum: [linux, windows]
+          description: Target operating system (for example `linux` or `windows`).
           example: linux
         arch:
           type: string

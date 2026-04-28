@@ -220,7 +220,7 @@ class SandboxImageAuth private constructor(
 /**
  * Runtime platform constraint for sandbox provisioning.
  *
- * @property os Target operating system (currently only linux)
+ * @property os Target operating system (linux or windows)
  * @property arch Target CPU architecture (amd64 or arm64)
  */
 class PlatformSpec private constructor(
@@ -237,7 +237,7 @@ class PlatformSpec private constructor(
         private var arch: String? = null
 
         fun os(os: String): Builder {
-            require(os == "linux") { "Platform os must be linux" }
+            require(os == "linux" || os == "windows") { "Platform os must be one of: linux, windows" }
             this.os = os
             return this
         }

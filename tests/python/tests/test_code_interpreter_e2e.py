@@ -380,6 +380,8 @@ class TestCodeInterpreterE2E:
                 "NODE_VERSION": "22",
                 "PYTHON_VERSION": "3.12",
                 "EXECD_LOG_FILE": "/tmp/opensandbox-e2e/logs/execd.log",
+                "EXECD_API_GRACE_SHUTDOWN": "3s",
+                "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s",
             },
             health_check_polling_interval=timedelta(milliseconds=500),
             volumes=[
@@ -431,6 +433,8 @@ class TestCodeInterpreterE2E:
                 "NODE_VERSION": "22",
                 "PYTHON_VERSION": "3.12",
                 "EXECD_LOG_FILE": "/tmp/opensandbox-e2e/logs/execd.log",
+                "EXECD_API_GRACE_SHUTDOWN": "3s",
+                "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s",
             },
             health_check_polling_interval=timedelta(milliseconds=500),
             volumes=[

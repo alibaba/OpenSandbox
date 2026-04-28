@@ -25,8 +25,6 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 )
 
-// dnsRedirectRules returns the iptables/ip6tables argv lines for OUTPUT DNS redirect (append or delete via op).
-// op must be "-A" (append) or "-D" (delete).
 func dnsRedirectRules(port int, exemptDst []netip.Addr, op string) [][]string {
 	targetPort := strconv.Itoa(port)
 
@@ -69,9 +67,7 @@ func runRedirectRules(rules [][]string) error {
 	return nil
 }
 
-// SetupRedirect installs OUTPUT nat redirect for DNS (udp/tcp 53 -> port).
-//
-// exemptDst: optional list of destination IPs; traffic to these is not redirected. Packets carrying mark are also RETURNed (proxy's own upstream). Requires CAP_NET_ADMIN.
+// SetupRedirect: OUTPUT 53 (udp/tcp) → port; sk_mark RETURN (proxy) and per-dst RETURN (exempt list) first.
 func SetupRedirect(port int, exemptDst []netip.Addr) error {
 	log.Infof("installing iptables DNS redirect: OUTPUT port 53 -> %d (mark %s bypass)", port, constants.MarkHex)
 	rules := dnsRedirectRules(port, exemptDst, "-A")
@@ -82,8 +78,7 @@ func SetupRedirect(port int, exemptDst []netip.Addr) error {
 	return nil
 }
 
-// RemoveRedirect removes rules installed by SetupRedirect with the same port and exemptDst.
-// Deletion order is reverse of insertion. Missing rules are ignored so teardown is best-effort.
+// RemoveRedirect deletes the same rules as SetupRedirect in reverse order; ignores missing rules.
 func RemoveRedirect(port int, exemptDst []netip.Addr) {
 	rules := dnsRedirectRules(port, exemptDst, "-D")
 	for i := len(rules) - 1; i >= 0; i-- {

@@ -35,7 +35,7 @@ const (
 	EnvEgressMetricsExtraAttrs = "OPENSANDBOX_EGRESS_METRICS_EXTRA_ATTRS"
 	EnvNameserverExempt        = "OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT"
 
-	// Python mitmproxy (mitmdump) transparent mode — Linux + CAP_NET_ADMIN only.
+	// MITM: mitmdump transparent; Linux + CAP_NET_ADMIN, runs as a dedicated user.
 	EnvMitmproxyTransparent      = "OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT"
 	EnvMitmproxyPort             = "OPENSANDBOX_EGRESS_MITMPROXY_PORT"
 	EnvMitmproxyConfDir          = "OPENSANDBOX_EGRESS_MITMPROXY_CONFDIR"
@@ -43,7 +43,7 @@ const (
 	EnvMitmproxyUpstreamTrustDir = "OPENSANDBOX_EGRESS_MITMPROXY_UPSTREAM_TRUST_DIR"
 	EnvMitmproxyIgnoreHosts      = "OPENSANDBOX_EGRESS_MITMPROXY_IGNORE_HOSTS"
 
-	// EnvDNSUpstream comma-separated upstream resolvers; each address must be a literal IPv4/IPv6 (optional :port). Hostnames are rejected (DNS recursion via REDIRECT).
+	// Comma-separated upstream resolvers: literal IP only (optional :port) — no hostnames (see dnsproxy REDIRECT note).
 	EnvDNSUpstream                 = "OPENSANDBOX_EGRESS_DNS_UPSTREAM"
 	EnvDNSUpstreamTimeout          = "OPENSANDBOX_EGRESS_DNS_UPSTREAM_TIMEOUT"
 	EnvDNSUpstreamProbe            = "OPENSANDBOX_EGRESS_DNS_UPSTREAM_PROBE"

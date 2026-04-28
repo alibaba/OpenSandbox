@@ -21,6 +21,7 @@ helpers to access the parsed settings throughout the application.
 
 from __future__ import annotations
 
+import base64
 import ipaddress
 import logging
 import os
@@ -28,7 +29,7 @@ import re
 from pathlib import Path
 from typing import Any, ClassVar, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 try:  # Python 3.11+
     import tomllib  # type: ignore[attr-defined]
@@ -165,6 +166,115 @@ class RenewIntentConfig(BaseModel):
     )
 
 
+_KEY_ID_RE = re.compile(r"^[0-9a-z]$")
+
+
+def _try_decode_base64(s: str) -> bytes | None:
+    """Accept both padded and unpadded base64."""
+    try:
+        return base64.b64decode(s, validate=True)
+    except Exception:
+        pass
+    try:
+        padded = s + "=" * ((4 - len(s) % 4) % 4)
+        return base64.b64decode(padded, validate=True)
+    except Exception:
+        return None
+
+
+class SecureAccessKey(BaseModel):
+    """A signing key entry for OSEP-0011 signed route verification."""
+
+    key_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=1,
+        description="Key identifier, exactly one character in ``[0-9a-z]``.",
+    )
+    key: str = Field(
+        ...,
+        min_length=1,
+        description="Base64-encoded signing key secret bytes.",
+    )
+
+    @field_validator("key_id")
+    @classmethod
+    def validate_key_id_char(cls, v: str) -> str:
+        if not _KEY_ID_RE.match(v):
+            raise ValueError(
+                f"key_id must be exactly one character [0-9a-z], got {v!r}"
+            )
+        return v
+
+    @field_validator("key")
+    @classmethod
+    def validate_key_is_base64(cls, v: str) -> str:
+        decoded = _try_decode_base64(v)
+        if decoded is None:
+            raise ValueError(f"key is not valid base64: {v!r}")
+        if not decoded:
+            raise ValueError("key must decode to at least 1 byte")
+        return v
+
+    def get_secret_bytes(self) -> bytes:
+        decoded = _try_decode_base64(self.key)
+        assert decoded is not None, "key was validated at construction"
+        return decoded
+
+
+class SecureAccessConfig(BaseModel):
+    """OSEP-0011 secure access signing configuration."""
+
+    active_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=1,
+        description=(
+            "Identifier of the active signing key. Must reference a ``key_id`` "
+            "present in ``keys``. Exactly one character ``[0-9a-z]``."
+        ),
+    )
+    keys: list[SecureAccessKey] = Field(
+        ...,
+        min_length=1,
+        description="List of signing keys available for route signing and verification.",
+    )
+
+    @field_validator("active_key")
+    @classmethod
+    def validate_active_key_char(cls, v: str) -> str:
+        if not _KEY_ID_RE.match(v):
+            raise ValueError(
+                f"active_key must be exactly one character [0-9a-z], got {v!r}"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def ensure_active_key_exists(self) -> "SecureAccessConfig":
+        seen = set()
+        for k in self.keys:
+            if k.key_id in seen:
+                raise ValueError(
+                    f"duplicate secure_access key_id {k.key_id!r}; "
+                    "each key_id must be unique"
+                )
+            seen.add(k.key_id)
+        if self.active_key not in seen:
+            raise ValueError(
+                f"active_key {self.active_key!r} not found in secure_access.keys; "
+                f"available keys: {sorted(seen)}"
+            )
+        return self
+
+    def get_active_secret_bytes(self) -> bytes:
+        for k in self.keys:
+            if k.key_id == self.active_key:
+                return k.get_secret_bytes()
+        raise RuntimeError(
+            f"active_key {self.active_key!r} not in keys list"
+        )
+
+
 class GatewayRouteModeConfig(BaseModel):
     """Routing strategy for gateway ingress exposure."""
 
@@ -206,6 +316,15 @@ class IngressConfig(BaseModel):
         default=None,
         description="Gateway configuration required when mode = 'gateway'.",
     )
+    secure_access: Optional[SecureAccessConfig] = Field(
+        default=None,
+        description=(
+            "OSEP-0011 secure access signing configuration. "
+            "When set, the server can issue signed route tokens and static "
+            "SecureAccessTokens for sandbox endpoints. "
+            "Requires ingress.mode = 'gateway'."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_ingress_mode(self) -> "IngressConfig":
@@ -213,6 +332,11 @@ class IngressConfig(BaseModel):
             raise ValueError("gateway block must be provided when ingress.mode = 'gateway'.")
         if self.mode == INGRESS_MODE_DIRECT and self.gateway is not None:
             raise ValueError("gateway block must be omitted unless ingress.mode = 'gateway'.")
+
+        if self.secure_access is not None and self.mode != INGRESS_MODE_GATEWAY:
+            raise ValueError(
+                "secure_access block requires ingress.mode = 'gateway'."
+            )
 
         if self.mode == INGRESS_MODE_GATEWAY and self.gateway:
             route_mode = self.gateway.route.mode
@@ -802,6 +926,8 @@ __all__ = [
     "IngressConfig",
     "GatewayConfig",
     "GatewayRouteModeConfig",
+    "SecureAccessConfig",
+    "SecureAccessKey",
     "INGRESS_MODE_DIRECT",
     "INGRESS_MODE_GATEWAY",
     "DockerConfig",

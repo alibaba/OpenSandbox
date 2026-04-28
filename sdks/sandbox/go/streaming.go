@@ -51,6 +51,7 @@ func streamSSE(ctx context.Context, resp *http.Response, handler EventHandler) e
 
 	var current StreamEvent
 	var dataLines []string
+	eventCount := 0
 
 	for {
 		select {
@@ -66,9 +67,13 @@ func streamSSE(ctx context.Context, resp *http.Response, handler EventHandler) e
 				if err := handler(current); err != nil {
 					return err
 				}
+				eventCount++
 			}
 			if err := scanner.Err(); err != nil {
 				return fmt.Errorf("opensandbox: sse read: %w", err)
+			}
+			if eventCount == 0 {
+				return fmt.Errorf("opensandbox: empty sse stream")
 			}
 			return nil
 		}
@@ -82,6 +87,7 @@ func streamSSE(ctx context.Context, resp *http.Response, handler EventHandler) e
 				if err := handler(current); err != nil {
 					return err
 				}
+				eventCount++
 			}
 			// Reset for next event.
 			current = StreamEvent{}

@@ -143,6 +143,32 @@ internal sealed class SandboxesAdapter : ISandboxes
             queryParams,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
+        return ParseEndpointResponse(response);
+    }
+
+    public async Task<Endpoint> GetSignedSandboxEndpointAsync(
+        string sandboxId,
+        int port,
+        long expires,
+        bool useServerProxy = false,
+        CancellationToken cancellationToken = default)
+    {
+        var queryParams = new Dictionary<string, string?>
+        {
+            ["use_server_proxy"] = useServerProxy ? "true" : "false",
+            ["expires"] = expires.ToString()
+        };
+
+        var response = await _client.GetAsync<JsonElement>(
+            $"/sandboxes/{Uri.EscapeDataString(sandboxId)}/endpoints/{port}",
+            queryParams,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        return ParseEndpointResponse(response);
+    }
+
+    private static Endpoint ParseEndpointResponse(JsonElement response)
+    {
         return new Endpoint
         {
             EndpointAddress = response.GetProperty("endpoint").GetString() ?? throw new SandboxApiException("Missing endpoint in response"),

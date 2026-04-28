@@ -56,7 +56,6 @@ func patchMergedPolicy(base *policy.NetworkPolicy, patchRules []policy.EgressRul
 	return policy.ParsePolicy(string(rawMerged))
 }
 
-// mergeEgressRules joins base rules and additions, deduping by target (last writer wins).
 func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
 	if len(additions) == 0 {
 		return base
@@ -64,7 +63,7 @@ func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
 	out := make([]policy.EgressRule, 0, len(base)+len(additions))
 	seen := make(map[string]struct{})
 
-	// Priority: additions first; base rules only if target not overridden.
+	// patch rules win on same target; base fills the rest
 	for _, r := range additions {
 		key := mergeKey(r)
 		if _, ok := seen[key]; ok {
@@ -84,8 +83,7 @@ func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
 	return out
 }
 
-// mergeKey normalizes domain targets to lowercase for dedupe;
-// IP/CIDR targets are kept as-is.
+// mergeKey: domain targets lowercased for dedupe; IP/CIDR left as-is.
 func mergeKey(r policy.EgressRule) string {
 	if r.Target == "" {
 		return r.Target
@@ -134,7 +132,6 @@ func policyRuleSummary(p *policy.NetworkPolicy) []map[string]string {
 	return egressRulesSummary(p.Egress)
 }
 
-// egressRulesSummary builds the JSON-friendly rule list for logging.
 func egressRulesSummary(egress []policy.EgressRule) []map[string]string {
 	out := make([]map[string]string, 0, len(egress))
 	for _, r := range egress {
@@ -158,8 +155,8 @@ func logEgressLoaded(pol *policy.NetworkPolicy) {
 	log.Logger.With(fields...).Infof("egress policy loaded")
 }
 
-// logEgressUpdated logs egress.updated with only the rules from this HTTP request (PATCH: patch rules;
-// POST/PUT: body egress; reset: empty). defaultAction is the effective policy after apply.
+// logEgressUpdated: egress.updated event. rules is only the delta for this request (PATCH: patch list;
+// POST/PUT: full body egress; reset: empty), defaultAction is the policy after apply.
 func logEgressUpdated(defaultAction string, deltaEgress []policy.EgressRule) {
 	fields := []slogger.Field{
 		{Key: "opensandbox.event", Value: "egress.updated"},

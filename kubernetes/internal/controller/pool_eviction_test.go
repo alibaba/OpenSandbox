@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
+	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/algorithm"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/eviction"
 )
 
@@ -34,14 +35,11 @@ type stubAllocator struct {
 	podAllocation map[string]string
 }
 
-func (a *stubAllocator) Schedule(_ context.Context, _ *AllocSpec) (*AllocStatus, []SandboxSyncInfo, bool, error) {
-	return nil, nil, false, nil
+func (a *stubAllocator) Schedule(_ context.Context, _ *AllocSpec) (*algorithm.AllocAction, error) {
+	return nil, nil
 }
 func (a *stubAllocator) GetPoolAllocation(_ context.Context, _ *sandboxv1alpha1.Pool) (map[string]string, error) {
 	return a.podAllocation, nil
-}
-func (a *stubAllocator) PersistPoolAllocation(_ context.Context, _ *sandboxv1alpha1.Pool, _ *AllocStatus) error {
-	return nil
 }
 func (a *stubAllocator) ClearPoolAllocation(_ context.Context, _ string, _ string) error {
 	return nil
@@ -49,6 +47,16 @@ func (a *stubAllocator) ClearPoolAllocation(_ context.Context, _ string, _ strin
 func (a *stubAllocator) SyncSandboxAllocation(_ context.Context, _ *sandboxv1alpha1.BatchSandbox, _ []string) error {
 	return nil
 }
+func (a *stubAllocator) SyncSandboxReleased(_ context.Context, _ *sandboxv1alpha1.BatchSandbox, _ []string) error {
+	return nil
+}
+func (a *stubAllocator) GetSandboxAllocation(_ context.Context, _ *sandboxv1alpha1.BatchSandbox) ([]string, error) {
+	return nil, nil
+}
+func (a *stubAllocator) GetSandboxReleased(_ context.Context, _ *sandboxv1alpha1.BatchSandbox) ([]string, error) {
+	return nil, nil
+}
+func (a *stubAllocator) ReleasePodsAllocation(_ context.Context, _ string, _ string, _ []string) {}
 
 func newEvictionTestPod(name string, labels map[string]string, deleting bool) *corev1.Pod {
 	pod := &corev1.Pod{

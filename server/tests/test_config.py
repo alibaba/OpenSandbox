@@ -29,6 +29,8 @@ from opensandbox_server.config import (
     GatewayRouteModeConfig,
     IngressConfig,
     RuntimeConfig,
+    SecureAccessConfig,
+    SecureAccessKey,
     ServerConfig,
     StorageConfig,
 )
@@ -974,3 +976,287 @@ def test_load_config_log_file_enabled_with_custom_paths(tmp_path, monkeypatch):
     assert loaded.log.file_enabled is True
     assert loaded.log.resolved_file_path() == "/custom/server.log"
     assert loaded.log.resolved_access_file_path() == "/custom/access.log"
+
+
+# ============================================================
+# SecureAccessKey / SecureAccessConfig
+# ============================================================
+
+
+class TestSecureAccessKey:
+    def test_valid_key(self) -> None:
+        import base64
+
+        raw = b"my-secret-key-32-bytes!"
+        key = SecureAccessKey(key_id="a", key=base64.b64encode(raw).decode())
+        assert key.get_secret_bytes() == raw
+
+    def test_key_id_must_be_single_char(self) -> None:
+        with pytest.raises(ValidationError):
+            SecureAccessKey(key_id="ab", key="AAAA")
+
+    def test_key_id_must_be_alphanumeric_lowercase(self) -> None:
+        with pytest.raises(ValidationError):
+            SecureAccessKey(key_id="A", key="AAAA")
+        with pytest.raises(ValidationError):
+            SecureAccessKey(key_id="-", key="AAAA")
+        with pytest.raises(ValidationError):
+            SecureAccessKey(key_id="", key="AAAA")
+
+    def test_key_id_edge_cases(self) -> None:
+        import base64
+
+        b64 = base64.b64encode(b"x").decode()
+        for valid in "0abcxyz":
+            key = SecureAccessKey(key_id=valid, key=b64)
+            assert key.key_id == valid
+
+    def test_key_must_be_valid_base64(self) -> None:
+        with pytest.raises(ValidationError, match="not valid base64"):
+            SecureAccessKey(key_id="a", key="!!!invalid-base64!!!")
+
+    def test_key_must_decode_to_at_least_one_byte(self) -> None:
+        with pytest.raises(ValidationError):
+            SecureAccessKey(key_id="a", key="")
+
+    def test_key_accepts_padded_and_unpadded_base64(self) -> None:
+        import base64
+
+        raw = b"hello"
+        padded = base64.b64encode(raw).decode()  # "aGVsbG8="
+        unpadded = padded.rstrip("=")
+        key_a = SecureAccessKey(key_id="a", key=padded)
+        key_b = SecureAccessKey(key_id="b", key=unpadded)
+        assert key_a.get_secret_bytes() == raw
+        assert key_b.get_secret_bytes() == raw
+
+
+class TestSecureAccessConfig:
+    def test_valid_config(self) -> None:
+        import base64
+
+        keys = [
+            SecureAccessKey(key_id="a", key=base64.b64encode(b"key-a").decode()),
+            SecureAccessKey(key_id="b", key=base64.b64encode(b"key-b").decode()),
+        ]
+        cfg = SecureAccessConfig(active_key="a", keys=keys)
+        assert cfg.active_key == "a"
+        assert len(cfg.keys) == 2
+
+    def test_get_active_secret_bytes(self) -> None:
+        import base64
+
+        raw_a, raw_b = b"key-a-secret", b"key-b-secret"
+        keys = [
+            SecureAccessKey(key_id="a", key=base64.b64encode(raw_a).decode()),
+            SecureAccessKey(key_id="b", key=base64.b64encode(raw_b).decode()),
+        ]
+        cfg = SecureAccessConfig(active_key="b", keys=keys)
+        assert cfg.get_active_secret_bytes() == raw_b
+
+    def test_active_key_must_exist_in_keys(self) -> None:
+        import base64
+
+        keys = [SecureAccessKey(key_id="a", key=base64.b64encode(b"key").decode())]
+        with pytest.raises(ValidationError, match="not found in secure_access.keys"):
+            SecureAccessConfig(active_key="z", keys=keys)
+
+    def test_active_key_must_be_single_char(self) -> None:
+        import base64
+
+        keys = [SecureAccessKey(key_id="a", key=base64.b64encode(b"key").decode())]
+        with pytest.raises(ValidationError):
+            SecureAccessConfig(active_key="ab", keys=keys)
+
+    def test_must_have_at_least_one_key(self) -> None:
+        with pytest.raises(ValidationError):
+            SecureAccessConfig(active_key="a", keys=[])
+
+    def test_rejects_duplicate_key_ids(self) -> None:
+        import base64
+
+        keys = [
+            SecureAccessKey(key_id="a", key=base64.b64encode(b"key-a").decode()),
+            SecureAccessKey(key_id="a", key=base64.b64encode(b"key-a-dup").decode()),
+        ]
+        with pytest.raises(ValidationError, match="duplicate secure_access key_id"):
+            SecureAccessConfig(active_key="a", keys=keys)
+
+
+class TestSecureAccessInIngressConfig:
+    def test_secure_access_requires_gateway_mode(self) -> None:
+        import base64
+
+        keys = [SecureAccessKey(key_id="a", key=base64.b64encode(b"secret").decode())]
+        secure = SecureAccessConfig(active_key="a", keys=keys)
+        with pytest.raises(ValueError, match="secure_access block requires ingress.mode = 'gateway'"):
+            IngressConfig(mode="direct", secure_access=secure)
+
+    def test_gateway_with_secure_access_is_valid(self) -> None:
+        import base64
+
+        keys = [SecureAccessKey(key_id="a", key=base64.b64encode(b"secret").decode())]
+        ingress = IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="*.sandbox.example.com",
+                route=GatewayRouteModeConfig(mode="wildcard"),
+            ),
+            secure_access=SecureAccessConfig(active_key="a", keys=keys),
+        )
+        assert ingress.secure_access is not None
+        assert ingress.secure_access.active_key == "a"
+        assert ingress.secure_access.get_active_secret_bytes() == b"secret"
+
+
+class TestSecureAccessTomlLoading:
+    def test_load_secure_access_from_toml(self, tmp_path, monkeypatch) -> None:
+        import base64
+
+        raw_key = b"my-base64-secret"
+        b64 = base64.b64encode(raw_key).decode()
+        toml = textwrap.dedent(
+            f"""
+            [server]
+            host = "127.0.0.1"
+            port = 9000
+
+            [runtime]
+            type = "kubernetes"
+            execd_image = "opensandbox/execd:test"
+
+            [ingress]
+            mode = "gateway"
+
+            [ingress.gateway]
+            address = "*.sandbox.example.com"
+
+            [ingress.gateway.route]
+            mode = "wildcard"
+
+            [ingress.secure_access]
+            active_key = "a"
+
+            [[ingress.secure_access.keys]]
+            key_id = "a"
+            key = "{b64}"
+            """
+        )
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(toml)
+
+        loaded = config_module.load_config(config_path)
+        assert loaded.ingress is not None
+        assert loaded.ingress.secure_access is not None
+        assert loaded.ingress.secure_access.active_key == "a"
+        assert loaded.ingress.secure_access.keys[0].key_id == "a"
+        assert loaded.ingress.secure_access.get_active_secret_bytes() == raw_key
+
+    def test_load_secure_access_with_multiple_keys(self, tmp_path, monkeypatch) -> None:
+        import base64
+
+        b64_a = base64.b64encode(b"key-a").decode()
+        b64_b = base64.b64encode(b"key-b").decode()
+        toml = textwrap.dedent(
+            f"""
+            [server]
+            host = "127.0.0.1"
+            port = 9000
+
+            [runtime]
+            type = "kubernetes"
+            execd_image = "opensandbox/execd:test"
+
+            [ingress]
+            mode = "gateway"
+
+            [ingress.gateway]
+            address = "*.example.com"
+
+            [ingress.gateway.route]
+            mode = "wildcard"
+
+            [ingress.secure_access]
+            active_key = "b"
+
+            [[ingress.secure_access.keys]]
+            key_id = "a"
+            key = "{b64_a}"
+
+            [[ingress.secure_access.keys]]
+            key_id = "b"
+            key = "{b64_b}"
+            """
+        )
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(toml)
+
+        loaded = config_module.load_config(config_path)
+        assert loaded.ingress.secure_access.active_key == "b"
+        assert loaded.ingress.secure_access.get_active_secret_bytes() == b"key-b"
+
+    def test_secure_access_direct_mode_rejected(self, tmp_path, monkeypatch) -> None:
+        import base64
+
+        b64 = base64.b64encode(b"key").decode()
+        toml = textwrap.dedent(
+            f"""
+            [server]
+            host = "127.0.0.1"
+            port = 9000
+
+            [runtime]
+            type = "kubernetes"
+            execd_image = "opensandbox/execd:test"
+
+            [ingress.secure_access]
+            active_key = "a"
+
+            [[ingress.secure_access.keys]]
+            key_id = "a"
+            key = "{b64}"
+            """
+        )
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(toml)
+
+        with pytest.raises(ValidationError, match="secure_access block requires ingress.mode"):
+            config_module.load_config(config_path)
+
+    def test_secure_access_active_key_mismatch(self, tmp_path, monkeypatch) -> None:
+        import base64
+
+        b64 = base64.b64encode(b"key").decode()
+        toml = textwrap.dedent(
+            f"""
+            [server]
+            host = "127.0.0.1"
+            port = 9000
+
+            [runtime]
+            type = "kubernetes"
+            execd_image = "opensandbox/execd:test"
+
+            [ingress]
+            mode = "gateway"
+
+            [ingress.gateway]
+            address = "*.example.com"
+
+            [ingress.gateway.route]
+            mode = "wildcard"
+
+            [ingress.secure_access]
+            active_key = "z"
+
+            [[ingress.secure_access.keys]]
+            key_id = "a"
+            key = "{b64}"
+            """
+        )
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(toml)
+
+        with pytest.raises(ValidationError, match="not found in secure_access.keys"):
+            config_module.load_config(config_path)
+

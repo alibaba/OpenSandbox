@@ -20,6 +20,10 @@ from opensandbox_server.api.schema import ImageSpec, PlatformSpec, Sandbox, Sand
 from opensandbox_server.services.constants import SANDBOX_ID_LABEL
 
 
+def _is_opensandbox_label(label_key: str) -> bool:
+    return label_key.split("/", 1)[0] == "opensandbox.io"
+
+
 def _build_sandbox_from_workload(workload: Any, workload_provider: Any) -> Sandbox:
     if isinstance(workload, dict):
         metadata = workload.get("metadata", {})
@@ -37,7 +41,7 @@ def _build_sandbox_from_workload(workload: Any, workload_provider: Any) -> Sandb
     status_info = workload_provider.get_status(workload)
 
     user_metadata = {
-        k: v for k, v in labels.items() if not k.startswith("opensandbox.io/")
+        k: v for k, v in labels.items() if not _is_opensandbox_label(k)
     }
 
     image_uri = ""

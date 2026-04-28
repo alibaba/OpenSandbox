@@ -43,4 +43,10 @@ export interface Sandboxes {
     port: number,
     useServerProxy?: boolean
   ): Promise<Endpoint>;
+
+  getSignedEndpoint(
+    sandboxId: SandboxId,
+    port: number,
+    expires: number
+  ): Promise<Endpoint>;
 }

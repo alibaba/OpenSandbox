@@ -35,7 +35,6 @@ const (
 	defaultWebhookBackoff = 1 * time.Second
 )
 
-// WebhookSubscriber delivers blocked events to an HTTP endpoint.
 type WebhookSubscriber struct {
 	url        string
 	client     *http.Client
@@ -52,7 +51,7 @@ type webhookPayload struct {
 	SandboxID string `json:"sandboxId"`
 }
 
-// NewWebhookSubscriber builds a webhook subscriber with hardcoded timeout/retry settings.
+// NewWebhookSubscriber posts JSON to url with small retry/backoff (default queue consumer).
 func NewWebhookSubscriber(url string) *WebhookSubscriber {
 	if url == "" {
 		return nil
@@ -67,7 +66,6 @@ func NewWebhookSubscriber(url string) *WebhookSubscriber {
 	}
 }
 
-// HandleBlocked sends the blocked event to the configured webhook with retries.
 func (w *WebhookSubscriber) HandleBlocked(ctx context.Context, ev BlockedEvent) {
 	payload := webhookPayload{
 		Hostname:  ev.Hostname,

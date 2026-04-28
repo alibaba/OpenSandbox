@@ -16,8 +16,15 @@ package opensandbox
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -351,6 +358,13 @@ func TestDefaultTransport(t *testing.T) {
 	if tr.TLSHandshakeTimeout != 10*time.Second {
 		assert.Fail(t, fmt.Sprintf("TLSHandshakeTimeout = %v, want 10s", tr.TLSHandshakeTimeout))
 	}
+	if tr.TLSClientConfig == nil {
+		assert.Fail(t, "TLSClientConfig is nil, want non-nil")
+		return
+	}
+	if tr.TLSClientConfig.VerifyConnection == nil {
+		assert.Fail(t, "VerifyConnection is nil, want NIST keylength verifier by default")
+	}
 }
 
 func TestTransportConfig_NewTransport(t *testing.T) {
@@ -369,6 +383,112 @@ func TestTransportConfig_NewTransport(t *testing.T) {
 	if tr.MaxIdleConnsPerHost != 5 {
 		assert.Fail(t, fmt.Sprintf("MaxIdleConnsPerHost = %d, want 5", tr.MaxIdleConnsPerHost))
 	}
+	if tr.TLSClientConfig == nil {
+		assert.Fail(t, "TLSClientConfig is nil, want non-nil")
+		return
+	}
+	if tr.TLSClientConfig.VerifyConnection == nil {
+		assert.Fail(t, "VerifyConnection is nil, want NIST verifier when weak certs are disabled")
+	}
+}
+
+func TestTransportConfig_NewTransport_AllowsWeakServerCertsWhenConfigured(t *testing.T) {
+	cfg := TransportConfig{
+		MaxIdleConns:                  50,
+		MaxIdleConnsPerHost:           5,
+		IdleConnTimeout:               60 * time.Second,
+		TLSHandshakeTimeout:           5 * time.Second,
+		DialTimeout:                   15 * time.Second,
+		KeepAlive:                     15 * time.Second,
+		AllowWeakServerCertKeyLengths: true,
+	}
+	tr := cfg.NewTransport()
+	if tr.TLSClientConfig == nil {
+		assert.Fail(t, "TLSClientConfig is nil, want non-nil")
+		return
+	}
+	if tr.TLSClientConfig.VerifyConnection != nil {
+		assert.Fail(t, "VerifyConnection is set, want nil when weak certs are explicitly allowed")
+	}
+}
+
+func TestEnsureCertMeetsNISTMinimums_RSA1024Rejected(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	require.NoError(t, err)
+
+	cert := &x509.Certificate{
+		PublicKey:             &key.PublicKey,
+		SignatureAlgorithm:    x509.SHA256WithRSA,
+		SerialNumber:          big.NewInt(1),
+		BasicConstraintsValid: true,
+	}
+	require.Error(t, ensureCertMeetsNISTMinimums(cert))
+}
+
+func TestEnsureCertMeetsNISTMinimums_EC224Accepted(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	require.NoError(t, err)
+
+	cert := &x509.Certificate{
+		PublicKey:             &key.PublicKey,
+		SignatureAlgorithm:    x509.ECDSAWithSHA256,
+		SerialNumber:          big.NewInt(2),
+		BasicConstraintsValid: true,
+	}
+	require.NoError(t, ensureCertMeetsNISTMinimums(cert))
+}
+
+func TestEnsureCertMeetsNISTMinimums_SHA1Rejected(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	cert := &x509.Certificate{
+		PublicKey:             &key.PublicKey,
+		SignatureAlgorithm:    x509.SHA1WithRSA,
+		SerialNumber:          big.NewInt(3),
+		BasicConstraintsValid: true,
+	}
+	require.Error(t, ensureCertMeetsNISTMinimums(cert))
+}
+
+func TestEnsureCertMeetsNISTMinimums_UnknownSignatureAlgorithmRejected(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+
+	cert := &x509.Certificate{
+		PublicKey:             &key.PublicKey,
+		SignatureAlgorithm:    x509.UnknownSignatureAlgorithm,
+		SerialNumber:          big.NewInt(4),
+		BasicConstraintsValid: true,
+	}
+	require.Error(t, ensureCertMeetsNISTMinimums(cert))
+}
+
+func TestEnforceNISTPeerCertificateMinimums_RejectsWeakTrustAnchorKey(t *testing.T) {
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
+	rootKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	require.NoError(t, err)
+
+	leaf := &x509.Certificate{
+		PublicKey:             &leafKey.PublicKey,
+		SignatureAlgorithm:    x509.SHA256WithRSA,
+		SerialNumber:          big.NewInt(5),
+		BasicConstraintsValid: true,
+	}
+	root := &x509.Certificate{
+		PublicKey:             &rootKey.PublicKey,
+		SignatureAlgorithm:    x509.SHA1WithRSA,
+		SerialNumber:          big.NewInt(6),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+
+	err = enforceNISTPeerCertificateMinimums(tls.ConnectionState{
+		VerifiedChains: [][]*x509.Certificate{{leaf, root}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "certificate[1]")
 }
 
 func TestConnectionConfig_RetryAndTransport(t *testing.T) {

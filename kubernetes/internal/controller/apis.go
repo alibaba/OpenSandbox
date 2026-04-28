@@ -26,11 +26,13 @@ import (
 const (
 	AnnoAllocStatusKey           = "sandbox.opensandbox.io/alloc-status"
 	AnnoAllocReleaseKey          = "sandbox.opensandbox.io/alloc-release"
+	AnnoAllocReleasedKey         = "sandbox.opensandbox.io/alloc-released"
 	LabelBatchSandboxPodIndexKey = "batch-sandbox.sandbox.opensandbox.io/pod-index"
 	LabelBatchSandboxNameKey     = "batch-sandbox.sandbox.opensandbox.io/name"
 	LabelPrivilegedNodeAccess    = "sandbox.opensandbox.io/privileged-node-access"
 
-	FinalizerTaskCleanup = "batch-sandbox.sandbox.opensandbox.io/task-cleanup"
+	FinalizerTaskCleanup    = "batch-sandbox.sandbox.opensandbox.io/task-cleanup"
+	FinalizerPoolAllocation = "pool.sandbox.opensandbox.io/pool-allocation"
 )
 
 // AnnotationSandboxEndpoints Use the exported constant from pkg/utils
@@ -41,6 +43,10 @@ type SandboxAllocation struct {
 }
 
 type AllocationRelease struct {
+	Pods []string `json:"pods"`
+}
+
+type AllocationReleased struct {
 	Pods []string `json:"pods"`
 }
 

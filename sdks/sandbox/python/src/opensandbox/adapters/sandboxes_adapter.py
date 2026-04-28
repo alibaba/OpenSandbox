@@ -258,6 +258,44 @@ class SandboxesAdapter(Sandboxes):
             )
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
+    async def get_signed_sandbox_endpoint(
+        self, sandbox_id: str, port: int, expires: int,
+        use_server_proxy: bool = False,
+    ) -> SandboxEndpoint:
+        """Get signed sandbox endpoint with an OSEP-0011 route token."""
+        logger.debug(f"Retrieving signed sandbox endpoint: {sandbox_id}, port {port}")
+
+        try:
+            from opensandbox.api.lifecycle.api.sandboxes import (
+                get_sandboxes_sandbox_id_endpoints_port,
+            )
+
+            client = await self._get_client()
+            response_obj = (
+                await get_sandboxes_sandbox_id_endpoints_port.asyncio_detailed(
+                    client=client,
+                    sandbox_id=sandbox_id,
+                    port=port,
+                    use_server_proxy=use_server_proxy,
+                    expires=str(expires),
+                )
+            )
+
+            handle_api_error(
+                response_obj, f"Get signed endpoint for sandbox {sandbox_id} port {port}"
+            )
+
+            from opensandbox.api.lifecycle.models import Endpoint
+            parsed = require_parsed(response_obj, Endpoint, "Get signed endpoint")
+            return SandboxModelConverter.to_sandbox_endpoint(parsed)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to retrieve signed sandbox endpoint for sandbox {sandbox_id}",
+                exc_info=e,
+            )
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
     async def pause_sandbox(self, sandbox_id: str) -> None:
         """Pause a running sandbox while preserving its state."""
         logger.info(f"Pausing sandbox: {sandbox_id}")

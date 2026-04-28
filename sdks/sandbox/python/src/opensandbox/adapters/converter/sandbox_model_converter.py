@@ -263,7 +263,10 @@ class SandboxModelConverter:
             volumes=api_volumes,
             secure_access=secure_access,
         )
-        if timeout is not None:
+        if timeout is None:
+            # Preserve an explicit manual-cleanup request as JSON null.
+            request.timeout = None
+        else:
             request.timeout = int(timeout.total_seconds())
         return request
 

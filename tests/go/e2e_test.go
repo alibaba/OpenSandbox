@@ -61,6 +61,7 @@ func TestE2E_FullLifecycle(t *testing.T) {
 			"cpu":    "500m",
 			"memory": "256Mi",
 		},
+		Env: map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 		Metadata: map[string]string{
 			"test": "go-e2e",
 		},
@@ -200,6 +201,7 @@ func TestE2E_PauseResume(t *testing.T) {
 	// 1. Create sandbox via high-level API
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image:    getDefaultImage(),
+		Env:      map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 		Metadata: map[string]string{"test": "go-e2e-pause-resume"},
 	})
 	require.NoError(t, err)
@@ -266,6 +268,7 @@ func TestE2E_ManualCleanup(t *testing.T) {
 	// 1. Create sandbox with ManualCleanup (no auto-expiration)
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image:         getDefaultImage(),
+		Env:           map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 		ManualCleanup: true,
 		Metadata:      map[string]string{"test": "go-e2e-manual-cleanup"},
 	})
@@ -290,6 +293,7 @@ func TestE2E_ManualCleanup(t *testing.T) {
 	// 4. Compare with a normal sandbox that should have an expiration
 	sbWithTimeout, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image:    getDefaultImage(),
+		Env:      map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 		Metadata: map[string]string{"test": "go-e2e-with-timeout"},
 	})
 	require.NoError(t, err)

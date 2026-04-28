@@ -26,23 +26,21 @@ import (
 
 const defaultQueueSize = 128
 
-// BlockedEvent describes a blocked hostname notification.
+// BlockedEvent is emitted when the DNS path denies a query.
 type BlockedEvent struct {
 	Hostname  string    `json:"hostname"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// Subscriber consumes blocked events.
 type Subscriber interface {
 	HandleBlocked(ctx context.Context, ev BlockedEvent)
 }
 
-// BroadcasterConfig defines queue sizing for the broadcaster.
 type BroadcasterConfig struct {
 	QueueSize int
 }
 
-// Broadcaster fans out blocked events to one or more subscribers via channels.
+// Broadcaster: per-subscriber buffered channel; full buffer drops and logs a warning.
 type Broadcaster struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -53,7 +51,6 @@ type Broadcaster struct {
 	closed      atomic.Bool
 }
 
-// NewBroadcaster builds a broadcaster with the given queue size (defaults to 128).
 func NewBroadcaster(ctx context.Context, cfg BroadcasterConfig) *Broadcaster {
 	if cfg.QueueSize <= 0 {
 		cfg.QueueSize = defaultQueueSize
@@ -66,7 +63,6 @@ func NewBroadcaster(ctx context.Context, cfg BroadcasterConfig) *Broadcaster {
 	}
 }
 
-// AddSubscriber registers a new subscriber with its own buffered queue and worker.
 func (b *Broadcaster) AddSubscriber(sub Subscriber) {
 	if sub == nil {
 		return
@@ -92,7 +88,6 @@ func (b *Broadcaster) AddSubscriber(sub Subscriber) {
 	})
 }
 
-// Publish sends an event to all subscribers; drops and logs when a subscriber queue is full.
 func (b *Broadcaster) Publish(event BlockedEvent) {
 	if b.closed.Load() {
 		return
@@ -110,7 +105,6 @@ func (b *Broadcaster) Publish(event BlockedEvent) {
 	}
 }
 
-// Close stops all workers and closes subscriber queues.
 func (b *Broadcaster) Close() {
 	if b.closed.Load() {
 		return

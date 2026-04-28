@@ -21,6 +21,7 @@ This module defines the abstract interface for sandbox services.
 
 from abc import ABC, abstractmethod
 import socket
+from typing import Optional
 from uuid import uuid4
 
 from opensandbox_server.api.schema import (
@@ -252,7 +253,8 @@ class SandboxService(ABC):
         pass
 
     @abstractmethod
-    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False,
+                     expires: Optional[int] = None) -> Endpoint:
         """
         Get sandbox access endpoint.
 
@@ -260,11 +262,15 @@ class SandboxService(ABC):
             sandbox_id: Unique sandbox identifier
             port: Port number where the service is listening inside the sandbox
             resolve_internal: If True, return the internal container IP (for proxy), ignoring router config.
+            expires: Unix epoch seconds for a signed route token. When provided, the
+                endpoint is wrapped in a cryptographically signed route per OSEP-0011.
+                Requires ingress gateway mode with secure_access keys configured.
 
         Returns:
             Endpoint: Public endpoint URL
 
         Raises:
-            HTTPException: If sandbox not found or endpoint not available
+            HTTPException: If sandbox not found, endpoint not available,
+                or signed routes are not supported by the runtime/configuration.
         """
         pass

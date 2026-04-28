@@ -29,7 +29,7 @@ SANDBOX_MANAGED_VOLUMES_LABEL = "opensandbox.io/volume-managed-by"
 OPEN_SANDBOX_INGRESS_HEADER = "OpenSandbox-Ingress-To"
 OPEN_SANDBOX_EGRESS_AUTH_HEADER = "OPENSANDBOX-EGRESS-AUTH"
 SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY = "opensandbox.io/egress-auth-token"
-OPEN_SANDBOX_SECURE_ACCESS_HEADER = "OPENSANDBOX-SECURE-ACCESS"
+OPEN_SANDBOX_SECURE_ACCESS_HEADER = "OpenSandbox-Secure-Access"
 SANDBOX_SECURE_ACCESS_TOKEN_METADATA_KEY = "opensandbox.io/secure-access-token"
 
 # Environment variable name for passing network policy to egress sidecar

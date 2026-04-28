@@ -269,6 +269,7 @@ internal object SandboxModelConverter {
         val osValue =
             when (this.os.lowercase()) {
                 "linux" -> ApiPlatformSpec.Os.linux
+                "windows" -> ApiPlatformSpec.Os.windows
                 else -> throw IllegalArgumentException("Unsupported platform os: ${this.os}")
             }
         val archValue =

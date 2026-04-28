@@ -43,24 +43,35 @@ type TransportConfig struct {
 
 	// KeepAlive sets the TCP keep-alive probe interval.
 	KeepAlive time.Duration
+
+	// AllowWeakServerCertKeyLengths allows server certificates below NIST minimum
+	// key/hash lengths. Keep false unless interoperability requires legacy certs.
+	AllowWeakServerCertKeyLengths bool
 }
 
 // DefaultTransportConfig returns connection pool settings tuned for SDK
 // workloads: moderate concurrency across multiple sandbox endpoints.
 func DefaultTransportConfig() TransportConfig {
 	return TransportConfig{
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 10,
-		IdleConnTimeout:     90 * time.Second,
-		TLSHandshakeTimeout: 10 * time.Second,
-		DialTimeout:         30 * time.Second,
-		KeepAlive:           30 * time.Second,
+		MaxIdleConns:                  100,
+		MaxIdleConnsPerHost:           10,
+		IdleConnTimeout:               90 * time.Second,
+		TLSHandshakeTimeout:           10 * time.Second,
+		DialTimeout:                   30 * time.Second,
+		KeepAlive:                     30 * time.Second,
+		AllowWeakServerCertKeyLengths: false,
 	}
 }
 
 // NewTransport creates an *http.Transport from the config.
 func (tc TransportConfig) NewTransport() *http.Transport {
+	tlsClientConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if !tc.AllowWeakServerCertKeyLengths {
+		tlsClientConfig.VerifyConnection = enforceNISTPeerCertificateMinimums
+	}
+
 	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   tc.DialTimeout,
 			KeepAlive: tc.KeepAlive,
@@ -69,7 +80,7 @@ func (tc TransportConfig) NewTransport() *http.Transport {
 		MaxIdleConnsPerHost: tc.MaxIdleConnsPerHost,
 		IdleConnTimeout:     tc.IdleConnTimeout,
 		TLSHandshakeTimeout: tc.TLSHandshakeTimeout,
-		TLSClientConfig:     &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSClientConfig:     tlsClientConfig,
 	}
 }
 

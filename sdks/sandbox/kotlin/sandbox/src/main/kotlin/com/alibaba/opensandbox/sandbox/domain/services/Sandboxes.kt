@@ -151,6 +151,22 @@ interface Sandboxes {
     ): SandboxEndpoint
 
     /**
+     * Get signed sandbox endpoint with an OSEP-0011 route token.
+     *
+     * @param sandboxId sandbox id
+     * @param port endpoint port number
+     * @param expires Unix epoch seconds for the signed route token expiry
+     * @param useServerProxy whether to use server proxy for endpoint (default false)
+     * @return Target sandbox endpoint
+     */
+    fun getSignedSandboxEndpoint(
+        sandboxId: String,
+        port: Int,
+        expires: Long,
+        useServerProxy: Boolean = false,
+    ): SandboxEndpoint
+
+    /**
      * Pauses a running sandbox, preserving its state.
      *
      * @param sandboxId Unique identifier of the sandbox

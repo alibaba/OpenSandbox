@@ -39,7 +39,7 @@ export interface PlatformSpec extends Record<string, unknown> {
   /**
    * Target operating system for sandbox provisioning.
    */
-  os: "linux";
+  os: "linux" | "windows";
   /**
    * Target CPU architecture for sandbox provisioning.
    */

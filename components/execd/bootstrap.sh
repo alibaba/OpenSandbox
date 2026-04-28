@@ -16,6 +16,14 @@
 
 set -e
 
+_forward_signal() {
+	sig="$1"
+	pid="$2"
+	kill "-$sig" "$pid" 2>/dev/null || true
+	wait "$pid" 2>/dev/null || true
+	exit 0
+}
+
 # Returns 0 if the value looks like a boolean "true" (1, true, yes, on).
 is_truthy() {
 	case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -58,6 +66,39 @@ trust_mitm_ca() {
 	return 0
 }
 
+# Chromium/Chrome on Linux do not use only the system trust store: they also honor the per-user
+# NSS database at $HOME/.pki/nssdb. Import the same mitm CA there so the browser trusts it.
+# Requires certutil (e.g. Alpine: nss-tools, Debian/Ubuntu: libnss3-tools).
+trust_mitm_ca_nss() {
+	cert="$1"
+	[ -f "$cert" ] || return 0
+	[ -n "${HOME:-}" ] && [ -d "$HOME" ] || return 0
+	if ! command -v certutil >/dev/null 2>&1; then
+		return 0
+	fi
+	pki="${HOME}/.pki/nssdb"
+	if ! mkdir -p "$pki" 2>/dev/null; then
+		return 0
+	fi
+	if [ -f "$pki/cert9.db" ]; then
+		nssdb="sql:$pki"
+	elif [ -f "$pki/cert8.db" ]; then
+		nssdb="dbm:$pki"
+	else
+		nssdb="sql:$pki"
+		if ! certutil -N -d "$nssdb" --empty-password 2>/dev/null; then
+			[ -f "$pki/cert9.db" ] || return 0
+		fi
+	fi
+	nick="opensandbox-mitmproxy"
+	certutil -D -d "$nssdb" -n "$nick" 2>/dev/null || true
+	if ! certutil -A -d "$nssdb" -n "$nick" -t "C,," -i "$cert"; then
+		echo "warning: failed to import mitm CA into NSS at $pki (Chrome may still distrust); need certutil" >&2
+		return 0
+	fi
+	return 0
+}
+
 MITM_CA="/opt/opensandbox/mitmproxy-ca-cert.pem"
 if is_truthy "${OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT:-}"; then
 	i=0
@@ -69,9 +110,14 @@ if is_truthy "${OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT:-}"; then
 		i=$((i + 1))
 	done
 	if [ ! -f "$MITM_CA" ] || [ ! -s "$MITM_CA" ]; then
-		echo "warning: timed out after 10s waiting for $MITM_CA (egress mitm CA export); continuing without system CA trust" >&2
+		echo "warning: timed out after 30s waiting for $MITM_CA (egress mitm CA export); continuing without system CA trust" >&2
 	elif ! trust_mitm_ca "$MITM_CA"; then
 		echo "warning: failed to install mitm CA into system trust store; TLS interception may not work for system libraries" >&2
+	fi
+
+	if [ -f "$MITM_CA" ] && [ -s "$MITM_CA" ]; then
+		trust_mitm_ca_nss "$MITM_CA" || true
+		export NODE_EXTRA_CA_CERTS="$MITM_CA"
 	fi
 fi
 
@@ -117,11 +163,17 @@ fi
 
 set -x
 if [ "$CMD" != "" ]; then
-	exec "$SHELL_BIN" -c "$CMD"
+	"$SHELL_BIN" -c "$CMD" &
+	CMD_PID=$!
+elif [ $# -eq 0 ]; then
+	"$SHELL_BIN" &
+	CMD_PID=$!
+else
+	"$@" &
+	CMD_PID=$!
 fi
 
-if [ $# -eq 0 ]; then
-	exec "$SHELL_BIN"
-fi
+trap '_forward_signal TERM "$CMD_PID"' TERM
 
-exec "$@"
+wait "$CMD_PID" 2>/dev/null
+exit $?

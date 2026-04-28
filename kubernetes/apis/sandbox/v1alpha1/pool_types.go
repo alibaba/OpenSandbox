@@ -23,6 +23,28 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
+// RecycleType defines the type of recycle policy.
+type RecycleType string
+
+const (
+	// RecycleTypeNoop does nothing when a pod is returned to the pool.
+	RecycleTypeNoop RecycleType = "Noop"
+	// RecycleTypeDelete deletes the pod when it is returned to the pool.
+	RecycleTypeDelete RecycleType = "Delete"
+	// RecycleTypeRestart restarts the pod containers when it is returned to the pool.
+	RecycleTypeRestart RecycleType = "Restart"
+)
+
+// RecycleStrategy controls how pods are handled when returned to the pool.
+type RecycleStrategy struct {
+	// Type specifies the recycle policy type.
+	// Default is Delete.
+	// +kubebuilder:validation:Enum=Delete;Restart;Noop
+	// +kubebuilder:default=Delete
+	// +optional
+	Type RecycleType `json:"type,omitempty"`
+}
+
 // PoolSpec defines the desired state of Pool.
 type PoolSpec struct {
 	// Pod Template used to create pre-warmed nodes in the pool.
@@ -39,6 +61,11 @@ type PoolSpec struct {
 	// UpdateStrategy controls how pool pods are updated when the template changes.
 	// +optional
 	UpdateStrategy *UpdateStrategy `json:"updateStrategy,omitempty"`
+	// RecycleStrategy controls how pods are handled when returned to the pool.
+	// Default is Delete, which deletes the pod.
+	// Restart strategy restarts the pod containers instead of deleting.
+	// +optional
+	RecycleStrategy *RecycleStrategy `json:"recycleStrategy,omitempty"`
 }
 
 type CapacitySpec struct {

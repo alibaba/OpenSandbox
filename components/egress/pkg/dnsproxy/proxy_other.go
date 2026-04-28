@@ -20,7 +20,7 @@ import (
 	"net"
 )
 
-// Non-linux: no SO_MARK; return basic dialer.
+// No SO_MARK: plain dialer (UNIX/Windows test builds; Linux path is in proxy_linux.go).
 func (p *Proxy) dialerForUpstream(upstreamAddr string) *net.Dialer {
 	_ = upstreamAddr
 	return &net.Dialer{Timeout: p.upstreamExchangeTimeout}

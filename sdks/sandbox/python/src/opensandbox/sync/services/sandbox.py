@@ -132,6 +132,27 @@ class SandboxesSync(Protocol):
         """
         ...
 
+    def get_signed_sandbox_endpoint(
+        self, sandbox_id: str, port: int, expires: int,
+        use_server_proxy: bool = False,
+    ) -> SandboxEndpoint:
+        """
+        Get signed sandbox endpoint with an OSEP-0011 route token.
+
+        Args:
+            sandbox_id: Sandbox id.
+            port: Endpoint port number.
+            expires: Unix epoch seconds for the signed route token expiry.
+            use_server_proxy: Whether to use server proxy for endpoint.
+
+        Returns:
+            Target sandbox endpoint.
+
+        Raises:
+            SandboxException: If the operation fails.
+        """
+        ...
+
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
         Pause a running sandbox, preserving its state.

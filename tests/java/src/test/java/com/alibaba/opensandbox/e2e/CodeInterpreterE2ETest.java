@@ -144,6 +144,8 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
                         .env("NODE_VERSION", "22")
                         .env("PYTHON_VERSION", "3.12")
                         .env("EXECD_LOG_FILE", "/tmp/opensandbox-e2e/logs/execd.log")
+                        .env("EXECD_API_GRACE_SHUTDOWN", "3s")
+                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s")
                         .healthCheckPollingInterval(Duration.ofMillis(500))
                         .volume(volume)
                         .build();

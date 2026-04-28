@@ -150,6 +150,50 @@ class SandboxesAdapterTest {
     }
 
     @Test
+    fun `createSandbox should forward windows platform in request`() {
+        val responseBody =
+            """
+            {
+                "id": "windows-sandbox-id",
+                "status": { "state": "Running" },
+                "platform": { "os": "windows", "arch": "amd64" },
+                "expiresAt": null,
+                "createdAt": "2023-01-01T10:00:00Z",
+                "entrypoint": ["cmd"]
+            }
+            """.trimIndent()
+        mockWebServer.enqueue(MockResponse().setBody(responseBody).setResponseCode(201))
+
+        val spec = SandboxImageSpec.builder().image("dockurr/windows:latest").build()
+        val result =
+            sandboxesAdapter.createSandbox(
+                spec = spec,
+                entrypoint = listOf("cmd"),
+                env = emptyMap(),
+                metadata = emptyMap(),
+                timeout = Duration.ofSeconds(600),
+                resource = mapOf("cpu" to "2", "memory" to "4G"),
+                platform =
+                    PlatformSpec.builder()
+                        .os("windows")
+                        .arch("amd64")
+                        .build(),
+                networkPolicy = null,
+                extensions = emptyMap(),
+                volumes = null,
+                secureAccess = false,
+            )
+
+        val request = mockWebServer.takeRequest()
+        val payload = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        val gotPlatform = payload["platform"]?.jsonObject
+        assertNotNull(gotPlatform, "platform should be present in createSandbox request")
+        assertEquals("windows", gotPlatform!!["os"]!!.jsonPrimitive.content)
+        assertEquals("amd64", gotPlatform["arch"]!!.jsonPrimitive.content)
+        assertEquals("windows", result.platform?.os)
+    }
+
+    @Test
     fun `createSandbox should accept null expiresAt for manual cleanup response`() {
         val responseBody =
             """

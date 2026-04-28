@@ -72,17 +72,20 @@ beforeAll(async () => {
   s1 = await Sandbox.create({
     ...common,
     metadata: { tag, team: "t1", env: "prod" },
-    env: { E2E_TEST: "true", CASE: "mgr-s1" },
+    env: { E2E_TEST: "true", CASE: "mgr-s1", EXECD_API_GRACE_SHUTDOWN: "3s",
+      EXECD_JUPYTER_IDLE_POLL_INTERVAL: "1s" },
   });
   s2 = await Sandbox.create({
     ...common,
     metadata: { tag, team: "t1", env: "dev" },
-    env: { E2E_TEST: "true", CASE: "mgr-s2" },
+    env: { E2E_TEST: "true", CASE: "mgr-s2", EXECD_API_GRACE_SHUTDOWN: "3s",
+      EXECD_JUPYTER_IDLE_POLL_INTERVAL: "1s" },
   });
   s3 = await Sandbox.create({
     ...common,
     metadata: { tag, env: "prod" },
-    env: { E2E_TEST: "true", CASE: "mgr-s3" },
+    env: { E2E_TEST: "true", CASE: "mgr-s3", EXECD_API_GRACE_SHUTDOWN: "3s",
+      EXECD_JUPYTER_IDLE_POLL_INTERVAL: "1s" },
   });
 
   expect(await s1.isHealthy()).toBe(true);

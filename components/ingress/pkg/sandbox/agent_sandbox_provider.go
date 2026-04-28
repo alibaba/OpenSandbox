@@ -162,12 +162,12 @@ func resourceNameCandidates(sandboxId string) []string {
 	return candidates
 }
 
-func (a *AgentSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
+func (a *AgentSandboxProvider) lookupAgentSandbox(sandboxId string) (*unstructured.Unstructured, error) {
 	candidates := resourceNameCandidates(sandboxId)
 	for _, name := range candidates {
 		indexed, err := a.informer.GetIndexer().ByIndex(sandboxNameIndex, name)
 		if err != nil {
-			return "", fmt.Errorf("failed to query AgentSandbox index for %q: %w", name, err)
+			return nil, fmt.Errorf("failed to query AgentSandbox index for %q: %w", name, err)
 		}
 		matches := make([]string, 0, len(indexed))
 		var matchObj *unstructured.Unstructured
@@ -182,13 +182,33 @@ func (a *AgentSandboxProvider) GetEndpoint(sandboxId string) (string, error) {
 			}
 		}
 		if len(matches) > 1 {
-			return "", fmt.Errorf("ambiguous sandbox id %q found in multiple namespaces: %v", sandboxId, matches)
+			return nil, fmt.Errorf("ambiguous sandbox id %q found in multiple namespaces: %v", sandboxId, matches)
 		}
 		if len(matches) == 1 {
-			return a.resolveEndpointFromSandbox(sandboxId, matchObj)
+			return matchObj, nil
 		}
 	}
-	return "", fmt.Errorf("%w: %s", ErrSandboxNotFound, sandboxId)
+	return nil, fmt.Errorf("%w: %s", ErrSandboxNotFound, sandboxId)
+}
+
+func (a *AgentSandboxProvider) GetEndpoint(sandboxId string) (*EndpointInfo, error) {
+	u, err := a.lookupAgentSandbox(sandboxId)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := a.resolveEndpointFromSandbox(sandboxId, u)
+	if err != nil {
+		return nil, err
+	}
+	accessToken := ""
+	ann := u.GetAnnotations()
+	if ann != nil {
+		accessToken = strings.TrimSpace(ann[AnnotationAccessToken])
+	}
+	return &EndpointInfo{
+		Endpoint:          endpoint,
+		SecureAccessToken: accessToken,
+	}, nil
 }
 
 func (a *AgentSandboxProvider) resolveEndpointFromSandbox(sandboxId string, u *unstructured.Unstructured) (string, error) {

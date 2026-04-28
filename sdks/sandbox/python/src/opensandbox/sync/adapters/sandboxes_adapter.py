@@ -203,6 +203,30 @@ class SandboxesAdapterSync(SandboxesSync):
             logger.error("Failed to retrieve sandbox endpoint for sandbox %s", sandbox_id, exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
+    def get_signed_sandbox_endpoint(
+        self, sandbox_id: str, port: int, expires: int,
+        use_server_proxy: bool = False,
+    ) -> SandboxEndpoint:
+        try:
+            from opensandbox.api.lifecycle.api.sandboxes import (
+                get_sandboxes_sandbox_id_endpoints_port,
+            )
+            from opensandbox.api.lifecycle.models import Endpoint as ApiEndpoint
+
+            response_obj = get_sandboxes_sandbox_id_endpoints_port.sync_detailed(
+                sandbox_id=sandbox_id,
+                port=port,
+                client=self._get_client(),
+                use_server_proxy=use_server_proxy,
+                expires=str(expires),
+            )
+            handle_api_error(response_obj, f"Get signed endpoint for sandbox {sandbox_id} port {port}")
+            parsed = require_parsed(response_obj, ApiEndpoint, "Get signed endpoint")
+            return SandboxModelConverter.to_sandbox_endpoint(parsed)
+        except Exception as e:
+            logger.error("Failed to retrieve signed sandbox endpoint for sandbox %s", sandbox_id, exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
     def pause_sandbox(self, sandbox_id: str) -> None:
         try:
             from opensandbox.api.lifecycle.api.sandboxes import (

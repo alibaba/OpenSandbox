@@ -26,6 +26,9 @@ const (
 	ProviderTypeAgentSandbox ProviderType = "agent-sandbox"
 
 	sandboxNameIndex string = "sandbox-name"
+
+	// AnnotationAccessToken marks a sandbox that requires signed ingress routes when non-empty.
+	AnnotationAccessToken = "opensandbox.io/secure-access-token"
 )
 
 func (tpy ProviderType) String() string { return string(tpy) }
@@ -42,12 +45,12 @@ var (
 // Provider defines the interface for sandbox resource providers
 // Implementations include BatchSandboxProvider, AgentSandboxProvider, etc.
 type Provider interface {
-	// GetEndpoint retrieves the IP address for a sandbox by its id/name
+	// GetEndpoint retrieves endpoint and secure-access metadata for a sandbox by its id/name.
 	// Providers run in global-watch mode across all namespaces.
-	// Returns the first available IP from the endpoints annotation
-	// Returns error if sandbox not found or no endpoints available
+	// Returns the first available endpoint from provider status/annotations.
+	// Returns error if sandbox not found or endpoint unavailable.
 	// Note: This is a local cache query, no network I/O involved
-	GetEndpoint(sandboxId string) (string, error)
+	GetEndpoint(sandboxId string) (*EndpointInfo, error)
 
 	// Start initializes and starts the provider's informer cache
 	// Waits for cache sync before returning

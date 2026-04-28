@@ -567,6 +567,13 @@ export class Sandbox {
   }
 
   /**
+   * Get signed endpoint URL with an OSEP-0011 route token that expires at the given Unix epoch timestamp (seconds).
+   */
+  async getSignedEndpoint(port: number, expires: number): Promise<Endpoint> {
+    return await this.sandboxes.getSignedEndpoint(this.id, port, expires);
+  }
+
+  /**
    * Get absolute endpoint URL with scheme (convenience for HTTP clients).
    */
   async getEndpointUrl(port: number): Promise<string> {

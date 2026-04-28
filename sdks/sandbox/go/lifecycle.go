@@ -143,3 +143,15 @@ func (c *LifecycleClient) GetEndpoint(ctx context.Context, sandboxID string, por
 	}
 	return &resp, nil
 }
+
+// GetSignedEndpoint retrieves a cryptographically signed endpoint URL for a
+// sandbox port. The returned endpoint embeds an OSEP-0011 signed route token
+// that expires at the given Unix epoch timestamp (seconds).
+func (c *LifecycleClient) GetSignedEndpoint(ctx context.Context, sandboxID string, port int, expires int64) (*Endpoint, error) {
+	path := fmt.Sprintf("/sandboxes/%s/endpoints/%d?expires=%d", url.PathEscape(sandboxID), port, expires)
+	var resp Endpoint
+	if err := c.doRequest(ctx, "GET", path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

@@ -192,6 +192,24 @@ class Sandbox:
             self.id, port, self.connection_config.use_server_proxy
         )
 
+    async def get_signed_endpoint(self, port: int, expires: int) -> SandboxEndpoint:
+        """
+        Get a signed endpoint URL with an OSEP-0011 route token.
+
+        Args:
+            port: The port number to get the endpoint for
+            expires: Unix epoch seconds for the signed route token expiry
+
+        Returns:
+            Endpoint information with a signed URL
+
+        Raises:
+            SandboxException: if endpoint cannot be retrieved
+        """
+        return await self._sandbox_service.get_signed_sandbox_endpoint(
+            self.id, port, expires, self.connection_config.use_server_proxy
+        )
+
     async def get_metrics(self) -> SandboxMetrics:
         """
         Get the current resource usage metrics for this sandbox.

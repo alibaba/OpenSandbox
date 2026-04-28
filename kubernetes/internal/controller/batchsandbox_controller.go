@@ -358,6 +358,16 @@ func (r *BatchSandboxReconciler) getTaskScheduler(ctx context.Context, batchSbx 
 		}
 		// Update the pods list for this scheduler
 		tSch.UpdatePods(pods)
+		// Handle scale-out: register task specs for any replicas added since the
+		// scheduler was first created. Already-tracked task names are skipped.
+		taskStrategy := strategy.NewTaskSchedulingStrategy(batchSbx)
+		taskSpecs, err := taskStrategy.GenerateTaskSpecs()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate task specs for scale-out: %w", err)
+		}
+		if err := tSch.AddTasks(taskSpecs); err != nil {
+			return nil, fmt.Errorf("failed to add tasks on scale-out: %w", err)
+		}
 	}
 	return tSch, nil
 }

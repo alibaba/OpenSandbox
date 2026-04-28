@@ -123,7 +123,7 @@ async def test_create_sandbox_success(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_sandbox_manual_cleanup_omits_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_create_sandbox_manual_cleanup_preserves_null_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     called = {}
 
     async def _fake_asyncio_detailed(*, client, body):
@@ -149,7 +149,7 @@ async def test_create_sandbox_manual_cleanup_omits_timeout(monkeypatch: pytest.M
         volumes=None,
     )
 
-    assert "timeout" not in called["body"].to_dict()
+    assert called["body"].to_dict()["timeout"] is None
 
 
 @pytest.mark.asyncio

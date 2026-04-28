@@ -256,11 +256,11 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/controller/main.go
+	go build -o bin/manager ./cmd/controller
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/controller/main.go
+	go run ./cmd/controller
 
 .PHONY: task-executor-build
 task-executor-build: ## Build task-executor binary.
@@ -281,7 +281,7 @@ docker-build: docker-build-controller
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build $(DOCKER_BUILD_ARGS) --build-arg PACKAGE=cmd/controller/main.go -t ${CONTROLLER_IMG} .
+	$(CONTAINER_TOOL) build $(DOCKER_BUILD_ARGS) --build-arg PACKAGE=./cmd/controller -t ${CONTROLLER_IMG} .
 
 .PHONY: docker-build-task-executor
 docker-build-task-executor: ## Build docker image with task-executor.

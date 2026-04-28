@@ -34,6 +34,8 @@ from opensandbox_server.config import (
     GatewayConfig,
     GatewayRouteModeConfig,
     IngressConfig,
+    SecureAccessConfig,
+    SecureAccessKey,
 )
 from opensandbox_server.api.schema import Endpoint
 
@@ -222,7 +224,7 @@ class TestKubernetesSandboxServiceCreate:
         self, k8s_service, create_sandbox_request
     ):
         create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
-        k8s_service.app_config.egress = EgressConfig(image="opensandbox/egress:v1.0.8")
+        k8s_service.app_config.egress = EgressConfig(image="opensandbox/egress:v1.0.9")
         k8s_service.workload_provider.create_workload.return_value = {
             "name": "test-id", "uid": "uid-1"
         }
@@ -296,7 +298,7 @@ class TestKubernetesSandboxServiceCreate:
     ):
         create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
         k8s_service.app_config.egress = EgressConfig(
-            image="opensandbox/egress:v1.0.8",
+            image="opensandbox/egress:v1.0.9",
             mode=EGRESS_MODE_DNS_NFT,
         )
         k8s_service.workload_provider.create_workload.return_value = {
@@ -1054,3 +1056,183 @@ class TestRenewExpiration:
         assert exc_info.value.status_code == 409
         assert "does not have automatic expiration" in exc_info.value.detail["message"]
         k8s_service.workload_provider.update_expiration.assert_not_called()
+
+
+class TestSignedEndpoint:
+    """Test signed route token generation in get_endpoint."""
+
+    BASE64_SECRET = "bXktdGVzdC1zZWNyZXQ="  # "my-test-secret"
+
+    def _setup_gateway_with_secure_access(self, k8s_service, route_mode="wildcard"):
+        """Helper to configure ingress gateway with secure_access on the service."""
+        address = "*.sandbox.example.com" if route_mode == "wildcard" else "gateway.sandbox.example.com"
+        k8s_service.ingress_config = IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address=address,
+                route=GatewayRouteModeConfig(mode=route_mode),
+            ),
+            secure_access=SecureAccessConfig(
+                active_key="a",
+                keys=[
+                    SecureAccessKey(key_id="a", key=self.BASE64_SECRET),
+                ],
+            ),
+        )
+
+    def test_signed_endpoint_embeds_token_in_url(self, k8s_service):
+        self._setup_gateway_with_secure_access(k8s_service)
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+
+        endpoint = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
+
+        assert endpoint.endpoint.startswith("sbx-001-8080-")
+        assert endpoint.endpoint.endswith(".sandbox.example.com")
+        # The signature should be embedded in the endpoint URL (right-split for hyphenated sandbox_id)
+        parts = endpoint.endpoint.split(".")[0].rsplit("-", 3)
+        assert len(parts) == 4  # sandbox_id-port-b36-signature
+
+    def test_signed_endpoint_omits_secure_access_header(self, k8s_service):
+        """Signed endpoint must NOT include the static SecureAccessToken header."""
+        self._setup_gateway_with_secure_access(k8s_service)
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {
+                "annotations": {
+                    SANDBOX_SECURE_ACCESS_TOKEN_METADATA_KEY: "static-token",
+                }
+            },
+        }
+
+        endpoint = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
+
+        if endpoint.headers:
+            assert OPEN_SANDBOX_SECURE_ACCESS_HEADER not in endpoint.headers, (
+                "Signed endpoint should not carry the static SecureAccessToken header"
+            )
+
+    def test_unsigned_endpoint_attaches_secure_access_header(self, k8s_service):
+        """Unsigned endpoint must include the static SecureAccessToken header."""
+        self._setup_gateway_with_secure_access(k8s_service)
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {
+                "annotations": {
+                    SANDBOX_SECURE_ACCESS_TOKEN_METADATA_KEY: "static-token",
+                }
+            },
+        }
+        k8s_service.workload_provider.get_endpoint_info.return_value = Endpoint(
+            endpoint="sbx-001-8080.sandbox.example.com",
+        )
+
+        endpoint = k8s_service.get_endpoint("sbx-001", 8080)
+
+        assert endpoint.headers is not None
+        assert endpoint.headers[OPEN_SANDBOX_SECURE_ACCESS_HEADER] == "static-token"
+
+    def test_signed_endpoint_header_mode(self, k8s_service):
+        self._setup_gateway_with_secure_access(k8s_service, route_mode="header")
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+
+        endpoint = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
+
+        assert endpoint.endpoint == "gateway.sandbox.example.com"
+        assert endpoint.headers is not None
+        ingress_val = endpoint.headers.get("OpenSandbox-Ingress-To", "")
+        # Header value should contain the signed route: {sid}-{port}-{b36}-{sig}
+        parts = ingress_val.rsplit("-", 3)
+        assert len(parts) == 4
+
+    def test_signed_endpoint_uri_mode(self, k8s_service):
+        self._setup_gateway_with_secure_access(k8s_service, route_mode="uri")
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+
+        endpoint = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
+
+        # URI mode: endpoint is {addr}/{sid}/{port}/{b36}/{sig}
+        assert "x2qxvk" in endpoint.endpoint
+        assert "0ff8cd39a" in endpoint.endpoint
+
+    def test_expires_negative_rejected(self, k8s_service):
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+
+        with pytest.raises(HTTPException) as exc:
+            k8s_service.get_endpoint("sbx-001", 8080, expires=-1)
+
+        assert exc.value.status_code == 400
+
+    def test_expires_in_past_rejected(self, k8s_service):
+        """A timestamp in the past must be rejected."""
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+
+        with pytest.raises(HTTPException) as exc:
+            k8s_service.get_endpoint("sbx-001", 8080, expires=1000000)
+
+        assert exc.value.status_code == 400
+        assert "must be greater than current time" in exc.value.detail["message"]
+
+    def test_expires_without_gateway_rejected(self, k8s_service):
+        """No ingress config at all."""
+        k8s_service.ingress_config = None
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+
+        with pytest.raises(HTTPException) as exc:
+            k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
+
+        assert exc.value.status_code == 400
+        assert "gateway" in exc.value.detail["message"].lower()
+
+    def test_expires_without_secure_access_keys_rejected(self, k8s_service):
+        """Gateway configured but no secure_access keys block."""
+        k8s_service.ingress_config = IngressConfig(
+            mode="gateway",
+            gateway=GatewayConfig(
+                address="*.example.com",
+                route=GatewayRouteModeConfig(mode="wildcard"),
+            ),
+        )
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+
+        with pytest.raises(HTTPException) as exc:
+            k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
+
+        assert exc.value.status_code == 400
+        assert "secure_access" in exc.value.detail["message"].lower()
+
+    def test_unsigned_endpoint_no_expires(self, k8s_service):
+        """Without expires, the unsigned endpoint should be returned."""
+        self._setup_gateway_with_secure_access(k8s_service)
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+        k8s_service.workload_provider.get_endpoint_info.return_value = Endpoint(
+            endpoint="sbx-001-8080.sandbox.example.com",
+        )
+
+        endpoint = k8s_service.get_endpoint("sbx-001", 8080)
+
+        assert endpoint.endpoint == "sbx-001-8080.sandbox.example.com"
+
+    def test_signed_endpoint_different_expires_produces_different_endpoints(self, k8s_service):
+        self._setup_gateway_with_secure_access(k8s_service)
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {"annotations": {}},
+        }
+
+        ep1 = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000000)
+        ep2 = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000500)
+
+        assert ep1.endpoint != ep2.endpoint

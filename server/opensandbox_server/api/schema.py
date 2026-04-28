@@ -621,6 +621,8 @@ class Endpoint(BaseModel):
         default=None,
         description="Optional headers required when accessing the endpoint (e.g., for header-based routing).",
     )
+    class Config:
+        populate_by_name = True
 
 
 # ============================================================================

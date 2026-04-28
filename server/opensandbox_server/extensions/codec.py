@@ -19,6 +19,8 @@ from typing import Dict, MutableMapping, Optional
 from opensandbox_server.extensions.keys import (
     ACCESS_RENEW_EXTEND_SECONDS_KEY,
     ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY,
+    EXTENSIONS_ANNOTATION_PREFIX,
+    ANNOTATION_METADATA_PREFIX,
 )
 
 
@@ -42,3 +44,27 @@ def apply_access_renew_extend_seconds_to_mapping(
     if not s:
         return
     mapping[metadata_key] = s
+
+
+def apply_extensions_to_annotations(
+    annotations: MutableMapping[str, str],
+    extensions: Optional[Dict[str, str]],
+) -> None:
+    """
+    Propagate extension keys with ``opensandbox.extensions.`` prefix to Pod annotations.
+
+    For each extension key starting with EXTENSIONS_ANNOTATION_PREFIX, the value is
+    copied to annotations with ANNOTATION_METADATA_PREFIX prefix.
+
+    Example:
+        extensions = {"opensandbox.extensions.pool-ref": "my-pool"}
+        → annotations["opensandbox.io/extensions.pool-ref"] = "my-pool"
+    """
+    if not extensions:
+        return
+    for key, value in extensions.items():
+        if key.startswith(EXTENSIONS_ANNOTATION_PREFIX):
+            # Extract the suffix after the prefix
+            suffix = key[len(EXTENSIONS_ANNOTATION_PREFIX):]
+            annotation_key = ANNOTATION_METADATA_PREFIX + suffix
+            annotations[annotation_key] = value

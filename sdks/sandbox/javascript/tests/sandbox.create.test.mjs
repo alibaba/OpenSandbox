@@ -96,6 +96,21 @@ test("Sandbox.create forwards secureAccess", async () => {
   assert.equal(recordedRequests[0].secureAccess, true);
 });
 
+test("Sandbox.create forwards windows platform values", async () => {
+  const { adapterFactory, recordedRequests } = createAdapterFactory();
+
+  await Sandbox.create({
+    adapterFactory,
+    connectionConfig: { domain: "http://127.0.0.1:8080" },
+    image: "python:3.12",
+    platform: { os: "windows", arch: "amd64" },
+    skipHealthCheck: true,
+  });
+
+  assert.equal(recordedRequests.length, 1);
+  assert.deepEqual(recordedRequests[0].platform, { os: "windows", arch: "amd64" });
+});
+
 test("Sandbox.create floors finite timeoutSeconds", async () => {
   const { adapterFactory, recordedRequests } = createAdapterFactory();
 

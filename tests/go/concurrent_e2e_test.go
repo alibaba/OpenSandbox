@@ -45,6 +45,7 @@ func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
 			defer wg.Done()
 			sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 				Image: getSandboxImage(),
+				Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 				Metadata: map[string]string{
 					"test":  "go-e2e-concurrent",
 					"index": fmt.Sprintf("%d", idx),

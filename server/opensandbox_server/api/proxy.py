@@ -173,6 +173,20 @@ async def _proxy_http_request(
             endpoint.headers,
             connection_header=request.headers.get("connection"),
         )
+        # Inject standard reverse-proxy headers. Check for existing values
+        # case-insensitively so an already-present header with any casing
+        # (e.g. lowercase "x-forwarded-proto" from an upstream edge) is
+        # preserved and we don't emit a duplicate with different casing,
+        # which would break chain-safe semantics for downstream backends.
+        existing_lower = {key.lower() for key in headers}
+        if "x-forwarded-proto" not in existing_lower:
+            headers["X-Forwarded-Proto"] = request.url.scheme
+        inbound_host = request.headers.get("host", "")
+        if inbound_host and "x-forwarded-host" not in existing_lower:
+            headers["X-Forwarded-Host"] = inbound_host
+        if request.client and "x-forwarded-for" not in existing_lower:
+            headers["X-Forwarded-For"] = request.client.host
+
         stream_body = request.method in ("POST", "PUT", "PATCH", "DELETE")
         req = client.build_request(
             method=request.method,

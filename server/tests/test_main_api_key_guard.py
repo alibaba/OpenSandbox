@@ -12,12 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
 import time
+
+import pytest
 
 from opensandbox_server.startup_guard import (
     ALLOW_NO_API_KEY_CONFIRMATION,
-    ALLOW_NO_API_KEY_ENV,
+    INSECURE_SERVER_ENV_VAR,
     api_key_confirm,
 )
 
@@ -33,7 +34,7 @@ class _NonTTY:
 
 
 def test_api_key_configured_skips_confirmation(monkeypatch):
-    monkeypatch.delenv(ALLOW_NO_API_KEY_ENV, raising=False)
+    monkeypatch.delenv(INSECURE_SERVER_ENV_VAR, raising=False)
 
     def _fail_prompt(_: str) -> str:
         raise AssertionError("prompt should not be called when api_key is configured")
@@ -46,7 +47,7 @@ def test_api_key_configured_skips_confirmation(monkeypatch):
 
 
 def test_non_interactive_requires_env_ack(monkeypatch):
-    monkeypatch.delenv(ALLOW_NO_API_KEY_ENV, raising=False)
+    monkeypatch.delenv(INSECURE_SERVER_ENV_VAR, raising=False)
 
     with pytest.raises(RuntimeError) as exc_info:
         api_key_confirm(
@@ -55,11 +56,11 @@ def test_non_interactive_requires_env_ack(monkeypatch):
         )
 
     assert "Startup blocked" in str(exc_info.value)
-    assert ALLOW_NO_API_KEY_ENV in str(exc_info.value)
+    assert INSECURE_SERVER_ENV_VAR in str(exc_info.value)
 
 
 def test_env_ack_allows_non_interactive_start(monkeypatch):
-    monkeypatch.setenv(ALLOW_NO_API_KEY_ENV, ALLOW_NO_API_KEY_CONFIRMATION)
+    monkeypatch.setenv(INSECURE_SERVER_ENV_VAR, ALLOW_NO_API_KEY_CONFIRMATION)
 
     api_key_confirm(
         configured_api_key=None,
@@ -67,8 +68,30 @@ def test_env_ack_allows_non_interactive_start(monkeypatch):
     )
 
 
+def test_env_ack_warning_does_not_log_confirmation_value(monkeypatch):
+    monkeypatch.setenv(INSECURE_SERVER_ENV_VAR, ALLOW_NO_API_KEY_CONFIRMATION)
+    calls = []
+
+    def _capture_warning(message: str, *args) -> None:
+        calls.append(message % args)
+
+    monkeypatch.setattr(
+        "opensandbox_server.startup_guard.logger.warning",
+        _capture_warning,
+    )
+
+    api_key_confirm(
+        configured_api_key=None,
+        stdin=_NonTTY(),
+    )
+
+    assert len(calls) == 1
+    assert INSECURE_SERVER_ENV_VAR in calls[0]
+    assert f"{INSECURE_SERVER_ENV_VAR}={ALLOW_NO_API_KEY_CONFIRMATION}" not in calls[0]
+
+
 def test_tty_requires_exact_yes(monkeypatch):
-    monkeypatch.delenv(ALLOW_NO_API_KEY_ENV, raising=False)
+    monkeypatch.delenv(INSECURE_SERVER_ENV_VAR, raising=False)
 
     with pytest.raises(RuntimeError) as exc_info:
         api_key_confirm(
@@ -81,7 +104,7 @@ def test_tty_requires_exact_yes(monkeypatch):
 
 
 def test_tty_yes_allows_start(monkeypatch):
-    monkeypatch.delenv(ALLOW_NO_API_KEY_ENV, raising=False)
+    monkeypatch.delenv(INSECURE_SERVER_ENV_VAR, raising=False)
 
     api_key_confirm(
         configured_api_key=None,
@@ -91,7 +114,7 @@ def test_tty_yes_allows_start(monkeypatch):
 
 
 def test_tty_confirmation_timeout(monkeypatch):
-    monkeypatch.delenv(ALLOW_NO_API_KEY_ENV, raising=False)
+    monkeypatch.delenv(INSECURE_SERVER_ENV_VAR, raising=False)
     monkeypatch.setattr(
         "opensandbox_server.startup_guard.API_KEY_CONFIRM_TIMEOUT_SECONDS",
         1,

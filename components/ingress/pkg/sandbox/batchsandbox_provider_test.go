@@ -106,7 +106,8 @@ func TestBatchSandboxProvider_WithFakeInformer(t *testing.T) {
 	t.Run("GetEndpoint from ready sandbox", func(t *testing.T) {
 		endpoint, err := provider.GetEndpoint("ready-sandbox")
 		assert.NoError(t, err)
-		assert.Equal(t, "10.0.0.1", endpoint, "Should return first endpoint IP")
+		assert.Equal(t, "10.0.0.1", endpoint.Endpoint, "Should return first endpoint IP")
+		assert.Equal(t, "", endpoint.SecureAccessToken)
 	})
 
 	// Test 2: Get endpoint from not ready sandbox
@@ -123,6 +124,32 @@ func TestBatchSandboxProvider_WithFakeInformer(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, ErrSandboxNotFound), "Should return ErrSandboxNotFound")
 		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("GetEndpoint with non-empty access-token", func(t *testing.T) {
+		secureSB := &sandboxv1alpha1.BatchSandbox{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "secure-sb",
+				Namespace: namespace,
+				Annotations: map[string]string{
+					AnnotationAccessToken:     "opaque",
+					utils.AnnotationEndpoints: `["10.0.0.1"]`,
+				},
+			},
+			Spec: sandboxv1alpha1.BatchSandboxSpec{
+				Replicas: ptr(int32(1)),
+			},
+			Status: sandboxv1alpha1.BatchSandboxStatus{
+				Replicas: 1,
+				Ready:    1,
+			},
+		}
+		err := batchSandboxInformer.Informer().GetStore().Add(secureSB)
+		assert.NoError(t, err)
+		info, err := provider.GetEndpoint("secure-sb")
+		assert.NoError(t, err)
+		assert.Equal(t, "10.0.0.1", info.Endpoint)
+		assert.Equal(t, "opaque", info.SecureAccessToken)
 	})
 }
 
@@ -284,7 +311,7 @@ func TestBatchSandboxProvider_DynamicUpdate(t *testing.T) {
 	// Wait for informer to pick up the change
 	assert.Eventually(t, func() bool {
 		endpoint, err := provider.GetEndpoint("dynamic-sandbox")
-		return err == nil && endpoint == "10.0.0.100"
+		return err == nil && endpoint.Endpoint == "10.0.0.100"
 	}, 3*time.Second, 100*time.Millisecond, "Informer should eventually sync the new object")
 }
 
@@ -369,7 +396,7 @@ func TestBatchSandboxProvider_GetEndpointNonNotFoundError(t *testing.T) {
 	// Should successfully get endpoint
 	endpoint, err := provider.GetEndpoint("missing-endpoint-sandbox")
 	assert.NoError(t, err)
-	assert.Equal(t, "10.0.0.1", endpoint)
+	assert.Equal(t, "10.0.0.1", endpoint.Endpoint)
 }
 
 func TestBatchSandboxProvider_GetEndpoint_AmbiguousAcrossNamespaces(t *testing.T) {

@@ -193,4 +193,20 @@ export class SandboxesAdapter implements Sandboxes {
     }
     return ok as unknown as Endpoint;
   }
+
+  async getSignedEndpoint(
+    sandboxId: SandboxId,
+    port: number,
+    expires: number
+  ): Promise<Endpoint> {
+    const { data, error, response } = await this.client.GET("/sandboxes/{sandboxId}/endpoints/{port}", {
+      params: { path: { sandboxId, port }, query: { expires: expires.toString() } },
+    });
+    throwOnOpenApiFetchError({ error, response }, "Get signed endpoint failed");
+    const ok = data as ApiEndpointOk | undefined;
+    if (!ok || typeof ok !== "object") {
+      throw new Error("Get signed endpoint failed: unexpected response shape");
+    }
+    return ok as unknown as Endpoint;
+  }
 }

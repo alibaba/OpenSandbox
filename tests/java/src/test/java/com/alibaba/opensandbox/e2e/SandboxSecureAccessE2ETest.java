@@ -39,7 +39,7 @@ import org.junit.jupiter.api.Timeout;
 @Tag("e2e")
 @DisplayName("Sandbox secured access E2E Tests (Java SDK)")
 public class SandboxSecureAccessE2ETest extends BaseE2ETest {
-    private static final String SECURE_ACCESS_HEADER = "OPENSANDBOX-SECURE-ACCESS";
+    private static final String SECURE_ACCESS_HEADER = "OpenSandbox-Secure-Access";
     private static final String SECURE_ACCESS_VERIFIABLE_ENV =
             "OPENSANDBOX_TEST_SECURE_ACCESS_VERIFIABLE";
 
@@ -59,6 +59,8 @@ public class SandboxSecureAccessE2ETest extends BaseE2ETest {
                         .timeout(Duration.ofMinutes(2))
                         .readyTimeout(Duration.ofSeconds(60))
                         .secureAccess()
+                        .env("EXECD_API_GRACE_SHUTDOWN", "3s")
+                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s")
                         .metadata(Map.of("tag", "secure-access-java-e2e-test"))
                         .build();
 
@@ -125,6 +127,8 @@ public class SandboxSecureAccessE2ETest extends BaseE2ETest {
                         .image(getSandboxImage())
                         .timeout(Duration.ofMinutes(2))
                         .readyTimeout(Duration.ofSeconds(60))
+                        .env("EXECD_API_GRACE_SHUTDOWN", "3s")
+                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s")
                         .metadata(Map.of("tag", "non-secure-access-java-e2e-test"))
                         .build();
 

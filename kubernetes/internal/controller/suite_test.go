@@ -98,10 +98,11 @@ var _ = BeforeSuite(func() {
 		Recorder: k8sManager.GetEventRecorderFor("test-batch-sandbox-controller"),
 	}).SetupWithManager(k8sManager, 32)).Should(Succeed())
 	Expect((&PoolReconciler{
-		Client:    k8sManager.GetClient(),
-		Scheme:    k8sManager.GetScheme(),
-		Recorder:  k8sManager.GetEventRecorderFor("test-pool-controller"),
-		Allocator: NewDefaultAllocator(k8sManager.GetClient()),
+		Client:     k8sManager.GetClient(),
+		Scheme:     k8sManager.GetScheme(),
+		Recorder:   k8sManager.GetEventRecorderFor("test-pool-controller"),
+		Allocator:  NewDefaultAllocator(k8sManager.GetClient()),
+		RestConfig: cfg,
 	}).SetupWithManager(k8sManager, 128)).Should(Succeed())
 	// TODO more reconciler goes HERE
 

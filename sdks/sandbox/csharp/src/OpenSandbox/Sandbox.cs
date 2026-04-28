@@ -563,6 +563,19 @@ public sealed class Sandbox : IAsyncDisposable
     }
 
     /// <summary>
+    /// Gets a signed endpoint for a port with an OSEP-0011 route token.
+    /// </summary>
+    /// <param name="port">The port number.</param>
+    /// <param name="expires">Unix epoch seconds for the signed route token expiry.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The endpoint information.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
+    public Task<Endpoint> GetSignedEndpointAsync(int port, long expires, CancellationToken cancellationToken = default)
+    {
+        return _sandboxes.GetSignedSandboxEndpointAsync(Id, port, expires, ConnectionConfig.UseServerProxy, cancellationToken);
+    }
+
+    /// <summary>
     /// Gets the endpoint URL for a port.
     /// </summary>
     /// <param name="port">The port number.</param>

@@ -263,6 +263,12 @@ func (s *Sandbox) GetEndpoint(ctx context.Context, port int) (*Endpoint, error) 
 	return s.lifecycle.GetEndpoint(ctx, s.id, port, &useProxy)
 }
 
+// GetSignedEndpoint retrieves a signed endpoint URL with an OSEP-0011 route
+// token that expires at the given Unix epoch timestamp (seconds).
+func (s *Sandbox) GetSignedEndpoint(ctx context.Context, port int, expires int64) (*Endpoint, error) {
+	return s.lifecycle.GetSignedEndpoint(ctx, s.id, port, expires)
+}
+
 // ReadyOptions configures WaitUntilReady behavior.
 type ReadyOptions struct {
 	Timeout         time.Duration

@@ -41,6 +41,7 @@ import (
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller"
+	cryptoutil "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/crypto"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/fieldindex"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/logging"
 	// +kubebuilder:scaffold:imports
@@ -137,6 +138,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var allowWeakTLSKeyLengths bool
 	var tlsOpts []func(*tls.Config)
 
 	// Log file options
@@ -171,6 +173,12 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.BoolVar(
+		&allowWeakTLSKeyLengths,
+		"allow-weak-tls-keylengths",
+		false,
+		"If set, allows TLS certificates below NIST 2030 minimum key/hash lengths (not recommended).",
+	)
 
 	// Log file flags
 	flag.BoolVar(&enableFileLog, "enable-file-log", false, "Enable log output to file")
@@ -236,6 +244,10 @@ func main() {
 		c.NextProtos = []string{"http/1.1"}
 	}
 
+	tlsOpts = append(tlsOpts, func(c *tls.Config) {
+		c.MinVersion = tls.VersionTLS12
+	})
+
 	if !enableHTTP2 {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
@@ -247,13 +259,23 @@ func main() {
 	webhookTLSOpts := tlsOpts
 
 	if len(webhookCertPath) > 0 {
+		webhookCertFile := filepath.Join(webhookCertPath, webhookCertName)
+		webhookKeyFile := filepath.Join(webhookCertPath, webhookCertKey)
+		if !allowWeakTLSKeyLengths {
+			if err := cryptoutil.ValidateCertificateKeyPair(webhookCertFile, webhookKeyFile); err != nil {
+				setupLog.Error(err, "Webhook certificate does not meet NIST minimum key/hash requirements",
+					"webhook-cert-file", webhookCertFile, "webhook-key-file", webhookKeyFile)
+				os.Exit(1)
+			}
+		}
+
 		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
 			"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
 
 		var err error
 		webhookCertWatcher, err = certwatcher.New(
-			filepath.Join(webhookCertPath, webhookCertName),
-			filepath.Join(webhookCertPath, webhookCertKey),
+			webhookCertFile,
+			webhookKeyFile,
 		)
 		if err != nil {
 			setupLog.Error(err, "Failed to initialize webhook certificate watcher")
@@ -261,7 +283,19 @@ func main() {
 		}
 
 		webhookTLSOpts = append(webhookTLSOpts, func(config *tls.Config) {
-			config.GetCertificate = webhookCertWatcher.GetCertificate
+			config.GetCertificate = func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				cert, err := webhookCertWatcher.GetCertificate(chi)
+				if err != nil {
+					return nil, err
+				}
+				if allowWeakTLSKeyLengths {
+					return cert, nil
+				}
+				if err := cryptoutil.ValidateTLSCertificate(webhookCertFile, cert); err != nil {
+					return nil, err
+				}
+				return cert, nil
+			}
 		})
 	}
 
@@ -296,13 +330,23 @@ func main() {
 	// managed by cert-manager for the metrics server.
 	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml for TLS certification.
 	if len(metricsCertPath) > 0 {
+		metricsCertFile := filepath.Join(metricsCertPath, metricsCertName)
+		metricsKeyFile := filepath.Join(metricsCertPath, metricsCertKey)
+		if !allowWeakTLSKeyLengths && metricsAddr != "0" && secureMetrics {
+			if err := cryptoutil.ValidateCertificateKeyPair(metricsCertFile, metricsKeyFile); err != nil {
+				setupLog.Error(err, "Metrics certificate does not meet NIST minimum key/hash requirements",
+					"metrics-cert-file", metricsCertFile, "metrics-key-file", metricsKeyFile)
+				os.Exit(1)
+			}
+		}
+
 		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
 			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
 
 		var err error
 		metricsCertWatcher, err = certwatcher.New(
-			filepath.Join(metricsCertPath, metricsCertName),
-			filepath.Join(metricsCertPath, metricsCertKey),
+			metricsCertFile,
+			metricsKeyFile,
 		)
 		if err != nil {
 			setupLog.Error(err, "to initialize metrics certificate watcher", "error", err)
@@ -310,7 +354,19 @@ func main() {
 		}
 
 		metricsServerOptions.TLSOpts = append(metricsServerOptions.TLSOpts, func(config *tls.Config) {
-			config.GetCertificate = metricsCertWatcher.GetCertificate
+			config.GetCertificate = func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				cert, err := metricsCertWatcher.GetCertificate(chi)
+				if err != nil {
+					return nil, err
+				}
+				if allowWeakTLSKeyLengths {
+					return cert, nil
+				}
+				if err := cryptoutil.ValidateTLSCertificate(metricsCertFile, cert); err != nil {
+					return nil, err
+				}
+				return cert, nil
+			}
 		})
 	}
 
@@ -330,17 +386,11 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "2fa1c467.opensandbox.io",
-		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
-		// when the Manager ends. This requires the binary to immediately end when the
-		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
-		// speeds up voluntary leader transitions as the new leader don't have to wait
-		// LeaseDuration time first.
-		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
+		// LeaderElectionReleaseOnCancel causes the leader to voluntarily release the lease
+		// when the Manager is stopped, allowing a new leader to acquire it without waiting
+		// for the full LeaseDuration. This is safe because main() exits immediately after
+		// mgr.Start() returns and performs no post-stop cleanup.
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -370,10 +420,11 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.PoolReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("pool-controller"),
-		Allocator: controller.NewDefaultAllocator(mgr.GetClient()),
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("pool-controller"),
+		Allocator:  controller.NewDefaultAllocator(mgr.GetClient()),
+		RestConfig: mgr.GetConfig(),
 	}).SetupWithManager(mgr, poolConcurrency); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pool")
 		os.Exit(1)

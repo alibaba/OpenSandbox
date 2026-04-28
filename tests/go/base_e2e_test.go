@@ -81,6 +81,7 @@ func createTestSandbox(t *testing.T) (context.Context, *opensandbox.Sandbox) {
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
+		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { sb.Kill(context.Background()) })

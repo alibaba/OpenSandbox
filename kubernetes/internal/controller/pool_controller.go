@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/json"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	"k8s.io/client-go/util/workqueue"
@@ -50,6 +51,7 @@ import (
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/eviction"
+	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/recycle"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils"
 	controllerutils "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/controller"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/expectations"
@@ -68,11 +70,15 @@ const (
 const (
 	defaultSyncSandboxAllocConcurrency = 256
 	envSyncSandboxAllocConcurrency     = "SYNC_SANDBOX_ALLOC_CONCURRENCY"
+
+	defaultRecyclePodConcurrency = 64
+	envRecyclePodConcurrency     = "RECYCLE_POD_CONCURRENCY"
 )
 
 var (
 	PoolScaleExpectations       = expectations.NewScaleExpectations()
 	syncSandboxAllocConcurrency int
+	recyclePodConcurrency       int
 )
 
 func init() {
@@ -82,14 +88,21 @@ func init() {
 			syncSandboxAllocConcurrency = n
 		}
 	}
+	recyclePodConcurrency = defaultRecyclePodConcurrency
+	if val := os.Getenv(envRecyclePodConcurrency); val != "" {
+		if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			recyclePodConcurrency = n
+		}
+	}
 }
 
 // PoolReconciler reconciles a Pool object
 type PoolReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Recorder  record.EventRecorder
-	Allocator Allocator
+	Scheme     *runtime.Scheme
+	Recorder   record.EventRecorder
+	Allocator  Allocator
+	RestConfig *rest.Config
 }
 
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=pools,verbs=get;list;watch;create;update;patch;delete
@@ -97,6 +110,7 @@ type PoolReconciler struct {
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=pools/finalizers,verbs=update
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=batchsandboxes,verbs=get;list;watch;patch
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=pods/exec,verbs=create
 // +kubebuilder:rbac:groups=core,resources=pods/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;update;patch;delete
 
@@ -198,12 +212,12 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 		}
 
 		// 5. Handle pool scale
-		toDeletePods := append(updateResult.ToDeletePods, schedResult.DirtyPods...)
+		toDeletePods := append(updateResult.ToDeletePods, schedResult.ToDelete...)
 		args := &scaleArgs{
 			updateRevision: updateResult.UpdateRevision,
 			pods:           schedulePods,
 			totalPodCnt:    int32(len(pods)),
-			allocatedCnt:   int32(len(schedResult.PodAllocation)),
+			allocatedCnt:   int32(len(schedResult.LatestAllocation)),
 			idlePods:       updateResult.IdlePods,
 			toDeletePods:   toDeletePods,
 			supplyCnt:      schedResult.SupplyCnt + updateResult.SupplyUpdateRevision,
@@ -214,7 +228,7 @@ func (r *PoolReconciler) reconcilePool(ctx context.Context, pool *sandboxv1alpha
 		}
 
 		// 6. Update pool status
-		if err := r.updatePoolStatus(ctx, updateResult.UpdateRevision, latestPool, pods, schedulePods, schedResult.PodAllocation); err != nil {
+		if err := r.updatePoolStatus(ctx, updateResult.UpdateRevision, latestPool, pods, schedulePods, schedResult.LatestAllocation); err != nil {
 			return err
 		}
 
@@ -263,6 +277,10 @@ func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconci
 				return true
 			}
 			if oldObj.Spec.Replicas != newObj.Spec.Replicas {
+				return true
+			}
+			// Trigger reconcile when sandbox enters terminating state (DeletionTimestamp is set).
+			if oldObj.DeletionTimestamp.IsZero() && !newObj.DeletionTimestamp.IsZero() {
 				return true
 			}
 			return false
@@ -344,73 +362,270 @@ func (r *PoolReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurrentReconci
 		Complete(r)
 }
 
+func (r *PoolReconciler) doAllocate(ctx context.Context, pool *sandboxv1alpha1.Pool, batchSandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod, toAllocate map[string][]string) error {
+	// 1. Compute latest allocated pods per sandbox (merge current + newly allocated).
+	toSyncMap := r.getLatestAllocated(ctx, pool, batchSandboxes, toAllocate)
+
+	// 2. Concurrently sync each sandbox's Allocated annotation (AddFinalizer is called inside SyncSandboxAllocation).
+	return r.syncSandboxConcurrently(ctx, batchSandboxes, toSyncMap, r.Allocator.SyncSandboxAllocation, "allocated")
+}
+
+// getLatestAllocated computes the latest allocated pods for each sandbox by merging current allocation with new pods to allocate.
+func (r *PoolReconciler) getLatestAllocated(ctx context.Context, pool *sandboxv1alpha1.Pool, batchSandboxes []*sandboxv1alpha1.BatchSandbox, toAllocate map[string][]string) map[string][]string {
+	log := logf.FromContext(ctx)
+	sandboxByName := make(map[string]*sandboxv1alpha1.BatchSandbox, len(batchSandboxes))
+	for _, bs := range batchSandboxes {
+		sandboxByName[bs.Name] = bs
+	}
+
+	toSyncMap := make(map[string][]string, len(toAllocate))
+	for sandboxName, allocPods := range toAllocate {
+		if len(allocPods) == 0 {
+			continue
+		}
+		sandbox, ok := sandboxByName[sandboxName]
+		if !ok {
+			log.Error(nil, "Sandbox not found for allocate", "sandbox", sandboxName)
+			continue
+		}
+		currentAllocated, err := r.Allocator.GetSandboxAllocation(ctx, sandbox)
+		if err != nil {
+			log.Error(err, "Failed to get sandbox allocated", "sandbox", sandboxName)
+			continue
+		}
+		toSyncMap[sandboxName] = append(currentAllocated, allocPods...)
+	}
+	return toSyncMap
+}
+
+// syncSandboxConcurrently syncs allocation or released state for each sandbox concurrently.
+// Each sandbox is an independent resource, so concurrent writes are safe.
+func (r *PoolReconciler) syncSandboxConcurrently(ctx context.Context, batchSandboxes []*sandboxv1alpha1.BatchSandbox, toSyncMap map[string][]string, syncFn func(context.Context, *sandboxv1alpha1.BatchSandbox, []string) error, label string) error {
+	log := logf.FromContext(ctx)
+
+	sandboxByName := make(map[string]*sandboxv1alpha1.BatchSandbox, len(batchSandboxes))
+	for _, bs := range batchSandboxes {
+		sandboxByName[bs.Name] = bs
+	}
+
+	errCh := make(chan error, len(toSyncMap))
+	sem := make(chan struct{}, syncSandboxAllocConcurrency)
+	var wg sync.WaitGroup
+	for sandboxName, pods := range toSyncMap {
+		sandbox, ok := sandboxByName[sandboxName]
+		if !ok {
+			log.Error(nil, "Sandbox not found for sync "+label, "sandbox", sandboxName)
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if err := syncFn(ctx, sandbox, pods); err != nil {
+				log.Error(err, "Failed to sync sandbox "+label, "sandbox", sandbox.Name)
+				errCh <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+	return gerrors.Join(errs...)
+}
+
+func (r *PoolReconciler) doRecycle(ctx context.Context, pool *sandboxv1alpha1.Pool, batchSandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod, toRecycle map[string][]string) (map[string][]string, []string, error) {
+	if len(toRecycle) == 0 {
+		return nil, nil, nil
+	}
+
+	handler, err := recycle.NewHandler(r.Client, r.RestConfig, pool)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get recycle handler for pool %s: %w", pool.Name, err)
+	}
+
+	results := r.runRecycleTasks(ctx, pool, pods, toRecycle, handler)
+	return collectRecycleResults(ctx, results)
+}
+
+type recycleResult struct {
+	sandboxName string
+	podName     string
+	status      *recycle.Status
+	err         error
+}
+
+// runRecycleTasks executes TryRecycle concurrently for each (sandbox, pod) pair and
+// returns one result per task.
+func (r *PoolReconciler) runRecycleTasks(ctx context.Context, pool *sandboxv1alpha1.Pool, pods []*corev1.Pod, toRecycle map[string][]string, handler recycle.Handler) []recycleResult {
+	podByName := make(map[string]*corev1.Pod, len(pods))
+	for _, p := range pods {
+		podByName[p.Name] = p
+	}
+
+	// Flatten the map into an ordered slice so goroutines can write by index.
+	type task struct {
+		sandboxName string
+		podName     string
+	}
+	var tasks []task
+	for sandboxName, podNames := range toRecycle {
+		for _, podName := range podNames {
+			tasks = append(tasks, task{sandboxName: sandboxName, podName: podName})
+		}
+	}
+
+	// Results are written by index so each goroutine writes to a unique slot without synchronization.
+	results := make([]recycleResult, len(tasks))
+	sem := make(chan struct{}, recyclePodConcurrency)
+	var wg sync.WaitGroup
+	for idx, task := range tasks {
+		localIdx, localTask := idx, task
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			status, err := handler.TryRecycle(ctx, pool, podByName[localTask.podName], &recycle.Spec{ID: localTask.sandboxName})
+			results[localIdx] = recycleResult{sandboxName: localTask.sandboxName, podName: localTask.podName, status: status, err: err}
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
+// collectRecycleResults aggregates per-task results into the succeed map and delete list.
+func collectRecycleResults(ctx context.Context, results []recycleResult) (map[string][]string, []string, error) {
+	log := logf.FromContext(ctx)
+	succeedMap := make(map[string][]string)
+	var toDeletePods []string
+	var errs []error
+
+	for _, res := range results {
+		if res.err != nil {
+			log.Error(res.err, "Failed to recycle pod", "pod", res.podName, "sandbox", res.sandboxName)
+			errs = append(errs, res.err)
+			continue
+		}
+		if res.status.State == recycle.StateSucceeded {
+			succeedMap[res.sandboxName] = append(succeedMap[res.sandboxName], res.podName)
+		}
+		if res.status.NeedDelete {
+			toDeletePods = append(toDeletePods, res.podName)
+		}
+	}
+	return succeedMap, toDeletePods, gerrors.Join(errs...)
+}
+
+// doRelease runs the recycle operation for pods to be returned to the pool,
+// then persists the released state to each sandbox's annotation.
+func (r *PoolReconciler) doRelease(ctx context.Context, pool *sandboxv1alpha1.Pool, batchSandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod, toRelease map[string][]string) ([]string, error) {
+	log := logf.FromContext(ctx)
+
+	// 1. Recycle pods.
+	succeedMap, toDeletePods, err := r.doRecycle(ctx, pool, batchSandboxes, pods, toRelease)
+	if err != nil {
+		log.Error(err, "Some errors occurred during recycle")
+	}
+
+	// 2. Compute latest released pods per sandbox (merge current + recycle-succeeded).
+	// Also collect orphan pods whose sandboxes no longer exist.
+	toSyncMap, orphanPods := r.getLatestReleased(ctx, batchSandboxes, succeedMap)
+
+	// 3. Concurrently sync each sandbox's Released annotation.
+	syncErr := r.syncSandboxConcurrently(ctx, batchSandboxes, toSyncMap, r.Allocator.SyncSandboxReleased, "released")
+	if syncErr != nil {
+		log.Error(syncErr, "Failed to sync released")
+	}
+
+	// 4. Release in-memory allocations for orphan pods directly (no annotation to persist).
+	if len(orphanPods) > 0 {
+		r.Allocator.ReleasePodsAllocation(ctx, pool.Namespace, pool.Name, orphanPods)
+	}
+
+	return toDeletePods, gerrors.Join(err, syncErr)
+}
+
+// getLatestReleased computes the latest released pods for each sandbox by merging current released with recycle-succeeded pods.
+// It also returns orphanPods: pods from succeedMap whose sandbox no longer exists and should be released directly by the caller.
+func (r *PoolReconciler) getLatestReleased(ctx context.Context, batchSandboxes []*sandboxv1alpha1.BatchSandbox, succeedMap map[string][]string) (map[string][]string, []string) {
+	log := logf.FromContext(ctx)
+	sandboxByName := make(map[string]*sandboxv1alpha1.BatchSandbox, len(batchSandboxes))
+	for _, bs := range batchSandboxes {
+		sandboxByName[bs.Name] = bs
+	}
+
+	toSyncMap := make(map[string][]string, len(succeedMap))
+	orphanPods := make([]string, 0)
+	for sandboxName, succeedPods := range succeedMap {
+		if len(succeedPods) == 0 {
+			continue
+		}
+		sandbox, ok := sandboxByName[sandboxName]
+		if !ok {
+			// Orphan sandbox: deleted before recycle completed. Collect its pods for direct release.
+			log.Info("GC: sandbox not found for recycle result, collecting orphan pods", "sandbox", sandboxName, "pods", succeedPods)
+			orphanPods = append(orphanPods, succeedPods...)
+			continue
+		}
+		currentReleased, err := r.Allocator.GetSandboxReleased(ctx, sandbox)
+		if err != nil {
+			log.Error(err, "Failed to get sandbox released", "sandbox", sandboxName)
+			continue
+		}
+		toSyncMap[sandboxName] = append(currentReleased, succeedPods...)
+	}
+	return toSyncMap, orphanPods
+}
+
 func (r *PoolReconciler) scheduleSandbox(ctx context.Context, pool *sandboxv1alpha1.Pool, batchSandboxes []*sandboxv1alpha1.BatchSandbox, pods []*corev1.Pod) (*ScheduleResult, error) {
 	log := logf.FromContext(ctx)
+	// 1. Compute scheduling actions.
 	spec := &AllocSpec{
 		Sandboxes: batchSandboxes,
 		Pool:      pool,
 		Pods:      pods,
 	}
-	allocStatus, pendingSyncs, poolDirty, err := r.Allocator.Schedule(ctx, spec)
+	allocAction, err := r.Allocator.Schedule(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	log.Info("Allocate action", "pool", pool.Name, "toAllocate", allocAction.ToAllocate, "toRelease", allocAction.ToRelease)
+
+	// 2. Execute scheduling actions.
+	// 2.1 Execute ToAllocate / update in-memory store.
+	err = r.doAllocate(ctx, pool, batchSandboxes, pods, allocAction.ToAllocate)
+	if err != nil {
+		return nil, err
+	}
+	// 2.2 Execute ToRelease / release in-memory store.
+	toDeletePods, err := r.doRelease(ctx, pool, batchSandboxes, pods, allocAction.ToRelease)
+	if err != nil {
+		return nil, err
+	}
+
+	// 3. Return schedule result
+	latestAllocation, err := r.Allocator.GetPoolAllocation(ctx, pool)
 	if err != nil {
 		return nil, err
 	}
 	idlePods := make([]string, 0)
 	for _, pod := range pods {
-		if _, ok := allocStatus.PodAllocation[pod.Name]; !ok {
+		if _, ok := latestAllocation[pod.Name]; !ok {
 			idlePods = append(idlePods, pod.Name)
 		}
 	}
-	log.Info("Schedule result", "pool", pool.Name, "allocated", len(allocStatus.PodAllocation),
-		"idlePods", len(idlePods), "supplement", allocStatus.PodSupplement, "pendingSyncs", len(pendingSyncs), "poolDirty", poolDirty)
-
-	schedResult := &ScheduleResult{
-		PodAllocation: allocStatus.PodAllocation,
-		IdlePods:      idlePods,
-		DirtyPods:     allocStatus.DirtyPods,
-		SupplyCnt:     allocStatus.PodSupplement,
+	result := &ScheduleResult{
+		LatestAllocation: latestAllocation,
+		IdlePods:         idlePods,
+		ToDelete:         toDeletePods,
+		SupplyCnt:        allocAction.PodSupplement,
 	}
-
-	// Persist allocation to memory store
-	if poolDirty {
-		if err := r.Allocator.PersistPoolAllocation(ctx, pool, &AllocStatus{PodAllocation: allocStatus.PodAllocation}); err != nil {
-			log.Error(err, "Failed to persist pool allocation")
-			return nil, err
-		}
-	}
-
-	// Sync to each BatchSandbox concurrently
-	errCh := make(chan error, len(pendingSyncs))
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, syncSandboxAllocConcurrency)
-
-	for _, syncInfo := range pendingSyncs {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(info SandboxSyncInfo) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			if err := r.Allocator.SyncSandboxAllocation(ctx, info.Sandbox, info.Pods); err != nil {
-				log.Error(err, "Failed to sync sandbox allocation", "sandbox", info.SandboxName)
-				errCh <- fmt.Errorf("failed to sync sandbox %s: %w", info.SandboxName, err)
-			} else {
-				log.Info("Successfully sync Sandbox allocation", "sandbox", info.SandboxName, "pods", info.Pods)
-			}
-		}(syncInfo)
-	}
-	wg.Wait()
-	close(errCh)
-
-	var syncErrs []error
-	for err := range errCh {
-		syncErrs = append(syncErrs, err)
-	}
-
-	if err := gerrors.Join(syncErrs...); err != nil {
-		return nil, err
-	}
-
-	return schedResult, nil
+	log.Info("Schedule result", "pool", pool.Name, "toDeletePods", toDeletePods, "supplyCnt", allocAction.PodSupplement)
+	return result, nil
 }
 
 func (r *PoolReconciler) updatePool(ctx context.Context, pool *sandboxv1alpha1.Pool, pods []*corev1.Pod, idlePods []string) (*UpdateResult, error) {
@@ -434,12 +649,16 @@ type scaleArgs struct {
 	toDeletePods   []string
 }
 
-// ScheduleResult holds the output of scheduleSandbox.
 type ScheduleResult struct {
-	PodAllocation map[string]string
-	IdlePods      []string
-	DirtyPods     []string
-	SupplyCnt     int32
+	// LatestAllocation is the most recent pod-to-sandbox allocation map.
+	LatestAllocation map[string]string
+	// IdlePods contains pods that are not currently allocated to any sandbox.
+	IdlePods []string
+	// ToDelete contains pods that the recycle handler has decided to delete
+	// (e.g. direct deletion or restart failure fallback).
+	ToDelete []string
+	// SupplyCnt is the number of additional pods the allocator needs but are not yet available.
+	SupplyCnt int32
 }
 
 type UpdateResult struct {

@@ -19,7 +19,6 @@ from datetime import datetime, timedelta
 
 import pytest
 from httpx import HTTPStatusError, Request, Response
-from pydantic import ValidationError
 
 from opensandbox.adapters.converter.exception_converter import (
     ExceptionConverter,
@@ -262,12 +261,13 @@ def test_sandbox_model_converter_to_api_create_request_and_renew_tz() -> None:
     assert renew.expires_at.tzinfo is timezone.utc
 
 
-def test_platform_spec_rejects_windows_before_request_conversion() -> None:
-    with pytest.raises(ValidationError):
-        PlatformSpec(os="windows", arch="amd64")
+def test_platform_spec_accepts_windows() -> None:
+    platform = PlatformSpec(os="windows", arch="amd64")
+    assert platform.os == "windows"
+    assert platform.arch == "amd64"
 
 
-def test_sandbox_model_converter_omits_timeout_for_manual_cleanup() -> None:
+def test_sandbox_model_converter_preserves_null_timeout_for_manual_cleanup() -> None:
     req = SandboxModelConverter.to_api_create_sandbox_request(
         spec=SandboxImageSpec("python:3.11"),
         entrypoint=["/bin/sh"],
@@ -282,7 +282,7 @@ def test_sandbox_model_converter_omits_timeout_for_manual_cleanup() -> None:
     )
 
     dumped = req.to_dict()
-    assert "timeout" not in dumped
+    assert dumped["timeout"] is None
 
 
 def test_sandbox_model_converter_maps_platform_from_create_response() -> None:
@@ -305,3 +305,20 @@ def test_sandbox_model_converter_maps_platform_from_create_response() -> None:
     converted = SandboxModelConverter.to_sandbox_create_response(api_response)
     assert converted.platform is not None
     assert converted.platform.arch == "arm64"
+
+
+def test_sandbox_model_converter_supports_windows_platform_request() -> None:
+    req = SandboxModelConverter.to_api_create_sandbox_request(
+        spec=SandboxImageSpec("dockurr/windows:latest"),
+        entrypoint=["cmd", "/c", "echo hi"],
+        env={},
+        metadata={},
+        timeout=timedelta(seconds=3),
+        resource={"cpu": "2", "memory": "4G"},
+        platform=PlatformSpec(os="windows", arch="amd64"),
+        network_policy=None,
+        extensions={},
+        volumes=None,
+    )
+    dumped = req.to_dict()
+    assert dumped["platform"] == {"os": "windows", "arch": "amd64"}

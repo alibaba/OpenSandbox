@@ -148,11 +148,12 @@ func TestInMemoryAllocationStore_Recover(t *testing.T) {
 
 	allocation1 := &SandboxAllocation{Pods: []string{"pod1", "pod2"}}
 	allocation2 := &SandboxAllocation{Pods: []string{"pod3", "pod4"}}
-	release2 := &AllocationRelease{Pods: []string{"pod4"}}
+	// released (alloc-released) means recycle is complete; Recover should exclude these pods.
+	released2 := &AllocationReleased{Pods: []string{"pod4"}}
 
 	alloc1JSON, _ := json.Marshal(allocation1)
 	alloc2JSON, _ := json.Marshal(allocation2)
-	release2JSON, _ := json.Marshal(release2)
+	released2JSON, _ := json.Marshal(released2)
 
 	sandbox1 := &sandboxv1alpha1.BatchSandbox{
 		ObjectMeta: metav1.ObjectMeta{
@@ -172,8 +173,8 @@ func TestInMemoryAllocationStore_Recover(t *testing.T) {
 			Name:      "sandbox2",
 			Namespace: "default",
 			Annotations: map[string]string{
-				AnnoAllocStatusKey:  string(alloc2JSON),
-				AnnoAllocReleaseKey: string(release2JSON),
+				AnnoAllocStatusKey:   string(alloc2JSON),
+				AnnoAllocReleasedKey: string(released2JSON),
 			},
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
@@ -205,7 +206,7 @@ func TestInMemoryAllocationStore_Recover(t *testing.T) {
 	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod1"])
 	assert.Equal(t, "sandbox1", store.pools["default/pool1"].data["pod2"])
 	assert.Equal(t, "sandbox2", store.pools["default/pool1"].data["pod3"])
-	// Filter released pod4
+	// pod4 is in alloc-released (completed recycle), so it should be excluded from the pool.
 	assert.Equal(t, "", store.pools["default/pool1"].data["pod4"])
 
 	assert.Equal(t, 0, len(store.pools["default/pool2"].data), "pool2 should have no allocations")
@@ -216,11 +217,12 @@ func TestInMemoryAllocationStore_Recover_ReleaseOnlyOwnPods(t *testing.T) {
 	_ = sandboxv1alpha1.AddToScheme(scheme)
 
 	allocation1 := &SandboxAllocation{Pods: []string{"pod1"}}
-	release1 := &AllocationRelease{Pods: []string{"pod1"}}
+	// sandbox1 has completed recycling pod1 (alloc-released), so pod1 should be freed.
+	released1 := &AllocationReleased{Pods: []string{"pod1"}}
 	allocation2 := &SandboxAllocation{Pods: []string{"pod1"}}
 
 	alloc1JSON, _ := json.Marshal(allocation1)
-	release1JSON, _ := json.Marshal(release1)
+	released1JSON, _ := json.Marshal(released1)
 	alloc2JSON, _ := json.Marshal(allocation2)
 
 	sandbox1 := &sandboxv1alpha1.BatchSandbox{
@@ -228,8 +230,8 @@ func TestInMemoryAllocationStore_Recover_ReleaseOnlyOwnPods(t *testing.T) {
 			Name:      "sandbox1",
 			Namespace: "default",
 			Annotations: map[string]string{
-				AnnoAllocStatusKey:  string(alloc1JSON),
-				AnnoAllocReleaseKey: string(release1JSON),
+				AnnoAllocStatusKey:   string(alloc1JSON),
+				AnnoAllocReleasedKey: string(released1JSON),
 			},
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
@@ -269,15 +271,15 @@ func TestInMemoryAllocationStore_Recover_ReleasePodReassignedMultipleTimes(t *te
 	_ = sandboxv1alpha1.AddToScheme(scheme)
 
 	allocation1 := &SandboxAllocation{Pods: []string{"pod1"}}
-	release1 := &AllocationRelease{Pods: []string{"pod1"}}
+	released1 := &AllocationReleased{Pods: []string{"pod1"}}
 	allocation2 := &SandboxAllocation{Pods: []string{"pod1"}}
-	release2 := &AllocationRelease{Pods: []string{"pod1"}}
+	released2 := &AllocationReleased{Pods: []string{"pod1"}}
 	allocation3 := &SandboxAllocation{Pods: []string{"pod1"}}
 
 	alloc1JSON, _ := json.Marshal(allocation1)
-	release1JSON, _ := json.Marshal(release1)
+	released1JSON, _ := json.Marshal(released1)
 	alloc2JSON, _ := json.Marshal(allocation2)
-	release2JSON, _ := json.Marshal(release2)
+	released2JSON, _ := json.Marshal(released2)
 	alloc3JSON, _ := json.Marshal(allocation3)
 
 	sandbox1 := &sandboxv1alpha1.BatchSandbox{
@@ -285,8 +287,8 @@ func TestInMemoryAllocationStore_Recover_ReleasePodReassignedMultipleTimes(t *te
 			Name:      "sandbox1",
 			Namespace: "default",
 			Annotations: map[string]string{
-				AnnoAllocStatusKey:  string(alloc1JSON),
-				AnnoAllocReleaseKey: string(release1JSON),
+				AnnoAllocStatusKey:   string(alloc1JSON),
+				AnnoAllocReleasedKey: string(released1JSON),
 			},
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{PoolRef: "pool1"},
@@ -297,8 +299,8 @@ func TestInMemoryAllocationStore_Recover_ReleasePodReassignedMultipleTimes(t *te
 			Name:      "sandbox2",
 			Namespace: "default",
 			Annotations: map[string]string{
-				AnnoAllocStatusKey:  string(alloc2JSON),
-				AnnoAllocReleaseKey: string(release2JSON),
+				AnnoAllocStatusKey:   string(alloc2JSON),
+				AnnoAllocReleasedKey: string(released2JSON),
 			},
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{PoolRef: "pool1"},

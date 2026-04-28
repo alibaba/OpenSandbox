@@ -70,3 +70,64 @@ def test_format_ingress_endpoint_header():
     assert endpoint is not None
     assert endpoint.endpoint == "gateway.example.com"
     assert endpoint.headers == {OPEN_SANDBOX_INGRESS_HEADER: "sid-8080"}
+
+
+# ============================================================
+# Signed ingress endpoints
+# ============================================================
+
+
+def test_format_signed_ingress_endpoint_wildcard():
+    cfg = IngressConfig(
+        mode=INGRESS_MODE_GATEWAY,
+        gateway=GatewayConfig(
+            address="*.example.com",
+            route=GatewayRouteModeConfig(mode="wildcard"),
+        ),
+    )
+    endpoint = format_ingress_endpoint(cfg, "sid", 8080, expires_b36="x2qxvk", signature="aabbccddk")
+    assert endpoint is not None
+    assert endpoint.endpoint == "sid-8080-x2qxvk-aabbccddk.example.com"
+    assert endpoint.headers is None
+
+
+def test_format_signed_ingress_endpoint_uri():
+    cfg = IngressConfig(
+        mode=INGRESS_MODE_GATEWAY,
+        gateway=GatewayConfig(
+            address="gateway.example.com",
+            route=GatewayRouteModeConfig(mode="uri"),
+        ),
+    )
+    endpoint = format_ingress_endpoint(cfg, "sid", 9000, expires_b36="x2qxvk", signature="aabbccddk")
+    assert endpoint is not None
+    assert endpoint.endpoint == "gateway.example.com/sid/9000/x2qxvk/aabbccddk"
+    assert endpoint.headers is None
+
+
+def test_format_signed_ingress_endpoint_header():
+    cfg = IngressConfig(
+        mode=INGRESS_MODE_GATEWAY,
+        gateway=GatewayConfig(
+            address="gateway.example.com",
+            route=GatewayRouteModeConfig(mode="header"),
+        ),
+    )
+    endpoint = format_ingress_endpoint(cfg, "sid", 8080, expires_b36="x2qxvk", signature="aabbccddk")
+    assert endpoint is not None
+    assert endpoint.endpoint == "gateway.example.com"
+    assert endpoint.headers == {OPEN_SANDBOX_INGRESS_HEADER: "sid-8080-x2qxvk-aabbccddk"}
+
+
+def test_format_signed_ingress_endpoint_partial_params_falls_back_to_unsigned():
+    """Only providing one of expires_b36/signature should not trigger signed format."""
+    cfg = IngressConfig(
+        mode=INGRESS_MODE_GATEWAY,
+        gateway=GatewayConfig(
+            address="*.example.com",
+            route=GatewayRouteModeConfig(mode="wildcard"),
+        ),
+    )
+    endpoint = format_ingress_endpoint(cfg, "sid", 8080, expires_b36="x2qxvk")
+    assert endpoint is not None
+    assert endpoint.endpoint == "sid-8080.example.com"

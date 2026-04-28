@@ -188,6 +188,21 @@ internal class SandboxesAdapter(
         }
     }
 
+    override fun getSignedSandboxEndpoint(
+        sandboxId: String,
+        port: Int,
+        expires: Long,
+        useServerProxy: Boolean,
+    ): SandboxEndpoint {
+        logger.debug("Retrieving signed sandbox endpoint: {}, port {}", sandboxId, port)
+        return try {
+            api.sandboxesSandboxIdEndpointsPortGet(sandboxId, port, useServerProxy, expires.toString()).toSandboxEndpoint()
+        } catch (e: Exception) {
+            logger.error("Failed to retrieve signed sandbox endpoint for sandbox {}", sandboxId, e)
+            throw e.toSandboxException()
+        }
+    }
+
     override fun pauseSandbox(sandboxId: String) {
         logger.info("Pausing sandbox: {}", sandboxId)
 

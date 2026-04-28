@@ -48,6 +48,7 @@ func TestVolume_HostMount(t *testing.T) {
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image:        getSandboxImage(),
+		Env:          map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 		ReadyTimeout: 60 * time.Second,
 		Volumes: []opensandbox.Volume{
 			{
@@ -84,6 +85,7 @@ func TestVolume_HostMountReadOnly(t *testing.T) {
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
+		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 		Volumes: []opensandbox.Volume{
 			{
 				Name:      "test-host-ro",
@@ -118,6 +120,7 @@ func TestVolume_PVCMount(t *testing.T) {
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
+		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
 		Volumes: []opensandbox.Volume{
 			{
 				Name:      "test-pvc-vol",

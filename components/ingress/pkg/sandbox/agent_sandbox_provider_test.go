@@ -147,7 +147,7 @@ func TestAgentSandboxProvider_GetEndpoint_ServiceFQDN(t *testing.T) {
 
 	endpoint, err := provider.GetEndpoint("demo")
 	assert.NoError(t, err)
-	assert.Equal(t, "sandbox.demo.svc.cluster.local", endpoint)
+	assert.Equal(t, "sandbox.demo.svc.cluster.local", endpoint.Endpoint)
 }
 
 func TestAgentSandboxProvider_GetEndpoint_NotFound(t *testing.T) {
@@ -288,7 +288,7 @@ func TestAgentSandboxProvider_GetEndpoint_GlobalWatchAcrossNamespaces(t *testing
 
 	endpoint, err := provider.GetEndpoint("demo")
 	assert.NoError(t, err)
-	assert.Equal(t, "sandbox.demo.svc.cluster.local", endpoint)
+	assert.Equal(t, "sandbox.demo.svc.cluster.local", endpoint.Endpoint)
 }
 
 func TestAgentSandboxProvider_GetEndpoint_AmbiguousAcrossNamespaces(t *testing.T) {

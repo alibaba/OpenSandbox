@@ -32,10 +32,13 @@ def _get_kwargs(
     port: int,
     *,
     use_server_proxy: bool | Unset = False,
+    expires: int | Unset = UNSET,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {}
 
     params["use_server_proxy"] = use_server_proxy
+    if not isinstance(expires, Unset):
+        params["expires"] = expires
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
@@ -102,6 +105,7 @@ def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
     use_server_proxy: bool | Unset = False,
+    expires: int | Unset = UNSET,
 ) -> Response[Endpoint | ErrorResponse]:
     """Get sandbox access endpoint
 
@@ -113,6 +117,7 @@ def sync_detailed(
         sandbox_id (str):
         port (int):
         use_server_proxy (bool | Unset):  Default: False.
+        expires (int | Unset):  Unix epoch seconds for a signed route token (OSEP-0011).
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -126,6 +131,7 @@ def sync_detailed(
         sandbox_id=sandbox_id,
         port=port,
         use_server_proxy=use_server_proxy,
+        expires=expires,
     )
 
     response = client.get_httpx_client().request(
@@ -141,6 +147,7 @@ def sync(
     *,
     client: AuthenticatedClient | Client,
     use_server_proxy: bool | Unset = False,
+    expires: int | Unset = UNSET,
 ) -> Endpoint | ErrorResponse | None:
     """Get sandbox access endpoint
 
@@ -152,6 +159,7 @@ def sync(
         sandbox_id (str):
         port (int):
         use_server_proxy (bool | Unset):  Default: False.
+        expires (int | Unset):  Unix epoch seconds for a signed route token (OSEP-0011).
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -166,6 +174,7 @@ def sync(
         port=port,
         client=client,
         use_server_proxy=use_server_proxy,
+        expires=expires,
     ).parsed
 
 
@@ -175,6 +184,7 @@ async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
     use_server_proxy: bool | Unset = False,
+    expires: int | Unset = UNSET,
 ) -> Response[Endpoint | ErrorResponse]:
     """Get sandbox access endpoint
 
@@ -186,6 +196,7 @@ async def asyncio_detailed(
         sandbox_id (str):
         port (int):
         use_server_proxy (bool | Unset):  Default: False.
+        expires (int | Unset):  Unix epoch seconds for a signed route token (OSEP-0011).
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -199,6 +210,7 @@ async def asyncio_detailed(
         sandbox_id=sandbox_id,
         port=port,
         use_server_proxy=use_server_proxy,
+        expires=expires,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -212,6 +224,7 @@ async def asyncio(
     *,
     client: AuthenticatedClient | Client,
     use_server_proxy: bool | Unset = False,
+    expires: int | Unset = UNSET,
 ) -> Endpoint | ErrorResponse | None:
     """Get sandbox access endpoint
 
@@ -223,6 +236,7 @@ async def asyncio(
         sandbox_id (str):
         port (int):
         use_server_proxy (bool | Unset):  Default: False.
+        expires (int | Unset):  Unix epoch seconds for a signed route token (OSEP-0011).
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -238,5 +252,6 @@ async def asyncio(
             port=port,
             client=client,
             use_server_proxy=use_server_proxy,
+            expires=expires,
         )
     ).parsed

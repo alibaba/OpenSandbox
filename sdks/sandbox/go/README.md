@@ -118,6 +118,7 @@ Created with `NewLifecycleClient(baseURL, apiKey string, opts ...Option)`.
 | `ResumeSandbox(ctx, id)` | Resume a paused sandbox |
 | `RenewExpiration(ctx, id, expiresAt)` | Extend sandbox expiration time |
 | `GetEndpoint(ctx, sandboxID, port, useServerProxy)` | Get public endpoint for a sandbox port |
+| `GetSignedEndpoint(ctx, sandboxID, port, expires)` | Get signed endpoint URL with OSEP-0011 route token |
 
 ### ExecdClient
 
@@ -211,6 +212,10 @@ client := opensandbox.NewExecdClient(url, token,
     opensandbox.WithTimeout(60 * time.Second),
 )
 ```
+
+SDK-created HTTP clients enforce NIST 2030 minimum TLS certificate strength by default
+(RSA >= 2048, EC >= 224, DSA P >= 2048/Q >= 224, hash >= 224). If you must interoperate
+with legacy endpoints, set `AllowWeakServerCertKeyLengths: true` in `TransportConfig`.
 
 ## Error Handling
 
