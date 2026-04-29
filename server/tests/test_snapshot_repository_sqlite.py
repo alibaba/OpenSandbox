@@ -15,7 +15,10 @@
 from datetime import datetime, timedelta
 
 from opensandbox_server.repositories.snapshots.factory import create_snapshot_repository
-from opensandbox_server.repositories.snapshots.sqlite import SQLiteSnapshotRepository
+from opensandbox_server.repositories.snapshots.sqlite import (
+    SQLITE_BUSY_TIMEOUT_MS,
+    SQLiteSnapshotRepository,
+)
 from opensandbox_server.config import AppConfig, RuntimeConfig, StoreConfig
 from opensandbox_server.services.snapshot_models import (
     SnapshotRecord,
@@ -63,6 +66,17 @@ def test_sqlite_snapshot_repository_persists_and_fetches_records(tmp_path) -> No
     assert loaded.source_sandbox_id == "sbx-001"
     assert loaded.restore_config.image == record.restore_config.image
     assert loaded.status.state == SnapshotState.CREATING
+
+
+def test_sqlite_snapshot_repository_enables_wal_and_busy_timeout(tmp_path) -> None:
+    repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
+
+    with repo._connect() as conn:
+        journal_mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        busy_timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+
+    assert journal_mode.lower() == "wal"
+    assert busy_timeout == SQLITE_BUSY_TIMEOUT_MS
 
 
 def test_sqlite_snapshot_repository_lists_and_updates_records(tmp_path) -> None:

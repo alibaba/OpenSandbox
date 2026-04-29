@@ -402,25 +402,6 @@ class PersistedSnapshotService(SnapshotService):
             )
 
     @staticmethod
-    def _build_deleting_record(record: SnapshotRecord) -> SnapshotRecord:
-        now = datetime.now(timezone.utc)
-        return SnapshotRecord(
-            id=record.id,
-            source_sandbox_id=record.source_sandbox_id,
-            name=record.name,
-            description=record.description,
-            restore_config=record.restore_config,
-            status=SnapshotStatusRecord(
-                state=SnapshotState.DELETING,
-                reason="snapshot_delete_requested",
-                message="Snapshot deletion requested.",
-                last_transition_at=now,
-            ),
-            created_at=record.created_at,
-            updated_at=now,
-        )
-
-    @staticmethod
     def _to_snapshot_response(record: SnapshotRecord) -> Snapshot:
         return Snapshot(
             id=record.id,
