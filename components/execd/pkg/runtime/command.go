@@ -105,7 +105,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	stderrPath := c.stderrFileName(session)
 
 	startAt := time.Now()
-	log.Info("received command: %v", request.Code)
+	log.Info("received command: %v", log.SanitizeCommand(request.Code))
 	shell := getShell()
 	cmd := exec.CommandContext(ctx, shell, "-c", request.Code)
 	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
@@ -240,7 +240,7 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	defer signal.Reset()
 
 	startAt := time.Now()
-	log.Info("received command: %v", request.Code)
+	log.Info("received command: %v", log.SanitizeCommand(request.Code))
 	shell := getShell()
 	cmd := exec.CommandContext(ctx, shell, "-c", request.Code)
 	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
