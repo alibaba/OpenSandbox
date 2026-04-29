@@ -59,7 +59,7 @@ seccomp_profile = ""
 mode = "direct"
 
 [egress]
-image = "opensandbox/egress:v1.0.9"
+image = "opensandbox/egress:v1.0.10"
 mode = "dns"
 
 # 🧪 [EXPERIMENTAL] Renew-on-access. Off by default — see server/README.md.
