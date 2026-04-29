@@ -278,7 +278,19 @@ class PersistedSnapshotService(SnapshotService):
         if current_record.status.state != SnapshotState.CREATING:
             return
 
-        self._apply_runtime_status(current_record, runtime_status)
+        updated = self._build_runtime_status_record(current_record, runtime_status)
+        if updated is None:
+            return
+
+        updated_applied = self._snapshot_repository.update_if_state(
+            updated,
+            SnapshotState.CREATING,
+        )
+        if not updated_applied:
+            logger.info(
+                "Snapshot %s was already transitioned before worker completion; skipping update",
+                current_record.id,
+            )
 
     def recover_unfinished_snapshots(self) -> None:
         while True:
@@ -343,15 +355,15 @@ class PersistedSnapshotService(SnapshotService):
 
         return False
 
-    def _apply_runtime_status(
+    def _build_runtime_status_record(
         self,
         record: SnapshotRecord,
         runtime_status,
-    ) -> SnapshotRecord:
+    ) -> SnapshotRecord | None:
         now = datetime.now(timezone.utc)
         if runtime_status.state == SnapshotState.READY:
             if not runtime_status.image:
-                updated = SnapshotRecord(
+                return SnapshotRecord(
                     id=record.id,
                     source_sandbox_id=record.source_sandbox_id,
                     name=record.name,
@@ -366,10 +378,8 @@ class PersistedSnapshotService(SnapshotService):
                     created_at=record.created_at,
                     updated_at=now,
                 )
-                self._snapshot_repository.update(updated)
-                return updated
 
-            updated = SnapshotRecord(
+            return SnapshotRecord(
                 id=record.id,
                 source_sandbox_id=record.source_sandbox_id,
                 name=record.name,
@@ -384,11 +394,9 @@ class PersistedSnapshotService(SnapshotService):
                 created_at=record.created_at,
                 updated_at=now,
             )
-            self._snapshot_repository.update(updated)
-            return updated
 
         if runtime_status.state == SnapshotState.FAILED:
-            updated = SnapshotRecord(
+            return SnapshotRecord(
                 id=record.id,
                 source_sandbox_id=record.source_sandbox_id,
                 name=record.name,
@@ -403,10 +411,8 @@ class PersistedSnapshotService(SnapshotService):
                 created_at=record.created_at,
                 updated_at=now,
             )
-            self._snapshot_repository.update(updated)
-            return updated
 
-        return record
+        return None
 
     def _cleanup_runtime_artifact(self, snapshot_id: str, image: str | None) -> None:
         if not image:

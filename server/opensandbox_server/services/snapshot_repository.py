@@ -19,7 +19,7 @@ Repository abstraction for persisted snapshot records.
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from opensandbox_server.services.snapshot_models import SnapshotRecord
+from opensandbox_server.services.snapshot_models import SnapshotRecord, SnapshotState
 
 
 @dataclass(slots=True)
@@ -67,6 +67,15 @@ class SnapshotRepository(Protocol):
     def update(self, record: SnapshotRecord) -> SnapshotRecord:
         """
         Replace the persisted contents of an existing snapshot record.
+        """
+
+    def update_if_state(
+        self,
+        record: SnapshotRecord,
+        expected_state: SnapshotState,
+    ) -> bool:
+        """
+        Replace a snapshot record only if its current state matches the expected state.
         """
 
     def delete(self, snapshot_id: str) -> None:

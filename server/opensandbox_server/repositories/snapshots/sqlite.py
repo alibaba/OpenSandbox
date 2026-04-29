@@ -180,6 +180,45 @@ class SQLiteSnapshotRepository:
             )
         return record
 
+    def update_if_state(
+        self,
+        record: SnapshotRecord,
+        expected_state: SnapshotState,
+    ) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE snapshots
+                SET
+                    source_sandbox_id = ?,
+                    name = ?,
+                    description = ?,
+                    restore_config = ?,
+                    state = ?,
+                    reason = ?,
+                    message = ?,
+                    last_transition_at = ?,
+                    created_at = ?,
+                    updated_at = ?
+                WHERE id = ? AND state = ?
+                """,
+                (
+                    record.source_sandbox_id,
+                    record.name,
+                    record.description,
+                    json.dumps(self._restore_config_to_dict(record.restore_config), sort_keys=True),
+                    record.status.state.value,
+                    record.status.reason,
+                    record.status.message,
+                    self._datetime_to_str(record.status.last_transition_at),
+                    self._datetime_to_str(record.created_at),
+                    self._datetime_to_str(record.updated_at),
+                    record.id,
+                    expected_state.value,
+                ),
+            )
+            return cursor.rowcount == 1
+
     def delete(self, snapshot_id: str) -> None:
         with self._connect() as conn:
             conn.execute("DELETE FROM snapshots WHERE id = ?", (snapshot_id,))

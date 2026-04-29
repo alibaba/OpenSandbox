@@ -376,6 +376,48 @@ def test_snapshot_service_worker_cleans_up_snapshot_deleted_during_creation(tmp_
     assert repo.get(created.id) is None
 
 
+def test_snapshot_service_worker_does_not_overwrite_transitioned_snapshot(tmp_path) -> None:
+    repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
+    runtime = StubSnapshotRuntime()
+    service = PersistedSnapshotService(
+        repo,
+        StubSandboxService(),
+        snapshot_runtime=runtime,
+        snapshot_executor=CapturingExecutor(),
+    )
+
+    ready_status = SnapshotRuntimeStatus(
+        state=SnapshotState.READY,
+        image="opensandbox-snapshots:snap-ready",
+        reason="snapshot_runtime_ready",
+        message="Docker snapshot image created successfully.",
+    )
+
+    def create_snapshot(snapshot_id: str, sandbox_id: str):
+        runtime.calls.append((snapshot_id, sandbox_id))
+        return ready_status
+
+    runtime.create_snapshot = create_snapshot
+    created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint"))
+
+    failed_record = repo.get(created.id)
+    assert failed_record is not None
+    failed_record.status = SnapshotStatusRecord(
+        state=SnapshotState.FAILED,
+        reason="external_transition",
+        message="Snapshot was transitioned by another worker.",
+    )
+    repo.update(failed_record)
+
+    service._create_snapshot_worker(_snapshot_record(created.id, SnapshotState.CREATING))
+
+    stored = repo.get(created.id)
+    assert stored is not None
+    assert stored.status.state == SnapshotState.FAILED
+    assert stored.status.reason == "external_transition"
+    assert stored.restore_config.image is None
+
+
 def test_snapshot_service_close_shuts_down_executor(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     executor = CapturingExecutor()

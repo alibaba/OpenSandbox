@@ -120,6 +120,52 @@ def test_sqlite_snapshot_repository_lists_and_updates_records(tmp_path) -> None:
     assert loaded.restore_config.image == "registry.example.com/snapshots/snap-001:v2"
 
 
+def test_sqlite_snapshot_repository_update_if_state_is_atomic(tmp_path) -> None:
+    repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
+    now = datetime.utcnow()
+    original = _record("snap-001", "sbx-001", now, state=SnapshotState.CREATING)
+    repo.create(original)
+
+    ready = SnapshotRecord(
+        id=original.id,
+        source_sandbox_id=original.source_sandbox_id,
+        name=original.name,
+        description=original.description,
+        restore_config=SnapshotRestoreConfig(image="opensandbox-snapshots:snap-001"),
+        status=SnapshotStatusRecord(
+            state=SnapshotState.READY,
+            reason="snapshot_ready",
+            message="Snapshot is ready.",
+            last_transition_at=now + timedelta(seconds=1),
+        ),
+        created_at=original.created_at,
+        updated_at=now + timedelta(seconds=1),
+    )
+    failed = SnapshotRecord(
+        id=original.id,
+        source_sandbox_id=original.source_sandbox_id,
+        name=original.name,
+        description=original.description,
+        restore_config=original.restore_config,
+        status=SnapshotStatusRecord(
+            state=SnapshotState.FAILED,
+            reason="snapshot_failed",
+            message="Snapshot failed.",
+            last_transition_at=now + timedelta(seconds=2),
+        ),
+        created_at=original.created_at,
+        updated_at=now + timedelta(seconds=2),
+    )
+
+    assert repo.update_if_state(ready, SnapshotState.CREATING) is True
+    assert repo.update_if_state(failed, SnapshotState.CREATING) is False
+
+    loaded = repo.get(original.id)
+    assert loaded is not None
+    assert loaded.status.state == SnapshotState.READY
+    assert loaded.restore_config.image == "opensandbox-snapshots:snap-001"
+
+
 def test_snapshot_repository_factory_defaults_to_sqlite(tmp_path) -> None:
     db_path = tmp_path / "factory-snapshots.db"
     config = AppConfig(
