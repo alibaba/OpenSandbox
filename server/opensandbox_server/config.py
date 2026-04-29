@@ -660,7 +660,7 @@ class EgressConfig(BaseModel):
 class RuntimeConfig(BaseModel):
     """Runtime selection (docker, kubernetes, etc.)."""
 
-    type: Literal["docker", "kubernetes"] = Field(
+    type: Literal["docker", "kubernetes", "podman"] = Field(
         ...,
         description="Active sandbox runtime implementation.",
     )
@@ -785,6 +785,18 @@ class DockerConfig(BaseModel):
     )
 
 
+class PodmanConfig(BaseModel):
+    """Podman-specific settings."""
+
+    socket_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explicit Podman API socket path. "
+            "Auto-detected from standard platform locations if omitted."
+        ),
+    )
+
+
 class AppConfig(BaseModel):
     """Root application configuration model."""
 
@@ -802,6 +814,7 @@ class AppConfig(BaseModel):
     agent_sandbox: Optional["AgentSandboxRuntimeConfig"] = None
     ingress: Optional[IngressConfig] = None
     docker: DockerConfig = Field(default_factory=DockerConfig)
+    podman: PodmanConfig = Field(default_factory=PodmanConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     egress: Optional[EgressConfig] = None
     secure_runtime: Optional[SecureRuntimeConfig] = Field(
@@ -810,15 +823,16 @@ class AppConfig(BaseModel):
     )
     @model_validator(mode="after")
     def validate_runtime_blocks(self) -> "AppConfig":
-        if self.runtime.type == "docker":
+        if self.runtime.type in ("docker", "podman"):
+            rt = self.runtime.type
             if self.kubernetes is not None:
-                raise ValueError("Kubernetes block must be omitted when runtime.type = 'docker'.")
+                raise ValueError(f"Kubernetes block must be omitted when runtime.type = '{rt}'.")
             if self.agent_sandbox is not None:
-                raise ValueError("agent_sandbox block must be omitted when runtime.type = 'docker'.")
+                raise ValueError(f"agent_sandbox block must be omitted when runtime.type = '{rt}'.")
             if self.ingress is not None and self.ingress.mode != INGRESS_MODE_DIRECT:
-                raise ValueError("ingress.mode must be 'direct' when runtime.type = 'docker'.")
+                raise ValueError(f"ingress.mode must be 'direct' when runtime.type = '{rt}'.")
             if self.secure_runtime is not None and self.secure_runtime.type == "firecracker":
-                raise ValueError( "secure_runtime.type 'firecracker' is only compatible with runtime.type='kubernetes'.")
+                raise ValueError("secure_runtime.type 'firecracker' is only compatible with runtime.type='kubernetes'.")
         elif self.runtime.type == "kubernetes":
             if self.kubernetes is None:
                 self.kubernetes = KubernetesRuntimeConfig()
@@ -931,6 +945,7 @@ __all__ = [
     "INGRESS_MODE_DIRECT",
     "INGRESS_MODE_GATEWAY",
     "DockerConfig",
+    "PodmanConfig",
     "StorageConfig",
     "KubernetesRuntimeConfig",
     "EgressConfig",

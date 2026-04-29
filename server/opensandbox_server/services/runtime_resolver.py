@@ -155,7 +155,7 @@ async def validate_secure_runtime_on_startup(
         logger.info("Secure runtime is not configured.")
         return
 
-    if config.runtime.type == "docker":
+    if config.runtime.type in ("docker", "podman"):
         await _validate_docker_runtime(resolver, docker_client)
     elif config.runtime.type == "kubernetes":
         await _validate_k8s_runtime_class(resolver, k8s_client, config)
@@ -170,18 +170,18 @@ async def _validate_docker_runtime(
     resolver: SecureRuntimeResolver,
     docker_client: Optional["DockerClient"],
 ) -> None:
-    """Validate that the Docker OCI runtime exists."""
+    """Validate that the configured OCI runtime exists."""
     runtime_name = resolver.get_docker_runtime()
 
     if not runtime_name:
-        logger.info("No Docker runtime configured for secure containers.")
+        logger.info("No OCI runtime configured for secure containers.")
         return
 
-    logger.info("Validating Docker OCI runtime: %s", runtime_name)
+    logger.info("Validating OCI runtime: %s", runtime_name)
 
     if docker_client is None:
         logger.warning(
-            "Docker client not available; skipping runtime validation. "
+            "Container client not available; skipping runtime validation. "
             "Runtime '%s' will be used but not validated.",
             runtime_name,
         )
@@ -196,18 +196,18 @@ async def _validate_docker_runtime(
         if runtime_name not in runtimes:
             available = ", ".join(runtimes.keys()) if runtimes else "none"
             raise ValueError(
-                f"Configured Docker runtime '{runtime_name}' is not available. "
+                f"Configured OCI runtime '{runtime_name}' is not available. "
                 f"Available runtimes: {available}. "
                 f"Please install and configure the runtime before starting the server."
             )
 
         logger.info(
-            "Docker OCI runtime '%s' is available: %s",
+            "OCI runtime '%s' is available: %s",
             runtime_name,
             runtimes.get(runtime_name, {}),
         )
     except Exception as exc:
-        logger.error("Failed to validate Docker runtime: %s", exc)
+        logger.error("Failed to validate OCI runtime: %s", exc)
         raise
 
 
