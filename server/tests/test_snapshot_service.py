@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from concurrent.futures import Future
+
 import pytest
 from fastapi import HTTPException
 
@@ -38,13 +40,35 @@ class StubSandboxService:
         return {"id": sandbox_id}
 
 
-class ImmediateThread:
-    def __init__(self, target, args=(), **kwargs) -> None:
-        self._target = target
-        self._args = args
+class ImmediateExecutor:
+    def __init__(self) -> None:
+        self.shutdown_called = False
 
-    def start(self) -> None:
-        self._target(*self._args)
+    def submit(self, fn, *args, **kwargs) -> Future:
+        future = Future()
+        try:
+            future.set_result(fn(*args, **kwargs))
+        except Exception as exc:  # noqa: BLE001
+            future.set_exception(exc)
+        return future
+
+    def shutdown(self, wait: bool = True) -> None:
+        self.shutdown_called = True
+
+
+class CapturingExecutor:
+    def __init__(self) -> None:
+        self.submitted: list[tuple[object, tuple, dict]] = []
+        self.shutdown_called = False
+        self.shutdown_wait = None
+
+    def submit(self, fn, *args, **kwargs) -> Future:
+        self.submitted.append((fn, args, kwargs))
+        return Future()
+
+    def shutdown(self, wait: bool = True) -> None:
+        self.shutdown_called = True
+        self.shutdown_wait = wait
 
 
 class StubSnapshotRuntime:
@@ -101,6 +125,7 @@ def test_snapshot_service_persists_create_and_get(tmp_path) -> None:
         repo,
         StubSandboxService(),
         snapshot_runtime=runtime,
+        snapshot_executor=ImmediateExecutor(),
     )
 
     created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint-before-import"))
@@ -113,17 +138,14 @@ def test_snapshot_service_persists_create_and_get(tmp_path) -> None:
     assert runtime.calls == [(created.id, "sbx-001")]
 
 
-def test_snapshot_service_marks_snapshot_ready_from_worker(monkeypatch, tmp_path) -> None:
+def test_snapshot_service_marks_snapshot_ready_from_worker(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
-    monkeypatch.setattr(
-        "opensandbox_server.services.snapshot_service.Thread",
-        ImmediateThread,
-    )
     service = PersistedSnapshotService(
         repo,
         StubSandboxService(),
         snapshot_runtime=runtime,
+        snapshot_executor=ImmediateExecutor(),
     )
 
     ready_status = SnapshotRuntimeStatus(
@@ -149,17 +171,14 @@ def test_snapshot_service_marks_snapshot_ready_from_worker(monkeypatch, tmp_path
     assert stored.restore_config.image == "opensandbox-snapshots:snap-ready"
 
 
-def test_snapshot_service_marks_snapshot_failed_from_worker(monkeypatch, tmp_path) -> None:
+def test_snapshot_service_marks_snapshot_failed_from_worker(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
-    monkeypatch.setattr(
-        "opensandbox_server.services.snapshot_service.Thread",
-        ImmediateThread,
-    )
     service = PersistedSnapshotService(
         repo,
         StubSandboxService(),
         snapshot_runtime=runtime,
+        snapshot_executor=ImmediateExecutor(),
     )
 
     failed_status = SnapshotRuntimeStatus(
@@ -184,17 +203,14 @@ def test_snapshot_service_marks_snapshot_failed_from_worker(monkeypatch, tmp_pat
     assert stored.status.reason == "snapshot_runtime_timeout"
 
 
-def test_snapshot_service_marks_snapshot_failed_when_worker_returns_none(monkeypatch, tmp_path) -> None:
+def test_snapshot_service_marks_snapshot_failed_when_worker_returns_none(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
-    monkeypatch.setattr(
-        "opensandbox_server.services.snapshot_service.Thread",
-        ImmediateThread,
-    )
     service = PersistedSnapshotService(
         repo,
         StubSandboxService(),
         snapshot_runtime=runtime,
+        snapshot_executor=ImmediateExecutor(),
     )
 
     created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint-before-import"))
@@ -213,6 +229,7 @@ def test_snapshot_service_lists_and_deletes_records(tmp_path) -> None:
         repo,
         StubSandboxService(),
         snapshot_runtime=runtime,
+        snapshot_executor=ImmediateExecutor(),
     )
 
     first = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="first"))
@@ -239,26 +256,15 @@ def test_snapshot_service_lists_and_deletes_records(tmp_path) -> None:
     assert exc_info.value.status_code == 404
 
 
-def test_snapshot_service_rejects_delete_while_creating(monkeypatch, tmp_path) -> None:
+def test_snapshot_service_rejects_delete_while_creating(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
+    executor = CapturingExecutor()
     service = PersistedSnapshotService(
         repo,
         StubSandboxService(),
         snapshot_runtime=runtime,
-    )
-
-    class CapturedThread:
-        def __init__(self, target, args=(), **kwargs) -> None:
-            self._target = target
-            self._args = args
-
-        def start(self) -> None:
-            return None
-
-    monkeypatch.setattr(
-        "opensandbox_server.services.snapshot_service.Thread",
-        CapturedThread,
+        snapshot_executor=executor,
     )
 
     created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint"))
@@ -272,19 +278,17 @@ def test_snapshot_service_rejects_delete_while_creating(monkeypatch, tmp_path) -
     assert stored is not None
     assert stored.status.state == SnapshotState.CREATING
     assert runtime.delete_calls == []
+    assert len(executor.submitted) == 1
 
 
-def test_snapshot_service_deletes_runtime_artifact_before_metadata(monkeypatch, tmp_path) -> None:
+def test_snapshot_service_deletes_runtime_artifact_before_metadata(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
-    monkeypatch.setattr(
-        "opensandbox_server.services.snapshot_service.Thread",
-        ImmediateThread,
-    )
     service = PersistedSnapshotService(
         repo,
         StubSandboxService(),
         snapshot_runtime=runtime,
+        snapshot_executor=ImmediateExecutor(),
     )
 
     ready_status = SnapshotRuntimeStatus(
@@ -341,13 +345,14 @@ def test_snapshot_service_propagates_snapshot_delete_conflict(tmp_path) -> None:
     assert repo.get("snap-in-use") is not None
 
 
-def test_snapshot_service_worker_cleans_up_snapshot_deleted_during_creation(monkeypatch, tmp_path) -> None:
+def test_snapshot_service_worker_cleans_up_snapshot_deleted_during_creation(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
     service = PersistedSnapshotService(
         repo,
         StubSandboxService(),
         snapshot_runtime=runtime,
+        snapshot_executor=CapturingExecutor(),
     )
 
     ready_status = SnapshotRuntimeStatus(
@@ -355,19 +360,6 @@ def test_snapshot_service_worker_cleans_up_snapshot_deleted_during_creation(monk
         image="opensandbox-snapshots:snap-ready",
         reason="snapshot_runtime_ready",
         message="Docker snapshot image created successfully.",
-    )
-
-    class CapturedThread:
-        def __init__(self, target, args=(), **kwargs) -> None:
-            self._target = target
-            self._args = args
-
-        def start(self) -> None:
-            return None
-
-    monkeypatch.setattr(
-        "opensandbox_server.services.snapshot_service.Thread",
-        CapturedThread,
     )
 
     def create_snapshot(snapshot_id: str, sandbox_id: str):
@@ -382,6 +374,22 @@ def test_snapshot_service_worker_cleans_up_snapshot_deleted_during_creation(monk
 
     assert runtime.delete_calls == [(created.id, "opensandbox-snapshots:snap-ready")]
     assert repo.get(created.id) is None
+
+
+def test_snapshot_service_close_shuts_down_executor(tmp_path) -> None:
+    repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
+    executor = CapturingExecutor()
+    service = PersistedSnapshotService(
+        repo,
+        StubSandboxService(),
+        snapshot_runtime=StubSnapshotRuntime(),
+        snapshot_executor=executor,
+    )
+
+    service.close()
+
+    assert executor.shutdown_called is True
+    assert executor.shutdown_wait is True
 
 
 def test_snapshot_service_propagates_missing_sandbox(tmp_path) -> None:

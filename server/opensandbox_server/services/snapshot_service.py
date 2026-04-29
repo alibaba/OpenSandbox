@@ -23,10 +23,10 @@ state within the request lifecycle.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 import logging
 from math import ceil
-from threading import Thread
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -59,6 +59,7 @@ from opensandbox_server.services.snapshot_repository import (
 
 logger = logging.getLogger(__name__)
 SNAPSHOT_RECOVERY_PAGE_SIZE = 200
+SNAPSHOT_WORKER_MAX_WORKERS = 2
 
 
 class SnapshotService(ABC):
@@ -82,6 +83,11 @@ class SnapshotService(ABC):
     def delete_snapshot(self, snapshot_id: str) -> None:
         pass
 
+    def close(self) -> None:
+        """
+        Release resources owned by the snapshot service.
+        """
+
 
 class PersistedSnapshotService(SnapshotService):
     """
@@ -93,12 +99,17 @@ class PersistedSnapshotService(SnapshotService):
         snapshot_repository: SnapshotRepository,
         sandbox_service,
         snapshot_runtime: SnapshotRuntime | None = None,
+        snapshot_executor=None,
         *,
         recover_unfinished_snapshots: bool = True,
     ) -> None:
         self._snapshot_repository = snapshot_repository
         self._sandbox_service = sandbox_service
         self._snapshot_runtime = snapshot_runtime or NoopSnapshotRuntime()
+        self._snapshot_executor = snapshot_executor or ThreadPoolExecutor(
+            max_workers=SNAPSHOT_WORKER_MAX_WORKERS,
+            thread_name_prefix="snapshot-create",
+        )
         if recover_unfinished_snapshots:
             self.recover_unfinished_snapshots()
 
@@ -130,13 +141,11 @@ class PersistedSnapshotService(SnapshotService):
             updated_at=now,
         )
         self._snapshot_repository.create(record)
-        worker = Thread(
-            target=self._create_snapshot_worker,
-            args=(record,),
-            name=f"snapshot-create-{record.id}",
-            daemon=True,
+        future = self._snapshot_executor.submit(
+            self._create_snapshot_worker,
+            record,
         )
-        worker.start()
+        future.add_done_callback(self._log_worker_failure)
         return self._to_snapshot_response(record)
 
     def list_snapshots(self, request: ListSnapshotsRequest) -> ListSnapshotsResponse:
@@ -203,6 +212,12 @@ class PersistedSnapshotService(SnapshotService):
         )
         self._snapshot_repository.delete(snapshot_id)
 
+    def close(self) -> None:
+        """
+        Stop accepting new snapshot work and wait for in-flight workers.
+        """
+        self._snapshot_executor.shutdown(wait=True)
+
     @staticmethod
     def _default_restore_config():
         return SnapshotRestoreConfig(image=None)
@@ -242,6 +257,12 @@ class PersistedSnapshotService(SnapshotService):
             )
 
         self._complete_snapshot(record, runtime_status)
+
+    def _log_worker_failure(self, future: Future) -> None:
+        try:
+            future.result()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Snapshot worker exited unexpectedly: %s", exc)
 
     def _complete_snapshot(self, record: SnapshotRecord, runtime_status) -> None:
         current_record = self._snapshot_repository.get(record.id)
@@ -436,4 +457,5 @@ __all__ = [
     "SnapshotService",
     "PersistedSnapshotService",
     "create_snapshot_service",
+    "SNAPSHOT_WORKER_MAX_WORKERS",
 ]

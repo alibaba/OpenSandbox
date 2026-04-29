@@ -41,7 +41,7 @@ _log_config = configure_logging(app_config.log)
 
 from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402
-from opensandbox_server.api.lifecycle import router, sandbox_service  # noqa: E402
+from opensandbox_server.api.lifecycle import router, sandbox_service, snapshot_service  # noqa: E402
 from opensandbox_server.api.proxy import router as proxy_router  # noqa: E402
 from opensandbox_server.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator  # noqa: E402
 from opensandbox_server.middleware.auth import AuthMiddleware  # noqa: E402
@@ -109,6 +109,7 @@ async def lifespan(app: FastAPI):
     consumer = getattr(app.state, "renew_intent_consumer", None)
     if consumer is not None:
         await consumer.stop()
+    snapshot_service.close()
     await app.state.http_client.aclose()
 
 
