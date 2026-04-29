@@ -119,6 +119,9 @@ func main() {
 		log.Fatalf("mitmproxy transparent: %v", err)
 	}
 	mitmGate.MarkStackReady()
+	if mitm != nil {
+		mitm.watchMitmproxy(ctx, mitmGate)
+	}
 
 	if err := startup.RunPost(ctx); err != nil {
 		log.Errorf("startup hooks (post) error: %v", err)

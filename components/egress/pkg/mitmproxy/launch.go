@@ -26,6 +26,7 @@ import (
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 const RunAsUser = "mitmproxy"
@@ -39,6 +40,8 @@ type Config struct {
 	UserName   string
 	ConfDir    string
 	ScriptPath string
+	// OnExit is called (if non-nil) when mitmdump exits. Called from a background goroutine.
+	OnExit func(error)
 }
 
 // Running: child mitmdump; use GracefulShutdown to SIGTERM+reap before process exit.
@@ -95,6 +98,10 @@ func Launch(cfg Config) (*Running, error) {
 		trustDir = "/etc/ssl/certs"
 	}
 	args = append(args, "--set", "ssl_verify_upstream_trusted_confdir="+trustDir)
+
+	// Stream large bodies instead of buffering them in memory (OOM prevention).
+	args = append(args, "--set", "stream_large_bodies=1m")
+
 	homeEnv := home
 	if strings.TrimSpace(cfg.ConfDir) != "" {
 		cd := strings.TrimSpace(cfg.ConfDir)
@@ -126,9 +133,14 @@ func Launch(cfg Config) (*Running, error) {
 		return nil, fmt.Errorf("mitmproxy: start mitmdump: %w", err)
 	}
 	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Wait()
-	}()
+	onExit := cfg.OnExit
+	safego.Go(func() {
+		err := cmd.Wait()
+		done <- err
+		if onExit != nil {
+			onExit(err)
+		}
+	})
 
 	log.Infof("[mitmproxy] mitmdump started (pid %d, transparent on %s:%d)", cmd.Process.Pid, listenHostLoopback, cfg.ListenPort)
 	return &Running{Cmd: cmd, done: done}, nil
