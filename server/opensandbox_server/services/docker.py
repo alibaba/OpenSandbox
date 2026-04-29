@@ -1466,8 +1466,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         Docker-specific validation for host bind mount volumes.
 
         Validates that the resolved host path (host.path + optional subPath)
-        remains within allowed prefixes, then ensures the directory exists on
-        the filesystem — creating it automatically if it does not.
+        remains within allowed prefixes — including symlink resolution — then
+        ensures the directory exists on the filesystem, creating it automatically
+        if it does not.
 
         Args:
             volume: Volume with host backend.
@@ -1486,6 +1487,19 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         # any edge-case bypass.
         if allowed_prefixes and resolved_path != volume.host.path:
             ensure_valid_host_path(resolved_path, allowed_prefixes)
+
+        # ── Symlink-aware allowlist check ──
+        # os.path.normpath and ensure_valid_host_path only perform lexical
+        # checks.  A symlink within a whitelisted directory (e.g.
+        # /data/opensandbox/link -> /) would pass lexical validation but
+        # Docker resolves the symlink when creating the bind mount, escaping
+        # the allowed prefix.  Resolve both the host path and the allowed
+        # prefixes with realpath to detect this.
+        if allowed_prefixes:
+            canonical = os.path.realpath(resolved_path)
+            canonical_prefixes = [os.path.realpath(p) for p in allowed_prefixes]
+            if canonical != resolved_path or canonical_prefixes != allowed_prefixes:
+                ensure_valid_host_path(canonical, canonical_prefixes)
 
         # Allow existing host files (for example ISO binds to /boot.iso)
         # without attempting directory creation.

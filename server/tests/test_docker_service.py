@@ -3190,6 +3190,56 @@ class TestDockerVolumeValidation:
             assert binds[0] == f"{sub_dir}:/mnt/work:ro"
 
     @pytest.mark.asyncio
+    async def test_host_volume_symlink_bypass_rejected(self, mock_docker):
+        """Host volume with symlink escaping allowed prefix should be rejected."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        mock_client.api.create_host_config.return_value = {}
+        mock_client.api.create_container.return_value = {"Id": "cid"}
+        mock_client.containers.get.return_value = MagicMock()
+        mock_docker.from_env.return_value = mock_client
+
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a symlink within the allowed path that points to /
+            link_path = os.path.join(tmpdir, "escape")
+            os.symlink("/", link_path)
+
+            cfg = _app_config()
+            cfg.storage = StorageConfig(allowed_host_paths=[tmpdir])
+            service = DockerSandboxService(config=cfg)
+
+            # Request /tmpdir/escape/etc — lexical check passes (starts with
+            # tmpdir) but realpath resolves escape -> /, producing /etc which
+            # is outside the allowed prefix.
+            request = CreateSandboxRequest(
+                image=ImageSpec(uri="python:3.11"),
+                timeout=120,
+                resourceLimits=ResourceLimits(root={}),
+                env={},
+                metadata={},
+                entrypoint=["python"],
+                volumes=[
+                    Volume(
+                        name="escape-vol",
+                        host=Host(path=os.path.join(link_path, "etc")),
+                        mount_path="/mnt/etc",
+                        read_only=True,
+                    )
+                ],
+            )
+
+            with (
+                patch.object(service, "_ensure_image_available"),
+                patch.object(service, "_prepare_sandbox_runtime"),
+            ):
+                with pytest.raises(HTTPException) as exc_info:
+                    await service.create_sandbox(request)
+            assert exc_info.value.status_code == 400
+            assert exc_info.value.detail["code"] == SandboxErrorCodes.HOST_PATH_NOT_ALLOWED
+
+    @pytest.mark.asyncio
     async def test_host_subpath_auto_created(self, mock_docker):
         """Host volume with non-existent subPath should be auto-created."""
         mock_client = MagicMock()
