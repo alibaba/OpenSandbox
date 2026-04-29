@@ -26,6 +26,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/iptables"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/mitmproxy"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 type mitmTransparent struct {
@@ -98,7 +99,7 @@ func startMitmproxyTransparentIfEnabled() (*mitmTransparent, error) {
 // watchMitmproxy monitors mitmdump for unexpected exits, logs the error, and restarts it.
 // Must be called after startMitmproxyTransparentIfEnabled.
 func (m *mitmTransparent) watchMitmproxy(ctx context.Context, gate *mitmproxy.HealthGate) {
-	go func() {
+	safego.Go(func() {
 		for {
 			select {
 			case err := <-m.restartCh:
@@ -131,5 +132,5 @@ func (m *mitmTransparent) watchMitmproxy(ctx context.Context, gate *mitmproxy.He
 				return
 			}
 		}
-	}()
+	})
 }

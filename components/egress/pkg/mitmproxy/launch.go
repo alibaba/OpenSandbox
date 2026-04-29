@@ -26,6 +26,7 @@ import (
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
+	"github.com/alibaba/opensandbox/internal/safego"
 )
 
 const RunAsUser = "mitmproxy"
@@ -133,13 +134,13 @@ func Launch(cfg Config) (*Running, error) {
 	}
 	done := make(chan error, 1)
 	onExit := cfg.OnExit
-	go func() {
+	safego.Go(func() {
 		err := cmd.Wait()
 		done <- err
 		if onExit != nil {
 			onExit(err)
 		}
-	}()
+	})
 
 	log.Infof("[mitmproxy] mitmdump started (pid %d, transparent on %s:%d)", cmd.Process.Pid, listenHostLoopback, cfg.ListenPort)
 	return &Running{Cmd: cmd, done: done}, nil
