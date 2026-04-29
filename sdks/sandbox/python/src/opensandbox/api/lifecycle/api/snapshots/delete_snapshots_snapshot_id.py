@@ -59,6 +59,11 @@ def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Res
 
         return response_404
 
+    if response.status_code == 409:
+        response_409 = ErrorResponse.from_dict(response.json())
+
+        return response_409
+
     if response.status_code == 500:
         response_500 = ErrorResponse.from_dict(response.json())
 
@@ -86,7 +91,8 @@ def sync_detailed(
 ) -> Response[Any | ErrorResponse]:
     """Delete a snapshot
 
-     Delete a persistent sandbox snapshot by id.
+     Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be
+    deleted.
 
     Args:
         snapshot_id (str):
@@ -117,7 +123,8 @@ def sync(
 ) -> Any | ErrorResponse | None:
     """Delete a snapshot
 
-     Delete a persistent sandbox snapshot by id.
+     Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be
+    deleted.
 
     Args:
         snapshot_id (str):
@@ -143,7 +150,8 @@ async def asyncio_detailed(
 ) -> Response[Any | ErrorResponse]:
     """Delete a snapshot
 
-     Delete a persistent sandbox snapshot by id.
+     Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be
+    deleted.
 
     Args:
         snapshot_id (str):
@@ -172,7 +180,8 @@ async def asyncio(
 ) -> Any | ErrorResponse | None:
     """Delete a snapshot
 
-     Delete a persistent sandbox snapshot by id.
+     Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be
+    deleted.
 
     Args:
         snapshot_id (str):

@@ -189,8 +189,13 @@ class PersistedSnapshotService(SnapshotService):
             return
 
         if record.status.state == SnapshotState.CREATING:
-            self._snapshot_repository.update(self._build_deleting_record(record))
-            return
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "SNAPSHOT::INVALID_STATE",
+                    "message": f"Snapshot {snapshot_id} is still being created and cannot be deleted",
+                },
+            )
 
         self._snapshot_runtime.delete_snapshot(
             snapshot_id,

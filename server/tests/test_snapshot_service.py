@@ -239,7 +239,7 @@ def test_snapshot_service_lists_and_deletes_records(tmp_path) -> None:
     assert exc_info.value.status_code == 404
 
 
-def test_snapshot_service_marks_creating_snapshot_as_deleting(monkeypatch, tmp_path) -> None:
+def test_snapshot_service_rejects_delete_while_creating(monkeypatch, tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
     service = PersistedSnapshotService(
@@ -262,12 +262,15 @@ def test_snapshot_service_marks_creating_snapshot_as_deleting(monkeypatch, tmp_p
     )
 
     created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint"))
-    service.delete_snapshot(created.id)
+    with pytest.raises(HTTPException) as exc_info:
+        service.delete_snapshot(created.id)
+
     stored = repo.get(created.id)
 
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "SNAPSHOT::INVALID_STATE"
     assert stored is not None
-    assert stored.status.state == SnapshotState.DELETING
-    assert stored.status.reason == "snapshot_delete_requested"
+    assert stored.status.state == SnapshotState.CREATING
     assert runtime.delete_calls == []
 
 
@@ -338,7 +341,7 @@ def test_snapshot_service_propagates_snapshot_delete_conflict(tmp_path) -> None:
     assert repo.get("snap-in-use") is not None
 
 
-def test_snapshot_service_worker_cleans_up_deleting_snapshot(monkeypatch, tmp_path) -> None:
+def test_snapshot_service_worker_cleans_up_snapshot_deleted_during_creation(monkeypatch, tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
     service = PersistedSnapshotService(
@@ -373,13 +376,9 @@ def test_snapshot_service_worker_cleans_up_deleting_snapshot(monkeypatch, tmp_pa
 
     runtime.create_snapshot = create_snapshot
     created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint"))
-    service.delete_snapshot(created.id)
+    repo.delete(created.id)
 
-    deleting = repo.get(created.id)
-    assert deleting is not None
-    assert deleting.status.state == SnapshotState.DELETING
-
-    service._create_snapshot_worker(deleting)
+    service._create_snapshot_worker(_snapshot_record(created.id, SnapshotState.CREATING))
 
     assert runtime.delete_calls == [(created.id, "opensandbox-snapshots:snap-ready")]
     assert repo.get(created.id) is None

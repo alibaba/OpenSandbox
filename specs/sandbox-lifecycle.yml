@@ -318,7 +318,7 @@ paths:
     delete:
       tags: [Snapshots]
       summary: Delete a snapshot
-      description: Delete a persistent sandbox snapshot by id.
+      description: Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be deleted.
       responses:
         '204':
           description: Snapshot successfully deleted
@@ -331,6 +331,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
   /sandboxes/{sandboxId}:

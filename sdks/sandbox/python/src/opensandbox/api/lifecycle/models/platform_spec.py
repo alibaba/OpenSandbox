@@ -43,7 +43,7 @@ class PlatformSpec:
       request must fail explicitly.
 
         Attributes:
-            os (PlatformSpecOs): Target operating system (for example `linux`). Example: linux.
+            os (PlatformSpecOs): Target operating system (for example `linux` or `windows`). Example: linux.
             arch (PlatformSpecArch): Target CPU architecture (for example `amd64` or `arm64`). Example: arm64.
     """
 

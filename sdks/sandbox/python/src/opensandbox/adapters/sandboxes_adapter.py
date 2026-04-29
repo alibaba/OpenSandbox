@@ -367,7 +367,7 @@ class SandboxesAdapter(Sandboxes):
                     sandbox_id=sandbox_id,
                     port=port,
                     use_server_proxy=use_server_proxy,
-                    expires=expires,
+                    expires=str(expires),
                 )
             )
 

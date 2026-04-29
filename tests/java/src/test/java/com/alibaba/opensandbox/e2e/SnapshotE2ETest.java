@@ -57,7 +57,6 @@ public class SnapshotE2ETest extends BaseE2ETest {
         Sandbox source = null;
         Sandbox restored = null;
         String readySnapshotId = null;
-        String transientSnapshotId = null;
         String tag = "snapshot-e2e-" + UUID.randomUUID().toString().substring(0, 8);
         String marker = "snapshot-marker-" + UUID.randomUUID();
 
@@ -163,36 +162,9 @@ public class SnapshotE2ETest extends BaseE2ETest {
                                     .pageSize(50)
                                     .build());
             assertSnapshotList(readySnapshotsAfterDelete, 1, 50);
-
-            SnapshotInfo transientSnapshot =
-                    manager.createSnapshot(source.getId(), tag + "-delete-while-creating");
-            transientSnapshotId = transientSnapshot.getId();
-            assertSnapshotFields(
-                    transientSnapshot,
-                    transientSnapshotId,
-                    source.getId(),
-                    tag + "-delete-while-creating",
-                    "Creating",
-                    "snapshot_accepted",
-                    "Snapshot creation accepted.",
-                    null);
-
-            manager.deleteSnapshot(transientSnapshotId);
-            waitForSnapshotDeleted(manager, transientSnapshotId, DELETE_TIMEOUT);
-            transientSnapshotId = null;
-
-            PagedSnapshotInfos snapshotsAfterTransientDelete =
-                    manager.listSnapshots(
-                            SnapshotFilter.builder()
-                                    .sandboxId(source.getId())
-                                    .page(1)
-                                    .pageSize(50)
-                                    .build());
-            assertSnapshotList(snapshotsAfterTransientDelete, 1, 50);
         } finally {
             closeSandbox(restored);
             closeSandbox(source);
-            deleteSnapshotIfExists(manager, transientSnapshotId);
             deleteSnapshotIfExists(manager, readySnapshotId);
             manager.close();
         }

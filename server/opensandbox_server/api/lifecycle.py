@@ -455,7 +455,7 @@ async def get_snapshot(
         401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
         403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
         404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
-        409: {"model": ErrorResponse, "description": "The snapshot is still in use and cannot be deleted"},
+        409: {"model": ErrorResponse, "description": "The snapshot is not in a deletable state or is still in use"},
         501: {"model": ErrorResponse, "description": "Snapshot management is not implemented yet"},
         500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
     },

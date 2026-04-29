@@ -242,7 +242,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a snapshot
-         * @description Delete a persistent sandbox snapshot by id.
+         * @description Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be deleted.
          */
         delete: {
             parameters: {
@@ -267,6 +267,7 @@ export interface paths {
                 401: components["responses"]["Unauthorized"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
                 500: components["responses"]["InternalServerError"];
             };
         };
@@ -437,7 +438,7 @@ export interface paths {
         put?: never;
         /**
          * Pause execution while retaining state
-         * @description Pause a running sandbox while preserving its state. Poll GET /sandboxes/{sandboxId} to track state transition to Paused.
+         * @description Pause a running sandbox while preserving its state. Poll GET /sandboxes/{sandboxId} to track state transition through Pausing and eventually Paused.
          */
         post: {
             parameters: {
@@ -454,7 +455,7 @@ export interface paths {
                 /**
                  * @description Pause operation accepted.
                  *
-                 *     Sandbox will transition to Pausing state.
+                 *     Sandbox will transition to Pausing state and eventually Paused.
                  *     Poll GET /sandboxes/{sandboxId} to track progress.
                  */
                 202: {
@@ -488,7 +489,7 @@ export interface paths {
         put?: never;
         /**
          * Resume a paused sandbox
-         * @description Resume execution of a paused sandbox. Poll GET /sandboxes/{sandboxId} to track state transition to Running.
+         * @description Resume execution of a paused sandbox. Poll GET /sandboxes/{sandboxId} to track state transition through Resuming and eventually Running.
          */
         post: {
             parameters: {
@@ -505,7 +506,7 @@ export interface paths {
                 /**
                  * @description Resume operation accepted.
                  *
-                 *     Sandbox will transition from Paused → Running.
+                 *     Sandbox will transition from Paused → Resuming → Running.
                  *     Poll GET /sandboxes/{sandboxId} to track progress.
                  */
                 202: {
@@ -603,6 +604,14 @@ export interface paths {
                 query?: {
                     /** @description Whether to return a server-proxied URL */
                     use_server_proxy?: boolean;
+                    /**
+                     * @description Optional. When set, the server **issues a signed** access route (OSEP-0011). The value
+                     *     is **Linux / Unix epoch seconds** — a decimal `uint64` count of **whole seconds** since
+                     *     the Unix epoch (`1970-01-01 00:00:00` UTC, same as POSIX / `time(2)`), not
+                     *     milliseconds. Normalized to `expires_b36` for the four-segment route token. Omit to
+                     *     get the unsigned/legacy response shape.
+                     */
+                    expires?: string;
                 };
                 header?: never;
                 path: {
@@ -629,6 +638,7 @@ export interface paths {
                         "application/json": components["schemas"]["Endpoint"];
                     };
                 };
+                400: components["responses"]["BadRequest"];
                 401: components["responses"]["Unauthorized"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
@@ -804,6 +814,7 @@ export interface components {
          *     - Running: Sandbox is running and ready to accept requests
          *     - Pausing: Sandbox is in the process of pausing
          *     - Paused: Sandbox has been paused while retaining its state
+         *     - Resuming: Sandbox is being restored after a pause
          *     - Stopping: Sandbox is being terminated
          *     - Terminated: Sandbox has been successfully terminated
          *     - Failed: Sandbox encountered a critical error
@@ -812,10 +823,11 @@ export interface components {
          *     - Pending → Running (after creation completes)
          *     - Running → Pausing (when pause is requested)
          *     - Pausing → Paused (pause operation completes)
-         *     - Paused → Running (when resume is requested)
+         *     - Paused → Resuming (when resume is requested)
+         *     - Resuming → Running (when resume operation completes)
          *     - Running/Paused → Stopping (when kill is requested or TTL expires)
          *     - Stopping → Terminated (kill/timeout operation completes)
-         *     - Pending/Running/Paused → Failed (on error)
+         *     - Pending/Running/Paused/Resuming → Failed (on error)
          *
          *     Note: New state values may be added in future versions.
          *     Clients should handle unknown state values gracefully.
@@ -878,11 +890,11 @@ export interface components {
          */
         PlatformSpec: {
             /**
-             * @description Target operating system (for example `linux`).
+             * @description Target operating system (for example `linux` or `windows`).
              * @example linux
              * @enum {string}
              */
-            os: "linux";
+            os: "linux" | "windows";
             /**
              * @description Target CPU architecture (for example `amd64` or `arm64`).
              * @example arm64

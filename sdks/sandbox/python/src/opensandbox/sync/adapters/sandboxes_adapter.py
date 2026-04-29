@@ -231,7 +231,7 @@ class SandboxesAdapterSync(SandboxesSync):
                 port=port,
                 client=self._get_client(),
                 use_server_proxy=use_server_proxy,
-                expires=expires,
+                expires=str(expires),
             )
             handle_api_error(response_obj, f"Get signed endpoint for sandbox {sandbox_id} port {port}")
             parsed = require_parsed(response_obj, ApiEndpoint, "Get signed endpoint")
