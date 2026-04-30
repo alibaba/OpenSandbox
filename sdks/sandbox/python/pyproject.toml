@@ -48,6 +48,11 @@ dependencies = [
     "httpx>=0.27.0,<1.0",
 ]
 
+[project.optional-dependencies]
+pool-redis = [
+    "redis>=5.0,<6.0",
+]
+
 [project.urls]
 Homepage = "https://open-sandbox.ai"
 Repository = "https://github.com/alibaba/OpenSandbox"

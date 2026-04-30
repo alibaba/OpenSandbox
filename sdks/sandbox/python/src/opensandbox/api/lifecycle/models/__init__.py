@@ -22,6 +22,7 @@ from .create_sandbox_request_extensions import CreateSandboxRequestExtensions
 from .create_sandbox_request_metadata import CreateSandboxRequestMetadata
 from .create_sandbox_response import CreateSandboxResponse
 from .create_sandbox_response_metadata import CreateSandboxResponseMetadata
+from .create_snapshot_request import CreateSnapshotRequest
 from .endpoint import Endpoint
 from .endpoint_headers import EndpointHeaders
 from .error_response import ErrorResponse
@@ -29,6 +30,7 @@ from .host import Host
 from .image_spec import ImageSpec
 from .image_spec_auth import ImageSpecAuth
 from .list_sandboxes_response import ListSandboxesResponse
+from .list_snapshots_response import ListSnapshotsResponse
 from .network_policy import NetworkPolicy
 from .network_policy_default_action import NetworkPolicyDefaultAction
 from .network_rule import NetworkRule
@@ -46,6 +48,8 @@ from .resource_limits import ResourceLimits
 from .sandbox import Sandbox
 from .sandbox_metadata import SandboxMetadata
 from .sandbox_status import SandboxStatus
+from .snapshot import Snapshot
+from .snapshot_status import SnapshotStatus
 from .volume import Volume
 
 __all__ = (
@@ -55,6 +59,7 @@ __all__ = (
     "CreateSandboxRequestMetadata",
     "CreateSandboxResponse",
     "CreateSandboxResponseMetadata",
+    "CreateSnapshotRequest",
     "Endpoint",
     "EndpointHeaders",
     "ErrorResponse",
@@ -62,6 +67,7 @@ __all__ = (
     "ImageSpec",
     "ImageSpecAuth",
     "ListSandboxesResponse",
+    "ListSnapshotsResponse",
     "NetworkPolicy",
     "NetworkPolicyDefaultAction",
     "NetworkRule",
@@ -79,5 +85,7 @@ __all__ = (
     "Sandbox",
     "SandboxMetadata",
     "SandboxStatus",
+    "Snapshot",
+    "SnapshotStatus",
     "Volume",
 )

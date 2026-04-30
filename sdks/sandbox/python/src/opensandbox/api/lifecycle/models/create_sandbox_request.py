@@ -40,14 +40,16 @@ T = TypeVar("T", bound="CreateSandboxRequest")
 
 @_attrs_define
 class CreateSandboxRequest:
-    """Request to create a new sandbox from a container image.
+    """Request to create a new sandbox from either a container image or a snapshot.
+    Exactly one of `image` or `snapshotId` must be provided.
+
+    When `image` is provided, `entrypoint` is required. When `snapshotId` is
+    provided, `entrypoint` must be omitted because the restored snapshot carries
+    its startup process.
 
     **Note**: API Key authentication is required via the `OPEN-SANDBOX-API-KEY` header.
 
         Attributes:
-            image (ImageSpec): Container image specification for sandbox provisioning.
-
-                Supports public registry images and private registry images with authentication.
             resource_limits (ResourceLimits): Runtime resource constraints as key-value pairs. Similar to Kubernetes
                 resource specifications,
                 allows flexible definition of resource limits. Common resource types include:
@@ -57,19 +59,11 @@ class CreateSandboxRequest:
 
                 New resource types can be added without API changes.
                  Example: {'cpu': '500m', 'memory': '512Mi', 'gpu': '1'}.
-            entrypoint (list[str]): The command to execute as the sandbox's entry process (required).
+            image (ImageSpec | Unset): Container image specification for sandbox provisioning.
 
-                Explicitly specifies the user's expected main process, allowing the sandbox management
-                service to reliably inject control processes before executing this command.
-
-                Format: [executable, arg1, arg2, ...]
-
-                Examples:
-                - ["python", "/app/main.py"]
-                - ["/bin/bash"]
-                - ["java", "-jar", "/app/app.jar"]
-                - ["node", "server.js"]
-                 Example: ['python', '/app/main.py'].
+                Supports public registry images and private registry images with authentication.
+            snapshot_id (str | Unset): Snapshot identifier to restore from.
+                Mutually exclusive with `image`.
             platform (PlatformSpec | Unset): Runtime platform constraint used for scheduling/provisioning.
 
                 This field is independent from `image` and expresses the expected target
@@ -95,6 +89,22 @@ class CreateSandboxRequest:
                 Use "name" key for a human-readable identifier.
                  Example: {'name': 'Data Processing Sandbox', 'project': 'data-processing', 'team': 'ml', 'environment':
                 'staging'}.
+            entrypoint (list[str] | Unset): The command to execute as the sandbox's entry process.
+
+                Required when `image` is provided. Must be omitted when `snapshotId`
+                is provided because the restored snapshot carries its startup process.
+
+                Explicitly specifies the user's expected main process, allowing the sandbox management
+                service to reliably inject control processes before executing this command.
+
+                Format: [executable, arg1, arg2, ...]
+
+                Examples:
+                - ["python", "/app/main.py"]
+                - ["/bin/bash"]
+                - ["java", "-jar", "/app/app.jar"]
+                - ["node", "server.js"]
+                 Example: ['python', '/app/main.py'].
             network_policy (NetworkPolicy | Unset): Egress network policy matching the sidecar `/policy` request body.
                 If `defaultAction` is omitted, the sidecar defaults to "deny"; passing an empty
                 object or null results in allow-all behavior at startup.
@@ -128,13 +138,14 @@ class CreateSandboxRequest:
                 via `validate_extensions` in server `src/extensions/validation.py`).
     """
 
-    image: ImageSpec
     resource_limits: ResourceLimits
-    entrypoint: list[str]
+    image: ImageSpec | Unset = UNSET
+    snapshot_id: str | Unset = UNSET
     platform: PlatformSpec | Unset = UNSET
     timeout: int | None | Unset = UNSET
     env: CreateSandboxRequestEnv | Unset = UNSET
     metadata: CreateSandboxRequestMetadata | Unset = UNSET
+    entrypoint: list[str] | Unset = UNSET
     network_policy: NetworkPolicy | Unset = UNSET
     secure_access: bool | Unset = False
     volumes: list[Volume] | Unset = UNSET
@@ -142,11 +153,13 @@ class CreateSandboxRequest:
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        image = self.image.to_dict()
-
         resource_limits = self.resource_limits.to_dict()
 
-        entrypoint = self.entrypoint
+        image: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.image, Unset):
+            image = self.image.to_dict()
+
+        snapshot_id = self.snapshot_id
 
         platform: dict[str, Any] | Unset = UNSET
         if not isinstance(self.platform, Unset):
@@ -165,6 +178,10 @@ class CreateSandboxRequest:
         metadata: dict[str, Any] | Unset = UNSET
         if not isinstance(self.metadata, Unset):
             metadata = self.metadata.to_dict()
+
+        entrypoint: list[str] | Unset = UNSET
+        if not isinstance(self.entrypoint, Unset):
+            entrypoint = self.entrypoint
 
         network_policy: dict[str, Any] | Unset = UNSET
         if not isinstance(self.network_policy, Unset):
@@ -187,11 +204,13 @@ class CreateSandboxRequest:
         field_dict.update(self.additional_properties)
         field_dict.update(
             {
-                "image": image,
                 "resourceLimits": resource_limits,
-                "entrypoint": entrypoint,
             }
         )
+        if image is not UNSET:
+            field_dict["image"] = image
+        if snapshot_id is not UNSET:
+            field_dict["snapshotId"] = snapshot_id
         if platform is not UNSET:
             field_dict["platform"] = platform
         if timeout is not UNSET:
@@ -200,6 +219,8 @@ class CreateSandboxRequest:
             field_dict["env"] = env
         if metadata is not UNSET:
             field_dict["metadata"] = metadata
+        if entrypoint is not UNSET:
+            field_dict["entrypoint"] = entrypoint
         if network_policy is not UNSET:
             field_dict["networkPolicy"] = network_policy
         if secure_access is not UNSET:
@@ -223,11 +244,16 @@ class CreateSandboxRequest:
         from ..models.volume import Volume
 
         d = dict(src_dict)
-        image = ImageSpec.from_dict(d.pop("image"))
-
         resource_limits = ResourceLimits.from_dict(d.pop("resourceLimits"))
 
-        entrypoint = cast(list[str], d.pop("entrypoint"))
+        _image = d.pop("image", UNSET)
+        image: ImageSpec | Unset
+        if isinstance(_image, Unset):
+            image = UNSET
+        else:
+            image = ImageSpec.from_dict(_image)
+
+        snapshot_id = d.pop("snapshotId", UNSET)
 
         _platform = d.pop("platform", UNSET)
         platform: PlatformSpec | Unset
@@ -259,6 +285,8 @@ class CreateSandboxRequest:
         else:
             metadata = CreateSandboxRequestMetadata.from_dict(_metadata)
 
+        entrypoint = cast(list[str], d.pop("entrypoint", UNSET))
+
         _network_policy = d.pop("networkPolicy", UNSET)
         network_policy: NetworkPolicy | Unset
         if isinstance(_network_policy, Unset):
@@ -285,13 +313,14 @@ class CreateSandboxRequest:
             extensions = CreateSandboxRequestExtensions.from_dict(_extensions)
 
         create_sandbox_request = cls(
-            image=image,
             resource_limits=resource_limits,
-            entrypoint=entrypoint,
+            image=image,
+            snapshot_id=snapshot_id,
             platform=platform,
             timeout=timeout,
             env=env,
             metadata=metadata,
+            entrypoint=entrypoint,
             network_policy=network_policy,
             secure_access=secure_access,
             volumes=volumes,

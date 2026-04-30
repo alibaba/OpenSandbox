@@ -16,38 +16,42 @@
 
 from http import HTTPStatus
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.endpoint import Endpoint
 from ...models.error_response import ErrorResponse
+from ...models.list_snapshots_response import ListSnapshotsResponse
 from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
-    sandbox_id: str,
-    port: int,
     *,
-    use_server_proxy: bool | Unset = False,
-    expires: str | Unset = UNSET,
+    sandbox_id: str | Unset = UNSET,
+    state: list[str] | Unset = UNSET,
+    page: int | Unset = 1,
+    page_size: int | Unset = 20,
 ) -> dict[str, Any]:
     params: dict[str, Any] = {}
 
-    params["use_server_proxy"] = use_server_proxy
+    params["sandboxId"] = sandbox_id
 
-    params["expires"] = expires
+    json_state: list[str] | Unset = UNSET
+    if not isinstance(state, Unset):
+        json_state = state
+
+    params["state"] = json_state
+
+    params["page"] = page
+
+    params["pageSize"] = page_size
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/sandboxes/{sandbox_id}/endpoints/{port}".format(
-            sandbox_id=quote(str(sandbox_id), safe=""),
-            port=quote(str(port), safe=""),
-        ),
+        "url": "/snapshots",
         "params": params,
     }
 
@@ -56,9 +60,9 @@ def _get_kwargs(
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Endpoint | ErrorResponse | None:
+) -> ErrorResponse | ListSnapshotsResponse | None:
     if response.status_code == 200:
-        response_200 = Endpoint.from_dict(response.json())
+        response_200 = ListSnapshotsResponse.from_dict(response.json())
 
         return response_200
 
@@ -71,16 +75,6 @@ def _parse_response(
         response_401 = ErrorResponse.from_dict(response.json())
 
         return response_401
-
-    if response.status_code == 403:
-        response_403 = ErrorResponse.from_dict(response.json())
-
-        return response_403
-
-    if response.status_code == 404:
-        response_404 = ErrorResponse.from_dict(response.json())
-
-        return response_404
 
     if response.status_code == 500:
         response_500 = ErrorResponse.from_dict(response.json())
@@ -95,7 +89,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[Endpoint | ErrorResponse]:
+) -> Response[ErrorResponse | ListSnapshotsResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -105,38 +99,37 @@ def _build_response(
 
 
 def sync_detailed(
-    sandbox_id: str,
-    port: int,
     *,
     client: AuthenticatedClient | Client,
-    use_server_proxy: bool | Unset = False,
-    expires: str | Unset = UNSET,
-) -> Response[Endpoint | ErrorResponse]:
-    """Get sandbox access endpoint
+    sandbox_id: str | Unset = UNSET,
+    state: list[str] | Unset = UNSET,
+    page: int | Unset = 1,
+    page_size: int | Unset = 20,
+) -> Response[ErrorResponse | ListSnapshotsResponse]:
+    """List snapshots
 
-     Get the public access endpoint URL for accessing a service running on a specific port
-    within the sandbox. The service must be listening on the specified port inside
-    the sandbox for the endpoint to be available.
+     List all snapshots with optional filtering and pagination using query parameters.
+    Snapshots are persistent captures of sandbox state and may outlive the source sandbox.
 
     Args:
-        sandbox_id (str):
-        port (int):
-        use_server_proxy (bool | Unset):  Default: False.
-        expires (str | Unset):
+        sandbox_id (str | Unset):
+        state (list[str] | Unset):
+        page (int | Unset):  Default: 1.
+        page_size (int | Unset):  Default: 20.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Endpoint | ErrorResponse]
+        Response[ErrorResponse | ListSnapshotsResponse]
     """
 
     kwargs = _get_kwargs(
         sandbox_id=sandbox_id,
-        port=port,
-        use_server_proxy=use_server_proxy,
-        expires=expires,
+        state=state,
+        page=page,
+        page_size=page_size,
     )
 
     response = client.get_httpx_client().request(
@@ -147,75 +140,73 @@ def sync_detailed(
 
 
 def sync(
-    sandbox_id: str,
-    port: int,
     *,
     client: AuthenticatedClient | Client,
-    use_server_proxy: bool | Unset = False,
-    expires: str | Unset = UNSET,
-) -> Endpoint | ErrorResponse | None:
-    """Get sandbox access endpoint
+    sandbox_id: str | Unset = UNSET,
+    state: list[str] | Unset = UNSET,
+    page: int | Unset = 1,
+    page_size: int | Unset = 20,
+) -> ErrorResponse | ListSnapshotsResponse | None:
+    """List snapshots
 
-     Get the public access endpoint URL for accessing a service running on a specific port
-    within the sandbox. The service must be listening on the specified port inside
-    the sandbox for the endpoint to be available.
+     List all snapshots with optional filtering and pagination using query parameters.
+    Snapshots are persistent captures of sandbox state and may outlive the source sandbox.
 
     Args:
-        sandbox_id (str):
-        port (int):
-        use_server_proxy (bool | Unset):  Default: False.
-        expires (str | Unset):
+        sandbox_id (str | Unset):
+        state (list[str] | Unset):
+        page (int | Unset):  Default: 1.
+        page_size (int | Unset):  Default: 20.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Endpoint | ErrorResponse
+        ErrorResponse | ListSnapshotsResponse
     """
 
     return sync_detailed(
-        sandbox_id=sandbox_id,
-        port=port,
         client=client,
-        use_server_proxy=use_server_proxy,
-        expires=expires,
+        sandbox_id=sandbox_id,
+        state=state,
+        page=page,
+        page_size=page_size,
     ).parsed
 
 
 async def asyncio_detailed(
-    sandbox_id: str,
-    port: int,
     *,
     client: AuthenticatedClient | Client,
-    use_server_proxy: bool | Unset = False,
-    expires: str | Unset = UNSET,
-) -> Response[Endpoint | ErrorResponse]:
-    """Get sandbox access endpoint
+    sandbox_id: str | Unset = UNSET,
+    state: list[str] | Unset = UNSET,
+    page: int | Unset = 1,
+    page_size: int | Unset = 20,
+) -> Response[ErrorResponse | ListSnapshotsResponse]:
+    """List snapshots
 
-     Get the public access endpoint URL for accessing a service running on a specific port
-    within the sandbox. The service must be listening on the specified port inside
-    the sandbox for the endpoint to be available.
+     List all snapshots with optional filtering and pagination using query parameters.
+    Snapshots are persistent captures of sandbox state and may outlive the source sandbox.
 
     Args:
-        sandbox_id (str):
-        port (int):
-        use_server_proxy (bool | Unset):  Default: False.
-        expires (str | Unset):
+        sandbox_id (str | Unset):
+        state (list[str] | Unset):
+        page (int | Unset):  Default: 1.
+        page_size (int | Unset):  Default: 20.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[Endpoint | ErrorResponse]
+        Response[ErrorResponse | ListSnapshotsResponse]
     """
 
     kwargs = _get_kwargs(
         sandbox_id=sandbox_id,
-        port=port,
-        use_server_proxy=use_server_proxy,
-        expires=expires,
+        state=state,
+        page=page,
+        page_size=page_size,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -224,39 +215,38 @@ async def asyncio_detailed(
 
 
 async def asyncio(
-    sandbox_id: str,
-    port: int,
     *,
     client: AuthenticatedClient | Client,
-    use_server_proxy: bool | Unset = False,
-    expires: str | Unset = UNSET,
-) -> Endpoint | ErrorResponse | None:
-    """Get sandbox access endpoint
+    sandbox_id: str | Unset = UNSET,
+    state: list[str] | Unset = UNSET,
+    page: int | Unset = 1,
+    page_size: int | Unset = 20,
+) -> ErrorResponse | ListSnapshotsResponse | None:
+    """List snapshots
 
-     Get the public access endpoint URL for accessing a service running on a specific port
-    within the sandbox. The service must be listening on the specified port inside
-    the sandbox for the endpoint to be available.
+     List all snapshots with optional filtering and pagination using query parameters.
+    Snapshots are persistent captures of sandbox state and may outlive the source sandbox.
 
     Args:
-        sandbox_id (str):
-        port (int):
-        use_server_proxy (bool | Unset):  Default: False.
-        expires (str | Unset):
+        sandbox_id (str | Unset):
+        state (list[str] | Unset):
+        page (int | Unset):  Default: 1.
+        page_size (int | Unset):  Default: 20.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Endpoint | ErrorResponse
+        ErrorResponse | ListSnapshotsResponse
     """
 
     return (
         await asyncio_detailed(
-            sandbox_id=sandbox_id,
-            port=port,
             client=client,
-            use_server_proxy=use_server_proxy,
-            expires=expires,
+            sandbox_id=sandbox_id,
+            state=state,
+            page=page,
+            page_size=page_size,
         )
     ).parsed

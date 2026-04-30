@@ -38,17 +38,22 @@ T = TypeVar("T", bound="Sandbox")
 
 @_attrs_define
 class Sandbox:
-    """Runtime execution environment provisioned from a container image
+    """Runtime execution environment provisioned from a container image or restored from a snapshot
 
     Attributes:
         id (str): Unique sandbox identifier
-        image (ImageSpec): Container image specification for sandbox provisioning.
-
-            Supports public registry images and private registry images with authentication.
         status (SandboxStatus): Detailed status information with lifecycle state and transition details
         entrypoint (list[str]): The command to execute as the sandbox's entry process.
-            Always present in responses since entrypoint is required in creation requests.
+            Always present in responses. For image-created sandboxes, this is copied
+            from the creation request. For snapshot-created sandboxes, this is restored
+            from the snapshot.
         created_at (datetime.datetime): Sandbox creation timestamp
+        image (ImageSpec | Unset): Container image specification for sandbox provisioning.
+
+            Supports public registry images and private registry images with authentication.
+        snapshot_id (str | Unset): Snapshot identifier used to restore this sandbox.
+            Present when the sandbox was restored from a snapshot.
+            Not returned in createSandbox response.
         platform (PlatformSpec | Unset): Runtime platform constraint used for scheduling/provisioning.
 
             This field is independent from `image` and expresses the expected target
@@ -67,10 +72,11 @@ class Sandbox:
     """
 
     id: str
-    image: ImageSpec
     status: SandboxStatus
     entrypoint: list[str]
     created_at: datetime.datetime
+    image: ImageSpec | Unset = UNSET
+    snapshot_id: str | Unset = UNSET
     platform: PlatformSpec | Unset = UNSET
     metadata: SandboxMetadata | Unset = UNSET
     expires_at: datetime.datetime | Unset = UNSET
@@ -79,13 +85,17 @@ class Sandbox:
     def to_dict(self) -> dict[str, Any]:
         id = self.id
 
-        image = self.image.to_dict()
-
         status = self.status.to_dict()
 
         entrypoint = self.entrypoint
 
         created_at = self.created_at.isoformat()
+
+        image: dict[str, Any] | Unset = UNSET
+        if not isinstance(self.image, Unset):
+            image = self.image.to_dict()
+
+        snapshot_id = self.snapshot_id
 
         platform: dict[str, Any] | Unset = UNSET
         if not isinstance(self.platform, Unset):
@@ -104,12 +114,15 @@ class Sandbox:
         field_dict.update(
             {
                 "id": id,
-                "image": image,
                 "status": status,
                 "entrypoint": entrypoint,
                 "createdAt": created_at,
             }
         )
+        if image is not UNSET:
+            field_dict["image"] = image
+        if snapshot_id is not UNSET:
+            field_dict["snapshotId"] = snapshot_id
         if platform is not UNSET:
             field_dict["platform"] = platform
         if metadata is not UNSET:
@@ -129,13 +142,20 @@ class Sandbox:
         d = dict(src_dict)
         id = d.pop("id")
 
-        image = ImageSpec.from_dict(d.pop("image"))
-
         status = SandboxStatus.from_dict(d.pop("status"))
 
         entrypoint = cast(list[str], d.pop("entrypoint"))
 
         created_at = isoparse(d.pop("createdAt"))
+
+        _image = d.pop("image", UNSET)
+        image: ImageSpec | Unset
+        if isinstance(_image, Unset):
+            image = UNSET
+        else:
+            image = ImageSpec.from_dict(_image)
+
+        snapshot_id = d.pop("snapshotId", UNSET)
 
         _platform = d.pop("platform", UNSET)
         platform: PlatformSpec | Unset
@@ -160,10 +180,11 @@ class Sandbox:
 
         sandbox = cls(
             id=id,
-            image=image,
             status=status,
             entrypoint=entrypoint,
             created_at=created_at,
+            image=image,
+            snapshot_id=snapshot_id,
             platform=platform,
             metadata=metadata,
             expires_at=expires_at,

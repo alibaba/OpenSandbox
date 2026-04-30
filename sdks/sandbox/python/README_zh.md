@@ -90,6 +90,133 @@ with sandbox:
     sandbox.kill()
 ```
 
+### 同步 Sandbox Pool
+
+`SandboxPoolSync` 会维护一组已就绪的 idle sandbox，用于降低 acquire 延迟。
+Pool API 是同步 API，并对齐 Kotlin `SandboxPool` 的语义：任意节点都可以
+acquire，实际的补池和缩容由 store 的主锁持有者执行。
+
+```python
+from datetime import timedelta
+
+from opensandbox import (
+    AcquirePolicy,
+    InMemoryPoolStateStore,
+    PoolCreationSpec,
+    SandboxPoolSync,
+)
+from opensandbox.config import ConnectionConfigSync
+
+pool = SandboxPoolSync(
+    pool_name="demo-pool",
+    owner_id="worker-1",
+    max_idle=2,
+    state_store=InMemoryPoolStateStore(),  # 仅适合单进程
+    connection_config=ConnectionConfigSync(domain="api.opensandbox.io"),
+    creation_spec=PoolCreationSpec(image="ubuntu:22.04"),
+    reconcile_interval=timedelta(seconds=5),
+)
+
+pool.start()
+try:
+    sandbox = pool.acquire(
+        sandbox_timeout=timedelta(minutes=30),
+        policy=AcquirePolicy.FAIL_FAST,
+    )
+    try:
+        result = sandbox.commands.run("echo pool-ok")
+        print(result.logs.stdout[0].text)
+    finally:
+        sandbox.kill()
+        sandbox.close()
+finally:
+    pool.shutdown(graceful=True)
+```
+
+asyncio 应用请使用 `SandboxPoolAsync`，避免 pool acquire、warmup、健康检查和
+生命周期 API 调用阻塞事件循环：
+
+```python
+from datetime import timedelta
+
+from opensandbox import (
+    AcquirePolicy,
+    InMemoryAsyncPoolStateStore,
+    PoolCreationSpec,
+    SandboxPoolAsync,
+)
+from opensandbox.config import ConnectionConfig
+
+pool = SandboxPoolAsync(
+    pool_name="demo-pool",
+    owner_id="worker-1",
+    max_idle=2,
+    state_store=InMemoryAsyncPoolStateStore(),  # 仅适合单事件循环
+    connection_config=ConnectionConfig(domain="api.opensandbox.io"),
+    creation_spec=PoolCreationSpec(image="ubuntu:22.04"),
+)
+
+await pool.start()
+try:
+    sandbox = await pool.acquire(
+        sandbox_timeout=timedelta(minutes=30),
+        policy=AcquirePolicy.FAIL_FAST,
+    )
+    try:
+        result = await sandbox.commands.run("echo pool-ok")
+        print(result.logs.stdout[0].text)
+    finally:
+        await sandbox.kill()
+        await sandbox.close()
+finally:
+    await pool.shutdown(graceful=True)
+```
+
+Python 生产服务如果是多进程或多 Pod 部署，建议使用 Redis-backed pool state。
+先安装可选依赖：
+
+```bash
+pip install "opensandbox[pool-redis]"
+```
+
+Redis client 由业务方自己创建和配置，然后传给 `RedisPoolStateStore`。Store
+不会创建或关闭 Redis client。
+
+```python
+import redis
+
+from opensandbox import PoolCreationSpec, RedisPoolStateStore, SandboxPoolSync
+from opensandbox.config import ConnectionConfigSync
+
+redis_client = redis.Redis.from_url(
+    "redis://user:password@redis.example.com:6379/0",
+    decode_responses=True,
+)
+
+pool = SandboxPoolSync(
+    pool_name="prod-pool",
+    owner_id="worker-1",
+    max_idle=10,
+    state_store=RedisPoolStateStore(redis_client, key_prefix="opensandbox:pool:prod"),
+    connection_config=ConnectionConfigSync(domain="api.opensandbox.io"),
+    creation_spec=PoolCreationSpec(image="ubuntu:22.04"),
+    primary_lock_ttl=timedelta(seconds=60),
+)
+```
+
+async pool 使用 `AsyncRedisPoolStateStore`，并传入 `redis.asyncio` client。
+
+注意事项：
+
+- `InMemoryPoolStateStore` 只适合单进程开发和测试，不适合作为 gunicorn、
+  uvicorn workers、Celery 或 Kubernetes 多实例下的全局池。
+- 分布式部署时，同一个逻辑池的所有节点必须使用相同的 `key_prefix` 和 `pool_name`。
+- 共享同一 pool 的所有节点必须使用相同的 creation/warmup 定义；如果定义变化，
+  建议使用新的 `pool_name` 或 `key_prefix`，并 drain 旧池。
+- `primary_lock_ttl` 应大于 `warmup_ready_timeout` 加上预期 warmup preparer
+  耗时和缓冲时间。
+- Redis 故障会以 pool state store 错误暴露；pool 会 fail closed，不会绕过共享状态。
+
 ## 核心功能示例
 
 ### 1. 生命周期管理

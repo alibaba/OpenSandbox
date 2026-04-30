@@ -1,5 +1,5 @@
 #
-# Copyright 2025 Alibaba Group Holding Ltd.
+# Copyright 2026 Alibaba Group Holding Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,12 +13,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""
-Synchronous OpenSandbox SDK entrypoints.
-"""
 
-from opensandbox.sync.manager import SandboxManagerSync
-from opensandbox.sync.pool import SandboxPoolSync
-from opensandbox.sync.sandbox import SandboxSync
-
-__all__ = ["SandboxSync", "SandboxManagerSync", "SandboxPoolSync"]
+"""Contains endpoint functions for accessing the API"""

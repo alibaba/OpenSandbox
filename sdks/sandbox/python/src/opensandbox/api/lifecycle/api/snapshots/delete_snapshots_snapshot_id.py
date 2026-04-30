@@ -15,7 +15,7 @@
 #
 
 from http import HTTPStatus
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import httpx
@@ -23,30 +23,26 @@ import httpx
 from ... import errors
 from ...client import AuthenticatedClient, Client
 from ...models.error_response import ErrorResponse
-from ...models.sandbox import Sandbox
 from ...types import Response
 
 
 def _get_kwargs(
-    sandbox_id: str,
+    snapshot_id: str,
 ) -> dict[str, Any]:
     _kwargs: dict[str, Any] = {
-        "method": "get",
-        "url": "/sandboxes/{sandbox_id}".format(
-            sandbox_id=quote(str(sandbox_id), safe=""),
+        "method": "delete",
+        "url": "/snapshots/{snapshot_id}".format(
+            snapshot_id=quote(str(snapshot_id), safe=""),
         ),
     }
 
     return _kwargs
 
 
-def _parse_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> ErrorResponse | Sandbox | None:
-    if response.status_code == 200:
-        response_200 = Sandbox.from_dict(response.json())
-
-        return response_200
+def _parse_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Any | ErrorResponse | None:
+    if response.status_code == 204:
+        response_204 = cast(Any, None)
+        return response_204
 
     if response.status_code == 401:
         response_401 = ErrorResponse.from_dict(response.json())
@@ -74,9 +70,7 @@ def _parse_response(
         return None
 
 
-def _build_response(
-    *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[ErrorResponse | Sandbox]:
+def _build_response(*, client: AuthenticatedClient | Client, response: httpx.Response) -> Response[Any | ErrorResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -86,32 +80,27 @@ def _build_response(
 
 
 def sync_detailed(
-    sandbox_id: str,
+    snapshot_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Response[ErrorResponse | Sandbox]:
-    """Fetch a sandbox by id
+) -> Response[Any | ErrorResponse]:
+    """Delete a snapshot
 
-     Returns the complete sandbox information including:
-    - `id`, `status`, `metadata`, `expiresAt`, `createdAt`: Core information
-    - `image` or `snapshotId`: Startup source information (not included in create response)
-    - `entrypoint`: Entry process specification
-
-    This is the complete representation of the sandbox resource.
+     Delete a persistent sandbox snapshot by id.
 
     Args:
-        sandbox_id (str):
+        snapshot_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ErrorResponse | Sandbox]
+        Response[Any | ErrorResponse]
     """
 
     kwargs = _get_kwargs(
-        sandbox_id=sandbox_id,
+        snapshot_id=snapshot_id,
     )
 
     response = client.get_httpx_client().request(
@@ -122,63 +111,53 @@ def sync_detailed(
 
 
 def sync(
-    sandbox_id: str,
+    snapshot_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> ErrorResponse | Sandbox | None:
-    """Fetch a sandbox by id
+) -> Any | ErrorResponse | None:
+    """Delete a snapshot
 
-     Returns the complete sandbox information including:
-    - `id`, `status`, `metadata`, `expiresAt`, `createdAt`: Core information
-    - `image` or `snapshotId`: Startup source information (not included in create response)
-    - `entrypoint`: Entry process specification
-
-    This is the complete representation of the sandbox resource.
+     Delete a persistent sandbox snapshot by id.
 
     Args:
-        sandbox_id (str):
+        snapshot_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ErrorResponse | Sandbox
+        Any | ErrorResponse
     """
 
     return sync_detailed(
-        sandbox_id=sandbox_id,
+        snapshot_id=snapshot_id,
         client=client,
     ).parsed
 
 
 async def asyncio_detailed(
-    sandbox_id: str,
+    snapshot_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> Response[ErrorResponse | Sandbox]:
-    """Fetch a sandbox by id
+) -> Response[Any | ErrorResponse]:
+    """Delete a snapshot
 
-     Returns the complete sandbox information including:
-    - `id`, `status`, `metadata`, `expiresAt`, `createdAt`: Core information
-    - `image` or `snapshotId`: Startup source information (not included in create response)
-    - `entrypoint`: Entry process specification
-
-    This is the complete representation of the sandbox resource.
+     Delete a persistent sandbox snapshot by id.
 
     Args:
-        sandbox_id (str):
+        snapshot_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ErrorResponse | Sandbox]
+        Response[Any | ErrorResponse]
     """
 
     kwargs = _get_kwargs(
-        sandbox_id=sandbox_id,
+        snapshot_id=snapshot_id,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -187,33 +166,28 @@ async def asyncio_detailed(
 
 
 async def asyncio(
-    sandbox_id: str,
+    snapshot_id: str,
     *,
     client: AuthenticatedClient | Client,
-) -> ErrorResponse | Sandbox | None:
-    """Fetch a sandbox by id
+) -> Any | ErrorResponse | None:
+    """Delete a snapshot
 
-     Returns the complete sandbox information including:
-    - `id`, `status`, `metadata`, `expiresAt`, `createdAt`: Core information
-    - `image` or `snapshotId`: Startup source information (not included in create response)
-    - `entrypoint`: Entry process specification
-
-    This is the complete representation of the sandbox resource.
+     Delete a persistent sandbox snapshot by id.
 
     Args:
-        sandbox_id (str):
+        snapshot_id (str):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ErrorResponse | Sandbox
+        Any | ErrorResponse
     """
 
     return (
         await asyncio_detailed(
-            sandbox_id=sandbox_id,
+            snapshot_id=snapshot_id,
             client=client,
         )
     ).parsed
