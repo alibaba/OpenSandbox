@@ -19,7 +19,10 @@ Run a specific suite:
 
 ```bash
 uv run pytest tests/test_sandbox_e2e.py
+uv run pytest tests/test_sandbox_pool_e2e_sync.py tests/test_sandbox_pool_e2e_async.py
 ```
+
+Redis-backed pool E2E tests are skipped unless `OPENSANDBOX_TEST_REDIS_URL` is set.
 
 ### Notes about asyncio + shared Sandbox
 
@@ -33,6 +36,7 @@ To avoid `RuntimeError: Event loop is closed`, pytest-asyncio is configured to u
 make sync
 make test
 make test-sandbox
+make test-pool
 make lint
 make fmt
 ```
