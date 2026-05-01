@@ -232,6 +232,20 @@ class TenantEntry(BaseModel):
 class TenantsConfig(BaseModel):
     entries: list[TenantEntry]
 
+    @model_validator(mode="after")
+    def _reject_duplicate_keys(self) -> "TenantsConfig":
+        """Reject duplicate API keys across tenants — a hard config error."""
+        seen: dict[str, str] = {}  # api_key -> tenant name
+        for entry in self.entries:
+            for k in entry.api_keys:
+                if k in seen:
+                    raise ValueError(
+                        f"Duplicate api_key across tenants: "
+                        f"'{seen[k]}' and '{entry.name}' both declare '{k}'"
+                    )
+                seen[k] = entry.name
+        return self
+
     def lookup(self, api_key: str) -> Optional[TenantEntry]:
         """Constant-time lookup across all tenant keys."""
         for entry in self.entries:
@@ -256,7 +270,8 @@ class TenantsConfig(BaseModel):
 def _load_api_keys(self) -> dict[str, Optional[TenantEntry]]:
     tenants_cfg = load_tenants_config()
     if tenants_cfg is not None:
-        # Multi-tenant mode: server.api_key is ignored
+        # Multi-tenant mode: server.api_key is ignored.
+        # TenantsConfig model_validator already rejected duplicates.
         return {k: e for e in tenants_cfg.entries for k in e.api_keys}
 
     # Single-tenant mode: legacy behavior
@@ -371,6 +386,11 @@ class TenantLoader:
         for raw in data.get("tenants", []):
             entry = TenantEntry(**raw)
             for k in entry.api_keys:
+                if k in new_entries:
+                    raise ValueError(
+                        f"Duplicate api_key '{k}' across tenants "
+                        f"'{new_entries[k].name}' and '{entry.name}'"
+                    )
                 new_entries[k] = entry
         with self._lock:
             self._entries = new_entries
@@ -416,7 +436,7 @@ subjects:
 ## Test Plan
 
 **Unit tests:**
-- `TenantsConfig.lookup()`: valid key → tenant; invalid key → None; duplicate keys across tenants → last wins warning
+- `TenantsConfig.lookup()`: valid key → tenant; invalid key → None; duplicate keys across tenants → `ValueError` at config load time
 - `AuthMiddleware`: rejects `server.api_key` when tenants loaded; accepts any valid tenant key
 - `TenantLoader._reload()`: file deleted mid-run → clear entries; new key added → live in lookup
 - Docker runtime startup: error if `tenants.toml` exists with `runtime.type = "docker"`
