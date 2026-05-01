@@ -206,7 +206,7 @@ uv run pytest
 uv run pytest tests/test_docker_service.py
 
 # With coverage
-uv run pytest --cov=opensandbox_server --cov-report=html
+uv run pytest --cov=opensandbox_server --cov-report=term --cov-fail-under=80
 ```
 
 ### Writing Tests

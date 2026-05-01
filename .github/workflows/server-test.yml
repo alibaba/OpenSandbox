@@ -41,7 +41,19 @@ jobs:
           cd server
           uv sync --all-groups
           uv run ruff check
-          uv run pytest
+          mkdir -p reports
+          uv run pytest \
+            --cov=opensandbox_server \
+            --cov-report=term \
+            --cov-report=xml:reports/coverage.xml \
+            --cov-fail-under=80
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-coverage-${{ matrix.os }}
+          path: server/reports/coverage.xml
 
   docker-smoke:
     strategy:
