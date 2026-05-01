@@ -17,6 +17,7 @@ on:
           - java/code-interpreter
           - csharp/sandbox
           - csharp/code-interpreter
+          - sdks/sandbox/go
           - cli
           - server
           - docker/execd
@@ -62,6 +63,9 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   release:
@@ -76,6 +80,7 @@ jobs:
         run: chmod +x scripts/release/create-release.sh
 
       - name: Run generic release script
+        id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -116,3 +121,50 @@ jobs:
           fi
 
           scripts/release/create-release.sh "${ARGS[@]}"
+
+      - name: Create release source archive
+        if: ${{ inputs.dry_run == false }}
+        id: source_archive
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          SAFE_TAG="$(printf '%s' "$RELEASE_TAG" | tr '/:' '--')"
+          ARCHIVE_NAME="opensandbox-${SAFE_TAG}.tar.gz"
+          ARCHIVE_DIR="dist/release-source"
+
+          mkdir -p "$ARCHIVE_DIR"
+          git archive \
+            --format=tar.gz \
+            --prefix="opensandbox-${SAFE_TAG}/" \
+            -o "${ARCHIVE_DIR}/${ARCHIVE_NAME}" \
+            "$RELEASE_TAG"
+
+          (
+            cd "$ARCHIVE_DIR"
+            sha256sum "$ARCHIVE_NAME" > SHA256SUMS
+          )
+
+          echo "archive_path=${ARCHIVE_DIR}/${ARCHIVE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "checksums_path=${ARCHIVE_DIR}/SHA256SUMS" >> "$GITHUB_OUTPUT"
+
+      - name: Attest source release artifacts
+        if: ${{ inputs.dry_run == false }}
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            ${{ steps.source_archive.outputs.archive_path }}
+            ${{ steps.source_archive.outputs.checksums_path }}
+
+      - name: Upload source release artifacts
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            "${{ steps.source_archive.outputs.archive_path }}" \
+            "${{ steps.source_archive.outputs.checksums_path }}" \
+            --clobber

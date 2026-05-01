@@ -26,10 +26,12 @@ build_arg_if_set() {
 TAG=${TAG:-latest}
 COMPONENT=${COMPONENT:-controller}
 PUSH=${PUSH:-true}
+BUILD_METADATA_FILE=${BUILD_METADATA_FILE:-build/${COMPONENT}-image-metadata.json}
 BUILD_ARGS=()
 for name in GOFLAGS LDFLAGS CGO_ENABLED CC CXX CFLAGS CXXFLAGS CGO_CFLAGS CGO_CXXFLAGS CGO_LDFLAGS; do
     build_arg_if_set "${name}"
 done
+mkdir -p "$(dirname "${BUILD_METADATA_FILE}")"
 
 DOCKERHUB_REPO="opensandbox"
 ACR_REPO="sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox"
@@ -65,6 +67,7 @@ if [ "$PUSH" == "true" ]; then
         "${BUILD_ARGS[@]}" \
         -t "${DOCKERHUB_REPO}/${IMAGE_NAME}:${TAG}" \
         -t "${ACR_REPO}/${IMAGE_NAME}:${TAG}" \
+        --metadata-file "${BUILD_METADATA_FILE}" \
         --push \
         -f Dockerfile \
         .

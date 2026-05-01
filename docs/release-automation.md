@@ -5,6 +5,8 @@ This repository uses tag-driven publish workflows. The script below standardizes
 - canonical tag creation for each release target
 - release note generation from previous release to current commit
 - GitHub Release create/update
+- signed source archive upload and provenance attestation in the Generic
+  Release workflow
 
 Script path:
 
@@ -21,6 +23,7 @@ Script path:
 - `java/code-interpreter`
 - `csharp/sandbox`
 - `csharp/code-interpreter`
+- `sdks/sandbox/go`
 - `cli`
 - `server`
 - `docker/execd`
@@ -39,6 +42,7 @@ The script aligns with existing workflow triggers:
 - v-prefixed tags:
   - `<target>/v<version>` for SDK/CLI/Server targets
   - examples: `js/sandbox/v1.0.5`, `server/v0.2.0`
+  - Go SDK example: `sdks/sandbox/go/v1.0.0`
 - plain suffix tags:
   - `<target>/<version>` for docker/k8s/helm targets
   - examples: `docker/execd/v0.3.0`, `helm/opensandbox/0.1.0`
@@ -80,6 +84,9 @@ Options:
 - `--initial-release`: allow no previous tag; use full history
 - `--dry-run`: render computed tag/range/notes without side effects
 - `--push`: push created tag to origin
+- `--sign-tag`: create a cryptographically signed git tag using the local git
+  signing configuration. This is intended for local release-operator use, not
+  the hosted GitHub Actions release workflow.
 
 ## Path Filtering Strategy
 
@@ -183,6 +190,10 @@ If `--dry-run` is enabled, the script never creates/pushes tags and never create
 
 - The script creates/updates GitHub Release only when not in `--dry-run`.
 - Tag push is opt-in (`--push`), preventing accidental workflow trigger.
+- Tag signing is opt-in (`--sign-tag`) because it requires release-operator git
+  signing keys. The hosted GitHub Actions release workflow does not expose this
+  option. Official release artifacts are still signed by the GitHub release
+  workflows through Sigstore/GitHub attestations.
 - If previous tag cannot be found, script fails unless `--from-tag` or `--initial-release` is provided.
 
 ## GitHub Actions Entry
@@ -215,3 +226,9 @@ Recommended first run in UI:
 - keep `push_tag=false`
 - verify the generated release notes preview in logs
 - rerun with `dry_run=false` and `push_tag=true` when confirmed
+
+When `dry_run=false`, `.github/workflows/release-generic.yml` uploads an
+explicit `opensandbox-<tag>.tar.gz` source archive and `SHA256SUMS` file to the
+GitHub Release, then signs both files with GitHub/Sigstore provenance
+attestations. See [Release Verification](release-verification.md) for user
+verification commands and release signing coverage.

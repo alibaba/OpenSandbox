@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 jobs:
   publish-pypi:
@@ -50,6 +53,12 @@ jobs:
         working-directory: cli
         run: |
           uv build
+
+      - name: Attest built package
+        if: startsWith(github.ref, 'refs/tags/cli/v')
+        uses: actions/attest@v4
+        with:
+          subject-path: cli/dist/*
 
       - name: Publish to PyPI
         working-directory: cli

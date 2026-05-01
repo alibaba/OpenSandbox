@@ -32,6 +32,7 @@ Required:
                         java/code-interpreter
                         csharp/sandbox
                         csharp/code-interpreter
+                        sdks/sandbox/go
                         cli
                         server
                         docker/execd
@@ -52,6 +53,8 @@ Options:
   --push                Push tag to origin (required to trigger tag-based workflows).
   --dry-run             Print computed results without creating tag/release.
   --initial-release     Allow release without previous tag (uses full history).
+  --sign-tag            Create a cryptographically signed git tag using the local
+                        git signing configuration. Defaults to an annotated tag.
   --help                Show this help.
 
 Examples:
@@ -232,6 +235,7 @@ DRY_RUN=false
 PUSH_TAG=false
 INITIAL_RELEASE=false
 NO_PATH_FILTER=false
+SIGN_TAG=false
 CUSTOM_PATH_FILTERS=()
 
 while [[ $# -gt 0 ]]; do
@@ -266,6 +270,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --push)
       PUSH_TAG=true
+      shift
+      ;;
+    --sign-tag)
+      SIGN_TAG=true
       shift
       ;;
     --initial-release)
@@ -354,6 +362,13 @@ case "$TARGET" in
     WORKFLOW_HINT=".github/workflows/publish-csharp-sdks.yml"
     TARGET_PATH_FILTERS=("sdks/code-interpreter/csharp" "specs/execd-api.yaml")
     ;;
+  sdks/sandbox/go|go/sandbox)
+    TARGET="sdks/sandbox/go"
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="Go Sandbox SDK"
+    WORKFLOW_HINT=".github/workflows/release-generic.yml"
+    TARGET_PATH_FILTERS=("sdks/sandbox/go" "specs/sandbox-lifecycle.yml")
+    ;;
   cli)
     TAG_NEEDS_V=true
     DISPLAY_NAME="OpenSandbox CLI"
@@ -416,6 +431,14 @@ else
   NEW_TAG="${TARGET}/${VERSION}"
   TAG_PREFIX="${TARGET}/"
   VERSION_LABEL="$VERSION"
+fi
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  {
+    echo "tag=${NEW_TAG}"
+    echo "display_name=${DISPLAY_NAME}"
+    echo "version_label=${VERSION_LABEL}"
+  } >>"${GITHUB_OUTPUT}"
 fi
 
 if [[ -n "$FROM_TAG" ]] && ! git rev-parse -q --verify "refs/tags/${FROM_TAG}" >/dev/null; then
@@ -642,8 +665,13 @@ fi
 if git rev-parse -q --verify "refs/tags/${NEW_TAG}" >/dev/null; then
   warn "Tag '${NEW_TAG}' already exists. Reusing existing tag."
 else
-  git tag -a "$NEW_TAG" -m "release: ${DISPLAY_NAME} ${VERSION_LABEL}"
-  log "Created tag: ${NEW_TAG}"
+  if [[ "$SIGN_TAG" == true ]]; then
+    git tag -s "$NEW_TAG" -m "release: ${DISPLAY_NAME} ${VERSION_LABEL}"
+    log "Created signed tag: ${NEW_TAG}"
+  else
+    git tag -a "$NEW_TAG" -m "release: ${DISPLAY_NAME} ${VERSION_LABEL}"
+    log "Created annotated tag: ${NEW_TAG}"
+  fi
 fi
 
 if [[ "$PUSH_TAG" == true ]]; then

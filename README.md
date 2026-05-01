@@ -290,6 +290,7 @@ For detailed architecture, see [docs/architecture.md](docs/architecture.md).
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) – Overall architecture & design philosophy
+- [docs/release-verification.md](docs/release-verification.md) - Release signing and artifact verification
 - [oseps/README.md](oseps/README.md) – OpenSandbox Enhancement Proposals
 - SDK
   - Sandbox base SDK ([Java/Kotlin SDK](sdks/sandbox/kotlin/README.md), [Python SDK](sdks/sandbox/python/README.md), [JavaScript/TypeScript SDK](sdks/sandbox/javascript/README.md), [C#/.NET SDK](sdks/sandbox/csharp/README.md)), [Go SDK](sdks/sandbox/go/README.md) - includes sandbox lifecycle, command execution, file operations

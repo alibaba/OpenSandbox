@@ -27,6 +27,13 @@ The OpenSandbox team takes security seriously. If you discover a security vulner
 
 Only the latest release and main branch are actively supported with security updates.
 
+## Release Signatures
+
+OpenSandbox signs public release outputs with GitHub/Sigstore attestations,
+cosign keyless container signatures, and Maven Central package signatures where
+applicable. See [Release Verification](docs/release-verification.md) for the
+trusted signer identities and verification commands.
+
 ## Security Best Practices
 
 When deploying OpenSandbox:
