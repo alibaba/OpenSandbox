@@ -1,0 +1,7 @@
+# Artifact Hub repository metadata
+# After registering the repository on https://artifacthub.io/ (type: OCI, url: oci://ghcr.io/alibaba/helm-charts),
+# update the repositoryID below.
+repositoryID: 00000000-0000-0000-0000-000000000000
+owners:
+  - name: OpenSandbox Team
+    email: opensandbox@example.com
