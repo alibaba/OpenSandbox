@@ -122,6 +122,29 @@ jobs:
 
           scripts/release/create-release.sh "${ARGS[@]}"
 
+      - name: Verify release tag on origin
+        if: ${{ inputs.dry_run == false }}
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          local_commit="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          remote_commit="$(git ls-remote origin "refs/tags/${RELEASE_TAG}^{}" | awk 'NR == 1 { print $1 }')"
+
+          if [[ -z "$remote_commit" ]]; then
+            remote_commit="$(git ls-remote origin "refs/tags/${RELEASE_TAG}" | awk 'NR == 1 { print $1 }')"
+          fi
+
+          if [[ -z "$remote_commit" ]]; then
+            echo "::error::Release tag '${RELEASE_TAG}' does not exist on origin. Re-run with push_tag=true or push the tag before publishing source artifacts."
+            exit 1
+          fi
+
+          if [[ "$local_commit" != "$remote_commit" ]]; then
+            echo "::error::Local release tag '${RELEASE_TAG}' resolves to ${local_commit}, but origin resolves to ${remote_commit}. Refusing to publish source artifacts."
+            exit 1
+          fi
+
       - name: Create release source archive
         if: ${{ inputs.dry_run == false }}
         id: source_archive

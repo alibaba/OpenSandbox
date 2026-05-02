@@ -82,6 +82,18 @@ require_cmd() {
   command -v "$cmd" >/dev/null 2>&1 || die "Missing required command: $cmd"
 }
 
+remote_tag_commit() {
+  local tag="$1"
+  local commit
+
+  commit="$(git ls-remote origin "refs/tags/${tag}^{}" | awk 'NR == 1 { print $1 }')"
+  if [[ -z "$commit" ]]; then
+    commit="$(git ls-remote origin "refs/tags/${tag}" | awk 'NR == 1 { print $1 }')"
+  fi
+
+  printf '%s' "$commit"
+}
+
 is_semver_like() {
   local version="${1#v}"
   [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]
@@ -681,6 +693,15 @@ else
   warn "Tag not pushed. Use --push to trigger tag-based publish workflows."
 fi
 
+LOCAL_TAG_COMMIT="$(git rev-parse "${NEW_TAG}^{commit}")"
+REMOTE_TAG_COMMIT="$(remote_tag_commit "$NEW_TAG")"
+if [[ -z "$REMOTE_TAG_COMMIT" ]]; then
+  die "Tag '${NEW_TAG}' does not exist on origin. Pass --push or push the tag before creating a GitHub Release."
+fi
+if [[ "$LOCAL_TAG_COMMIT" != "$REMOTE_TAG_COMMIT" ]]; then
+  die "Local tag '${NEW_TAG}' resolves to ${LOCAL_TAG_COMMIT}, but origin resolves to ${REMOTE_TAG_COMMIT}. Refusing to create or update the GitHub Release."
+fi
+
 RELEASE_TITLE="${DISPLAY_NAME} ${VERSION_LABEL}"
 if gh release view "$NEW_TAG" >/dev/null 2>&1; then
   gh release edit "$NEW_TAG" \
@@ -689,6 +710,7 @@ if gh release view "$NEW_TAG" >/dev/null 2>&1; then
   log "Updated GitHub Release: ${NEW_TAG}"
 else
   gh release create "$NEW_TAG" \
+    --verify-tag \
     --title "$RELEASE_TITLE" \
     --notes-file "$NOTES_FILE"
   log "Created GitHub Release: ${NEW_TAG}"
