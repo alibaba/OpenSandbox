@@ -28,7 +28,6 @@ import logging
 import math
 import os
 import posixpath
-import random
 import socket
 import tarfile
 import time
@@ -41,6 +40,7 @@ from uuid import uuid4
 
 import docker
 from docker.errors import DockerException, ImageNotFound, NotFound as DockerNotFound
+from docker.types import DeviceRequest
 from fastapi import HTTPException, status
 
 from opensandbox_server.extensions import (
@@ -60,9 +60,28 @@ from opensandbox_server.api.schema import (
     RenewSandboxExpirationResponse,
     Sandbox,
     SandboxStatus,
+    PlatformSpec,
 )
 from opensandbox_server.config import AppConfig, get_config
 from opensandbox_server.services.docker_diagnostics import DockerDiagnosticsMixin
+from opensandbox_server.services.docker_port_allocator import (
+    allocate_port_bindings,
+    normalize_container_port_spec,
+    normalize_port_bindings,
+)
+from opensandbox_server.services.docker_windows_profile import (
+    apply_windows_runtime_host_config_defaults,
+    fetch_execd_install_bat,
+    fetch_execd_windows_binary,
+    inject_windows_resource_limits_env,
+    inject_windows_user_ports,
+    install_windows_oem_scripts,
+    is_windows_platform,
+    normalize_bootstrap_command,
+    resolve_docker_platform,
+    validate_windows_resource_limits,
+    validate_windows_runtime_prerequisites, WINDOWS_OEM_VOLUME_PREFIX,
+)
 from opensandbox_server.services.extension_service import ExtensionService
 from opensandbox_server.services.constants import (
     EGRESS_MODE_ENV,
@@ -73,8 +92,12 @@ from opensandbox_server.services.constants import (
     SANDBOX_EXPIRES_AT_LABEL,
     SANDBOX_HTTP_PORT_LABEL,
     SANDBOX_ID_LABEL,
+    SANDBOX_MANAGED_VOLUMES_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SANDBOX_OSSFS_MOUNTS_LABEL,
+    SANDBOX_PLATFORM_ARCH_LABEL,
+    SANDBOX_PLATFORM_OS_LABEL,
+    SANDBOX_SNAPSHOT_ID_LABEL,
     SandboxErrorCodes,
 )
 from opensandbox_server.services.endpoint_auth import (
@@ -84,6 +107,7 @@ from opensandbox_server.services.endpoint_auth import (
 )
 from opensandbox_server.services.helpers import (
     matches_filter,
+    parse_gpu_request,
     parse_memory_limit,
     parse_nano_cpus,
     parse_timestamp,
@@ -91,12 +115,14 @@ from opensandbox_server.services.helpers import (
 from opensandbox_server.services.ossfs_mixin import OSSFSMixin
 from opensandbox_server.services.sandbox_service import SandboxService
 from opensandbox_server.services.runtime_resolver import SecureRuntimeResolver
+from opensandbox_server.services.snapshot_restore import resolve_sandbox_image_from_request
 from opensandbox_server.services.validators import (
     calculate_expiration_or_raise,
     ensure_egress_configured,
     ensure_entrypoint,
     ensure_future_expiration,
     ensure_metadata_labels,
+    ensure_platform_valid,
     ensure_timeout_within_limit,
     ensure_valid_host_path,
     ensure_volumes_valid,
@@ -156,7 +182,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
         self.execd_image = runtime_config.execd_image
         self.network_mode = (self.app_config.docker.network_mode or HOST_NETWORK_MODE).lower()
-        self._execd_archive_cache: Optional[bytes] = None
+        self._execd_archive_cache: Dict[str, bytes] = {}
+        self._windows_profile_cache: Dict[str, bytes] = {}
+        self._daemon_platform: Optional[PlatformSpec] = None
         self._api_timeout = self._resolve_api_timeout()
         try:
             # Initialize Docker service from environment variables
@@ -339,6 +367,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         except HTTPException as exc:
             if exc.status_code == status.HTTP_404_NOT_FOUND:
                 self._remove_expiration_tracking(sandbox_id)
+                self._cleanup_windows_oem_volume(sandbox_id, None)
                 if fallback_mount_keys:
                     self._release_ossfs_mounts(fallback_mount_keys)
             else:
@@ -400,6 +429,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         self._remove_expiration_tracking(sandbox_id)
         # Ensure sidecar is also cleaned up on expiration
         self._cleanup_egress_sidecar(sandbox_id)
+        self._cleanup_windows_oem_volume(sandbox_id, labels)
         self._release_ossfs_mounts(mount_keys)
 
     def _restore_existing_sandboxes(self) -> None:
@@ -493,41 +523,107 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if restored:
             logger.info("Restored expiration timers for %d sandbox(es).", restored)
 
-    def _fetch_execd_archive(self) -> bytes:
-        """Fetch (and memoize) the execd archive from the platform container."""
-        if self._execd_archive_cache is not None:
-            return self._execd_archive_cache
+    def _normalize_platform_key(self, platform: Optional[PlatformSpec]) -> str:
+        if platform is None:
+            return "default"
+        return f"{platform.os}/{platform.arch}"
+
+    @staticmethod
+    def _normalize_arch(arch: Optional[str]) -> Optional[str]:
+        if not isinstance(arch, str):
+            return None
+        normalized = arch.strip().lower()
+        arch_aliases = {
+            "x86_64": "amd64",
+            "x86-64": "amd64",
+            "amd64": "amd64",
+            "aarch64": "arm64",
+            "arm64/v8": "arm64",
+            "arm64v8": "arm64",
+            "arm64": "arm64",
+        }
+        return arch_aliases.get(normalized, normalized)
+
+    @staticmethod
+    def _normalize_os(os_value: Optional[str]) -> Optional[str]:
+        if not isinstance(os_value, str):
+            return None
+        normalized = os_value.strip().lower()
+        os_aliases = {
+            "linux": "linux",
+        }
+        return os_aliases.get(normalized, normalized)
+
+    def _get_daemon_platform(self) -> Optional[PlatformSpec]:
+        if self._daemon_platform is not None:
+            return self._daemon_platform
+        try:
+            info = self.docker_client.info() or {}
+        except DockerException as exc:
+            logger.debug("Failed to inspect Docker daemon platform: %s", exc)
+            return None
+        os_value = info.get("OSType") or info.get("Os") or info.get("os")
+        arch_value = info.get("Architecture") or info.get("architecture")
+        if not isinstance(os_value, str) or not isinstance(arch_value, str):
+            return None
+        normalized_os = self._normalize_os(os_value)
+        normalized_arch = self._normalize_arch(arch_value)
+        if not normalized_os or not normalized_arch:
+            return None
+        self._daemon_platform = PlatformSpec(os=normalized_os, arch=normalized_arch)
+        return self._daemon_platform
+
+    def _fetch_execd_archive(self, platform: Optional[PlatformSpec] = None) -> bytes:
+        """Fetch (and memoize) the execd archive by effective target platform."""
+        cache_key = self._normalize_platform_key(platform)
+        if cache_key in self._execd_archive_cache:
+            return self._execd_archive_cache[cache_key]
 
         with self._execd_archive_lock:
             # Double-check locking to ensure only one thread initializes the cache
-            if self._execd_archive_cache is not None:
-                return self._execd_archive_cache
+            if cache_key in self._execd_archive_cache:
+                return self._execd_archive_cache[cache_key]
 
             container = None
+            docker_platform = None
+            if platform is not None:
+                docker_platform = f"{platform.os}/{platform.arch}"
             try:
-                try:
-                    # Prefer a locally built image (e.g., opensandbox/execd:local); pull only if missing.
-                    self.docker_client.images.get(self.execd_image)
-                    logger.info("Found execd image %s locally; skipping pull", self.execd_image)
-                except ImageNotFound:
-                    with self._docker_operation(
-                        f"pull execd image {self.execd_image}",
-                        "execd-cache",
-                    ):
-                        self.docker_client.images.pull(self.execd_image)
+                self._ensure_image_available(
+                    self.execd_image,
+                    auth_config=None,
+                    sandbox_id=f"execd-cache:{cache_key}",
+                    platform=platform,
+                )
 
                 with self._docker_operation("execd cache create container", "execd-cache"):
-                    container = self.docker_client.containers.create(
-                        image=self.execd_image,
-                        command=["tail", "-f", "/dev/null"],
-                        name=f"sandbox-execd-{uuid4()}",
-                        detach=True,
-                        auto_remove=False,
-                    )
+                    create_kwargs: dict[str, Any] = {
+                        "image": self.execd_image,
+                        "command": ["tail", "-f", "/dev/null"],
+                        "name": f"sandbox-execd-{uuid4()}",
+                        "detach": True,
+                        "auto_remove": False,
+                    }
+                    if docker_platform is not None:
+                        create_kwargs["platform"] = docker_platform
+                    container = self.docker_client.containers.create(**create_kwargs)
                 with self._docker_operation("execd cache start container", "execd-cache"):
                     container.start()
                     container.reload()
                     logger.info("Created sandbox execd archive for container %s", container.id)
+            except TypeError as exc:
+                if docker_platform is not None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "code": SandboxErrorCodes.INVALID_PARAMETER,
+                            "message": (
+                                "The configured Docker client/daemon does not support "
+                                f"platform-aware container create for '{docker_platform}'."
+                            ),
+                        },
+                    ) from exc
+                raise
             except DockerException as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -559,8 +655,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                             "Failed to cleanup temporary execd container: %s", cleanup_exc
                         )
 
-            self._execd_archive_cache = data
-            logger.info("Dumped execd archive to memory")
+            self._execd_archive_cache[cache_key] = data
+            logger.info("Dumped execd archive to memory for platform key %s", cache_key)
             return data
 
     def _container_to_sandbox(self, container, sandbox_id: Optional[str] = None) -> Sandbox:
@@ -621,6 +717,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 SANDBOX_ID_LABEL,
                 SANDBOX_EXPIRES_AT_LABEL,
                 SANDBOX_MANUAL_CLEANUP_LABEL,
+                SANDBOX_PLATFORM_OS_LABEL,
+                SANDBOX_PLATFORM_ARCH_LABEL,
+                SANDBOX_SNAPSHOT_ID_LABEL,
                 ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY,
             }
         } or None
@@ -629,7 +728,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             entrypoint = [entrypoint]
         image_tags = container.image.tags
         image_uri = image_tags[0] if image_tags else container.image.short_id
-        image_spec = ImageSpec(uri=image_uri)
+        snapshot_id = labels.get(SANDBOX_SNAPSHOT_ID_LABEL)
+        image_spec = None if snapshot_id else ImageSpec(uri=image_uri)
 
         created_at = parse_timestamp(container.attrs.get("Created"))
         last_transition_at = (
@@ -645,16 +745,56 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             message=message,
             last_transition_at=last_transition_at,
         )
+        platform_spec = self._resolve_platform_for_container(container, labels)
 
         return Sandbox(
             id=resolved_id,
             image=image_spec,
+            snapshotId=snapshot_id,
+            platform=platform_spec,
             status=status_info,
             metadata=metadata,
             entrypoint=entrypoint,
             expiresAt=expires_at,
             createdAt=created_at,
         )
+
+    @staticmethod
+    def _platform_from_labels(labels: Dict[str, str]) -> Optional[PlatformSpec]:
+        os_value = labels.get(SANDBOX_PLATFORM_OS_LABEL)
+        arch_value = labels.get(SANDBOX_PLATFORM_ARCH_LABEL)
+        if not isinstance(os_value, str) or not isinstance(arch_value, str):
+            return None
+        if not os_value or not arch_value:
+            return None
+        normalized_os = DockerSandboxService._normalize_os(os_value)
+        normalized_arch = DockerSandboxService._normalize_arch(arch_value)
+        if not normalized_os or not normalized_arch:
+            return None
+        return PlatformSpec(os=normalized_os, arch=normalized_arch)
+
+    def _resolve_platform_for_container(
+        self,
+        container,
+        labels: Dict[str, str],
+        include_runtime_metadata: bool = False,
+    ) -> Optional[PlatformSpec]:
+        # API contract: platform is only echoed from explicit constraints.
+        # Runtime image metadata is used only for internal runtime preparation.
+        if include_runtime_metadata:
+            image_attrs = getattr(container.image, "attrs", {}) or {}
+            if isinstance(image_attrs, dict):
+                os_value = image_attrs.get("Os") or image_attrs.get("os")
+                arch_value = image_attrs.get("Architecture") or image_attrs.get("architecture")
+            else:
+                os_value = None
+                arch_value = None
+            if isinstance(os_value, str) and isinstance(arch_value, str) and os_value and arch_value:
+                normalized_os = self._normalize_os(os_value)
+                normalized_arch = self._normalize_arch(arch_value)
+                if normalized_os and normalized_arch:
+                    return PlatformSpec(os=normalized_os, arch=normalized_arch)
+        return self._platform_from_labels(labels)
 
     def _ensure_directory(self, container, path: str, sandbox_id: Optional[str] = None) -> None:
         """Create a directory within the target container if it does not exist."""
@@ -683,9 +823,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 },
             ) from exc
 
-    def _copy_execd_to_container(self, container, sandbox_id: str) -> None:
+    def _copy_execd_to_container(
+        self,
+        container,
+        sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
+    ) -> None:
         """Copy execd artifacts from the platform container into the sandbox."""
-        archive = self._fetch_execd_archive()
+        archive = self._fetch_execd_archive(platform)
         target_parent = posixpath.dirname(EXECED_INSTALL_PATH.rstrip("/")) or "/"
         self._ensure_directory(container, target_parent, sandbox_id)
         try:
@@ -710,7 +855,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             [
                 "#!/bin/sh",
                 "set -e",
-                f"{execd_binary} >/tmp/execd.log 2>&1 &",
+                f"  {execd_binary} >/tmp/execd.log 2>&1 &",
                 'exec "$@"',
                 "",
             ]
@@ -736,9 +881,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 },
             ) from exc
 
-    def _prepare_sandbox_runtime(self, container, sandbox_id: str) -> None:
+    def _prepare_sandbox_runtime(
+        self,
+        container,
+        sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
+    ) -> None:
         """Copy execd artifacts and bootstrap launcher into the sandbox container."""
-        self._copy_execd_to_container(container, sandbox_id)
+        self._copy_execd_to_container(container, sandbox_id, platform)
         self._install_bootstrap_script(container, sandbox_id)
 
     def _prepare_creation_context(
@@ -751,22 +901,6 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if request.timeout is not None:
             expires_at = calculate_expiration_or_raise(created_at, request.timeout)
         return sandbox_id, created_at, expires_at
-
-    @staticmethod
-    def _allocate_host_port(
-        min_port: int = 40000, max_port: int = 60000, attempts: int = 50
-    ) -> Optional[int]:
-        """Find an available TCP port on the host within the given range."""
-        for _ in range(attempts):
-            port = random.randint(min_port, max_port)
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                try:
-                    sock.bind(("0.0.0.0", port))
-                except OSError:
-                    continue
-                return port
-        return None
 
     async def create_sandbox(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
         """
@@ -781,17 +915,22 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         Raises:
             HTTPException: If sandbox creation fails
         """
-        ensure_entrypoint(request.entrypoint)
+        request = resolve_sandbox_image_from_request(request)
+        ensure_entrypoint(request.entrypoint or [])
         ensure_metadata_labels(request.metadata)
+        ensure_platform_valid(request.platform)
         ensure_timeout_within_limit(
             request.timeout,
             self.app_config.server.max_sandbox_timeout_seconds,
         )
+        self._ensure_secure_access_support(request)
         self._ensure_network_policy_support(request)
         self._validate_network_exists()
-        pvc_inspect_cache = self._validate_volumes(request)
+        pvc_inspect_cache, auto_created_volumes = self._validate_volumes(request)
         sandbox_id, created_at, expires_at = self._prepare_creation_context(request)
-        return self._provision_sandbox(sandbox_id, request, created_at, expires_at, pvc_inspect_cache)
+        return self._provision_sandbox(
+            sandbox_id, request, created_at, expires_at, pvc_inspect_cache, auto_created_volumes,
+        )
 
     def _async_provision_worker(
         self,
@@ -882,9 +1021,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
     @staticmethod
     def _pending_to_sandbox(sandbox_id: str, pending: PendingSandbox) -> Sandbox:
+        snapshot_id = getattr(pending.request, "snapshot_id", None)
+        if not isinstance(snapshot_id, str) or not snapshot_id:
+            snapshot_id = None
         return Sandbox(
             id=sandbox_id,
-            image=pending.request.image,
+            image=None if snapshot_id else pending.request.image,
+            snapshotId=snapshot_id,
+            platform=pending.request.platform,
             status=pending.status,
             metadata=pending.request.metadata,
             entrypoint=pending.request.entrypoint,
@@ -923,10 +1067,28 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         image_uri: str,
         auth_config: Optional[dict],
         sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
     ) -> None:
+        docker_platform = resolve_docker_platform(platform)
         try:
             with self._docker_operation(f"pull image {image_uri}", sandbox_id):
-                self.docker_client.images.pull(image_uri, auth_config=auth_config)
+                pull_kwargs: dict[str, Any] = {"auth_config": auth_config}
+                if docker_platform is not None:
+                    pull_kwargs["platform"] = docker_platform
+                self.docker_client.images.pull(image_uri, **pull_kwargs)
+        except TypeError as exc:
+            if docker_platform is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": (
+                            "The configured Docker client/daemon does not support "
+                            f"platform-aware image pull for '{docker_platform}'."
+                        ),
+                    },
+                ) from exc
+            raise
         except DockerException as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -941,13 +1103,61 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         image_uri: str,
         auth_config: Optional[dict],
         sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
     ) -> None:
+        expected_platform = platform
+        if expected_platform is not None and is_windows_platform(expected_platform):
+            expected_platform = None
+        if expected_platform is None:
+            expected_platform = self._get_daemon_platform()
         try:
             with self._docker_operation(f"inspect image {image_uri}", sandbox_id):
-                self.docker_client.images.get(image_uri)
+                image = self.docker_client.images.get(image_uri)
+                if expected_platform is None:
+                    logger.debug(
+                        "Sandbox %s using cached image %s without platform check (daemon platform unavailable)",
+                        sandbox_id,
+                        image_uri,
+                    )
+                    return
+                image_attrs = getattr(image, "attrs", {}) or {}
+                image_os = (image_attrs.get("Os") or image_attrs.get("os") or "").lower()
+                image_arch = (
+                    image_attrs.get("Architecture")
+                    or image_attrs.get("architecture")
+                    or ""
+                ).lower()
+                image_os = self._normalize_os(image_os) or image_os
+                image_arch = self._normalize_arch(image_arch) or image_arch
+                requested_os = self._normalize_os(expected_platform.os) or expected_platform.os.lower()
+                requested_arch = (
+                    self._normalize_arch(expected_platform.arch) or expected_platform.arch.lower()
+                )
+                if image_os != requested_os or image_arch != requested_arch:
+                    logger.info(
+                        "Sandbox %s cached image %s platform mismatch (cached=%s/%s, requested=%s/%s); repulling",
+                        sandbox_id,
+                        image_uri,
+                        image_os or "unknown",
+                        image_arch or "unknown",
+                        requested_os,
+                        requested_arch,
+                    )
+                    self._pull_image(
+                        image_uri,
+                        auth_config,
+                        sandbox_id,
+                        expected_platform,
+                    )
+                    return
                 logger.debug("Sandbox %s using cached image %s", sandbox_id, image_uri)
         except ImageNotFound:
-            self._pull_image(image_uri, auth_config, sandbox_id)
+            self._pull_image(
+                image_uri,
+                auth_config,
+                sandbox_id,
+                platform,
+            )
         except DockerException as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -964,11 +1174,21 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         created_at: datetime,
         expires_at: Optional[datetime],
         pvc_inspect_cache: Optional[dict[str, dict]] = None,
+        auto_created_volumes: Optional[list[str]] = None,
     ) -> CreateSandboxResponse:
         labels, environment = self._build_labels_and_env(sandbox_id, request, expires_at)
+        if auto_created_volumes:
+            labels[SANDBOX_MANAGED_VOLUMES_LABEL] = json.dumps(
+                auto_created_volumes, separators=(",", ":"),
+            )
         image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
-        mem_limit, nano_cpus = self._resolve_resource_limits(request)
+        mem_limit, nano_cpus, gpu_count = self._resolve_resource_limits(request)
         egress_token: Optional[str] = None
+        requested_windows_profile = is_windows_platform(request.platform)
+
+        if requested_windows_profile:
+            validate_windows_resource_limits(request.resource_limits.root or {})
+            validate_windows_runtime_prerequisites()
 
         # Prepare OSSFS mounts first so binds can reference mounted host paths.
         ossfs_mount_keys = self._prepare_ossfs_mounts(request.volumes)
@@ -980,30 +1200,57 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
         sidecar_container = None
         try:
+            # For dockur/windows profile, resourceLimits are translated to
+            # guest envs (RAM_SIZE/CPU_CORES/DISK_SIZE). Avoid applying
+            # container cgroup memory/cpu limits to the outer Linux container,
+            # which can OOM-kill QEMU during installation/runtime. GPU
+            # passthrough is likewise suppressed: the Windows guest runs inside
+            # QEMU and would not see GPUs exposed to the outer container.
+            effective_mem_limit = None if requested_windows_profile else mem_limit
+            effective_nano_cpus = None if requested_windows_profile else nano_cpus
+            effective_gpu_count = None if requested_windows_profile else gpu_count
+
             # Build volume bind mounts from request volumes.
             # pvc_inspect_cache carries Docker volume inspect data from the
             # validation phase, avoiding a redundant API call.
             volume_binds = self._build_volume_binds(request.volumes, pvc_inspect_cache)
 
             host_config_kwargs: Dict[str, Any]
-            exposed_ports: Optional[list[str]] = None
+            exposed_ports: Optional[list[str]] = ["44772", "8080"]
+            if requested_windows_profile:
+                # dockur/windows exposes RDP and noVNC/web UI on these ports.
+                # https://github.com/dockur/windows/blob/master/Dockerfile
+                exposed_ports.extend(["3389/tcp", "3389/udp", "8006/tcp"])
+            container_exposed_ports: Optional[list[str]] = exposed_ports
 
             if request.network_policy:
                 egress_token = generate_egress_token()
                 labels[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] = egress_token
-                host_execd_port, host_http_port = self._allocate_distinct_host_ports()
+                sidecar_port_bindings = allocate_port_bindings(exposed_ports)
+                host_execd_port = sidecar_port_bindings["44772"][1]
+                host_http_port = sidecar_port_bindings["8080"][1]
+                extra_sidecar_port_bindings = {
+                    port: binding
+                    for port, binding in sidecar_port_bindings.items()
+                    if port not in {"44772", "8080"}
+                }
                 sidecar_container = self._start_egress_sidecar(
                     sandbox_id=sandbox_id,
                     network_policy=request.network_policy,
                     egress_token=egress_token,
                     host_execd_port=host_execd_port,
                     host_http_port=host_http_port,
+                    extra_port_bindings=extra_sidecar_port_bindings,
                 )
                 labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                 labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
                 host_config_kwargs = self._base_host_config_kwargs(
-                    mem_limit, nano_cpus, f"container:{sidecar_container.id}"
+                    effective_mem_limit, effective_nano_cpus, f"container:{sidecar_container.id}",
+                    gpu_count=effective_gpu_count,
                 )
+                # Container network namespace is shared with sidecar. Docker rejects
+                # exposing ports on the main container in "container:<id>" mode.
+                container_exposed_ports = None
                 # Drop NET_ADMIN for the main container; only the sidecar should keep it
                 cap_drop = set(host_config_kwargs.get("cap_drop") or [])
                 cap_drop.add("NET_ADMIN")
@@ -1011,31 +1258,42 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     host_config_kwargs["cap_drop"] = list(cap_drop)
             else:
                 host_config_kwargs = self._base_host_config_kwargs(
-                    mem_limit, nano_cpus, self.network_mode
+                    effective_mem_limit, effective_nano_cpus, self.network_mode,
+                    gpu_count=effective_gpu_count,
                 )
                 if self.network_mode != HOST_NETWORK_MODE:
-                    host_execd_port, host_http_port = self._allocate_distinct_host_ports()
-                    port_bindings = {
-                        "44772": ("0.0.0.0", host_execd_port),
-                        "8080": ("0.0.0.0", host_http_port),
-                    }
-                    host_config_kwargs["port_bindings"] = port_bindings
-                    exposed_ports = list(port_bindings.keys())
+                    port_bindings = allocate_port_bindings(exposed_ports)
+                    host_execd_port = port_bindings["44772"][1]
+                    host_http_port = port_bindings["8080"][1]
+                    host_config_kwargs["port_bindings"] = normalize_port_bindings(port_bindings)
                     labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                     labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
+                else:
+                    exposed_ports = None
 
             # Inject volume bind mounts into Docker host config
             if volume_binds:
                 host_config_kwargs["binds"] = volume_binds
+            if requested_windows_profile:
+                host_config_kwargs = apply_windows_runtime_host_config_defaults(
+                    host_config_kwargs,
+                    sandbox_id,
+                )
+                environment = inject_windows_resource_limits_env(
+                    environment,
+                    request.resource_limits.root or {},
+                )
+                environment = inject_windows_user_ports(environment, exposed_ports)
 
-            self._create_and_start_container(
+            created_container = self._create_and_start_container(
                 sandbox_id,
                 image_uri,
                 request.entrypoint,
                 labels,
                 environment,
                 host_config_kwargs,
-                exposed_ports,
+                container_exposed_ports,
+                request.platform,
             )
         except Exception:
             if sidecar_container is not None:
@@ -1048,6 +1306,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                         cleanup_exc,
                     )
             self._release_ossfs_mounts(ossfs_mount_keys)
+            self._cleanup_managed_volumes(sandbox_id, auto_created_volumes or [])
             raise
 
         status_info = SandboxStatus(
@@ -1060,10 +1319,12 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if expires_at is not None:
             self._schedule_expiration(sandbox_id, expires_at)
 
+        effective_platform = self._resolve_platform_for_container(created_container, labels)
         return CreateSandboxResponse(
             id=sandbox_id,
             status=status_info,
             metadata=request.metadata,
+            platform=effective_platform or request.platform,
             expiresAt=expires_at,
             createdAt=created_at,
             entrypoint=request.entrypoint,
@@ -1138,7 +1399,25 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         # Common validation: egress.image must be configured
         ensure_egress_configured(request.network_policy, self.app_config.egress)
 
-    def _validate_volumes(self, request: CreateSandboxRequest) -> dict[str, dict]:
+    def _ensure_secure_access_support(self, request: CreateSandboxRequest) -> None:
+        """Validate that secure access can be honored under the current Docker runtime."""
+        if not request.secure_access:
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    "secureAccess is not supported when runtime.type='docker'. "
+                    "Use the Kubernetes runtime to create secured sandboxes."
+                ),
+            },
+        )
+
+    def _validate_volumes(
+        self, request: CreateSandboxRequest
+    ) -> tuple[dict[str, dict], list[str]]:
         """
         Validate volume definitions for Docker runtime.
 
@@ -1150,32 +1429,46 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             request: Sandbox creation request.
 
         Returns:
-            A dict mapping PVC volume names (``pvc.claimName``) to their
-            ``docker volume inspect`` results.  Empty when there are no PVC
-            volumes.  This data is passed to ``_build_volume_binds`` so that
-            bind generation does not need a second API call.
+            A tuple of:
+            - A dict mapping PVC volume names (``pvc.claimName``) to their
+              ``docker volume inspect`` results.  Empty when there are no PVC
+              volumes.  This data is passed to ``_build_volume_binds`` so that
+              bind generation does not need a second API call.
+            - A list of Docker named volume names that were auto-created during
+              validation (empty when ``createIfNotExists`` is false or all
+              volumes already existed).
 
         Raises:
             HTTPException: When any validation fails.
         """
         if not request.volumes:
-            return {}
+            return {}, []
 
         # Shared validation: names, mount paths, sub paths, backend count, host path allowlist
-        allowed_prefixes = self.app_config.storage.allowed_host_paths or None
+        allowed_prefixes = self.app_config.storage.allowed_host_paths
         ensure_volumes_valid(request.volumes, allowed_host_prefixes=allowed_prefixes)
 
         pvc_inspect_cache: dict[str, dict] = {}
-        for volume in request.volumes:
-            if volume.host is not None:
-                self._validate_host_volume(volume, allowed_prefixes)
-            elif volume.pvc is not None:
-                vol_info = self._validate_pvc_volume(volume)
-                pvc_inspect_cache[volume.pvc.claim_name] = vol_info
-            elif volume.ossfs is not None:
-                self._validate_ossfs_volume(volume)
+        auto_created_volumes: list[str] = []
+        try:
+            for volume in request.volumes:
+                if volume.host is not None:
+                    self._validate_host_volume(volume, allowed_prefixes)
+                elif volume.pvc is not None:
+                    vol_info, was_created = self._validate_pvc_volume(volume)
+                    pvc_inspect_cache[volume.pvc.claim_name] = vol_info
+                    if was_created and volume.pvc.delete_on_sandbox_termination:
+                        auto_created_volumes.append(volume.pvc.claim_name)
+                elif volume.ossfs is not None:
+                    self._validate_ossfs_volume(volume)
+        except Exception:
+            # If any subsequent volume validation fails, remove volumes we
+            # already auto-created so they don't leak — delete_sandbox will
+            # never run for a sandbox that was never provisioned.
+            self._cleanup_managed_volumes("<pre-sandbox>", auto_created_volumes)
+            raise
 
-        return pvc_inspect_cache
+        return pvc_inspect_cache, auto_created_volumes
 
     @staticmethod
     def _validate_host_volume(volume, allowed_prefixes: Optional[list[str]]) -> None:
@@ -1183,8 +1476,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         Docker-specific validation for host bind mount volumes.
 
         Validates that the resolved host path (host.path + optional subPath)
-        remains within allowed prefixes, then ensures the directory exists on
-        the filesystem — creating it automatically if it does not.
+        remains within allowed prefixes — including symlink resolution — then
+        ensures the directory exists on the filesystem, creating it automatically
+        if it does not.
 
         Args:
             volume: Volume with host backend.
@@ -1204,6 +1498,24 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if allowed_prefixes and resolved_path != volume.host.path:
             ensure_valid_host_path(resolved_path, allowed_prefixes)
 
+        # ── Symlink-aware allowlist check ──
+        # os.path.normpath and ensure_valid_host_path only perform lexical
+        # checks.  A symlink within a whitelisted directory (e.g.
+        # /data/opensandbox/link -> /) would pass lexical validation but
+        # Docker resolves the symlink when creating the bind mount, escaping
+        # the allowed prefix.  Resolve both the host path and the allowed
+        # prefixes with realpath to detect this.
+        if allowed_prefixes:
+            canonical = os.path.realpath(resolved_path)
+            canonical_prefixes = [os.path.realpath(p) for p in allowed_prefixes]
+            if canonical != resolved_path or canonical_prefixes != allowed_prefixes:
+                ensure_valid_host_path(canonical, canonical_prefixes)
+
+        # Allow existing host files (for example ISO binds to /boot.iso)
+        # without attempting directory creation.
+        if os.path.isfile(resolved_path):
+            return
+
         try:
             os.makedirs(resolved_path, exist_ok=True)
         except OSError as e:
@@ -1218,7 +1530,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 },
             )
 
-    def _validate_pvc_volume(self, volume) -> dict:
+    def _validate_pvc_volume(self, volume) -> tuple[dict, bool]:
         """
         Docker-specific validation for PVC (named volume) backend.
 
@@ -1236,27 +1548,52 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             volume: Volume with pvc backend.
 
         Returns:
-            The ``docker volume inspect`` result dict for the named volume.
+            A tuple of:
+            - The ``docker volume inspect`` result dict for the named volume.
+            - Whether the volume was auto-created by this call.
 
         Raises:
             HTTPException: When the named volume does not exist, inspection
                 fails, or subPath constraints are violated.
         """
         volume_name = volume.pvc.claim_name
+        auto_created = False
         try:
             vol_info = self.docker_client.api.inspect_volume(volume_name)
         except DockerNotFound:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": SandboxErrorCodes.PVC_VOLUME_NOT_FOUND,
-                    "message": (
-                        f"Volume '{volume.name}': Docker named volume '{volume_name}' "
-                        "does not exist. Named volumes must be created before sandbox "
-                        "creation (e.g., 'docker volume create <name>')."
-                    ),
-                },
-            )
+            if volume.pvc.create_if_not_exists:
+                # Auto-create the Docker named volume
+                try:
+                    self.docker_client.api.create_volume(
+                        name=volume_name,
+                        labels={SANDBOX_MANAGED_VOLUMES_LABEL: "server"},
+                    )
+                    logger.info("Auto-created Docker named volume '%s'", volume_name)
+                    vol_info = self.docker_client.api.inspect_volume(volume_name)
+                    auto_created = True
+                except DockerException as create_exc:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail={
+                            "code": SandboxErrorCodes.PVC_VOLUME_INSPECT_FAILED,
+                            "message": (
+                                f"Volume '{volume.name}': failed to auto-create Docker "
+                                f"named volume '{volume_name}': {create_exc}"
+                            ),
+                        },
+                    ) from create_exc
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.PVC_VOLUME_NOT_FOUND,
+                        "message": (
+                            f"Volume '{volume.name}': Docker named volume '{volume_name}' "
+                            "does not exist. Named volumes must be created before sandbox "
+                            "creation (e.g., 'docker volume create <name>')."
+                        ),
+                    },
+                )
         except DockerException as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1376,7 +1713,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             # false-negative rejections.  If the subPath does not actually
             # exist, Docker will report the error at container creation time.
 
-        return vol_info
+        return vol_info, auto_created
 
     def _build_volume_binds(
         self,
@@ -1562,6 +1899,11 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             mount_keys: list[str] = json.loads(mount_keys_raw)
         except (TypeError, json.JSONDecodeError):
             mount_keys = []
+        managed_volumes_raw = labels.get(SANDBOX_MANAGED_VOLUMES_LABEL, "[]")
+        try:
+            managed_volumes: list[str] = json.loads(managed_volumes_raw)
+        except (TypeError, json.JSONDecodeError):
+            managed_volumes = []
         try:
             try:
                 with self._docker_operation("kill sandbox container", sandbox_id):
@@ -1583,7 +1925,32 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         finally:
             self._remove_expiration_tracking(sandbox_id)
             self._cleanup_egress_sidecar(sandbox_id)
+            self._cleanup_windows_oem_volume(sandbox_id, labels)
             self._release_ossfs_mounts(mount_keys)
+            self._cleanup_managed_volumes(sandbox_id, managed_volumes)
+
+    def _cleanup_windows_oem_volume(
+        self,
+        sandbox_id: str,
+        labels: Optional[dict[str, str]],
+    ) -> None:
+        """Best-effort cleanup for windows profile OEM named volume."""
+        if labels is not None and labels.get(SANDBOX_PLATFORM_OS_LABEL) != "windows":
+            return
+
+        volume_name = f"{WINDOWS_OEM_VOLUME_PREFIX}-{sandbox_id}"
+        try:
+            with self._docker_operation("remove windows oem volume", sandbox_id):
+                self.docker_client.api.remove_volume(volume_name)
+        except DockerNotFound:
+            return
+        except DockerException as exc:
+            logger.warning(
+                "sandbox=%s | failed to remove windows OEM volume %s: %s",
+                sandbox_id,
+                volume_name,
+                exc,
+            )
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
@@ -1717,7 +2084,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
         return RenewSandboxExpirationResponse(expires_at=new_expiration)
 
-    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False,
+                     expires: Optional[int] = None) -> Endpoint:
         """
         Get sandbox access endpoint.
 
@@ -1725,13 +2093,27 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             sandbox_id: Unique sandbox identifier
             port: Port number where the service is listening inside the sandbox
             resolve_internal: If True, return the internal container IP (for proxy), ignoring router config.
+            expires: Not supported by Docker runtime.
 
         Returns:
             Endpoint: Public endpoint URL
 
         Raises:
-            HTTPException: If sandbox not found or endpoint not available
+            HTTPException: If sandbox not found, endpoint not available,
+                or expires is provided (Docker does not support signed routes).
         """
+        if expires is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.API_NOT_SUPPORTED,
+                    "message": (
+                        "Signed routes (expires parameter) are not supported when "
+                        "runtime.type='docker'. Use the Kubernetes runtime for signed routes."
+                    ),
+                },
+            )
+
         try:
             self.validate_port(port)
         except ValueError as exc:
@@ -1762,10 +2144,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         if self.network_mode == HOST_NETWORK_MODE:
             endpoint = Endpoint(endpoint=f"{public_host}:{port}")
             container = self._get_container_by_sandbox_id(sandbox_id)
-            self._attach_egress_auth_headers(
-                endpoint,
-                (container.attrs.get("Config", {}).get("Labels") or {}),
-            )
+            labels = container.attrs.get("Config", {}).get("Labels") or {}
+            self._attach_egress_auth_headers(endpoint, labels)
             return endpoint
 
         # non-host mode (bridge / user-defined network)
@@ -1797,7 +2177,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                         "message": "Missing host port mapping for container port 8080.",
                     },
                 )
-            return Endpoint(endpoint=f"{public_host}:{http_host_port}")
+            endpoint = Endpoint(endpoint=f"{public_host}:{http_host_port}")
+            self._attach_egress_auth_headers(endpoint, labels)
+            return endpoint
 
         if execd_host_port is None:
             raise HTTPException(
@@ -1885,6 +2267,11 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
         else:
             labels[SANDBOX_EXPIRES_AT_LABEL] = expires_at.isoformat()
+        if request.platform is not None:
+            labels[SANDBOX_PLATFORM_OS_LABEL] = request.platform.os
+            labels[SANDBOX_PLATFORM_ARCH_LABEL] = request.platform.arch
+        if request.snapshot_id:
+            labels[SANDBOX_SNAPSHOT_ID_LABEL] = request.snapshot_id
 
         apply_access_renew_extend_seconds_to_mapping(labels, request.extensions)
 
@@ -1906,22 +2293,24 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                 "username": request.image.auth.username,
                 "password": request.image.auth.password,
             }
-        self._ensure_image_available(image_uri, auth_config, sandbox_id)
+        self._ensure_image_available(image_uri, auth_config, sandbox_id, request.platform)
         return image_uri, auth_config
 
     def _resolve_resource_limits(
         self, request: CreateSandboxRequest
-    ) -> tuple[Optional[int], Optional[int]]:
+    ) -> tuple[Optional[int], Optional[int], Optional[int]]:
         resource_limits = request.resource_limits.root or {}
         mem_limit = parse_memory_limit(resource_limits.get("memory"))
         nano_cpus = parse_nano_cpus(resource_limits.get("cpu"))
-        return mem_limit, nano_cpus
+        gpu_count = parse_gpu_request(resource_limits.get("gpu"))
+        return mem_limit, nano_cpus, gpu_count
 
     def _base_host_config_kwargs(
         self,
         mem_limit: Optional[int],
         nano_cpus: Optional[int],
         network_mode: str,
+        gpu_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         host_config_kwargs: Dict[str, Any] = {"network_mode": network_mode}
         security_opts: list[str] = []
@@ -1942,6 +2331,13 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             host_config_kwargs["mem_limit"] = mem_limit
         if nano_cpus:
             host_config_kwargs["nano_cpus"] = nano_cpus
+        if gpu_count:
+            # Honors host toolchains such as nvidia-container-toolkit. The Docker
+            # Engine returns a clear error at container create time if the host
+            # cannot satisfy the request, so failure is surfaced rather than silent.
+            host_config_kwargs["device_requests"] = [
+                DeviceRequest(count=gpu_count, capabilities=[["gpu"]])
+            ]
         # Inject secure runtime into host_config
         if self.docker_runtime:
             logger.info(
@@ -1951,28 +2347,35 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             host_config_kwargs["runtime"] = self.docker_runtime
         return host_config_kwargs
 
-    def _allocate_distinct_host_ports(self) -> tuple[int, int]:
-        host_execd_port = self._allocate_host_port()
-        host_http_port = self._allocate_host_port()
-        if host_execd_port is None or host_http_port is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail={
-                    "code": SandboxErrorCodes.CONTAINER_START_FAILED,
-                    "message": "Failed to allocate host ports for sandbox container.",
-                },
-            )
-        while host_http_port == host_execd_port:
-            host_http_port = self._allocate_host_port()
-            if host_http_port is None:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail={
-                        "code": SandboxErrorCodes.CONTAINER_START_FAILED,
-                        "message": "Failed to allocate distinct host ports for sandbox container.",
-                    },
+    def _cleanup_managed_volumes(self, sandbox_id: str, volume_names: list[str]) -> None:
+        """
+        Remove Docker named volumes that were auto-created for this sandbox.
+
+        Only volumes whose ``opensandbox.io/volume-managed-by`` label equals
+        ``"server"`` are removed.  Pre-existing volumes are never touched.
+        Errors are logged but do not propagate — volume cleanup is best-effort.
+        """
+        for name in volume_names:
+            try:
+                vol_info = self.docker_client.api.inspect_volume(name)
+                vol_labels = vol_info.get("Labels") or {}
+                if vol_labels.get(SANDBOX_MANAGED_VOLUMES_LABEL) != "server":
+                    logger.debug(
+                        "sandbox=%s | volume '%s' not managed by server, skipping removal",
+                        sandbox_id, name,
+                    )
+                    continue
+                self.docker_client.api.remove_volume(name)
+                logger.info("sandbox=%s | removed managed volume '%s'", sandbox_id, name)
+            except DockerNotFound:
+                logger.debug(
+                    "sandbox=%s | managed volume '%s' already removed", sandbox_id, name,
                 )
-        return host_execd_port, host_http_port
+            except DockerException as exc:
+                logger.warning(
+                    "sandbox=%s | failed to remove managed volume '%s': %s",
+                    sandbox_id, name, exc,
+                )
 
     def _cleanup_egress_sidecar(self, sandbox_id: str) -> None:
         """
@@ -2005,6 +2408,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         egress_token: str,
         host_execd_port: int,
         host_http_port: int,
+        extra_port_bindings: Optional[dict[str, tuple[str, int]]] = None,
     ):
         sidecar_name = f"sandbox-egress-{sandbox_id}"
         sidecar_labels = {
@@ -2026,20 +2430,25 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             f"{OPENSANDBOX_EGRESS_TOKEN}={egress_token}",
         ]
 
+        sidecar_port_bindings: dict[str, tuple[str, int]] = {
+            "44772": ("0.0.0.0", host_execd_port),
+            "8080": ("0.0.0.0", host_http_port),
+        }
+        if extra_port_bindings:
+            sidecar_port_bindings.update(extra_port_bindings)
+
         sidecar_host_config_kwargs: dict[str, Any] = {
             "network_mode": BRIDGE_NETWORK_MODE,
             "cap_add": ["NET_ADMIN"],
-            "port_bindings": {
-                "44772": ("0.0.0.0", host_execd_port),
-                "8080": ("0.0.0.0", host_http_port),
-            },
-            # FIXME(Pangjiping): Disable IPv6 in the shared namespace to keep policy enforcement consistent.
-            "sysctls": {
+            "port_bindings": normalize_port_bindings(sidecar_port_bindings),
+        }
+        if self.app_config.egress.disable_ipv6:
+            # Optional: disable IPv6 in the shared namespace when egress.disable_ipv6 is set.
+            sidecar_host_config_kwargs["sysctls"] = {
                 "net.ipv6.conf.all.disable_ipv6": 1,
                 "net.ipv6.conf.default.disable_ipv6": 1,
                 "net.ipv6.conf.lo.disable_ipv6": 1,
-            },
-        }
+            }
 
         sidecar_host_config = self.docker_client.api.create_host_config(
             **sidecar_host_config_kwargs
@@ -2056,7 +2465,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     labels=sidecar_labels,
                     environment=sidecar_env,
                     # Expose the ports that have host bindings so Docker publishes them in bridge mode.
-                    ports=["44772", "8080"],
+                    ports=[normalize_container_port_spec(p) for p in sidecar_port_bindings.keys()],
                 )
             sidecar_container_id = sidecar_resp.get("Id")
             if not sidecar_container_id:
@@ -2111,12 +2520,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
         environment: list[str],
         host_config_kwargs: Dict[str, Any],
         exposed_ports: Optional[list[str]],
+        platform: Optional[PlatformSpec],
     ):
-        # Normalize single-string entrypoint containing spaces to avoid shell path issues in bootstrap.
-        if len(bootstrap_command) == 1 and " " in bootstrap_command[0]:
-            import shlex
-
-            bootstrap_command = shlex.split(bootstrap_command[0])
+        requested_windows_platform = is_windows_platform(platform)
+        bootstrap_command = normalize_bootstrap_command(
+            bootstrap_command,
+            requested_windows_platform,
+        )
+        docker_platform = resolve_docker_platform(platform)
 
         host_config = self.docker_client.api.create_host_config(**host_config_kwargs)
         container = None
@@ -2125,14 +2536,21 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
             with self._docker_operation("create sandbox container", sandbox_id):
                 container_kwargs = {
                     "image": image_uri,
-                    "entrypoint": [BOOTSTRAP_PATH],
                     "command": bootstrap_command,
-                    "ports": exposed_ports,
+                    "ports": (
+                        [normalize_container_port_spec(p) for p in exposed_ports]
+                        if exposed_ports
+                        else None
+                    ),
                     "name": f"sandbox-{sandbox_id}",
                     "environment": environment,
                     "labels": labels,
                     "host_config": host_config,
                 }
+                if not requested_windows_platform:
+                    container_kwargs["entrypoint"] = [BOOTSTRAP_PATH]
+                if docker_platform is not None:
+                    container_kwargs["platform"] = docker_platform
 
                 response = self.docker_client.api.create_container(**container_kwargs)
             container_id = response.get("Id")
@@ -2145,7 +2563,42 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
                     },
                 )
             container = self.docker_client.containers.get(container_id)
-            self._prepare_sandbox_runtime(container, sandbox_id)
+            runtime_platform = self._resolve_platform_for_container(
+                container,
+                labels,
+                include_runtime_metadata=True,
+            )
+            if requested_windows_platform:
+                install_bat_bytes = fetch_execd_install_bat(
+                    docker_client=self.docker_client,
+                    execd_image=self.execd_image,
+                    cache=self._windows_profile_cache,
+                    cache_lock=self._execd_archive_lock,
+                    docker_operation=self._docker_operation,
+                    logger=logger,
+                )
+                execd_windows_bin_bytes = fetch_execd_windows_binary(
+                    docker_client=self.docker_client,
+                    execd_image=self.execd_image,
+                    cache=self._windows_profile_cache,
+                    cache_lock=self._execd_archive_lock,
+                    docker_operation=self._docker_operation,
+                    logger=logger,
+                )
+                install_windows_oem_scripts(
+                    container=container,
+                    sandbox_id=sandbox_id,
+                    install_bat_bytes=install_bat_bytes,
+                    execd_windows_bin_bytes=execd_windows_bin_bytes,
+                    ensure_directory=self._ensure_directory,
+                    docker_operation=self._docker_operation,
+                )
+                logger.info(
+                    "sandbox=%s | skip linux bootstrap/runtime injection for windows profile",
+                    sandbox_id,
+                )
+            else:
+                self._prepare_sandbox_runtime(container, sandbox_id, runtime_platform)
             with self._docker_operation("start sandbox container", sandbox_id):
                 container.start()
             return container
@@ -2173,6 +2626,17 @@ class DockerSandboxService(DockerDiagnosticsMixin, OSSFSMixin, SandboxService, E
 
             if isinstance(exc, HTTPException):
                 raise exc
+            if isinstance(exc, TypeError) and docker_platform is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": (
+                            "The configured Docker client/daemon does not support "
+                            f"platform-aware container create for '{docker_platform}'."
+                        ),
+                    },
+                ) from exc
 
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

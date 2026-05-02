@@ -16,6 +16,7 @@
 
 package com.alibaba.opensandbox.sandbox.infrastructure.pool
 
+import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolStateStore
 import com.alibaba.opensandbox.sandbox.domain.pool.StoreCounters
 import java.time.Duration
@@ -32,12 +33,12 @@ import java.util.concurrent.ConcurrentLinkedQueue
  * - Primary lock is a no-op: single-node mode always treats the caller as leader
  *   ([tryAcquirePrimaryLock]/[renewPrimaryLock] return true, [releasePrimaryLock] is no-op).
  *
- * Idle entries use a fixed 24h TTL; expired entries are removed on take, put, reap, or snapshot.
+ * Idle entries use a configurable TTL (default 24h); expired entries are removed on take, put, reap, or snapshot.
  * [tryTakeIdle] returns oldest (FIFO) non-expired idle sandbox ID.
  */
 class InMemoryPoolStateStore : PoolStateStore {
-    /** Fixed idle TTL per OSEP (24h). */
-    private val idleTtl: Duration = Duration.ofHours(24)
+    private val defaultIdleTtl: Duration = Duration.ofHours(24)
+    private val idleTtlByPool = ConcurrentHashMap<String, Duration>()
 
     /** Per pool: (map = sandboxId -> entry for idempotent put + expiry, queue = FIFO order for take). */
     private val pools = ConcurrentHashMap<String, PoolIdleState>()
@@ -58,7 +59,7 @@ class InMemoryPoolStateStore : PoolStateStore {
         sandboxId: String,
     ) {
         val state = pools.computeIfAbsent(poolName) { PoolIdleState() }
-        val expiresAt = Instant.now().plus(idleTtl)
+        val expiresAt = Instant.now().plus(resolveIdleTtl(poolName))
         val entry = IdleEntry(sandboxId, expiresAt)
         if (state.map.putIfAbsent(sandboxId, entry) == null) {
             state.queue.add(sandboxId)
@@ -115,6 +116,14 @@ class InMemoryPoolStateStore : PoolStateStore {
         return StoreCounters(idleCount = state.map.size)
     }
 
+    override fun snapshotIdleEntries(poolName: String): List<IdleEntry> {
+        val state = pools[poolName] ?: return emptyList()
+        val now = Instant.now()
+        state.map.entries.removeIf { it.value.expiresAt <= now }
+        state.queue.removeIf { sandboxId -> !state.map.containsKey(sandboxId) }
+        return state.queue.mapNotNull { sandboxId -> state.map[sandboxId] }
+    }
+
     override fun getMaxIdle(poolName: String): Int? = null
 
     override fun setMaxIdle(
@@ -124,10 +133,22 @@ class InMemoryPoolStateStore : PoolStateStore {
         // Single-node: no shared state; pool uses local currentMaxIdle.
     }
 
-    private data class IdleEntry(val sandboxId: String, val expiresAt: Instant)
+    override fun setIdleEntryTtl(
+        poolName: String,
+        idleTtl: Duration,
+    ) {
+        idleTtlByPool[poolName] = validateIdleTtl(idleTtl)
+    }
 
     private class PoolIdleState {
         val map = ConcurrentHashMap<String, IdleEntry>()
         val queue = ConcurrentLinkedQueue<String>()
     }
+
+    private fun validateIdleTtl(idleTtl: Duration): Duration {
+        require(!idleTtl.isNegative && !idleTtl.isZero) { "idleTtl must be positive" }
+        return idleTtl
+    }
+
+    private fun resolveIdleTtl(poolName: String): Duration = idleTtlByPool[poolName] ?: defaultIdleTtl
 }

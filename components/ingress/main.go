@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +30,7 @@ import (
 	"github.com/alibaba/opensandbox/ingress/pkg/proxy"
 	"github.com/alibaba/opensandbox/ingress/pkg/renewintent"
 	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
+	"github.com/alibaba/opensandbox/ingress/pkg/signature"
 	slogger "github.com/alibaba/opensandbox/internal/logger"
 	"github.com/alibaba/opensandbox/internal/version"
 )
@@ -37,9 +39,6 @@ func main() {
 	version.EchoVersion("OpenSandbox Ingress")
 
 	flag.InitFlags()
-	if flag.Namespace == "" {
-		log.Panicf("'-namespace' not set.")
-	}
 
 	cfg := injection.ParseAndGetRESTConfigOrDie()
 	cfg.ContentType = runtime.ContentTypeProtobuf
@@ -51,7 +50,6 @@ func main() {
 	// Create sandbox provider factory
 	providerFactory := sandbox.NewProviderFactory(
 		cfg,
-		flag.Namespace,
 		time.Second*30, // resync period
 	)
 
@@ -80,8 +78,17 @@ func main() {
 		})
 	}
 
+	var secure *signature.Verifier
+	if keyStr := strings.TrimSpace(flag.SecureAccessKeys); keyStr != "" {
+		keys, err := signature.ParseKeys(flag.SecureAccessKeys)
+		if err != nil {
+			log.Panicf("parse secure-access-keys: %v", err)
+		}
+		secure = &signature.Verifier{Keys: keys}
+	}
+
 	// Create reverse proxy with sandbox provider
-	reverseProxy := proxy.NewProxy(ctx, sandboxProvider, proxy.Mode(flag.Mode), renewPublisher)
+	reverseProxy := proxy.NewProxy(ctx, sandboxProvider, proxy.Mode(flag.Mode), renewPublisher, secure)
 	http.Handle("/", reverseProxy)
 	http.HandleFunc("/status.ok", proxy.Healthz)
 

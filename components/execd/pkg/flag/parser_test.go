@@ -26,7 +26,7 @@ import (
 func TestInitFlagsSanitizesNonPositiveJupyterIdlePollIntervalFromCLI(t *testing.T) {
 	previousArgs := os.Args
 	previousCommandLine := flag.CommandLine
-	defaultPollInterval := 10 * time.Millisecond
+	defaultPollInterval := 100 * time.Millisecond
 
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	os.Args = []string{previousArgs[0], "--jupyter-idle-poll-interval=0"}

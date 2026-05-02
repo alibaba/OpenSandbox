@@ -26,6 +26,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommand
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter;
 import com.alibaba.opensandbox.sandbox.domain.pool.AcquirePolicy;
+import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry;
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolCreationSpec;
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolStateStore;
 import com.alibaba.opensandbox.sandbox.domain.pool.StoreCounters;
@@ -404,7 +405,7 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
                         .image(getSandboxImage())
                         .entrypoint(List.of("tail -f /dev/null"))
                         .metadata(Map.of("tag", tag, "suite", "sandbox-pool-pseudo-dist-e2e"))
-                        .env(Map.of("E2E_TEST", "true"))
+                        .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
                         .build();
         return SandboxPool.builder()
                 .poolName(poolName)
@@ -598,6 +599,20 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
             reapExpiredIdle(poolName, Instant.now());
             LinkedHashMap<String, Instant> entries = idleByPool.get(poolName);
             return new StoreCounters(entries == null ? 0 : entries.size());
+        }
+
+        @Override
+        public synchronized List<IdleEntry> snapshotIdleEntries(String poolName) {
+            reapExpiredIdle(poolName, Instant.now());
+            LinkedHashMap<String, Instant> entries = idleByPool.get(poolName);
+            if (entries == null || entries.isEmpty()) {
+                return List.of();
+            }
+            List<IdleEntry> snapshot = new ArrayList<>(entries.size());
+            for (Map.Entry<String, Instant> entry : entries.entrySet()) {
+                snapshot.add(new IdleEntry(entry.getKey(), entry.getValue()));
+            }
+            return snapshot;
         }
 
         @Override

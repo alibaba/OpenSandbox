@@ -36,7 +36,11 @@ from opensandbox.models.sandboxes import (
     SandboxImageSpec,
 )
 
-from tests.base_e2e_test import create_connection_config_sync, get_sandbox_image
+from tests.base_e2e_test import (
+    create_connection_config_sync,
+    get_sandbox_image,
+    is_kubernetes_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +66,7 @@ class TestSandboxManagerE2ESync:
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "team": "t1", "env": "prod"},
-                env={"E2E_TEST": "true", "CASE": "mgr-s1"},
+                env={"E2E_TEST": "true", "EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms", "CASE": "mgr-s1"},
                 health_check_polling_interval=timedelta(milliseconds=500),
             )
             s2 = SandboxSync.create(
@@ -72,7 +76,7 @@ class TestSandboxManagerE2ESync:
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "team": "t1", "env": "dev"},
-                env={"E2E_TEST": "true", "CASE": "mgr-s2"},
+                env={"E2E_TEST": "true", "EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms", "CASE": "mgr-s2"},
                 health_check_polling_interval=timedelta(milliseconds=500),
             )
             s3 = SandboxSync.create(
@@ -82,7 +86,7 @@ class TestSandboxManagerE2ESync:
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "env": "prod"},
-                env={"E2E_TEST": "true", "CASE": "mgr-s3"},
+                env={"E2E_TEST": "true", "EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms", "CASE": "mgr-s3"},
                 health_check_polling_interval=timedelta(milliseconds=500),
             )
 
@@ -91,24 +95,30 @@ class TestSandboxManagerE2ESync:
             assert s3.is_healthy() is True
 
             s3_paused = False
-            try:
-                manager.pause_sandbox(s3.id)
-                deadline = time.time() + 180
-                while time.time() < deadline:
-                    info = manager.get_sandbox_info(s3.id)
-                    if info.status.state == "Paused":
-                        break
-                    time.sleep(1)
-                assert manager.get_sandbox_info(s3.id).status.state == "Paused"
-                s3_paused = True
-            except SandboxApiException as exc:
-                if exc.status_code == 501:
-                    logger.warning(
-                        "pause_sandbox not supported (HTTP %s); manager state-filter E2E uses all-Running sandboxes",
-                        exc.status_code,
-                    )
-                else:
-                    raise
+            if is_kubernetes_runtime():
+                logger.warning(
+                    "Skipping pause in Kubernetes manager E2E; mini suite does not provision snapshot infra"
+                )
+            else:
+                try:
+                    manager.pause_sandbox(s3.id)
+                    deadline = time.time() + 180
+                    while time.time() < deadline:
+                        info = manager.get_sandbox_info(s3.id)
+                        if info.status.state == "Paused":
+                            break
+                        time.sleep(1)
+                    assert manager.get_sandbox_info(s3.id).status.state == "Paused"
+                    s3_paused = True
+                except SandboxApiException as exc:
+                    # Some runtimes may not enable pause. Keep all sandboxes Running and relax state-filter asserts.
+                    if exc.status_code == 400:
+                        logger.warning(
+                            "pause_sandbox not configured (HTTP %s); manager state-filter E2E uses all-Running sandboxes",
+                            exc.status_code,
+                        )
+                    else:
+                        raise
 
             # OR states (broad: K8s lifecycle is not only Running/Paused)
             both = manager.list_sandbox_infos(
@@ -170,7 +180,7 @@ class TestSandboxManagerE2ESync:
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "team": "t1", "env": "prod"},
-                env={"E2E_TEST": "true", "CASE": "mgr-s1"},
+                env={"E2E_TEST": "true", "EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms", "CASE": "mgr-s1"},
                 health_check_polling_interval=timedelta(milliseconds=500),
             )
             s2 = SandboxSync.create(
@@ -180,7 +190,7 @@ class TestSandboxManagerE2ESync:
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "team": "t1", "env": "dev"},
-                env={"E2E_TEST": "true", "CASE": "mgr-s2"},
+                env={"E2E_TEST": "true", "EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms", "CASE": "mgr-s2"},
                 health_check_polling_interval=timedelta(milliseconds=500),
             )
             s3 = SandboxSync.create(
@@ -190,7 +200,7 @@ class TestSandboxManagerE2ESync:
                 timeout=timedelta(minutes=5),
                 ready_timeout=timedelta(seconds=60),
                 metadata={"tag": tag, "env": "prod"},
-                env={"E2E_TEST": "true", "CASE": "mgr-s3"},
+                env={"E2E_TEST": "true", "EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms", "CASE": "mgr-s3"},
                 health_check_polling_interval=timedelta(milliseconds=500),
             )
 

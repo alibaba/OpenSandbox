@@ -20,9 +20,12 @@ import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
 import com.alibaba.opensandbox.sandbox.domain.exceptions.InvalidArgumentException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxException
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSnapshotInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SnapshotFilter
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SnapshotInfo
 import com.alibaba.opensandbox.sandbox.domain.services.Sandboxes
 import com.alibaba.opensandbox.sandbox.infrastructure.factory.AdapterFactory
 import org.slf4j.LoggerFactory
@@ -159,6 +162,17 @@ class SandboxManager internal constructor(
         logger.info("Resuming sandbox: {}", sandboxId)
         sandboxService.resumeSandbox(sandboxId)
     }
+
+    fun createSnapshot(
+        sandboxId: String,
+        name: String? = null,
+    ): SnapshotInfo = sandboxService.createSnapshot(sandboxId, name)
+
+    fun getSnapshot(snapshotId: String): SnapshotInfo = sandboxService.getSnapshot(snapshotId)
+
+    fun listSnapshots(filter: SnapshotFilter): PagedSnapshotInfos = sandboxService.listSnapshots(filter)
+
+    fun deleteSnapshot(snapshotId: String) = sandboxService.deleteSnapshot(snapshotId)
 
     /**
      * Closes this resource, relinquishing any underlying resources.

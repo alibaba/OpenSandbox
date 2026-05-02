@@ -19,13 +19,17 @@ import type {
   Sandboxes,
 } from "../services/sandboxes.js";
 import type {
+  CreateSnapshotRequest,
   CreateSandboxRequest,
   CreateSandboxResponse,
   Endpoint,
+  ListSnapshotsParams,
+  ListSnapshotsResponse,
   ListSandboxesParams,
   ListSandboxesResponse,
   RenewSandboxExpirationRequest,
   RenewSandboxExpirationResponse,
+  SnapshotInfo,
   SandboxId,
   SandboxInfo,
 } from "../models/sandboxes.js";
@@ -42,6 +46,16 @@ type ApiRenewSandboxExpirationRequest =
   LifecyclePaths["/sandboxes/{sandboxId}/renew-expiration"]["post"]["requestBody"]["content"]["application/json"];
 type ApiRenewSandboxExpirationOk =
   LifecyclePaths["/sandboxes/{sandboxId}/renew-expiration"]["post"]["responses"][200]["content"]["application/json"];
+type ApiCreateSnapshotRequest =
+  NonNullable<
+    LifecyclePaths["/sandboxes/{sandboxId}/snapshots"]["post"]["requestBody"]
+  >["content"]["application/json"];
+type ApiCreateSnapshotOk =
+  LifecyclePaths["/sandboxes/{sandboxId}/snapshots"]["post"]["responses"][202]["content"]["application/json"];
+type ApiGetSnapshotOk =
+  LifecyclePaths["/snapshots/{snapshotId}"]["get"]["responses"][200]["content"]["application/json"];
+type ApiListSnapshotsOk =
+  LifecyclePaths["/snapshots"]["get"]["responses"][200]["content"]["application/json"];
 type ApiEndpointOk =
   LifecyclePaths["/sandboxes/{sandboxId}/endpoints/{port}"]["get"]["responses"][200]["content"]["application/json"];
 
@@ -72,6 +86,19 @@ export class SandboxesAdapter implements Sandboxes {
   private parseOptionalIsoDate(field: string, v: unknown): Date | null {
     if (v == null) return null;
     return this.parseIsoDate(field, v);
+  }
+
+  private mapSnapshotInfo(raw: ApiGetSnapshotOk | ApiCreateSnapshotOk): SnapshotInfo {
+    return {
+      ...(raw ?? {}),
+      createdAt: this.parseIsoDate("createdAt", raw?.createdAt),
+      status: {
+        ...(raw?.status ?? {}),
+        lastTransitionAt: raw?.status?.lastTransitionAt == null
+          ? undefined
+          : this.parseIsoDate("lastTransitionAt", raw.status.lastTransitionAt),
+      },
+    } as SnapshotInfo;
   }
 
   private mapSandboxInfo(raw: ApiGetSandboxOk): SandboxInfo {
@@ -178,6 +205,65 @@ export class SandboxesAdapter implements Sandboxes {
     } as RenewSandboxExpirationResponse;
   }
 
+  async createSnapshot(
+    sandboxId: SandboxId,
+    req: CreateSnapshotRequest = {},
+  ): Promise<SnapshotInfo> {
+    const body: ApiCreateSnapshotRequest = req as unknown as ApiCreateSnapshotRequest;
+    const { data, error, response } = await this.client.POST("/sandboxes/{sandboxId}/snapshots", {
+      params: { path: { sandboxId } },
+      body,
+    });
+    throwOnOpenApiFetchError({ error, response }, "Create snapshot failed");
+    const raw = data as ApiCreateSnapshotOk | undefined;
+    if (!raw || typeof raw !== "object") {
+      throw new Error("Create snapshot failed: unexpected response shape");
+    }
+    return this.mapSnapshotInfo(raw);
+  }
+
+  async getSnapshot(snapshotId: string): Promise<SnapshotInfo> {
+    const { data, error, response } = await this.client.GET("/snapshots/{snapshotId}", {
+      params: { path: { snapshotId } },
+    });
+    throwOnOpenApiFetchError({ error, response }, "Get snapshot failed");
+    const raw = data as ApiGetSnapshotOk | undefined;
+    if (!raw || typeof raw !== "object") {
+      throw new Error("Get snapshot failed: unexpected response shape");
+    }
+    return this.mapSnapshotInfo(raw);
+  }
+
+  async listSnapshots(params: ListSnapshotsParams = {}): Promise<ListSnapshotsResponse> {
+    const query: Record<string, string | number | (string | number)[] | undefined> = {};
+    if (params.sandboxId) query.sandboxId = params.sandboxId;
+    if (params.states?.length) query.state = params.states;
+    if (params.page != null) query.page = params.page;
+    if (params.pageSize != null) query.pageSize = params.pageSize;
+
+    const { data, error, response } = await this.client.GET("/snapshots", {
+      params: { query },
+    });
+    throwOnOpenApiFetchError({ error, response }, "List snapshots failed");
+    const raw = data as ApiListSnapshotsOk | undefined;
+    if (!raw || typeof raw !== "object") {
+      throw new Error("List snapshots failed: unexpected response shape");
+    }
+    const itemsRaw = raw.items;
+    if (!Array.isArray(itemsRaw)) throw new Error("List snapshots failed: unexpected items shape");
+    return {
+      ...(raw ?? {}),
+      items: itemsRaw.map((x) => this.mapSnapshotInfo(x)),
+    } as ListSnapshotsResponse;
+  }
+
+  async deleteSnapshot(snapshotId: string): Promise<void> {
+    const { error, response } = await this.client.DELETE("/snapshots/{snapshotId}", {
+      params: { path: { snapshotId } },
+    });
+    throwOnOpenApiFetchError({ error, response }, "Delete snapshot failed");
+  }
+
   async getSandboxEndpoint(
     sandboxId: SandboxId,
     port: number,
@@ -190,6 +276,22 @@ export class SandboxesAdapter implements Sandboxes {
     const ok = data as ApiEndpointOk | undefined;
     if (!ok || typeof ok !== "object") {
       throw new Error("Get sandbox endpoint failed: unexpected response shape");
+    }
+    return ok as unknown as Endpoint;
+  }
+
+  async getSignedEndpoint(
+    sandboxId: SandboxId,
+    port: number,
+    expires: number
+  ): Promise<Endpoint> {
+    const { data, error, response } = await this.client.GET("/sandboxes/{sandboxId}/endpoints/{port}", {
+      params: { path: { sandboxId, port }, query: { expires: expires.toString() } },
+    });
+    throwOnOpenApiFetchError({ error, response }, "Get signed endpoint failed");
+    const ok = data as ApiEndpointOk | undefined;
+    if (!ok || typeof ok !== "object") {
+      throw new Error("Get signed endpoint failed: unexpected response shape");
     }
     return ok as unknown as Endpoint;
   }

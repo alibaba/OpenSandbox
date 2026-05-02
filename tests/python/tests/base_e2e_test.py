@@ -26,7 +26,7 @@ from opensandbox.config import ConnectionConfig, ConnectionConfigSync
 DEFAULT_DOMAIN = "localhost:8080"
 DEFAULT_PROTOCOL = "http"
 DEFAULT_API_KEY = "e2e-test"
-DEFAULT_IMAGE = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:latest"
+DEFAULT_IMAGE = "opensandbox/code-interpreter:latest"
 DEFAULT_RUNTIME = "docker"
 DEFAULT_USE_SERVER_PROXY = "false"
 DEFAULT_PVC_NAME = "opensandbox-e2e-pvc-test"
@@ -45,15 +45,47 @@ TEST_HOST_VOLUME_DIR = os.getenv(
     "OPENSANDBOX_TEST_HOST_VOLUME_DIR", DEFAULT_HOST_VOLUME_DIR
 )
 
+# When ``true`` (case-insensitive, per Java ``Boolean.parseBoolean``), the shared
+# E2E sandbox is created with ``secure_access=True`` (gateway/ingress can enforce
+# ``OpenSandbox-Secure-Access``). Default off for local docker-style runs.
+OPENSANDBOX_TEST_SECURE_ACCESS_VERIFIABLE = "OPENSANDBOX_TEST_SECURE_ACCESS_VERIFIABLE"
+
 
 def get_sandbox_image() -> str:
     """Get the default sandbox image for E2E tests."""
     return TEST_IMAGE
 
 
+def get_e2e_sandbox_resource() -> dict[str, str]:
+    """
+    CPU/memory for ``Sandbox.create`` / ``SandboxSync.create`` in E2E tests.
+
+    Read from ``OPENSANDBOX_E2E_SANDBOX_CPU`` and ``OPENSANDBOX_E2E_SANDBOX_MEMORY``.
+    When unset, matches the SDK default (1 CPU, 2Gi memory).
+
+    Kubernetes E2E entry scripts (``scripts/python-k8s-e2e*.sh``) export smaller
+    defaults for Kind; override via the same env vars.
+    """
+    return {
+        "cpu": os.getenv("OPENSANDBOX_E2E_SANDBOX_CPU", "1"),
+        "memory": os.getenv("OPENSANDBOX_E2E_SANDBOX_MEMORY", "2Gi"),
+    }
+
+
 def is_kubernetes_runtime() -> bool:
     """Whether the current E2E run targets the Kubernetes backend."""
     return TEST_RUNTIME == "kubernetes"
+
+
+def is_secure_access_verifiable() -> bool:
+    """
+    True when ``OPENSANDBOX_TEST_SECURE_ACCESS_VERIFIABLE`` is ``"true"`` after
+    strip, case-insensitive (same as Java E2E ``Boolean.parseBoolean``).
+    """
+    v = os.getenv(OPENSANDBOX_TEST_SECURE_ACCESS_VERIFIABLE)
+    if v is None:
+        return False
+    return v.strip().lower() == "true"
 
 
 def should_use_server_proxy() -> bool:

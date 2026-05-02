@@ -187,6 +187,38 @@ public sealed class SandboxManager : IAsyncDisposable
         }, cancellationToken).ConfigureAwait(false);
     }
 
+    public Task<SnapshotInfo> CreateSnapshotAsync(
+        string sandboxId,
+        string? name = null,
+        CancellationToken cancellationToken = default)
+    {
+        return _sandboxes.CreateSnapshotAsync(
+            sandboxId,
+            new CreateSnapshotRequest { Name = name },
+            cancellationToken);
+    }
+
+    public Task<SnapshotInfo> GetSnapshotAsync(
+        string snapshotId,
+        CancellationToken cancellationToken = default)
+    {
+        return _sandboxes.GetSnapshotAsync(snapshotId, cancellationToken);
+    }
+
+    public Task<ListSnapshotsResponse> ListSnapshotsAsync(
+        ListSnapshotsParams? filter = null,
+        CancellationToken cancellationToken = default)
+    {
+        return _sandboxes.ListSnapshotsAsync(filter, cancellationToken);
+    }
+
+    public Task DeleteSnapshotAsync(
+        string snapshotId,
+        CancellationToken cancellationToken = default)
+    {
+        return _sandboxes.DeleteSnapshotAsync(snapshotId, cancellationToken);
+    }
+
     /// <summary>
     /// Releases resources used by this manager.
     /// </summary>

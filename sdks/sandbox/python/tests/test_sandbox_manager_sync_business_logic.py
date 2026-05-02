@@ -27,6 +27,7 @@ from opensandbox.sync.manager import SandboxManagerSync
 class _SandboxServiceStub:
     def __init__(self) -> None:
         self.renew_calls: list[tuple[object, datetime]] = []
+        self.snapshot_calls: list[tuple[str, object]] = []
 
     def list_sandboxes(self, _filter):  # pragma: no cover
         raise RuntimeError("not used")
@@ -45,6 +46,21 @@ class _SandboxServiceStub:
 
     def resume_sandbox(self, _sandbox_id):  # pragma: no cover
         raise RuntimeError("not used")
+
+    def create_snapshot(self, sandbox_id, request):
+        self.snapshot_calls.append(("create", (sandbox_id, request.name)))
+        return type("Snapshot", (), {"id": "snap-1"})()
+
+    def get_snapshot(self, snapshot_id):
+        self.snapshot_calls.append(("get", snapshot_id))
+        return type("Snapshot", (), {"id": snapshot_id})()
+
+    def list_snapshots(self, _filter):
+        self.snapshot_calls.append(("list", _filter))
+        return type("Paged", (), {"snapshot_infos": [type("Snapshot", (), {"id": "snap-1"})()]})()
+
+    def delete_snapshot(self, snapshot_id):
+        self.snapshot_calls.append(("delete", snapshot_id))
 
 
 def test_sync_manager_renew_uses_utc_datetime() -> None:
@@ -76,3 +92,20 @@ def test_sync_manager_close_does_not_close_user_transport() -> None:
     mgr = SandboxManagerSync(_SandboxServiceStub(), cfg)
     mgr.close()
     assert t.closed is False
+
+
+def test_sync_manager_snapshot_methods_delegate() -> None:
+    svc = _SandboxServiceStub()
+    mgr = SandboxManagerSync(svc, ConnectionConfigSync())
+
+    created = mgr.create_snapshot("sbx-1", "before-upgrade")
+    loaded = mgr.get_snapshot("snap-1")
+    listed = mgr.list_snapshots(type("Filter", (), {})())
+    mgr.delete_snapshot("snap-1")
+
+    assert created.id == "snap-1"
+    assert loaded.id == "snap-1"
+    assert listed.snapshot_infos[0].id == "snap-1"
+    assert svc.snapshot_calls[0] == ("create", ("sbx-1", "before-upgrade"))
+    assert svc.snapshot_calls[1] == ("get", "snap-1")
+    assert svc.snapshot_calls[3] == ("delete", "snap-1")

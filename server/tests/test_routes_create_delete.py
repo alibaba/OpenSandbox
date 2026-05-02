@@ -111,6 +111,81 @@ def test_create_sandbox_rejects_invalid_request(
     assert response.status_code == 422
 
 
+def test_create_sandbox_accepts_snapshot_id_without_entrypoint(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    now = datetime.now(timezone.utc)
+    calls: list[object] = []
+
+    class StubService:
+        @staticmethod
+        async def create_sandbox(request) -> CreateSandboxResponse:
+            calls.append(request)
+            return CreateSandboxResponse(
+                id="sbx-from-snapshot",
+                status=SandboxStatus(state="Pending"),
+                metadata=None,
+                expiresAt=now + timedelta(hours=1),
+                createdAt=now,
+                entrypoint=None,
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.post(
+        "/v1/sandboxes",
+        headers=auth_headers,
+        json={
+            "snapshotId": "snap-001",
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+        },
+    )
+
+    assert response.status_code == 202
+    assert calls[0].snapshot_id == "snap-001"
+    assert calls[0].entrypoint is None
+
+
+def test_create_sandbox_accepts_snapshot_id_with_entrypoint(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    now = datetime.now(timezone.utc)
+    calls: list[object] = []
+
+    class StubService:
+        @staticmethod
+        async def create_sandbox(request) -> CreateSandboxResponse:
+            calls.append(request)
+            return CreateSandboxResponse(
+                id="sbx-from-snapshot",
+                status=SandboxStatus(state="Pending"),
+                metadata=None,
+                expiresAt=now + timedelta(hours=1),
+                createdAt=now,
+                entrypoint=["python", "app.py"],
+            )
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.post(
+        "/v1/sandboxes",
+        headers=auth_headers,
+        json={
+            "snapshotId": "snap-001",
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+            "entrypoint": ["python", "app.py"],
+        },
+    )
+
+    assert response.status_code == 202
+    assert calls[0].snapshot_id == "snap-001"
+    assert calls[0].entrypoint == ["python", "app.py"]
+
+
 def test_delete_sandbox_returns_204_and_calls_service(
     client: TestClient,
     auth_headers: dict,

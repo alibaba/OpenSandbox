@@ -365,6 +365,7 @@ await sandbox.PatchEgressRulesAsync(new[]
 
 - `ConnectionConfig.RequestTimeoutSeconds` controls timeout for SDK HTTP calls.
 - `RunCommandOptions.TimeoutSeconds` controls command execution timeout for command runs.
+- `RunInSessionOptions.TimeoutSeconds` controls command execution timeout for session runs.
 - `SandboxCreateOptions.TimeoutSeconds` controls sandbox server-side TTL.
 - `ReadyTimeoutSeconds` controls how long `CreateAsync` / `ConnectAsync` waits for readiness.
 - The SDK does not automatically retry failed API requests; implement retries in caller code where appropriate.

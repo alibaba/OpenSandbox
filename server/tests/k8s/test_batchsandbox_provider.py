@@ -12,20 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Unit tests for BatchSandboxProvider.
-"""
-
 import pytest
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
+from fastapi import HTTPException
 from kubernetes.client import ApiException
 
-from opensandbox_server.api.schema import ImageSpec, ImageAuth, NetworkPolicy, NetworkRule
+from opensandbox_server.api.schema import ImageSpec, ImageAuth, NetworkPolicy, NetworkRule, PlatformSpec
 from opensandbox_server.config import (
     AppConfig,
     EGRESS_MODE_DNS,
     EGRESS_MODE_DNS_NFT,
+    EgressConfig,
     ExecdInitResources,
     KubernetesRuntimeConfig,
     RuntimeConfig,
@@ -35,7 +34,6 @@ from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxPr
 from opensandbox_server.services.constants import OPENSANDBOX_EGRESS_TOKEN
 from opensandbox_server.services.k8s.image_pull_secret_helper import IMAGE_AUTH_SECRET_PREFIX
 from opensandbox_server.services.k8s.volume_helper import apply_volumes_to_pod_spec
-
 
 def _app_config_with_template(template_file_path: str) -> AppConfig:
     """Build an AppConfig with a batchsandbox_template_file set."""
@@ -47,7 +45,6 @@ def _app_config_with_template(template_file_path: str) -> AppConfig:
         ),
     )
 
-
 def _app_config_with_execd_resources(execd_init_resources: ExecdInitResources) -> AppConfig:
     """Build an AppConfig with execd_init_resources set."""
     return AppConfig(
@@ -58,16 +55,29 @@ def _app_config_with_execd_resources(execd_init_resources: ExecdInitResources) -
         ),
     )
 
+def _app_config_with_image_pull_policy(image_pull_policy: str) -> AppConfig:
+    """Build an AppConfig with image_pull_policy set."""
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="execd:test"),
+        kubernetes=KubernetesRuntimeConfig(
+            namespace="test-ns",
+            image_pull_policy=image_pull_policy,
+        ),
+    )
+
+def _app_config_with_egress_disable_ipv6(disable_ipv6: bool = True) -> AppConfig:
+    """Build an AppConfig with ``egress.disable_ipv6`` set (privileged execd init when egress is used)."""
+    return AppConfig(
+        runtime=RuntimeConfig(type="kubernetes", execd_image="execd:test"),
+        kubernetes=KubernetesRuntimeConfig(namespace="test-ns"),
+        egress=EgressConfig(disable_ipv6=disable_ipv6),
+    )
 
 class TestBatchSandboxProvider:
-    """BatchSandboxProvider unit tests"""
     
     # ===== Initialization Tests =====
     
     def test_init_without_template_creates_provider(self, mock_k8s_client):
-        """
-        Test case: Verify normal initialization without template
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         
         assert provider.k8s_client == mock_k8s_client
@@ -77,9 +87,6 @@ class TestBatchSandboxProvider:
         assert provider.plural == "batchsandboxes"
     
     def test_init_with_template_loads_template(self, mock_k8s_client, tmp_path):
-        """
-        Test case: Verify correct loading with template
-        """
         template_file = tmp_path / "template.yaml"
         template_file.write_text("spec:\n  replicas: 1")
         
@@ -88,9 +95,6 @@ class TestBatchSandboxProvider:
         assert provider.template_manager._template is not None
     
     def test_init_sets_crd_constants_correctly(self, mock_k8s_client):
-        """
-        Test case: Verify CRD constants set correctly
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         
         assert provider.group == "sandbox.opensandbox.io"
@@ -100,9 +104,6 @@ class TestBatchSandboxProvider:
     # ===== Workload Creation Tests =====
     
     def test_create_workload_builds_correct_manifest(self, mock_k8s_client):
-        """
-        Test case: Verify created manifest structure is correct
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -138,11 +139,197 @@ class TestBatchSandboxProvider:
         assert "initContainers" in body["spec"]["template"]["spec"]
         assert "containers" in body["spec"]["template"]["spec"]
         assert "volumes" in body["spec"]["template"]["spec"]
+
+    def test_create_workload_injects_platform_node_selector(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={"cpu": "1", "memory": "1Gi"},
+            labels={"opensandbox.io/id": "test-id"},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="linux", arch="arm64"),
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        node_selector = body["spec"]["template"]["spec"]["nodeSelector"]
+        assert node_selector["kubernetes.io/os"] == "linux"
+        assert node_selector["kubernetes.io/arch"] == "arm64"
+
+    def test_create_workload_windows_profile_uses_windows_runtime_shape(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["cmd", "/c", "echo hello"],
+            env={"VERSION": "11"},
+            resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+            labels={"opensandbox.io/id": "test-id"},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="windows", arch="amd64"),
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        # windows profile should enforce requested arch, but not force os=windows.
+        node_selector = pod_spec.get("nodeSelector", {})
+        assert node_selector["kubernetes.io/arch"] == "amd64"
+        assert "kubernetes.io/os" not in node_selector
+
+        init_container = pod_spec["initContainers"][0]
+        assert init_container["command"] == ["/bin/sh", "-c"]
+        assert "install.bat" in init_container["args"][0]
+        assert "execd.exe" in init_container["args"][0]
+
+        main_container = pod_spec["containers"][0]
+        assert main_container["command"] == ["cmd", "/c", "echo hello"]
+        assert "resources" not in main_container
+
+        env_dict = {item["name"]: item["value"] for item in main_container.get("env", [])}
+        assert env_dict["VERSION"] == "11"
+        assert env_dict["CPU_CORES"] == "4"
+        assert env_dict["RAM_SIZE"] == "8G"
+        assert env_dict["DISK_SIZE"] == "64G"
+        assert env_dict["USER_PORTS"] == "44772,8080,3389,8006"
+
+        volume_names = {volume["name"] for volume in pod_spec.get("volumes", [])}
+        assert "opensandbox-win-oem" in volume_names
+        assert "opensandbox-win-kvm" in volume_names
+        assert "opensandbox-win-tun" in volume_names
+
+    def test_create_workload_windows_profile_merges_user_ports(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["cmd", "/c", "echo hello"],
+            env={"VERSION": "11", "USER_PORTS": "3000,44772"},
+            resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+            labels={"opensandbox.io/id": "test-id"},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="windows", arch="amd64"),
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        main_container = pod_spec["containers"][0]
+        env_dict = {item["name"]: item["value"] for item in main_container.get("env", [])}
+        assert env_dict["USER_PORTS"] == "3000,44772,8080,3389,8006"
+
+    def test_create_workload_windows_profile_rejects_arch_conflict_with_template_selector(
+        self, mock_k8s_client, tmp_path
+    ):
+        template_file = tmp_path / "template.yaml"
+        template_file.write_text(
+            """
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/arch: arm64
+"""
+        )
+        provider = BatchSandboxProvider(mock_k8s_client, _app_config_with_template(str(template_file)))
+
+        with pytest.raises(ValueError, match="platform conflict with template nodeSelector"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="dockurr/windows:latest"),
+                entrypoint=["cmd", "/c", "echo hello"],
+                env={"VERSION": "11"},
+                resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+                labels={"opensandbox.io/id": "test-id"},
+                expires_at=None,
+                execd_image="execd:latest",
+                platform=PlatformSpec(os="windows", arch="amd64"),
+            )
+
+    def test_create_workload_rejects_platform_conflict_with_template_selector(self, mock_k8s_client, tmp_path):
+        template_file = tmp_path / "template.yaml"
+        template_file.write_text(
+            """
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+"""
+        )
+        provider = BatchSandboxProvider(mock_k8s_client, _app_config_with_template(str(template_file)))
+
+        with pytest.raises(ValueError, match="platform conflict with template nodeSelector"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="python:3.11"),
+                entrypoint=["/bin/bash"],
+                env={},
+                resource_limits={"cpu": "1", "memory": "1Gi"},
+                labels={"opensandbox.io/id": "test-id"},
+                expires_at=None,
+                execd_image="execd:latest",
+                platform=PlatformSpec(os="linux", arch="arm64"),
+            )
+
+    def test_create_workload_rejects_platform_conflict_with_template_node_affinity(
+        self, mock_k8s_client, tmp_path
+    ):
+        template_file = tmp_path / "template.yaml"
+        template_file.write_text(
+            """
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/arch
+                    operator: In
+                    values: ["amd64"]
+"""
+        )
+        provider = BatchSandboxProvider(mock_k8s_client, _app_config_with_template(str(template_file)))
+
+        with pytest.raises(ValueError, match="platform conflict with template nodeAffinity"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="python:3.11"),
+                entrypoint=["/bin/bash"],
+                env={},
+                resource_limits={"cpu": "1", "memory": "1Gi"},
+                labels={"opensandbox.io/id": "test-id"},
+                expires_at=None,
+                execd_image="execd:latest",
+                platform=PlatformSpec(os="linux", arch="arm64"),
+            )
     
     def test_create_workload_builds_execd_init_container(self, mock_k8s_client):
-        """
-        Test case: Verify execd init container built correctly without resources when not configured
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test", "uid": "uid"}
@@ -172,9 +359,6 @@ class TestBatchSandboxProvider:
         assert "resources" not in init_container
 
     def test_create_workload_init_container_with_configured_resources(self, mock_k8s_client):
-        """
-        Test case: Verify init container applies resources when execd_init_resources is configured
-        """
         provider = BatchSandboxProvider(
             mock_k8s_client,
             _app_config_with_execd_resources(ExecdInitResources(
@@ -202,11 +386,33 @@ class TestBatchSandboxProvider:
         init_container = body["spec"]["template"]["spec"]["initContainers"][0]
         assert init_container["resources"]["limits"] == {"cpu": "100m", "memory": "128Mi"}
         assert init_container["resources"]["requests"] == {"cpu": "50m", "memory": "64Mi"}
+
+    def test_create_workload_sets_configured_image_pull_policy(self, mock_k8s_client):
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_image_pull_policy("Always"),
+        )
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test", "uid": "uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:test",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        main_container = body["spec"]["template"]["spec"]["containers"][0]
+        assert main_container["imagePullPolicy"] == "Always"
     
     def test_create_workload_wraps_entrypoint_with_bootstrap(self, mock_k8s_client):
-        """
-        Test case: Verify user entrypoint is wrapped with bootstrap
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -234,10 +440,6 @@ class TestBatchSandboxProvider:
         ]
     
     def test_create_workload_converts_env_to_list(self, mock_k8s_client):
-        """
-        Test case: Verify environment variable dict converted to list.
-        Also verifies EXECD environment variable is automatically injected.
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -267,9 +469,6 @@ class TestBatchSandboxProvider:
         assert env_dict["EXECD"] == "/opt/opensandbox/bin/execd"
 
     def test_create_workload_merges_template_volumes_and_mounts(self, mock_k8s_client, tmp_path):
-        """
-        Test case: Verify template volumes/volumeMounts are merged into runtime manifest
-        """
         template_file = tmp_path / "template.yaml"
         template_file.write_text(
             """
@@ -321,9 +520,6 @@ spec:
         assert "opensandbox-bin" in mount_names
 
     def test_create_workload_dedupes_template_volume_and_mount_names(self, mock_k8s_client, tmp_path):
-        """
-        Test case: Verify template entries do not duplicate runtime volumes/volumeMounts
-        """
         template_file = tmp_path / "template.yaml"
         template_file.write_text(
             """
@@ -373,9 +569,6 @@ spec:
         assert "sandbox-shared-data" in mount_names
     
     def test_create_workload_sets_resource_limits_and_requests(self, mock_k8s_client):
-        """
-        Test case: Verify resource limits set correctly
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -400,9 +593,6 @@ spec:
         assert resources["requests"] == {"cpu": "1", "memory": "1Gi"}
     
     def test_create_workload_handles_empty_resource_limits(self, mock_k8s_client):
-        """
-        Test case: Verify resources not set when resource limits are empty
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "sandbox-test", "uid": "uid"}
@@ -422,17 +612,82 @@ spec:
         
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
         container = body["spec"]["template"]["spec"]["containers"][0]
-        
+
         assert "resources" not in container
-    
+
+    def test_create_workload_translates_gpu_to_nvidia_extended_resource(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "sandbox-test", "uid": "uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={"cpu": "1", "memory": "1Gi", "gpu": "2"},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        resources = body["spec"]["template"]["spec"]["containers"][0]["resources"]
+
+        assert resources["limits"]["nvidia.com/gpu"] == "2"
+        assert resources["requests"]["nvidia.com/gpu"] == "2"
+        # Raw key must not leak through as an unknown extended resource.
+        assert "gpu" not in resources["limits"]
+        assert "gpu" not in resources["requests"]
+
+    def test_create_workload_without_gpu_omits_nvidia_extended_resource(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "sandbox-test", "uid": "uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={"cpu": "1", "memory": "1Gi"},
+            labels={},
+            expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+            execd_image="execd:latest",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        resources = body["spec"]["template"]["spec"]["containers"][0]["resources"]
+
+        assert "nvidia.com/gpu" not in resources["limits"]
+        assert "nvidia.com/gpu" not in resources["requests"]
+
+    def test_create_workload_rejects_gpu_all_sentinel(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+
+        with pytest.raises(HTTPException) as excinfo:
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="python:3.11"),
+                entrypoint=["/bin/bash"],
+                env={},
+                resource_limits={"cpu": "1", "gpu": "all"},
+                labels={},
+                expires_at=datetime(2025, 12, 31, tzinfo=timezone.utc),
+                execd_image="execd:latest",
+            )
+        assert excinfo.value.status_code == 400
+
     # ===== Workload Query Tests =====
     
     def test_get_workload_finds_existing_sandbox(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify successfully querying existing sandbox
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
@@ -442,9 +697,6 @@ spec:
         assert result["metadata"]["name"] == "test-id"
     
     def test_get_workload_returns_none_when_not_found(self, mock_k8s_client):
-        """
-        Test case: Verify None returned when not found
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = None
         
@@ -453,9 +705,6 @@ spec:
         assert result is None
 
     def test_get_workload_falls_back_to_legacy_name(self, mock_k8s_client):
-        """
-        Test case: Verify legacy sandbox-<id> name is used when primary lookup returns None
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.side_effect = [
             None,
@@ -469,9 +718,6 @@ spec:
         assert mock_k8s_client.get_custom_object.call_args_list[1].kwargs["name"] == "sandbox-test-id"
     
     def test_get_workload_handles_404_gracefully(self, mock_k8s_client):
-        """
-        Test case: Verify None returned when not found
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         
         mock_k8s_client.get_custom_object.return_value = None
@@ -481,9 +727,6 @@ spec:
         assert result is None
     
     def test_get_workload_reraises_non_404_exceptions(self, mock_k8s_client):
-        """
-        Test case: Verify non-404 exceptions are re-raised
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         
         # Mock 500 exception
@@ -496,9 +739,6 @@ spec:
         assert exc_info.value.status == 500
 
     def test_get_workload_prefers_informer_cache(self, mock_k8s_client):
-        """
-        Test case: get_workload calls k8s_client.get_custom_object and returns result
-        """
         cached = {"metadata": {"name": "test-id"}}
         mock_k8s_client.get_custom_object.return_value = cached
 
@@ -510,9 +750,6 @@ spec:
         mock_k8s_client.get_custom_object.assert_called()
     
     def test_get_workload_logs_unexpected_errors(self, mock_k8s_client):
-        """
-        Test case: Verify unexpected errors are re-raised
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.side_effect = RuntimeError("Unexpected")
         
@@ -520,9 +757,6 @@ spec:
             provider.get_workload("test-id", "test-ns")
 
     def test_create_workload_updates_informer_cache(self, mock_k8s_client):
-        """
-        Test case: create_workload returns name and uid from created resource
-        """
         created_body = {"metadata": {"name": "test-id", "uid": "test-uid"}}
         mock_k8s_client.create_custom_object.return_value = created_body
 
@@ -549,9 +783,6 @@ spec:
     def test_list_workloads_returns_items(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify list query returns results
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.list_custom_objects.return_value = mock_batchsandbox_list_response["items"]
         
@@ -561,9 +792,6 @@ spec:
         assert result[0]["metadata"]["name"] == "test-id"
     
     def test_list_workloads_returns_empty_on_404(self, mock_k8s_client):
-        """
-        Test case: Verify empty list returned when no items
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.list_custom_objects.return_value = []
         
@@ -576,14 +804,11 @@ spec:
     def test_delete_workload_deletes_existing_sandbox(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify successfully deleting existing sandbox
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
-        
+
         provider.delete_workload("test-id", "test-ns")
-        
+
         mock_k8s_client.delete_custom_object.assert_called_once_with(
             group="sandbox.opensandbox.io",
             version="v1alpha1",
@@ -594,28 +819,22 @@ spec:
         )
     
     def test_delete_workload_raises_when_not_found(self, mock_k8s_client):
-        """
-        Test case: Verify exception raised when not found
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = None
-        
+
         with pytest.raises(Exception) as exc_info:
             provider.delete_workload("test-id", "test-ns")
-        
+
         assert "not found" in str(exc_info.value)
     
     def test_delete_workload_sets_grace_period_zero(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify immediate deletion (grace period = 0)
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
-        
+
         provider.delete_workload("test-id", "test-ns")
-        
+
         call_kwargs = mock_k8s_client.delete_custom_object.call_args.kwargs
         assert call_kwargs["grace_period_seconds"] == 0
     
@@ -624,9 +843,6 @@ spec:
     def test_update_expiration_patches_spec(
         self, mock_k8s_client, mock_batchsandbox_list_response
     ):
-        """
-        Test case: Verify expiration time update
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.get_custom_object.return_value = mock_batchsandbox_list_response["items"][0]
         
@@ -639,9 +855,6 @@ spec:
         }
     
     def test_get_expiration_parses_iso_format(self):
-        """
-        Test case: Verify parsing ISO format time
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "spec": {"expireTime": "2025-12-31T10:00:00+00:00"}
@@ -652,9 +865,6 @@ spec:
         assert result == datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
     
     def test_get_expiration_handles_z_suffix(self):
-        """
-        Test case: Verify handling time with Z suffix
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "spec": {"expireTime": "2025-12-31T10:00:00Z"}
@@ -665,9 +875,6 @@ spec:
         assert result == datetime(2025, 12, 31, 10, 0, 0, tzinfo=timezone.utc)
     
     def test_get_expiration_returns_none_on_invalid_format(self):
-        """
-        Test case: Verify None returned on invalid format
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "spec": {"expireTime": "invalid-date"}
@@ -679,9 +886,6 @@ spec:
         assert result is None
     
     def test_get_expiration_returns_none_when_missing(self):
-        """
-        Test case: Verify None returned when missing
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {"spec": {}}
         
@@ -692,9 +896,6 @@ spec:
     # ===== Status Retrieval Tests =====
     
     def test_get_status_running_with_ip(self):
-        """
-        Test case: Verify status when Pod is Ready and has IP
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 1, "allocated": 1},
@@ -713,9 +914,6 @@ spec:
         assert "IP" in result["message"]
     
     def test_get_status_allocated_with_ip_not_ready(self):
-        """
-        Test case: Verify status when IP is assigned but Pod is not Ready (Allocated state)
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 1},
@@ -733,9 +931,6 @@ spec:
         assert result["reason"] == "IP_ASSIGNED"
     
     def test_get_status_pending_scheduled(self):
-        """
-        Test case: Verify Pod is scheduled but not Ready
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 1},
@@ -748,9 +943,6 @@ spec:
         assert result["reason"] == "POD_SCHEDULED"
     
     def test_get_status_pending_when_endpoints_invalid_json(self):
-        """
-        Test case: Verify Pending when endpoints annotation contains invalid JSON
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 1},
@@ -768,9 +960,6 @@ spec:
         assert result["reason"] == "POD_SCHEDULED"
 
     def test_get_status_pending_when_endpoints_empty_array(self):
-        """
-        Test case: Verify Pending when endpoints annotation is empty array
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 1},
@@ -788,9 +977,6 @@ spec:
         assert result["reason"] == "POD_SCHEDULED"
     
     def test_get_status_pending_unallocated(self):
-        """
-        Test case: Verify Pod is not scheduled
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "status": {"replicas": 1, "ready": 0, "allocated": 0},
@@ -801,13 +987,193 @@ spec:
         
         assert result["state"] == "Pending"
         assert result["reason"] == "BATCHSANDBOX_PENDING"
+
+    def test_get_status_returns_failed_when_pod_unschedulable(self):
+        mock_k8s_client = MagicMock()
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.list_pods.return_value = [
+            SimpleNamespace(
+                status=SimpleNamespace(
+                    phase="Pending",
+                    pod_ip=None,
+                    conditions=[
+                        SimpleNamespace(
+                            type="PodScheduled",
+                            status="False",
+                            reason="Unschedulable",
+                            message="0/1 nodes are available: 1 node(s) didn't match Pod's node affinity.",
+                        )
+                    ],
+                )
+            )
+        ]
+        workload = {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "nodeSelector": {
+                            "kubernetes.io/os": "linux",
+                            "kubernetes.io/arch": "arm64",
+                        }
+                    }
+                }
+            },
+            "status": {
+                "replicas": 1,
+                "ready": 0,
+                "allocated": 0,
+                "selector": "app=sandbox",
+            },
+            "metadata": {
+                "namespace": "test-ns",
+                "creationTimestamp": "2025-12-24T10:00:00Z",
+            },
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Failed"
+        assert result["reason"] == "POD_PLATFORM_UNSCHEDULABLE"
+        assert "didn't match Pod's node affinity" in result["message"]
+
+    def test_get_status_keeps_pending_for_generic_failed_scheduling(self):
+        mock_k8s_client = MagicMock()
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.list_pods.return_value = [
+            SimpleNamespace(
+                status=SimpleNamespace(
+                    phase="Pending",
+                    pod_ip=None,
+                    conditions=[
+                        SimpleNamespace(
+                            type="PodScheduled",
+                            status="False",
+                            reason="Unschedulable",
+                            message="0/1 nodes are available: 1 Insufficient cpu.",
+                        )
+                    ],
+                )
+            )
+        ]
+        workload = {
+            "status": {
+                "replicas": 1,
+                "ready": 0,
+                "allocated": 0,
+                "selector": "app=sandbox",
+            },
+            "metadata": {
+                "namespace": "test-ns",
+                "creationTimestamp": "2025-12-24T10:00:00Z",
+            },
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Pending"
+        assert result["reason"] == "BATCHSANDBOX_PENDING"
+
+    def test_get_status_keeps_pending_when_non_platform_affinity_mismatch(self):
+        mock_k8s_client = MagicMock()
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.list_pods.return_value = [
+            SimpleNamespace(
+                status=SimpleNamespace(
+                    phase="Pending",
+                    pod_ip=None,
+                    conditions=[
+                        SimpleNamespace(
+                            type="PodScheduled",
+                            status="False",
+                            reason="Unschedulable",
+                            message="0/1 nodes are available: 1 node(s) didn't match Pod's node affinity.",
+                        )
+                    ],
+                )
+            )
+        ]
+        workload = {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "nodeSelector": {
+                            "kubernetes.io/os": "linux",
+                            "kubernetes.io/arch": "arm64",
+                            "zone": "cn-hz-a",
+                        }
+                    }
+                }
+            },
+            "status": {
+                "replicas": 1,
+                "ready": 0,
+                "allocated": 0,
+                "selector": "app=sandbox",
+            },
+            "metadata": {
+                "namespace": "test-ns",
+                "creationTimestamp": "2025-12-24T10:00:00Z",
+            },
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Pending"
+        assert result["reason"] == "BATCHSANDBOX_PENDING"
+
+    def test_get_status_keeps_pending_for_mixed_capacity_and_affinity_message(self):
+        mock_k8s_client = MagicMock()
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.list_pods.return_value = [
+            SimpleNamespace(
+                status=SimpleNamespace(
+                    phase="Pending",
+                    pod_ip=None,
+                    conditions=[
+                        SimpleNamespace(
+                            type="PodScheduled",
+                            status="False",
+                            reason="Unschedulable",
+                            message=(
+                                "0/2 nodes are available: 1 Insufficient cpu, "
+                                "1 node(s) didn't match Pod's node affinity/selector."
+                            ),
+                        )
+                    ],
+                )
+            )
+        ]
+        workload = {
+            "spec": {
+                "template": {
+                    "spec": {
+                        "nodeSelector": {
+                            "kubernetes.io/os": "linux",
+                            "kubernetes.io/arch": "arm64",
+                        }
+                    }
+                }
+            },
+            "status": {
+                "replicas": 1,
+                "ready": 0,
+                "allocated": 0,
+                "selector": "app=sandbox",
+            },
+            "metadata": {
+                "namespace": "test-ns",
+                "creationTimestamp": "2025-12-24T10:00:00Z",
+            },
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Pending"
+        assert result["reason"] == "BATCHSANDBOX_PENDING"
     
     # ===== Endpoint Information Tests =====
     
     def test_get_endpoint_info_parses_json_annotation(self):
-        """
-        Test case: Verify parsing IP from annotation
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "metadata": {
@@ -823,9 +1189,6 @@ spec:
         assert result.headers is None
     
     def test_get_endpoint_info_uses_first_ip(self):
-        """
-        Test case: Verify using first IP when multiple IPs exist
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "metadata": {
@@ -841,9 +1204,6 @@ spec:
         assert result.headers is None
     
     def test_get_endpoint_info_returns_none_when_missing(self):
-        """
-        Test case: Verify None returned when annotation is missing
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {"metadata": {"annotations": {}}}
         
@@ -852,9 +1212,6 @@ spec:
         assert result is None
     
     def test_get_endpoint_info_returns_none_on_invalid_json(self):
-        """
-        Test case: Verify None returned on invalid JSON
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "metadata": {
@@ -869,9 +1226,6 @@ spec:
         assert result is None
     
     def test_get_endpoint_info_returns_none_on_empty_array(self):
-        """
-        Test case: Verify None returned on empty array
-        """
         provider = BatchSandboxProvider(MagicMock())
         workload = {
             "metadata": {
@@ -1160,14 +1514,10 @@ spec:
         # Verify no template field (pool-based doesn't use template)
         assert "template" not in body["spec"]
 
-
 class TestBatchSandboxProviderEgress:
     """BatchSandboxProvider egress sidecar tests"""
 
     def test_create_workload_without_network_policy_no_sidecar(self, mock_k8s_client):
-        """
-        Test case: Verify no sidecar is added when network_policy is None
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1200,10 +1550,10 @@ class TestBatchSandboxProviderEgress:
         assert "securityContext" not in pod_spec or "sysctls" not in pod_spec.get("securityContext", {})
 
     def test_create_workload_with_network_policy_adds_sidecar(self, mock_k8s_client):
-        """
-        Test case: Verify egress sidecar is added when network_policy is provided
-        """
-        provider = BatchSandboxProvider(mock_k8s_client)
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_egress_disable_ipv6(),
+        )
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
@@ -1225,7 +1575,7 @@ class TestBatchSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.10",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -1238,7 +1588,7 @@ class TestBatchSandboxProviderEgress:
         # Find sidecar container
         sidecar = next((c for c in containers if c["name"] == "egress"), None)
         assert sidecar is not None
-        assert sidecar["image"] == "opensandbox/egress:v1.0.4"
+        assert sidecar["image"] == "opensandbox/egress:v1.0.10"
         
         # Verify sidecar has environment variable
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
@@ -1255,6 +1605,47 @@ class TestBatchSandboxProviderEgress:
         execd_init = inits[0]
         assert execd_init["name"] == "execd-installer"
         assert execd_init["image"] == "execd:latest"
+        assert execd_init.get("securityContext", {}).get("privileged") is True
+        assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
+
+    def test_create_workload_windows_profile_with_network_policy_keeps_ipv6_disable(self, mock_k8s_client):
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_egress_disable_ipv6(),
+        )
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["cmd", "/c", "echo hello"],
+            env={"VERSION": "11"},
+            resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="windows", arch="amd64"),
+            network_policy=NetworkPolicy(default_action="deny", egress=[]),
+            egress_image="opensandbox/egress:v1.0.10",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+
+        sidecar = next((c for c in pod_spec["containers"] if c["name"] == "egress"), None)
+        assert sidecar is not None
+
+        main_container = next((c for c in pod_spec["containers"] if c["name"] == "sandbox"), None)
+        assert main_container is not None
+        main_caps = main_container.get("securityContext", {}).get("capabilities", {})
+        assert "NET_ADMIN" in main_caps.get("add", [])
+        assert "NET_RAW" in main_caps.get("add", [])
+        assert "NET_ADMIN" not in main_caps.get("drop", [])
+
+        execd_init = pod_spec["initContainers"][0]
         assert execd_init.get("securityContext", {}).get("privileged") is True
         assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
 
@@ -1275,7 +1666,7 @@ class TestBatchSandboxProviderEgress:
             expires_at=None,
             execd_image="execd:latest",
             network_policy=NetworkPolicy(default_action="deny", egress=[]),
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.10",
             annotations={SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY: "egress-token"},
             egress_auth_token="egress-token",
         )
@@ -1307,7 +1698,7 @@ class TestBatchSandboxProviderEgress:
             expires_at=None,
             execd_image="execd:latest",
             network_policy=NetworkPolicy(default_action="deny", egress=[]),
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.10",
             egress_mode=EGRESS_MODE_DNS_NFT,
         )
 
@@ -1320,7 +1711,10 @@ class TestBatchSandboxProviderEgress:
 
     def test_create_workload_with_network_policy_does_not_add_pod_ipv6_sysctls(self, mock_k8s_client):
         """IPv6 all.disable is applied in privileged execd init, not Pod sysctls."""
-        provider = BatchSandboxProvider(mock_k8s_client)
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_egress_disable_ipv6(),
+        )
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
         }
@@ -1342,7 +1736,7 @@ class TestBatchSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.10",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -1356,10 +1750,43 @@ class TestBatchSandboxProviderEgress:
         assert execd_init["name"] == "execd-installer"
         assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
 
+    def test_create_workload_with_egress_skips_ipv6_disable_when_not_configured(self, mock_k8s_client):
+        """With ``egress.disable_ipv6`` false, execd init is not privileged and does not write disable_ipv6."""
+        provider = BatchSandboxProvider(
+            mock_k8s_client,
+            _app_config_with_egress_disable_ipv6(False),
+        )
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            network_policy=network_policy,
+            egress_image="opensandbox/egress:v1.0.10",
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        execd_init = pod_spec["initContainers"][0]
+        assert execd_init["name"] == "execd-installer"
+        assert "securityContext" not in execd_init
+        assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" not in execd_init["args"][0]
+
     def test_create_workload_with_network_policy_drops_net_admin_from_main_container(self, mock_k8s_client):
-        """
-        Test case: Verify main container drops NET_ADMIN when network_policy is enabled
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1382,7 +1809,7 @@ class TestBatchSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.10",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -1400,9 +1827,6 @@ class TestBatchSandboxProviderEgress:
         assert "NET_ADMIN" in main_container["securityContext"]["capabilities"]["drop"]
 
     def test_create_workload_without_egress_image_no_sidecar(self, mock_k8s_client):
-        """
-        Test case: Verify no sidecar is added when egress_image is None even if network_policy exists
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1437,9 +1861,6 @@ class TestBatchSandboxProviderEgress:
         assert containers[0]["name"] == "sandbox"
 
     def test_egress_sidecar_contains_network_policy_in_env(self, mock_k8s_client):
-        """
-        Test case: Verify sidecar environment variable contains serialized network policy
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1465,7 +1886,7 @@ class TestBatchSandboxProviderEgress:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.10",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -1487,9 +1908,6 @@ class TestBatchSandboxProviderEgress:
         assert policy_json["egress"][0]["target"] == "pypi.org"
 
     def test_main_container_no_security_context_without_network_policy(self, mock_k8s_client):
-        """
-        Test case: Verify main container has no securityContext when network_policy is None
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "test-uid"}
@@ -1520,9 +1938,6 @@ class TestBatchSandboxProviderEgress:
         assert "securityContext" not in main_container
 
     def test_create_workload_with_network_policy_works_with_template(self, mock_k8s_client, tmp_path):
-        """
-        Test case: Verify egress sidecar works correctly when template is provided
-        """
         template_file = tmp_path / "template.yaml"
         template_file.write_text(
             """
@@ -1556,7 +1971,7 @@ spec:
             expires_at=expires_at,
             execd_image="execd:latest",
             network_policy=network_policy,
-            egress_image="opensandbox/egress:v1.0.4",
+            egress_image="opensandbox/egress:v1.0.10",
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -1578,19 +1993,299 @@ spec:
         assert "sandbox-shared-data" in volume_names
         assert "opensandbox-bin" in volume_names
 
+    # ===== Phase + Condition Validation Tests =====
+
+    def test_pause_sandbox_running_allows(self, mock_k8s_client):
+        """Test pause allowed when Phase=Succeed."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Succeed", "conditions": []}
+        }
+        mock_k8s_client.patch_custom_object.return_value = {}
+
+        provider.pause_sandbox("test-id", "test-ns")
+
+        mock_k8s_client.patch_custom_object.assert_called_once()
+        call_kwargs = mock_k8s_client.patch_custom_object.call_args.kwargs
+        assert call_kwargs["body"] == {"spec": {"pause": True}}
+
+    def test_pause_sandbox_running_with_pause_failed_allows_retry(self, mock_k8s_client):
+        """Test pause retry performs an internal nil->true double patch."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {
+                "phase": "Succeed",
+                "conditions": [{"type": "PauseFailed", "status": "True", "reason": "SnapshotFailed"}]
+            }
+        }
+        mock_k8s_client.patch_custom_object.return_value = {}
+
+        provider.pause_sandbox("test-id", "test-ns")
+
+        assert mock_k8s_client.patch_custom_object.call_count == 2
+        first_patch = mock_k8s_client.patch_custom_object.call_args_list[0].kwargs["body"]
+        second_patch = mock_k8s_client.patch_custom_object.call_args_list[1].kwargs["body"]
+        assert first_patch == {"spec": {"pause": None}}
+        assert second_patch == {"spec": {"pause": True}}
+
+    def test_patch_pause_with_retry_bridge_accepts_second_patch_timeout_when_readback_matches_target(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        provider.patch_workload = MagicMock(side_effect=[{}, ApiException(status=500, reason="timeout")])
+        provider.get_workload = MagicMock(
+            return_value={
+                "metadata": {"name": "test-id", "namespace": "test-ns"},
+                "spec": {"pause": True},
+            }
+        )
+
+        provider._patch_pause_with_retry_bridge("test-id", "test-ns", True)
+
+        assert provider.patch_workload.call_count == 2
+        first_call = provider.patch_workload.call_args_list[0].args
+        second_call = provider.patch_workload.call_args_list[1].args
+        assert first_call == ("test-id", "test-ns", {"spec": {"pause": None}})
+        assert second_call == ("test-id", "test-ns", {"spec": {"pause": True}})
+        provider.get_workload.assert_called_once_with("test-id", "test-ns")
+
+    def test_patch_pause_with_retry_bridge_retries_target_when_readback_still_nil(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
+        provider.patch_workload = MagicMock(side_effect=[{}, ApiException(status=500, reason="timeout"), {}])
+        provider.get_workload = MagicMock(
+            return_value={
+                "metadata": {"name": "test-id", "namespace": "test-ns"},
+                "spec": {"pause": None},
+            }
+        )
+
+        provider._patch_pause_with_retry_bridge("test-id", "test-ns", True)
+
+        assert provider.patch_workload.call_count == 3
+        first_call = provider.patch_workload.call_args_list[0].args
+        second_call = provider.patch_workload.call_args_list[1].args
+        third_call = provider.patch_workload.call_args_list[2].args
+        assert first_call == ("test-id", "test-ns", {"spec": {"pause": None}})
+        assert second_call == ("test-id", "test-ns", {"spec": {"pause": True}})
+        assert third_call == ("test-id", "test-ns", {"spec": {"pause": True}})
+        provider.get_workload.assert_called_once_with("test-id", "test-ns")
+
+    def test_pause_sandbox_pausing_rejects(self, mock_k8s_client):
+        """Test pause rejected when Phase=Pausing."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Pausing", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="operation in progress"):
+            provider.pause_sandbox("test-id", "test-ns")
+
+    def test_pause_sandbox_resuming_rejects(self, mock_k8s_client):
+        """Test pause rejected when Phase=Resuming."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Resuming", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="operation in progress"):
+            provider.pause_sandbox("test-id", "test-ns")
+
+    def test_pause_sandbox_paused_rejects(self, mock_k8s_client):
+        """Test pause rejected when Phase=Paused."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Paused", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="already paused"):
+            provider.pause_sandbox("test-id", "test-ns")
+
+    def test_pause_sandbox_failed_rejects(self, mock_k8s_client):
+        """Test pause rejected when Phase=Failed."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Failed", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="not available"):
+            provider.pause_sandbox("test-id", "test-ns")
+
+    def test_pause_sandbox_failed_with_pause_failed_rejects(self, mock_k8s_client):
+        """Test pause rejected when Phase=Failed + PauseFailed=True (pod loss scenario)."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {
+                "phase": "Failed",
+                "conditions": [{"type": "PauseFailed", "status": "True", "reason": "PodNotFound"}]
+            }
+        }
+
+        with pytest.raises(ValueError, match="pause caused pod loss"):
+            provider.pause_sandbox("test-id", "test-ns")
+
+    def test_pause_sandbox_pending_rejects(self, mock_k8s_client):
+        """Test pause rejected when Phase=Pending."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Pending", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="being created"):
+            provider.pause_sandbox("test-id", "test-ns")
+
+    def test_resume_sandbox_paused_allows(self, mock_k8s_client):
+        """Test resume allowed when Phase=Paused."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Paused", "conditions": []}
+        }
+        mock_k8s_client.patch_custom_object.return_value = {}
+
+        provider.resume_sandbox("test-id", "test-ns")
+
+        mock_k8s_client.patch_custom_object.assert_called_once()
+        call_kwargs = mock_k8s_client.patch_custom_object.call_args.kwargs
+        assert call_kwargs["body"] == {"spec": {"pause": False}}
+
+    def test_resume_sandbox_paused_with_resume_failed_allows_retry(self, mock_k8s_client):
+        """Test resume retry performs an internal nil->false double patch."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {
+                "phase": "Paused",
+                "conditions": [{"type": "ResumeFailed", "status": "True", "reason": "SnapshotNotReady"}]
+            }
+        }
+        mock_k8s_client.patch_custom_object.return_value = {}
+
+        provider.resume_sandbox("test-id", "test-ns")
+
+        assert mock_k8s_client.patch_custom_object.call_count == 2
+        first_patch = mock_k8s_client.patch_custom_object.call_args_list[0].kwargs["body"]
+        second_patch = mock_k8s_client.patch_custom_object.call_args_list[1].kwargs["body"]
+        assert first_patch == {"spec": {"pause": None}}
+        assert second_patch == {"spec": {"pause": False}}
+
+    def test_resume_sandbox_resuming_rejects(self, mock_k8s_client):
+        """Test resume rejected when Phase=Resuming."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Resuming", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="operation in progress"):
+            provider.resume_sandbox("test-id", "test-ns")
+
+    def test_resume_sandbox_pausing_rejects(self, mock_k8s_client):
+        """Test resume rejected when Phase=Pausing."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Pausing", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="operation in progress"):
+            provider.resume_sandbox("test-id", "test-ns")
+
+    def test_resume_sandbox_running_rejects(self, mock_k8s_client):
+        """Test resume rejected when Phase=Succeed."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Succeed", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="expected Paused"):
+            provider.resume_sandbox("test-id", "test-ns")
+
+    def test_get_status_succeed_phase_maps_to_running_state(self):
+        provider = BatchSandboxProvider(MagicMock())
+        workload = {
+            "status": {"phase": "Succeed"},
+            "metadata": {"creationTimestamp": "2025-12-24T10:00:00Z"},
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Running"
+        assert result["reason"] == "RUNNING"
+        assert result["message"] == "Sandbox is running"
+
+    def test_get_status_failed_uses_condition_message(self):
+        provider = BatchSandboxProvider(MagicMock())
+        workload = {
+            "status": {
+                "phase": "Failed",
+                "conditions": [
+                    {
+                        "type": "ResumeFailed",
+                        "status": "True",
+                        "reason": "PodStartFailed",
+                        "message": "Pod sandbox-abc-0: ImagePullBackOff - image not found",
+                    }
+                ],
+            },
+            "metadata": {"creationTimestamp": "2025-12-24T10:00:00Z"},
+        }
+
+        result = provider.get_status(workload)
+
+        assert result["state"] == "Failed"
+        assert result["reason"] == "FAILED"
+        assert result["message"] == "Pod sandbox-abc-0: ImagePullBackOff - image not found"
+
+    def test_resume_sandbox_failed_rejects(self, mock_k8s_client):
+        """Test resume rejected when Phase=Failed."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Failed", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="not available"):
+            provider.resume_sandbox("test-id", "test-ns")
+
+    def test_resume_sandbox_failed_with_resume_failed_rejects(self, mock_k8s_client):
+        """Test resume rejected when Phase=Failed + ResumeFailed=True (pod start failure)."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {
+                "phase": "Failed",
+                "conditions": [{"type": "ResumeFailed", "status": "True", "reason": "PodStartFailed"}]
+            }
+        }
+
+        with pytest.raises(ValueError, match="resume caused pod start failure"):
+            provider.resume_sandbox("test-id", "test-ns")
+
+    def test_resume_sandbox_pending_rejects(self, mock_k8s_client):
+        """Test resume rejected when Phase=Pending."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.get_custom_object.return_value = {
+            "metadata": {"name": "test-id", "namespace": "test-ns"},
+            "status": {"phase": "Pending", "conditions": []}
+        }
+
+        with pytest.raises(ValueError, match="being created"):
+            provider.resume_sandbox("test-id", "test-ns")
+
     # ===== Image Auth Tests =====
 
     def test_supports_image_auth_returns_true(self, mock_k8s_client):
-        """
-        Test case: BatchSandboxProvider declares image auth support
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         assert provider.supports_image_auth() is True
 
     def test_create_workload_with_image_auth_injects_image_pull_secrets(self, mock_k8s_client):
-        """
-        Test case: imagePullSecrets is injected into pod spec when image auth is provided
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
@@ -1616,9 +2311,6 @@ spec:
         assert pull_secrets == [{"name": f"{IMAGE_AUTH_SECRET_PREFIX}-test-id"}]
 
     def test_create_workload_with_image_auth_creates_secret(self, mock_k8s_client):
-        """
-        Test case: a kubernetes.io/dockerconfigjson Secret is created with correct ownerReference
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-abc"}
@@ -1650,9 +2342,6 @@ spec:
         assert ref.name == "test-id"
 
     def test_create_workload_without_image_auth_skips_secret(self, mock_k8s_client):
-        """
-        Test case: no Secret is created when image auth is absent
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
@@ -1675,9 +2364,6 @@ spec:
         assert "imagePullSecrets" not in body["spec"]["template"]["spec"]
 
     def test_create_workload_with_image_auth_secret_failure_rolls_back_batchsandbox(self, mock_k8s_client):
-        """
-        Test case: BatchSandbox is deleted when Secret creation fails
-        """
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.create_custom_object.return_value = {
             "metadata": {"name": "test-id", "uid": "uid-123"}
@@ -1753,23 +2439,23 @@ spec:
 
         assert result == {"name": "test-id", "uid": "test-uid"}
 
-        # Verify API call
-        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
-        pod_spec = body["spec"]["template"]["spec"]
+    def test_create_workload_poolref_rejects_platform(self, mock_k8s_client):
+        provider = BatchSandboxProvider(mock_k8s_client)
 
-        # Check volume definition
-        volumes_list = pod_spec.get("volumes", [])
-        pvc_volume = next((v for v in volumes_list if v["name"] == "data-volume"), None)
-        assert pvc_volume is not None
-        assert pvc_volume["persistentVolumeClaim"]["claimName"] == "my-pvc"
-
-        # Check volume mount in main container
-        main_container = pod_spec["containers"][0]
-        mounts = main_container.get("volumeMounts", [])
-        data_mount = next((m for m in mounts if m["name"] == "data-volume"), None)
-        assert data_mount is not None
-        assert data_mount["mountPath"] == "/mnt/data"
-        assert data_mount["readOnly"] is False
+        with pytest.raises(ValueError, match="platform is not supported together with extensions.poolRef"):
+            provider.create_workload(
+                sandbox_id="test-id",
+                namespace="test-ns",
+                image_spec=ImageSpec(uri="python:3.11"),
+                entrypoint=["/bin/bash"],
+                env={},
+                resource_limits={},
+                labels={"opensandbox.io/id": "test-id"},
+                expires_at=None,
+                execd_image="execd:latest",
+                extensions={"poolRef": "warm-pool"},
+                platform=PlatformSpec(os="linux", arch="amd64"),
+            )
 
     def test_create_workload_with_pvc_volume_readonly(self, mock_k8s_client):
         """

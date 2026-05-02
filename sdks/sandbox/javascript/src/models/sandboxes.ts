@@ -35,6 +35,17 @@ export interface ImageSpec {
   auth?: ImageAuth;
 }
 
+export interface PlatformSpec extends Record<string, unknown> {
+  /**
+   * Target operating system for sandbox provisioning.
+   */
+  os: "linux" | "windows";
+  /**
+   * Target CPU architecture for sandbox provisioning.
+   */
+  arch: "amd64" | "arm64";
+}
+
 export type ResourceLimits = Record<string, string>;
 
 export type NetworkRuleAction = "allow" | "deny";
@@ -75,21 +86,48 @@ export interface NetworkPolicy extends Record<string, unknown> {
 export interface Host extends Record<string, unknown> {
   /**
    * Absolute path on the host filesystem to mount.
+   * Must start with '/' (Unix) or a drive letter such as 'C:\' or 'D:/'
+   * (Windows), and be under an allowed prefix.
    */
   path: string;
 }
 
 /**
- * Kubernetes PersistentVolumeClaim mount backend.
+ * Platform-managed named volume backend.
  *
- * References an existing PVC in the same namespace as the sandbox pod.
- * Only available in Kubernetes runtime.
+ * Runtime-neutral abstraction for referencing a pre-existing named volume:
+ * - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+ * - Docker: maps to a Docker named volume.
  */
 export interface PVC extends Record<string, unknown> {
   /**
-   * Name of the PersistentVolumeClaim in the same namespace.
+   * Name of the platform volume.
+   * In Kubernetes this is the PVC name; in Docker this is the named volume name.
    */
   claimName: string;
+  /**
+   * When true (default), auto-create the volume if it does not exist.
+   */
+  createIfNotExists?: boolean;
+  /**
+   * When true, delete auto-created volume on sandbox deletion (Docker-only).
+   */
+  deleteOnSandboxTermination?: boolean;
+  /**
+   * Kubernetes StorageClass name for auto-created PVCs.
+   * Null means use cluster default. Ignored for Docker.
+   */
+  storageClass?: string | null;
+  /**
+   * Capacity request for auto-created PVCs (e.g. "1Gi").
+   * Ignored for Docker.
+   */
+  storage?: string | null;
+  /**
+   * Access modes for auto-created PVCs (e.g. ["ReadWriteOnce"]).
+   * Ignored for Docker.
+   */
+  accessModes?: string[] | null;
 }
 
 /**
@@ -189,7 +227,9 @@ export interface SandboxStatus extends Record<string, unknown> {
 
 export interface SandboxInfo extends Record<string, unknown> {
   id: SandboxId;
-  image: ImageSpec;
+  image?: ImageSpec;
+  snapshotId?: string;
+  platform?: PlatformSpec;
   entrypoint: string[];
   metadata?: Record<string, string>;
   status: SandboxStatus;
@@ -204,8 +244,14 @@ export interface SandboxInfo extends Record<string, unknown> {
 }
 
 export interface CreateSandboxRequest extends Record<string, unknown> {
-  image: ImageSpec;
-  entrypoint: string[];
+  image?: ImageSpec;
+  snapshotId?: string;
+  entrypoint?: string[];
+  platform?: PlatformSpec;
+  /**
+   * Whether to require secure access headers for sandbox endpoint access.
+   */
+  secureAccess?: boolean;
   /**
    * Timeout in seconds (server semantics).
    */
@@ -227,6 +273,7 @@ export interface CreateSandboxRequest extends Record<string, unknown> {
 export interface CreateSandboxResponse extends Record<string, unknown> {
   id: SandboxId;
   status: SandboxStatus;
+  platform?: PlatformSpec;
   metadata?: Record<string, string>;
   /**
    * Sandbox expiration time after creation.
@@ -237,6 +284,32 @@ export interface CreateSandboxResponse extends Record<string, unknown> {
    */
   createdAt: Date;
   entrypoint: string[];
+}
+
+export type SnapshotState = "Creating" | "Deleting" | "Ready" | "Failed" | string;
+
+export interface SnapshotStatus extends Record<string, unknown> {
+  state: SnapshotState;
+  reason?: string;
+  message?: string;
+  lastTransitionAt?: Date;
+}
+
+export interface SnapshotInfo extends Record<string, unknown> {
+  id: string;
+  sandboxId: SandboxId;
+  name?: string;
+  status: SnapshotStatus;
+  createdAt: Date;
+}
+
+export interface CreateSnapshotRequest extends Record<string, unknown> {
+  name?: string;
+}
+
+export interface ListSnapshotsResponse extends Record<string, unknown> {
+  items: SnapshotInfo[];
+  pagination?: PaginationInfo;
 }
 
 export interface PaginationInfo extends Record<string, unknown> {
@@ -285,4 +358,11 @@ export interface ListSandboxesParams {
   metadata?: Record<string, string>;
   page?: number;
   pageSize?: number;
-};
+}
+
+export interface ListSnapshotsParams {
+  sandboxId?: SandboxId;
+  states?: string[];
+  page?: number;
+  pageSize?: number;
+}

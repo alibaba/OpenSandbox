@@ -26,10 +26,14 @@ from datetime import datetime, timedelta, timezone
 from opensandbox.adapters.factory import AdapterFactory
 from opensandbox.config import ConnectionConfig
 from opensandbox.models.sandboxes import (
+    CreateSnapshotRequest,
     PagedSandboxInfos,
+    PagedSnapshotInfos,
     SandboxFilter,
     SandboxInfo,
     SandboxRenewResponse,
+    SnapshotFilter,
+    SnapshotInfo,
 )
 from opensandbox.services.sandbox import Sandboxes
 
@@ -207,6 +211,26 @@ class SandboxManager:
         """
         logger.info(f"Resuming sandbox: {sandbox_id}")
         await self._sandbox_service.resume_sandbox(sandbox_id)
+
+    async def create_snapshot(
+        self, sandbox_id: str, name: str | None = None
+    ) -> SnapshotInfo:
+        """Create a snapshot from a sandbox."""
+        return await self._sandbox_service.create_snapshot(
+            sandbox_id, CreateSnapshotRequest(name=name)
+        )
+
+    async def get_snapshot(self, snapshot_id: str) -> SnapshotInfo:
+        """Get information for a snapshot by id."""
+        return await self._sandbox_service.get_snapshot(snapshot_id)
+
+    async def list_snapshots(self, filter: SnapshotFilter) -> PagedSnapshotInfos:
+        """List snapshots with filtering options."""
+        return await self._sandbox_service.list_snapshots(filter)
+
+    async def delete_snapshot(self, snapshot_id: str) -> None:
+        """Delete a snapshot by id."""
+        await self._sandbox_service.delete_snapshot(snapshot_id)
 
     async def close(self) -> None:
         """

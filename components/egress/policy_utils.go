@@ -23,7 +23,9 @@ import (
 	"strings"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
+	"github.com/alibaba/opensandbox/egress/pkg/log"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 )
 
 const maxPolicyBodyBytes = 1 << 20
@@ -54,7 +56,6 @@ func patchMergedPolicy(base *policy.NetworkPolicy, patchRules []policy.EgressRul
 	return policy.ParsePolicy(string(rawMerged))
 }
 
-// mergeEgressRules joins base rules and additions, deduping by target (last writer wins).
 func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
 	if len(additions) == 0 {
 		return base
@@ -62,7 +63,7 @@ func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
 	out := make([]policy.EgressRule, 0, len(base)+len(additions))
 	seen := make(map[string]struct{})
 
-	// Priority: additions first; base rules only if target not overridden.
+	// patch rules win on same target; base fills the rest
 	for _, r := range additions {
 		key := mergeKey(r)
 		if _, ok := seen[key]; ok {
@@ -82,8 +83,7 @@ func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
 	return out
 }
 
-// mergeKey normalizes domain targets to lowercase for dedupe;
-// IP/CIDR targets are kept as-is.
+// mergeKey: domain targets lowercased for dedupe; IP/CIDR left as-is.
 func mergeKey(r policy.EgressRule) string {
 	if r.Target == "" {
 		return r.Target
@@ -123,4 +123,61 @@ func modeFromPolicy(p *policy.NetworkPolicy) string {
 	}
 
 	return "enforcing"
+}
+
+func policyRuleSummary(p *policy.NetworkPolicy) []map[string]string {
+	if p == nil {
+		return nil
+	}
+	return egressRulesSummary(p.Egress)
+}
+
+func egressRulesSummary(egress []policy.EgressRule) []map[string]string {
+	out := make([]map[string]string, 0, len(egress))
+	for _, r := range egress {
+		out = append(out, map[string]string{
+			"action": r.Action,
+			"target": r.Target,
+		})
+	}
+	return out
+}
+
+func logEgressLoaded(pol *policy.NetworkPolicy) {
+	if pol == nil {
+		pol = policy.DefaultDenyPolicy()
+	}
+	fields := []slogger.Field{
+		{Key: "opensandbox.event", Value: "egress.loaded"},
+		{Key: "egress.default", Value: pol.DefaultAction},
+		{Key: "rules", Value: policyRuleSummary(pol)},
+	}
+	log.Logger.With(fields...).Infof("egress policy loaded")
+}
+
+// logEgressUpdated: egress.updated event. rules is only the delta for this request (PATCH: patch list;
+// POST/PUT: full body egress; reset: empty), defaultAction is the policy after apply.
+func logEgressUpdated(defaultAction string, deltaEgress []policy.EgressRule) {
+	fields := []slogger.Field{
+		{Key: "opensandbox.event", Value: "egress.updated"},
+		{Key: "egress.default", Value: defaultAction},
+		{Key: "rules", Value: egressRulesSummary(deltaEgress)},
+	}
+	log.Logger.With(fields...).Infof("egress policy updated")
+}
+
+func logEgressUpdateFailedWarn(msg string) {
+	fields := []slogger.Field{
+		{Key: "opensandbox.event", Value: "egress.update_failed"},
+		{Key: "error", Value: msg},
+	}
+	log.Logger.With(fields...).Warnf("egress policy update failed")
+}
+
+func logEgressUpdateFailedError(msg string) {
+	fields := []slogger.Field{
+		{Key: "opensandbox.event", Value: "egress.update_failed"},
+		{Key: "error", Value: msg},
+	}
+	log.Logger.With(fields...).Errorf("egress policy update failed")
 }

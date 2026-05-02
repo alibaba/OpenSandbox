@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Unit tests for image_pull_secret_helper.
-"""
-
 import base64
 import json
 
@@ -87,7 +83,7 @@ class TestBuildImagePullSecret:
             owner_kind="BatchSandbox",
         )
         config = self._decode_docker_config(secret)
-        assert "registry.example.com" in config["auths"]
+        assert config["auths"].get("registry.example.com") is not None
 
     def test_docker_hub_image_uses_default_registry(self):
         secret = build_image_pull_secret(

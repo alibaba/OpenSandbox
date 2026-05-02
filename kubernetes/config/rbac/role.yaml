@@ -20,7 +20,41 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resources:
   - pods/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs/status
   verbs:
   - get
   - patch
@@ -30,6 +64,7 @@ rules:
   resources:
   - batchsandboxes
   - pools
+  - sandboxsnapshots
   verbs:
   - create
   - delete
@@ -43,6 +78,7 @@ rules:
   resources:
   - batchsandboxes/finalizers
   - pools/finalizers
+  - sandboxsnapshots/finalizers
   verbs:
   - update
 - apiGroups:
@@ -50,6 +86,7 @@ rules:
   resources:
   - batchsandboxes/status
   - pools/status
+  - sandboxsnapshots/status
   verbs:
   - get
   - patch

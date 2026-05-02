@@ -19,8 +19,8 @@ This module initializes the FastAPI application with middleware, routes,
 and configuration for the sandbox lifecycle management service.
 """
 
-import copy
-import logging.config
+import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -32,47 +32,16 @@ from fastapi.responses import JSONResponse
 
 from opensandbox_server.config import load_config
 from opensandbox_server.integrations.renew_intent import start_renew_intent_consumer
-from uvicorn.config import LOGGING_CONFIG as UVICORN_LOGGING_CONFIG
+from opensandbox_server.logging_config import configure_logging
+from opensandbox_server.startup_guard import api_key_confirm
 
 # Load configuration before initializing routers/middleware
 app_config = load_config()
-
-# Unify logging format (including uvicorn access/error logs) with timestamp prefix.
-_log_config = copy.deepcopy(UVICORN_LOGGING_CONFIG)
-_fmt = "%(levelprefix)s %(asctime)s [%(request_id)s] %(name)s: %(message)s"
-_datefmt = "%Y-%m-%d %H:%M:%S%z"
-
-# Inject request_id into log records so one request's logs can be correlated.
-_log_config["filters"] = {
-    "request_id": {"()": "opensandbox_server.middleware.request_id.RequestIdFilter"},
-}
-_log_config["handlers"]["default"]["filters"] = ["request_id"]
-_log_config["handlers"]["access"]["filters"] = ["request_id"]
-
-# Enable colors and set format for both default and access loggers
-_log_config["formatters"]["default"]["fmt"] = _fmt
-_log_config["formatters"]["default"]["datefmt"] = _datefmt
-_log_config["formatters"]["default"]["use_colors"] = True
-
-_log_config["formatters"]["access"]["fmt"] = _fmt
-_log_config["formatters"]["access"]["datefmt"] = _datefmt
-_log_config["formatters"]["access"]["use_colors"] = True
-
-# Ensure project loggers emit at configured level using the default handler.
-_log_config["loggers"]["opensandbox_server"] = {
-    "handlers": ["default"],
-    "level": app_config.server.log_level.upper(),
-    "propagate": False,
-}
-
-logging.config.dictConfig(_log_config)
-logging.getLogger().setLevel(
-    getattr(logging, app_config.server.log_level.upper(), logging.INFO)
-)
+_log_config = configure_logging(app_config.log)
 
 from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402
-from opensandbox_server.api.lifecycle import router, sandbox_service  # noqa: E402
+from opensandbox_server.api.lifecycle import router, sandbox_service, snapshot_service  # noqa: E402
 from opensandbox_server.api.proxy import router as proxy_router  # noqa: E402
 from opensandbox_server.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator  # noqa: E402
 from opensandbox_server.middleware.auth import AuthMiddleware  # noqa: E402
@@ -86,6 +55,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        api_key_confirm(configured_api_key=app_config.server.api_key)
+    except Exception as exc:
+        logger.error("API key startup confirmation failed: %s", exc)
+        os._exit(1)
+
     app.state.http_client = httpx.AsyncClient(timeout=180.0)
 
     # Validate secure runtime configuration at startup
@@ -134,6 +109,7 @@ async def lifespan(app: FastAPI):
     consumer = getattr(app.state, "renew_intent_consumer", None)
     if consumer is not None:
         await consumer.stop()
+    snapshot_service.close()
     await app.state.http_client.aclose()
 
 
@@ -227,4 +203,5 @@ if __name__ == "__main__":
         port=app_config.server.port,
         reload=True,
         log_config=_log_config,
+        timeout_keep_alive=app_config.server.timeout_keep_alive,
     )

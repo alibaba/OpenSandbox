@@ -25,6 +25,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alibaba/opensandbox/internal/safego"
+
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 )
 
@@ -60,10 +62,10 @@ func (c *Controller) killPid(pid int) error {
 		log.Warning("SIGTERM failed for pid %d: %v, trying SIGKILL", pid, err)
 	} else {
 		done := make(chan error, 1)
-		go func() {
+		safego.Go(func() {
 			_, err := process.Wait()
 			done <- err
-		}()
+		})
 
 		select {
 		case err := <-done:

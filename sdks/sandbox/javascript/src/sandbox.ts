@@ -36,12 +36,15 @@ import type {
   Endpoint,
   NetworkPolicy,
   NetworkRule,
+  PlatformSpec,
   RenewSandboxExpirationResponse,
   SandboxId,
   SandboxInfo,
   Volume,
 } from "./models/sandboxes.js";
 import { SandboxReadyTimeoutException } from "./core/exceptions.js";
+
+const HOST_PATH_PATTERN = /^([/]|[A-Za-z]:[\\/])/;
 
 export interface SandboxCreateOptions {
   /**
@@ -56,9 +59,14 @@ export interface SandboxCreateOptions {
   /**
    * Container image uri, e.g. `python:3.11`
    */
-  image:
+  image?:
     | string
     | { uri: string; auth?: { username: string; password: string } };
+  /**
+   * Snapshot identifier to restore from.
+   * Mutually exclusive with `image`.
+   */
+  snapshotId?: string;
 
   /**
    * Entrypoint command for the sandbox (defaults to tail -f /dev/null).
@@ -86,6 +94,14 @@ export interface SandboxCreateOptions {
    * Opaque extension parameters passed through to the server as-is.
    */
   extensions?: Record<string, string>;
+  /**
+   * Optional runtime platform constraint used for provisioning.
+   */
+  platform?: PlatformSpec;
+  /**
+   * Whether to enable secured access for sandbox endpoints.
+   */
+  secureAccess?: boolean;
 
   /**
    * Resource limits applied to the sandbox container.
@@ -153,8 +169,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 function toImageSpec(
-  image: SandboxCreateOptions["image"]
-): CreateSandboxRequest["image"] {
+  image: NonNullable<SandboxCreateOptions["image"]>
+): NonNullable<CreateSandboxRequest["image"]> {
   if (typeof image === "string") return { uri: image };
   return { uri: image.uri, auth: image.auth };
 }
@@ -224,6 +240,32 @@ export class Sandbox {
   }
 
   static async create(opts: SandboxCreateOptions): Promise<Sandbox> {
+    if ((opts.image == null) === (opts.snapshotId == null)) {
+      throw new Error("Exactly one of image or snapshotId must be provided");
+    }
+
+    // Validate volumes before allocating transport resources.
+    if (opts.volumes) {
+      for (const vol of opts.volumes) {
+        const backendsSpecified = [vol.host, vol.pvc, vol.ossfs].filter((b) => b != null).length;
+        if (backendsSpecified === 0) {
+          throw new Error(
+            `Volume '${vol.name}' must specify exactly one backend (host, pvc, ossfs), but none was provided.`
+          );
+        }
+        if (backendsSpecified > 1) {
+          throw new Error(
+            `Volume '${vol.name}' must specify exactly one backend (host, pvc, ossfs), but multiple were provided.`
+          );
+        }
+        if (vol.host && !HOST_PATH_PATTERN.test(vol.host.path)) {
+          throw new Error(
+            "Host path must be an absolute path starting with '/' or a Windows drive letter (e.g. 'C:\\' or 'D:/')"
+          );
+        }
+      }
+    }
+
     const baseConnectionConfig =
       opts.connectionConfig instanceof ConnectionConfig
         ? opts.connectionConfig
@@ -243,23 +285,6 @@ export class Sandbox {
       throw err;
     }
 
-    // Validate volumes: exactly one backend must be specified per volume
-    if (opts.volumes) {
-      for (const vol of opts.volumes) {
-        const backendsSpecified = [vol.host, vol.pvc, vol.ossfs].filter((b) => b != null).length;
-        if (backendsSpecified === 0) {
-          throw new Error(
-            `Volume '${vol.name}' must specify exactly one backend (host, pvc, ossfs), but none was provided.`
-          );
-        }
-        if (backendsSpecified > 1) {
-          throw new Error(
-            `Volume '${vol.name}' must specify exactly one backend (host, pvc, ossfs), but multiple were provided.`
-          );
-        }
-      }
-    }
-
     const rawTimeout = opts.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
     const timeoutSeconds =
       opts.timeoutSeconds === null
@@ -272,9 +297,11 @@ export class Sandbox {
     }
 
     const req: CreateSandboxRequest = {
-      image: toImageSpec(opts.image),
+      image: opts.image == null ? undefined : toImageSpec(opts.image),
+      snapshotId: opts.snapshotId,
       entrypoint: opts.entrypoint ?? DEFAULT_ENTRYPOINT,
       resourceLimits: opts.resource ?? DEFAULT_RESOURCE_LIMITS,
+      secureAccess: opts.secureAccess ?? false,
       env: opts.env ?? {},
       metadata: opts.metadata ?? {},
       networkPolicy: opts.networkPolicy
@@ -285,6 +312,7 @@ export class Sandbox {
         : undefined,
       volumes: opts.volumes,
       extensions: opts.extensions ?? {},
+      platform: opts.platform,
     };
     if (timeoutSeconds !== null) {
       req.timeout = timeoutSeconds;
@@ -546,6 +574,13 @@ export class Sandbox {
       port,
       this.connectionConfig.useServerProxy
     );
+  }
+
+  /**
+   * Get signed endpoint URL with an OSEP-0011 route token that expires at the given Unix epoch timestamp (seconds).
+   */
+  async getSignedEndpoint(port: number, expires: number): Promise<Endpoint> {
+    return await this.sandboxes.getSignedEndpoint(this.id, port, expires);
   }
 
   /**

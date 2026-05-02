@@ -16,6 +16,7 @@ package policy
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -104,4 +105,66 @@ func TestWithExtraAllowIPs(t *testing.T) {
 	// nil/empty ips returns same policy
 	require.Same(t, p, p.WithExtraAllowIPs(nil), "WithExtraAllowIPs(nil) should return same policy")
 	require.Same(t, p, p.WithExtraAllowIPs([]netip.Addr{}), "WithExtraAllowIPs([]) should return same policy")
+}
+
+func TestEvaluate_CompiledIndexMatchesLinear(t *testing.T) {
+	p, err := ParsePolicy(`{
+		"defaultAction":"deny",
+		"egress":[
+			{"action":"allow","target":"*.example.com"},
+			{"action":"deny","target":"api.example.com"},
+			{"action":"allow","target":"*.internal.example.com"},
+			{"action":"deny","target":"10.0.0.1"},
+			{"action":"allow","target":"10.0.0.0/24"}
+		]
+	}`)
+	require.NoError(t, err)
+	require.NotNil(t, p.domainIndex, "parsed policy should build compiled domain index")
+
+	queries := []string{
+		"api.example.com.",
+		"www.example.com.",
+		"a.internal.example.com.",
+		"internal.example.com.",
+		"unknown.test.",
+	}
+	for _, q := range queries {
+		got := p.Evaluate(q)
+		want, matched := p.evaluateLinear(normalizeQueryForTest(q))
+		if !matched {
+			want = p.DefaultAction
+		}
+		require.Equalf(t, want, got, "compiled evaluate mismatch for query=%s", q)
+	}
+}
+
+func TestEvaluate_ManualPolicyFallsBackToLinear(t *testing.T) {
+	manual := &NetworkPolicy{
+		DefaultAction: ActionDeny,
+		Egress: []EgressRule{
+			{Action: ActionAllow, Target: "*.example.com", targetKind: targetDomain},
+			{Action: ActionDeny, Target: "api.example.com", targetKind: targetDomain},
+		},
+	}
+	require.Nil(t, manual.domainIndex, "manual policy intentionally skips compile")
+	require.Equal(t, ActionAllow, manual.Evaluate("api.example.com."))
+	require.Equal(t, ActionAllow, manual.Evaluate("www.example.com."))
+	require.Equal(t, ActionDeny, manual.Evaluate("unknown.example."))
+}
+
+func TestEvaluate_CompiledIndexKeepsFirstMatchPriority(t *testing.T) {
+	p := &NetworkPolicy{
+		DefaultAction: ActionDeny,
+		Egress: []EgressRule{
+			{Action: ActionAllow, Target: "*.example.com", targetKind: targetDomain},
+			{Action: ActionDeny, Target: "api.example.com", targetKind: targetDomain},
+		},
+	}
+	p = ensureDefaults(p)
+	require.NotNil(t, p.domainIndex)
+	require.Equal(t, ActionAllow, p.Evaluate("api.example.com."))
+}
+
+func normalizeQueryForTest(domain string) string {
+	return strings.ToLower(strings.TrimSuffix(domain, "."))
 }

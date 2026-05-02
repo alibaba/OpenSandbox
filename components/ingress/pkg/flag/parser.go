@@ -18,10 +18,14 @@ import (
 	"flag"
 )
 
+var (
+	deprecatedNamespace string
+)
+
 func InitFlags() {
 	flag.StringVar(&LogLevel, "log-level", "info", "Server log level")
 	flag.IntVar(&Port, "port", 28888, "Server listening port (default: 28888)")
-	flag.StringVar(&Namespace, "namespace", "opensandbox", "The Kubernetes namespace to watch for sandbox resources")
+	flag.StringVar(&deprecatedNamespace, "namespace", "opensandbox", "Deprecated compatibility flag (ingress now watches sandbox resources across all namespaces)")
 	flag.StringVar(&ProviderType, "provider-type", "batchsandbox", "The sandbox provider type (default: batchsandbox)")
 	flag.StringVar(&Mode, "mode", "header", "The sandbox service discovery mode (default: header)")
 
@@ -30,6 +34,8 @@ func InitFlags() {
 	flag.StringVar(&RenewIntentQueueKey, "renew-intent-queue-key", "opensandbox:renew:intent", "Redis List key for renew-intent payloads")
 	flag.IntVar(&RenewIntentQueueMaxLen, "renew-intent-queue-max-len", 0, "Max renew-intent queue length (0 = no cap)")
 	flag.IntVar(&RenewIntentMinIntervalSec, "renew-intent-min-interval", 60, "Min seconds between publishing intents for the same sandbox (client-side throttle)")
+
+	flag.StringVar(&SecureAccessKeys, "secure-access-keys", "", "OSEP-0011 verification keys: a=base64,b=base64 (comma-separated; key_id is 1 char [0-9a-z])")
 
 	flag.Parse()
 }

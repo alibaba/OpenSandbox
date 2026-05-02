@@ -20,11 +20,14 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/flag"
+	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
+	"github.com/alibaba/opensandbox/execd/pkg/telemetry"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 )
 
@@ -57,14 +60,37 @@ func (c *CodeInterpretingController) RunCommand() {
 		deferResumeCleanup(c)
 		c.resumeEnabled = false
 	}()
+	execStart := time.Now()
+	var recordOnce sync.Once
+	recordExecution := func(result string) {
+		recordOnce.Do(func() {
+			telemetry.RecordExecutionDuration(
+				ctx,
+				"run_command",
+				result,
+				float64(time.Since(execStart))/float64(time.Millisecond),
+			)
+		})
+	}
 
 	runCodeRequest := c.buildExecuteCommandRequest(request)
 	eventsHandler := c.setServerEventsHandler(ctx)
+	origComplete := eventsHandler.OnExecuteComplete
+	eventsHandler.OnExecuteComplete = func(executionTime time.Duration) {
+		origComplete(executionTime)
+		recordExecution("success")
+	}
+	origError := eventsHandler.OnExecuteError
+	eventsHandler.OnExecuteError = func(err *execute.ErrorOutput) {
+		origError(err)
+		recordExecution("failure")
+	}
 	runCodeRequest.Hooks = eventsHandler
 
 	c.setupSSEResponse()
 	err = codeRunner.Execute(runCodeRequest)
 	if err != nil {
+		recordExecution("failure")
 		c.RespondError(
 			http.StatusInternalServerError,
 			model.ErrorCodeRuntimeError,

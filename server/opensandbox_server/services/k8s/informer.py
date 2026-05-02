@@ -142,12 +142,12 @@ class WorkloadInformer:
                     self._resource_version = None
                     self._has_synced = False
                 else:
-                    logger.warning("Informer watch error: %s", exc, exc_info=True)
+                    logger.warning(f"Informer watch error: {exc}", exc_info=True)
                     self._has_synced = False
                     self._stop_event.wait(min(backoff, 30.0))
                     backoff = min(backoff * 2, 30.0)
             except Exception as exc:  # pragma: no cover - defensive
-                logger.warning("Unexpected informer error: %s", exc, exc_info=True)
+                logger.warning(f"Unexpected informer error: {exc}", exc_info=True)
                 self._has_synced = False
                 self._stop_event.wait(min(backoff, 30.0))
                 backoff = min(backoff * 2, 30.0)

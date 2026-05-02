@@ -14,45 +14,37 @@
 
 # Example Kubernetes Runtime Configuration for OpenSandbox Server
 #
-# This configuration file demonstrates how to configure the OpenSandbox server
-# to use Kubernetes as the sandbox runtime.
-#
-# Usage:
-#   1. Copy this file to ~/.sandbox.toml (or set SANDBOX_CONFIG_PATH environment variable)
-#   2. Update the configuration values according to your environment
-#   3. Start the server: uvicorn opensandbox_server.main:app --host 0.0.0.0 --port 8080
+# 完整配置参考：https://github.com/alibaba/OpenSandbox/blob/main/server/configuration.md
 
 [server]
 host = "0.0.0.0"
 port = 8080
-log_level = "INFO"
-# api_key = "your-secret-api-key"  # Optional: Uncomment to enable API key authentication
+max_sandbox_timeout_seconds = 86400
 
-# 🧪 [EXPERIMENTAL] 按访问续期。默认关闭 — 见 server/README_zh.md。
-[renew_intent]
-enabled = false
-min_interval_seconds = 60
-redis.enabled = false
-# redis.dsn = "redis://127.0.0.1:6379/0"
-redis.queue_key = "opensandbox:renew:intent"
-redis.consumer_concurrency = 8
+# 可选：取消注释以启用 API Key 认证
+# api_key = "your-secret-api-key"
+# 若 api_key 为空，启动时需要显式确认：
+# - 交互式 TTY：按提示输入 YES
+# - 非交互环境：设置 OPENSANDBOX_INSECURE_SERVER=YES
+
+[log]
+level = "INFO"
 
 [runtime]
 type = "kubernetes"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.14"
 
 [storage]
-# 卷存储配置
-# -----------------------------------------------------------------
 # 允许进行 bind mount 的宿主机路径前缀白名单。
-# 仅匹配这些前缀的路径才能被挂载到沙箱中。
 # 如果为空，则允许所有路径（不建议在生产环境使用）。
 # 示例：allowed_host_paths = ["/data/opensandbox", "/tmp/sandbox"]
 allowed_host_paths = []
 
+# 自动创建 Kubernetes PVC 时的默认存储大小（当调用方未指定时使用）。
+volume_default_size = "1Gi"
+
 [kubernetes]
 # Path to kubeconfig file. Leave as null to use in-cluster configuration
-# Replace with your path
 kubeconfig_path = "~/.kube/config"
 
 # Namespace for sandbox workloads
@@ -68,17 +60,28 @@ informer_watch_timeout_seconds = 60
 # If not specified, uses the first registered provider (typically "batchsandbox")
 workload_provider = "batchsandbox"
 
+# BatchSandbox 主容器的镜像拉取策略。
+# 可选值："Always"、"IfNotPresent"、"Never"。
+image_pull_policy = "IfNotPresent"
+
 # Path to the BatchSandbox template file
 # Replace with your path
 batchsandbox_template_file = "~/batchsandbox-template.yaml"
 
 [ingress]
-# Ingress exposure mode: direct (default) or gateway
 mode = "direct"
 
 [egress]
-# Egress configuration
-# -----------------------------------------------------------------
-image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.4"
-# Enforcement: "dns" (DNS proxy only) or "dns+nft" (nftables + DNS).
+image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.10"
 mode = "dns"
+# Default is true (recommended for dual-stack CNI). Set false only if you need IPv6 in the netns (see server/configuration.md).
+# disable_ipv6 = false
+
+# 🧪 [EXPERIMENTAL] 按访问续期。默认关闭 — 见 server/README_zh.md。
+[renew_intent]
+enabled = false
+min_interval_seconds = 60
+redis.enabled = false
+# redis.dsn = "redis://127.0.0.1:6379/0"
+# redis.queue_key = "opensandbox:renew:intent"
+# redis.consumer_concurrency = 8

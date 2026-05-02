@@ -18,6 +18,7 @@ API routes for OpenSandbox DevOps diagnostics.
 All endpoints return plain text for easy consumption by humans and AI agents.
 """
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -25,6 +26,7 @@ from fastapi.responses import PlainTextResponse
 
 from opensandbox_server.api.lifecycle import sandbox_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["DevOps"])
 
 
@@ -111,8 +113,9 @@ def get_sandbox_diagnostics_summary(
         sections.append(sandbox_service.get_sandbox_inspect(sandbox_id))
     except HTTPException:
         raise
-    except Exception as exc:
-        sections.append(f"[error] {exc}")
+    except Exception:
+        logger.exception("Failed to collect sandbox inspect diagnostics for %s", sandbox_id)
+        sections.append("[error] Failed to collect inspect diagnostics.")
 
     # Events
     sections.append("")
@@ -123,8 +126,9 @@ def get_sandbox_diagnostics_summary(
         sections.append(sandbox_service.get_sandbox_events(sandbox_id, limit=event_limit))
     except HTTPException:
         raise
-    except Exception as exc:
-        sections.append(f"[error] {exc}")
+    except Exception:
+        logger.exception("Failed to collect sandbox event diagnostics for %s", sandbox_id)
+        sections.append("[error] Failed to collect event diagnostics.")
 
     # Logs
     sections.append("")
@@ -135,7 +139,8 @@ def get_sandbox_diagnostics_summary(
         sections.append(sandbox_service.get_sandbox_logs(sandbox_id, tail=tail))
     except HTTPException:
         raise
-    except Exception as exc:
-        sections.append(f"[error] {exc}")
+    except Exception:
+        logger.exception("Failed to collect sandbox log diagnostics for %s", sandbox_id)
+        sections.append("[error] Failed to collect log diagnostics.")
 
     return PlainTextResponse(content="\n".join(sections) + "\n")

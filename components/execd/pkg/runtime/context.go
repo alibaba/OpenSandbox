@@ -28,6 +28,7 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter"
 	jupytersession "github.com/alibaba/opensandbox/execd/pkg/jupyter/session"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 )
 
 // CreateContext provisions a kernel-backed session and returns its ID.
@@ -129,14 +130,18 @@ func (c *Controller) newContextID() string {
 }
 
 func (c *Controller) newIpynbPath(sessionID, cwd string) (string, error) {
+	resolvedCwd, err := pathutil.ExpandPath(cwd)
+	if err != nil {
+		return "", err
+	}
 	if cwd != "" {
-		err := os.MkdirAll(cwd, os.ModePerm)
+		err := os.MkdirAll(resolvedCwd, os.ModePerm)
 		if err != nil {
 			return "", err
 		}
 	}
 
-	return filepath.Join(cwd, fmt.Sprintf("%s.ipynb", sessionID)), nil
+	return filepath.Join(resolvedCwd, fmt.Sprintf("%s.ipynb", sessionID)), nil
 }
 
 // createDefaultLanguageJupyterContext prewarms a session for stateless execution.
@@ -254,10 +259,13 @@ func (c *Controller) deleteDefaultSessionByID(sessionID string) {
 
 func (c *Controller) listAllContexts() ([]CodeContext, error) {
 	contexts := make([]CodeContext, 0)
+	seen := make(map[string]struct{})
+
 	c.jupyterClientMap.Range(func(key, value any) bool {
 		session, _ := key.(string)
 		if kernel, ok := value.(*jupyterKernel); ok && kernel != nil {
 			contexts = append(contexts, CodeContext{ID: session, Language: kernel.language})
+			seen[session] = struct{}{}
 		}
 		return true
 	})
@@ -266,6 +274,10 @@ func (c *Controller) listAllContexts() ([]CodeContext, error) {
 		lang, _ := key.(Language)
 		session, _ := value.(string)
 		if session == "" {
+			return true
+		}
+		// Skip if already collected from jupyterClientMap to avoid duplicates.
+		if _, exists := seen[session]; exists {
 			return true
 		}
 		contexts = append(contexts, CodeContext{ID: session, Language: lang})
@@ -277,16 +289,22 @@ func (c *Controller) listAllContexts() ([]CodeContext, error) {
 
 func (c *Controller) listLanguageContexts(language Language) ([]CodeContext, error) {
 	contexts := make([]CodeContext, 0)
+	seen := make(map[string]struct{})
+
 	c.jupyterClientMap.Range(func(key, value any) bool {
 		session, _ := key.(string)
 		if kernel, ok := value.(*jupyterKernel); ok && kernel != nil && kernel.language == language {
 			contexts = append(contexts, CodeContext{ID: session, Language: language})
+			seen[session] = struct{}{}
 		}
 		return true
 	})
 
 	if defaultContext := c.getDefaultLanguageSession(language); defaultContext != "" {
-		contexts = append(contexts, CodeContext{ID: defaultContext, Language: language})
+		// Skip if already collected from jupyterClientMap to avoid duplicates.
+		if _, exists := seen[defaultContext]; !exists {
+			contexts = append(contexts, CodeContext{ID: defaultContext, Language: language})
+		}
 	}
 
 	return contexts, nil

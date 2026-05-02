@@ -8,6 +8,13 @@ opensandbox-controller:
   controller:
     logLevel: info
     replicaCount: 1
+    snapshot:
+      imageCommitterImage: image-committer:dev
+      commitJobTimeout: 10m
+      registry: ""
+      registryInsecure: false
+      snapshotPushSecret: ""
+      resumePullSecret: ""
 
 # Server component values
 opensandbox-server:

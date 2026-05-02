@@ -69,6 +69,15 @@ const manualEntries = [
     titleZh: "架构设计",
   },
   {
+    key: "guide-release-verification",
+    sectionId: "overview",
+    slug: "overview/release-verification",
+    enPath: "docs/release-verification.md",
+    zhPath: null,
+    titleEn: "Release Verification",
+    titleZh: "发布验签",
+  },
+  {
     key: "guide-network",
     sectionId: "modules",
     slug: "design/single-host-network",

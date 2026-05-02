@@ -1,3 +1,77 @@
+# components/execd 1.0.12
+
+## What's New
+
+### ✨ Features
+- trust mitm proxy if `OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT` set (#630)
+
+### 🐛 Bug Fixes
+- normalize traceback for command start errors (#701)
+- resolved issue which execd cannot process file like `$HOME/abc`, `~/abc` or `$MY_WORKSPACE/abc` (#726)
+
+### 📦 Misc
+- optimize Makefile for multi-build release (#695)
+- add Dockerfile.dockerignore to reduce build context (#718)
+
+## 👥 Contributors
+
+Thanks to these contributors ❤️
+
+- @Pangjiping
+- @Aboysky
+
+---
+- Docker Hub: opensandbox/execd:v1.0.12
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.12
+
+# components/execd 1.0.11
+
+## What's New
+
+### 🐛 Bug Fixes
+- fix deduplicate context entries in `ListAllContexts` and `LanguageSessions` (#619)
+- enlarge default jupyter polling interval to 100ms (#650)
+- validate request.cwd and return 400 (#656)
+- Bind token injection to an allowlisted host/scheme (e.g., compare req.URL.Host to the expected Jupyter endpoint before setting Authorization), and/or disable redirects for this client (CheckRedirect) unless explicitly safe (#680)
+
+### 📦 Misc
+- bump google.golang.org/grpc from 1.79.2 to 1.79.3 in /components/internal (#652)
+- extract safego to internal common package and wrapper execd goroutines with safego (#670)
+
+## 👥 Contributors
+
+Thanks to these contributors ❤️
+
+- @ZYecho11
+- @Pangjiping
+- @dependabot
+- @tomaioo
+
+---
+- Docker Hub: opensandbox/execd:v1.0.11
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.11
+
+# components/execd 1.0.10
+
+## What's New
+
+### ✨ Features
+- tune jupyter idle polling and sse completion wait (#577)
+- add websocket PTY support (#590) (#608)
+- add EXECD_CLONE3_COMPAT seccomp-based clone3 fallback (#518)
+
+## 👥 Contributors
+
+Thanks to these contributors ❤️
+
+- @skyler0513
+- @ctlaltlaltc
+- @Pangjiping
+
+---
+- Docker Hub: opensandbox/execd:v1.0.10
+- Aliyun Registry: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.10
+
 # components/execd 1.0.9
 
 ## What's New

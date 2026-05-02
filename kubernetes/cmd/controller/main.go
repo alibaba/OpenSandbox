@@ -17,8 +17,12 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -37,15 +41,86 @@ import (
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller"
+	cryptoutil "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/crypto"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/fieldindex"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/logging"
 	// +kubebuilder:scaffold:imports
 )
 
+const (
+	defaultBatchSandboxConcurrency = 32
+	defaultPoolConcurrency         = 16
+)
+
+type ConcurrencyConfig map[string]int
+
+func (c *ConcurrencyConfig) String() string {
+	if *c == nil {
+		return ""
+	}
+	parts := make([]string, 0, len(*c))
+	for k, v := range *c {
+		parts = append(parts, fmt.Sprintf("%s=%d", k, v))
+	}
+	return strings.Join(parts, ";")
+}
+
+func (c *ConcurrencyConfig) Set(value string) error {
+	if *c == nil {
+		*c = make(ConcurrencyConfig)
+	}
+	if value == "" {
+		return nil
+	}
+	pairs := strings.Split(value, ";")
+	for _, pair := range pairs {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) != 2 {
+			return fmt.Errorf("invalid concurrency config format: %s, expected format: controller=value", pair)
+		}
+		name := strings.TrimSpace(kv[0])
+		val, err := strconv.Atoi(strings.TrimSpace(kv[1]))
+		if err != nil {
+			return fmt.Errorf("invalid concurrency value for %s: %v", name, err)
+		}
+		if val <= 0 {
+			return fmt.Errorf("concurrency value must be positive for %s: %d", name, val)
+		}
+		(*c)[name] = val
+	}
+	return nil
+}
+
+func (c *ConcurrencyConfig) Get(name string, defaultVal int) int {
+	if *c != nil {
+		if v, ok := (*c)[name]; ok {
+			return v
+		}
+	}
+	return defaultVal
+}
+
 var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
+
+// getKindFromType returns the Kind name for a given runtime.Object using the scheme.
+// It panics if the object's kind cannot be determined.
+func getKindFromType(obj runtime.Object) string {
+	gvks, _, err := scheme.ObjectKinds(obj)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get kind for object %T: %v", obj, err))
+	}
+	if len(gvks) == 0 {
+		panic(fmt.Sprintf("no kind registered for object %T", obj))
+	}
+	return gvks[0].Kind
+}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -63,6 +138,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var allowWeakTLSKeyLengths bool
 	var tlsOpts []func(*tls.Config)
 
 	// Log file options
@@ -76,6 +152,9 @@ func main() {
 	// Kubernetes client rate limiter options
 	var kubeClientQPS float64
 	var kubeClientBurst int
+
+	// Controller concurrency options
+	var concurrencyConfig ConcurrencyConfig
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -94,6 +173,12 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.BoolVar(
+		&allowWeakTLSKeyLengths,
+		"allow-weak-tls-keylengths",
+		false,
+		"If set, allows TLS certificates below NIST 2030 minimum key/hash lengths (not recommended).",
+	)
 
 	// Log file flags
 	flag.BoolVar(&enableFileLog, "enable-file-log", false, "Enable log output to file")
@@ -104,6 +189,29 @@ func main() {
 	flag.BoolVar(&logCompress, "log-compress", true, "Compress determines if the rotated log files should be compressed using gzip")
 	flag.Float64Var(&kubeClientQPS, "kube-client-qps", 100, "QPS for Kubernetes client rate limiter.")
 	flag.IntVar(&kubeClientBurst, "kube-client-burst", 200, "Burst for Kubernetes client rate limiter.")
+	flag.Var(&concurrencyConfig, "concurrency", "Controller concurrency settings in format: controller1=N;controller2=M. "+
+		"Available controllers: batchsandbox, pool. "+
+		"Example: --concurrency='batchsandbox=32;pool=128'")
+
+	// Image committer
+	var imageCommitterImage string
+	flag.StringVar(&imageCommitterImage, "image-committer-image", "image-committer:dev", "The image used for commit operations (contains nerdctl tool).")
+
+	// Commit job timeout
+	var commitJobTimeout time.Duration
+	flag.DurationVar(&commitJobTimeout, "commit-job-timeout", 10*time.Minute, "The timeout duration for commit jobs.")
+
+	var snapshotRegistry string
+	flag.StringVar(&snapshotRegistry, "snapshot-registry", "", "OCI registry for snapshot images (e.g., registry.example.com/snapshots).")
+
+	var snapshotRegistryInsecure bool
+	flag.BoolVar(&snapshotRegistryInsecure, "snapshot-registry-insecure", false, "Use insecure registry mode when pushing snapshot images.")
+
+	var snapshotPushSecret string
+	flag.StringVar(&snapshotPushSecret, "snapshot-push-secret", "", "K8s Secret name for pushing snapshots to registry.")
+
+	var resumePullSecret string
+	flag.StringVar(&resumePullSecret, "resume-pull-secret", "", "K8s Secret name for pulling snapshot images during resume.")
 
 	opts := zap.Options{}
 	opts.BindFlags(flag.CommandLine)
@@ -136,6 +244,10 @@ func main() {
 		c.NextProtos = []string{"http/1.1"}
 	}
 
+	tlsOpts = append(tlsOpts, func(c *tls.Config) {
+		c.MinVersion = tls.VersionTLS12
+	})
+
 	if !enableHTTP2 {
 		tlsOpts = append(tlsOpts, disableHTTP2)
 	}
@@ -147,13 +259,23 @@ func main() {
 	webhookTLSOpts := tlsOpts
 
 	if len(webhookCertPath) > 0 {
+		webhookCertFile := filepath.Join(webhookCertPath, webhookCertName)
+		webhookKeyFile := filepath.Join(webhookCertPath, webhookCertKey)
+		if !allowWeakTLSKeyLengths {
+			if err := cryptoutil.ValidateCertificateKeyPair(webhookCertFile, webhookKeyFile); err != nil {
+				setupLog.Error(err, "Webhook certificate does not meet NIST minimum key/hash requirements",
+					"webhook-cert-file", webhookCertFile, "webhook-key-file", webhookKeyFile)
+				os.Exit(1)
+			}
+		}
+
 		setupLog.Info("Initializing webhook certificate watcher using provided certificates",
 			"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
 
 		var err error
 		webhookCertWatcher, err = certwatcher.New(
-			filepath.Join(webhookCertPath, webhookCertName),
-			filepath.Join(webhookCertPath, webhookCertKey),
+			webhookCertFile,
+			webhookKeyFile,
 		)
 		if err != nil {
 			setupLog.Error(err, "Failed to initialize webhook certificate watcher")
@@ -161,7 +283,19 @@ func main() {
 		}
 
 		webhookTLSOpts = append(webhookTLSOpts, func(config *tls.Config) {
-			config.GetCertificate = webhookCertWatcher.GetCertificate
+			config.GetCertificate = func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				cert, err := webhookCertWatcher.GetCertificate(chi)
+				if err != nil {
+					return nil, err
+				}
+				if allowWeakTLSKeyLengths {
+					return cert, nil
+				}
+				if err := cryptoutil.ValidateTLSCertificate(webhookCertFile, cert); err != nil {
+					return nil, err
+				}
+				return cert, nil
+			}
 		})
 	}
 
@@ -196,13 +330,23 @@ func main() {
 	// managed by cert-manager for the metrics server.
 	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml for TLS certification.
 	if len(metricsCertPath) > 0 {
+		metricsCertFile := filepath.Join(metricsCertPath, metricsCertName)
+		metricsKeyFile := filepath.Join(metricsCertPath, metricsCertKey)
+		if !allowWeakTLSKeyLengths && metricsAddr != "0" && secureMetrics {
+			if err := cryptoutil.ValidateCertificateKeyPair(metricsCertFile, metricsKeyFile); err != nil {
+				setupLog.Error(err, "Metrics certificate does not meet NIST minimum key/hash requirements",
+					"metrics-cert-file", metricsCertFile, "metrics-key-file", metricsKeyFile)
+				os.Exit(1)
+			}
+		}
+
 		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
 			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
 
 		var err error
 		metricsCertWatcher, err = certwatcher.New(
-			filepath.Join(metricsCertPath, metricsCertName),
-			filepath.Join(metricsCertPath, metricsCertKey),
+			metricsCertFile,
+			metricsKeyFile,
 		)
 		if err != nil {
 			setupLog.Error(err, "to initialize metrics certificate watcher", "error", err)
@@ -210,7 +354,19 @@ func main() {
 		}
 
 		metricsServerOptions.TLSOpts = append(metricsServerOptions.TLSOpts, func(config *tls.Config) {
-			config.GetCertificate = metricsCertWatcher.GetCertificate
+			config.GetCertificate = func(chi *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				cert, err := metricsCertWatcher.GetCertificate(chi)
+				if err != nil {
+					return nil, err
+				}
+				if allowWeakTLSKeyLengths {
+					return cert, nil
+				}
+				if err := cryptoutil.ValidateTLSCertificate(metricsCertFile, cert); err != nil {
+					return nil, err
+				}
+				return cert, nil
+			}
 		})
 	}
 
@@ -230,17 +386,11 @@ func main() {
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "2fa1c467.opensandbox.io",
-		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
-		// when the Manager ends. This requires the binary to immediately end when the
-		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
-		// speeds up voluntary leader transitions as the new leader don't have to wait
-		// LeaseDuration time first.
-		//
-		// In the default scaffold provided, the program ends immediately after
-		// the manager stops, so would be fine to enable this option. However,
-		// if you are doing or is intended to do any operation such as perform cleanups
-		// after the manager stops then its usage might be unsafe.
-		// LeaderElectionReleaseOnCancel: true,
+		// LeaderElectionReleaseOnCancel causes the leader to voluntarily release the lease
+		// when the Manager is stopped, allowing a new leader to acquire it without waiting
+		// for the full LeaseDuration. This is safe because main() exits immediately after
+		// mgr.Start() returns and performs no post-stop cleanup.
+		LeaderElectionReleaseOnCancel: true,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -251,21 +401,45 @@ func main() {
 		setupLog.Error(err, "failed to register field index")
 		os.Exit(1)
 	}
+
+	var (
+		batchSandboxKindName = strings.ToLower(getKindFromType(&sandboxv1alpha1.BatchSandbox{}))
+		poolKindName         = strings.ToLower(getKindFromType(&sandboxv1alpha1.Pool{}))
+	)
+	batchSandboxConcurrency := concurrencyConfig.Get(batchSandboxKindName, defaultBatchSandboxConcurrency)
+	poolConcurrency := concurrencyConfig.Get(poolKindName, defaultPoolConcurrency)
+	setupLog.Info("controller concurrency configured", batchSandboxKindName, batchSandboxConcurrency, poolKindName, poolConcurrency)
+
 	if err := (&controller.BatchSandboxReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("batchsandbox-controller"),
-	}).SetupWithManager(mgr); err != nil {
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Recorder:         mgr.GetEventRecorderFor("batchsandbox-controller"),
+		ResumePullSecret: resumePullSecret,
+	}).SetupWithManager(mgr, batchSandboxConcurrency); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BatchSandbox")
 		os.Exit(1)
 	}
 	if err := (&controller.PoolReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Recorder:  mgr.GetEventRecorderFor("pool-controller"),
-		Allocator: controller.NewDefaultAllocator(mgr.GetClient()),
-	}).SetupWithManager(mgr); err != nil {
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		Recorder:   mgr.GetEventRecorderFor("pool-controller"),
+		Allocator:  controller.NewDefaultAllocator(mgr.GetClient()),
+		RestConfig: mgr.GetConfig(),
+	}).SetupWithManager(mgr, poolConcurrency); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Pool")
+		os.Exit(1)
+	}
+	if err := (&controller.SandboxSnapshotReconciler{
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		Recorder:                 mgr.GetEventRecorderFor("sandboxsnapshot-controller"),
+		ImageCommitterImage:      imageCommitterImage,
+		CommitJobTimeout:         commitJobTimeout,
+		SnapshotRegistry:         snapshotRegistry,
+		SnapshotRegistryInsecure: snapshotRegistryInsecure,
+		SnapshotPushSecret:       snapshotPushSecret,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "SandboxSnapshot")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

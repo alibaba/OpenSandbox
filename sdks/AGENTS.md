@@ -88,6 +88,7 @@ Always:
 - Prefer tests for request mapping, response conversion, error mapping, streaming behavior, and resource cleanup.
 - Keep package-local validation fast before widening to multi-language verification.
 - Match public behavior across languages unless a documented platform constraint prevents it.
+- Keep wire-format units and public SDK units separate. Public SDK interfaces should expose time durations as language-native duration types where available (`timedelta`, `Duration`) or otherwise as explicitly second-based fields such as `timeoutSeconds`.
 
 Ask first:
 

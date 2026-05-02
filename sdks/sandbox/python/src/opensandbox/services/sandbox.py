@@ -23,14 +23,19 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from opensandbox.models.sandboxes import (
+    CreateSnapshotRequest,
     NetworkPolicy,
     PagedSandboxInfos,
+    PagedSnapshotInfos,
+    PlatformSpec,
     SandboxCreateResponse,
     SandboxEndpoint,
     SandboxFilter,
     SandboxImageSpec,
     SandboxInfo,
     SandboxRenewResponse,
+    SnapshotFilter,
+    SnapshotInfo,
     Volume,
 )
 
@@ -45,8 +50,8 @@ class Sandboxes(Protocol):
 
     async def create_sandbox(
         self,
-        spec: SandboxImageSpec,
-        entrypoint: list[str],
+        spec: SandboxImageSpec | None,
+        entrypoint: list[str] | None,
         env: dict[str, str],
         metadata: dict[str, str],
         timeout: timedelta | None,
@@ -54,6 +59,9 @@ class Sandboxes(Protocol):
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str],
         volumes: list[Volume] | None,
+        platform: PlatformSpec | None = None,
+        secure_access: bool = False,
+        snapshot_id: str | None = None,
     ) -> SandboxCreateResponse:
         """
         Create a new sandbox with the specified configuration.
@@ -69,6 +77,7 @@ class Sandboxes(Protocol):
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
             volumes: Optional list of volume mounts for persistent storage.
+            secure_access: Whether to enable secured access for sandbox endpoints.
 
         Returns:
             Sandbox create response
@@ -117,6 +126,27 @@ class Sandboxes(Protocol):
         Args:
             sandbox_id: Sandbox ID
             port: Endpoint port number
+            use_server_proxy: Whether to use server proxy for endpoint
+
+        Returns:
+            Target sandbox endpoint
+
+        Raises:
+            SandboxException: if the operation fails
+        """
+        ...
+
+    async def get_signed_sandbox_endpoint(
+        self, sandbox_id: str, port: int, expires: int,
+        use_server_proxy: bool = False,
+    ) -> SandboxEndpoint:
+        """
+        Get signed sandbox endpoint with an OSEP-0011 route token.
+
+        Args:
+            sandbox_id: Sandbox ID
+            port: Endpoint port number
+            expires: Unix epoch seconds for the signed route token expiry
             use_server_proxy: Whether to use server proxy for endpoint
 
         Returns:
@@ -179,4 +209,22 @@ class Sandboxes(Protocol):
         Raises:
             SandboxException: if the operation fails
         """
+        ...
+
+    async def create_snapshot(
+        self, sandbox_id: str, request: CreateSnapshotRequest | None = None
+    ) -> SnapshotInfo:
+        """Create a persistent snapshot from a sandbox."""
+        ...
+
+    async def get_snapshot(self, snapshot_id: str) -> SnapshotInfo:
+        """Retrieve information about an existing snapshot."""
+        ...
+
+    async def list_snapshots(self, filter: SnapshotFilter) -> PagedSnapshotInfos:
+        """List snapshots with optional filtering."""
+        ...
+
+    async def delete_snapshot(self, snapshot_id: str) -> None:
+        """Delete a snapshot."""
         ...

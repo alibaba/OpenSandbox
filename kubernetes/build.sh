@@ -15,10 +15,23 @@
 
 set -e
 
+build_arg_if_set() {
+    local name="$1"
+    if [[ -n "${!name+x}" ]]; then
+        BUILD_ARGS+=(--build-arg "${name}=${!name}")
+    fi
+}
+
 # Default values
 TAG=${TAG:-latest}
 COMPONENT=${COMPONENT:-controller}
 PUSH=${PUSH:-true}
+BUILD_METADATA_FILE=${BUILD_METADATA_FILE:-build/${COMPONENT}-image-metadata.json}
+BUILD_ARGS=()
+for name in GOFLAGS LDFLAGS CGO_ENABLED CC CXX CFLAGS CXXFLAGS CGO_CFLAGS CGO_CXXFLAGS CGO_LDFLAGS; do
+    build_arg_if_set "${name}"
+done
+mkdir -p "$(dirname "${BUILD_METADATA_FILE}")"
 
 DOCKERHUB_REPO="opensandbox"
 ACR_REPO="sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox"
@@ -26,7 +39,7 @@ ACR_REPO="sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox"
 # Component specific settings
 if [ "$COMPONENT" == "controller" ]; then
     IMAGE_NAME="controller"
-    BUILD_ARG="--build-arg PACKAGE=cmd/controller/main.go"
+    BUILD_ARG="--build-arg PACKAGE=./cmd/controller"
 elif [ "$COMPONENT" == "task-executor" ]; then
     IMAGE_NAME="task-executor"
     BUILD_ARG="--build-arg PACKAGE=cmd/task-executor/main.go --build-arg USERID=0"
@@ -51,8 +64,10 @@ if [ "$PUSH" == "true" ]; then
     docker buildx build \
         --platform $PLATFORMS \
         $BUILD_ARG \
+        "${BUILD_ARGS[@]}" \
         -t "${DOCKERHUB_REPO}/${IMAGE_NAME}:${TAG}" \
         -t "${ACR_REPO}/${IMAGE_NAME}:${TAG}" \
+        --metadata-file "${BUILD_METADATA_FILE}" \
         --push \
         -f Dockerfile \
         .
@@ -67,6 +82,7 @@ else
     docker buildx build \
         --platform linux/amd64 \
         $BUILD_ARG \
+        "${BUILD_ARGS[@]}" \
         -t ${IMAGE_NAME}:${TAG} \
         -f Dockerfile \
         --load \

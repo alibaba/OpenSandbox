@@ -50,13 +50,12 @@ class Volume:
                 Security note: Host paths are restricted by server-side allowlist.
                 Users must specify paths under permitted prefixes.
             pvc (PVC | Unset): Platform-managed named volume backend. A runtime-neutral abstraction
-                for referencing a pre-existing, platform-managed named volume.
+                for referencing a platform-managed named volume. If `createIfNotExists`
+                is true (the default) and the volume does not yet exist, it will be
+                created automatically using the provisioning hints below.
 
                 - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
                 - Docker: maps to a Docker named volume (created via `docker volume create`).
-
-                The volume must already exist on the target platform before sandbox
-                creation.
             ossfs (OSSFS | Unset): Alibaba Cloud OSS mount backend via ossfs.
 
                 The runtime mounts a host-side OSS path under `storage.ossfs_mount_root`

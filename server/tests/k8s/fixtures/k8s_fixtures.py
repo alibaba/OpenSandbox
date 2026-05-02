@@ -211,7 +211,6 @@ def k8s_app_config(k8s_runtime_config):
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -231,7 +230,6 @@ def agent_sandbox_app_config(agent_sandbox_runtime_config):
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -256,7 +254,6 @@ def app_config_no_k8s():
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -276,7 +273,6 @@ def app_config_docker():
         server=ServerConfig(
             host="0.0.0.0",
             port=8080,
-            log_level="DEBUG",
             api_key="test-api-key",
         ),
         runtime=RuntimeConfig(
@@ -294,7 +290,7 @@ def k8s_service(k8s_app_config):
     
     with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client_cls, \
          patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
-        
+
         # Mock K8sClient instance
         mock_k8s_client = MagicMock()
         mock_k8s_client_cls.return_value = mock_k8s_client
@@ -302,14 +298,14 @@ def k8s_service(k8s_app_config):
         # Mock WorkloadProvider instance
         mock_provider = MagicMock()
         mock_create_provider.return_value = mock_provider
-        
+
         from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
         service = KubernetesSandboxService(k8s_app_config)
         
         # Save mock objects for access in tests
         service.k8s_client = mock_k8s_client
         service.workload_provider = mock_provider
-        
+
         yield service
 
 

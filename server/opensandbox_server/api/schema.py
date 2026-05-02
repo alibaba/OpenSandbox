@@ -53,6 +53,21 @@ class ImageSpec(BaseModel):
     )
 
 
+class PlatformSpec(BaseModel):
+    """
+    Runtime platform constraint for scheduling/provisioning.
+    """
+
+    os: str = Field(
+        ...,
+        description="Target operating system (for example 'linux').",
+    )
+    arch: str = Field(
+        ...,
+        description="Target CPU architecture (for example 'amd64' or 'arm64').",
+    )
+
+
 # ============================================================================
 # Resource Limits
 # ============================================================================
@@ -132,10 +147,9 @@ class PVC(BaseModel):
     """
     Platform-managed named volume backend.
 
-    A runtime-neutral abstraction for referencing a pre-existing, platform-managed
-    named volume. The semantics are identical across runtimes: claim an existing
-    volume by name, mount it into the container, and leave volume lifecycle
-    management to the user.
+    A runtime-neutral abstraction for referencing a platform-managed named volume.
+    If ``createIfNotExists`` is true (the default) and the volume does not
+    yet exist, it will be created automatically using the provisioning hints below.
 
     - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
     - Docker: maps to a Docker named volume (created via ``docker volume create``).
@@ -150,6 +164,54 @@ class PVC(BaseModel):
         ),
         pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$",
         max_length=253,
+    )
+
+    create_if_not_exists: bool = Field(
+        True,
+        alias="createIfNotExists",
+        description=(
+            "When true, the volume is automatically created if it does not exist. "
+            "When false, referencing a non-existent volume fails with an error."
+        ),
+    )
+    delete_on_sandbox_termination: bool = Field(
+        False,
+        alias="deleteOnSandboxTermination",
+        description=(
+            "When true, the volume is automatically removed when the sandbox is "
+            "deleted. Only applies to volumes that were auto-created by the server "
+            "(Docker only). Pre-existing volumes are never removed. Has no effect "
+            "on Kubernetes PVCs, whose lifecycle is managed by the StorageClass "
+            "reclaim policy."
+        ),
+    )
+
+    # Provisioning hints — used only when auto-creating a new volume.
+    # Ignored if the volume already exists on the platform.
+    storage_class: Optional[str] = Field(
+        None,
+        alias="storageClass",
+        description=(
+            "Kubernetes StorageClass name for auto-created PVCs. "
+            "None means use the cluster default. Ignored for Docker volumes."
+        ),
+    )
+    storage: Optional[str] = Field(
+        None,
+        description=(
+            "Storage capacity request for auto-created PVCs (e.g. '1Gi', '10Gi'). "
+            "Defaults to server-side configured value when omitted. "
+            "Ignored for Docker volumes."
+        ),
+        pattern=r"^\d+(\.\d+)?(Ki|Mi|Gi|Ti|Pi|Ei)?$",
+    )
+    access_modes: Optional[List[str]] = Field(
+        None,
+        alias="accessModes",
+        description=(
+            "Access modes for auto-created PVCs (e.g. ['ReadWriteOnce']). "
+            "Defaults to ['ReadWriteOnce'] when omitted. Ignored for Docker volumes."
+        ),
     )
 
     class Config:
@@ -284,7 +346,7 @@ class SandboxStatus(BaseModel):
     """
     state: str = Field(
         ...,
-        description="Current lifecycle state (Pending, Running, Pausing, Paused, Stopping, Terminated, Failed)",
+        description="Current lifecycle state (Pending, Running, Pausing, Paused, Resuming, Stopping, Terminated, Failed)",
     )
     reason: Optional[str] = Field(
         None,
@@ -310,9 +372,26 @@ class SandboxStatus(BaseModel):
 
 class CreateSandboxRequest(BaseModel):
     """
-    Request to create a new sandbox from a container image.
+    Request to create a new sandbox from either a container image or a snapshot.
     """
-    image: ImageSpec = Field(..., description="Container image specification for the sandbox")
+    image: Optional[ImageSpec] = Field(
+        None,
+        description="Container image specification for the sandbox",
+    )
+    snapshot_id: Optional[str] = Field(
+        None,
+        alias="snapshotId",
+        description="Snapshot identifier to restore from",
+    )
+    platform: Optional[PlatformSpec] = Field(
+        None,
+        description=(
+            "Optional platform constraint for sandbox scheduling/runtime selection. "
+            "If omitted, runtime default behavior applies (runtime-specific and not a fixed "
+            "architecture guarantee). If specified, runtime must satisfy this platform or fail "
+            "explicitly."
+        ),
+    )
     timeout: Optional[int] = Field(
         None,
         ge=60,
@@ -337,10 +416,14 @@ class CreateSandboxRequest(BaseModel):
         None,
         description="Custom key-value metadata for management, filtering, and tagging",
     )
-    entrypoint: List[str] = Field(
-        ...,
+    entrypoint: Optional[List[str]] = Field(
+        None,
         min_length=1,
-        description="The command to execute as the sandbox's entry process",
+        description=(
+            "The command to execute as the sandbox's entry process. "
+            "Required when image is provided. Optional when snapshotId is provided; "
+            'the server defaults to ["tail", "-f", "/dev/null"] when omitted.'
+        ),
         example=["python", "/app/main.py"],
     )
     network_policy: Optional[NetworkPolicy] = Field(
@@ -349,6 +432,15 @@ class CreateSandboxRequest(BaseModel):
         description=(
             "Optional outbound network policy. Shape matches the egress sidecar /policy endpoint. "
             "Empty/omitted means allow-all until updated."
+        ),
+    )
+    secure_access: bool = Field(
+        False,
+        alias="secureAccess",
+        description=(
+            "Opts the sandbox into secured access for endpoint access. "
+            "Currently supported only for Kubernetes sandboxes exposed through ingress gateway mode. "
+            "When enabled, the server provisions access credentials and returns required endpoint headers."
         ),
     )
     volumes: Optional[List[Volume]] = Field(
@@ -363,6 +455,25 @@ class CreateSandboxRequest(BaseModel):
         description="Opaque container for provider-specific or transient parameters not covered by the core API",
     )
 
+    @model_validator(mode="after")
+    def validate_source_and_entrypoint(self) -> "CreateSandboxRequest":
+        has_image = self.image is not None and bool(self.image.uri.strip())
+        has_snapshot = bool((self.snapshot_id or "").strip())
+
+        if has_image == has_snapshot:
+            raise ValueError("Exactly one of image or snapshotId must be provided.")
+
+        if has_image and not self.entrypoint:
+            raise ValueError("Entrypoint is required when image is provided.")
+
+        if self.image is not None and not has_image:
+            self.image = None
+
+        if self.snapshot_id is not None and not has_snapshot:
+            self.snapshot_id = None
+
+        return self
+
     class Config:
         populate_by_name = True
 
@@ -376,13 +487,20 @@ class CreateSandboxResponse(BaseModel):
     id: str = Field(..., description="Unique sandbox identifier")
     status: SandboxStatus = Field(..., description="Current lifecycle status and detailed state information")
     metadata: Optional[Dict[str, str]] = Field(None, description="Custom metadata from creation request")
+    platform: Optional[PlatformSpec] = Field(
+        None,
+        description=(
+            "Platform constraint echoed from request or workload template. "
+            "Null when no scheduling constraint is provided."
+        ),
+    )
     expires_at: Optional[datetime] = Field(
         None,
         alias="expiresAt",
         description="Timestamp when sandbox will auto-terminate. Null when manual cleanup is enabled.",
     )
     created_at: datetime = Field(..., alias="createdAt", description="Sandbox creation timestamp")
-    entrypoint: List[str] = Field(..., description="Entry process specification from creation request")
+    entrypoint: Optional[List[str]] = Field(None, description="Entry process specification from creation request")
 
     class Config:
         populate_by_name = True
@@ -395,10 +513,22 @@ class Sandbox(BaseModel):
     This is the complete representation of the sandbox resource.
     """
     id: str = Field(..., description="Unique sandbox identifier")
-    image: ImageSpec = Field(..., description="Container image specification used to provision this sandbox")
+    image: Optional[ImageSpec] = Field(None, description="Container image specification used to provision this sandbox")
+    snapshot_id: Optional[str] = Field(
+        None,
+        alias="snapshotId",
+        description="Snapshot identifier used to restore this sandbox",
+    )
+    platform: Optional[PlatformSpec] = Field(
+        None,
+        description=(
+            "Platform constraint echoed from request or workload template. "
+            "Null when no scheduling constraint is provided."
+        ),
+    )
     status: SandboxStatus = Field(..., description="Current lifecycle status and detailed state information")
     metadata: Optional[Dict[str, str]] = Field(None, description="Custom metadata from creation request")
-    entrypoint: List[str] = Field(..., description="The command to execute as the sandbox's entry process")
+    entrypoint: Optional[List[str]] = Field(None, description="The command to execute as the sandbox's entry process")
     expires_at: Optional[datetime] = Field(
         None,
         alias="expiresAt",
@@ -408,6 +538,113 @@ class Sandbox(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+# ============================================================================
+# Snapshot Models
+# ============================================================================
+
+class SnapshotStatus(BaseModel):
+    """
+    Detailed snapshot status information with lifecycle state and transition details.
+    """
+    state: str = Field(
+        ...,
+        description="Current snapshot lifecycle state (Creating, Deleting, Ready, Failed)",
+    )
+    reason: Optional[str] = Field(
+        None,
+        description="Short machine-readable reason code for the current state",
+    )
+    message: Optional[str] = Field(
+        None,
+        description="Human-readable message describing the current state or failure reason",
+    )
+    last_transition_at: Optional[datetime] = Field(
+        None,
+        alias="lastTransitionAt",
+        description="Timestamp of the last state transition",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class CreateSnapshotRequest(BaseModel):
+    """
+    Request to create a snapshot from a sandbox.
+    """
+    name: Optional[str] = Field(
+        None,
+        min_length=1,
+        description="Optional human-readable snapshot name",
+    )
+
+
+class Snapshot(BaseModel):
+    """
+    Persistent point-in-time capture of a sandbox.
+    """
+    id: str = Field(..., description="Unique snapshot identifier")
+    sandbox_id: str = Field(
+        ...,
+        alias="sandboxId",
+        description="Source sandbox identifier used to create this snapshot",
+    )
+    name: Optional[str] = Field(
+        None,
+        description="Optional human-readable snapshot name",
+    )
+    status: SnapshotStatus = Field(
+        ...,
+        description="Current snapshot lifecycle status and detailed state information",
+    )
+    created_at: datetime = Field(
+        ...,
+        alias="createdAt",
+        description="Snapshot creation timestamp",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class SnapshotFilter(BaseModel):
+    """
+    Filtering criteria for listing snapshots.
+    """
+    sandbox_id: Optional[str] = Field(
+        None,
+        alias="sandboxId",
+        description="Filter snapshots by source sandbox identifier",
+    )
+    state: Optional[List[str]] = Field(
+        None,
+        min_length=1,
+        description="Filter by snapshot lifecycle state (status.state) - supports OR logic",
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class ListSnapshotsRequest(BaseModel):
+    """
+    Request body for snapshot listing queries.
+    """
+    filter: SnapshotFilter = Field(
+        default_factory=SnapshotFilter,
+        description="Filtering criteria (all conditions combined with AND logic)",
+    )
+    pagination: Optional["PaginationRequest"] = Field(None, description="Pagination parameters")
+
+
+class ListSnapshotsResponse(BaseModel):
+    """
+    Paginated collection of snapshots.
+    """
+    items: List[Snapshot] = Field(..., description="List of snapshots")
+    pagination: "PaginationInfo" = Field(..., description="Pagination metadata")
 
 
 # ============================================================================
@@ -527,6 +764,8 @@ class Endpoint(BaseModel):
         default=None,
         description="Optional headers required when accessing the endpoint (e.g., for header-based routing).",
     )
+    class Config:
+        populate_by_name = True
 
 
 # ============================================================================

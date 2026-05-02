@@ -34,6 +34,7 @@ import (
 
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 )
 
 const (
@@ -44,7 +45,18 @@ const (
 )
 
 func (c *Controller) createBashSession(req *CreateContextRequest) (string, error) {
-	session := newBashSession(req.Cwd)
+	resolvedCwd, err := pathutil.ExpandPath(req.Cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve request cwd %s: %w", req.Cwd, err)
+	}
+	if resolvedCwd != "" {
+		err := os.MkdirAll(resolvedCwd, os.ModePerm)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	session := newBashSession(resolvedCwd)
 	if err := session.start(); err != nil {
 		return "", fmt.Errorf("failed to start bash session: %w", err)
 	}
@@ -99,7 +111,6 @@ func (c *Controller) DeleteBashSession(sessionID string) error {
 	return c.closeBashSession(sessionID)
 }
 
-// Session implementation (pipe-based, no PTY)
 func newBashSession(cwd string) *bashSession {
 	config := &bashSessionConfig{
 		Session:        uuidString(),
@@ -157,7 +168,12 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	cwd := s.cwd
 	// override original cwd if specified
 	if request.Cwd != "" {
-		cwd = request.Cwd
+		expandedCwd, err := pathutil.ExpandPath(request.Cwd)
+		if err != nil {
+			s.mu.Unlock()
+			return fmt.Errorf("resolve cwd: %w", err)
+		}
+		cwd = expandedCwd
 	}
 	sessionID := s.config.Session
 	s.mu.Unlock()
@@ -201,7 +217,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	cmd.Stderr = cmd.Stdout
 
 	if err := cmd.Start(); err != nil {
-		log.Error("start bash session failed: %v (command: %q)", err, request.Code)
+		log.Error("start bash session failed: %v (command: %q)", err, log.SanitizeCommand(request.Code))
 		return fmt.Errorf("start bash: %w", err)
 	}
 	defer s.untrackCurrentProcess()
@@ -245,13 +261,13 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	waitErr := cmd.Wait()
 
 	if scanErr != nil {
-		log.Error("read stdout failed: %v (command: %q)", scanErr, request.Code)
+		log.Error("read stdout failed: %v (command: %q)", scanErr, log.SanitizeCommand(request.Code))
 		return fmt.Errorf("read stdout: %w", scanErr)
 	}
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		log.Error("timeout after %s while running command: %q", wait, request.Code)
-		return fmt.Errorf("timeout after %s while running command %q", wait, request.Code)
+		log.Error("timeout after %s while running command: %q", wait, log.SanitizeCommand(request.Code))
+		return fmt.Errorf("timeout after %s", wait)
 	}
 
 	if exitCode == nil && cmd.ProcessState != nil {
@@ -271,7 +287,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 
 	var exitErr *exec.ExitError
 	if waitErr != nil && !errors.As(waitErr, &exitErr) {
-		log.Error("command wait failed: %v (command: %q)", waitErr, request.Code)
+		log.Error("command wait failed: %v (command: %q)", waitErr, log.SanitizeCommand(request.Code))
 		return waitErr
 	}
 
@@ -292,7 +308,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 				Traceback: []string{errMsg},
 			})
 		}
-		log.Error("CommandExecError: %s (command: %q)", errMsg, request.Code)
+		log.Error("CommandExecError: %s (command: %q)", errMsg, log.SanitizeCommand(request.Code))
 		return nil
 	}
 

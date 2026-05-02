@@ -31,7 +31,6 @@ from opensandbox_server.services.k8s.rate_limiter import TokenBucketRateLimiter
 
 logger = logging.getLogger(__name__)
 
-# Type alias for informer cache key
 _InformerKey = Tuple[str, str, str, str]  # (group, version, plural, namespace)
 
 
@@ -49,10 +48,8 @@ class K8sClient:
         self._core_v1_api: Optional[CoreV1Api] = None
         self._custom_objects_api: Optional[CustomObjectsApi] = None
         self._node_v1_api: Optional[NodeV1Api] = None
-        # Informer pool: key -> WorkloadInformer
         self._informers: Dict[_InformerKey, WorkloadInformer] = {}
         self._informers_lock = threading.Lock()
-        # Rate limiters (None = unlimited)
         self._read_limiter: Optional[TokenBucketRateLimiter] = (
             TokenBucketRateLimiter(qps=k8s_config.read_qps, burst=k8s_config.read_burst)
             if k8s_config.read_qps > 0
@@ -63,10 +60,6 @@ class K8sClient:
             if k8s_config.write_qps > 0
             else None
         )
-
-    # ------------------------------------------------------------------
-    # Internal API handle accessors (lazy singletons)
-    # ------------------------------------------------------------------
 
     def _load_config(self) -> None:
         """Load kubeconfig from file path or in-cluster service account."""
@@ -93,9 +86,6 @@ class K8sClient:
             self._node_v1_api = client.NodeV1Api()
         return self._node_v1_api
 
-    # ------------------------------------------------------------------
-    # Internal informer pool management
-    # ------------------------------------------------------------------
 
     def _get_informer(self, group: str, version: str, plural: str, namespace: str) -> Optional[WorkloadInformer]:
         """Return the informer for this resource+namespace, starting it lazily."""
@@ -123,14 +113,11 @@ class K8sClient:
                 try:
                     informer.start()
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.warning("Failed to start informer for %s/%s: %s", plural, namespace, exc)
+                    logger.warning(f"Failed to start informer for {plural}/{namespace}: {exc}")
                     self._informers.pop(key, None)
                     return None
         return informer
 
-    # ------------------------------------------------------------------
-    # CustomObject operations
-    # ------------------------------------------------------------------
 
     def create_custom_object(
         self,
@@ -256,6 +243,41 @@ class K8sClient:
         )
 
     # ------------------------------------------------------------------
+    # PersistentVolumeClaim operations
+    # ------------------------------------------------------------------
+
+    def get_pvc(
+        self,
+        namespace: str,
+        name: str,
+    ) -> Optional[Any]:
+        """Read a PersistentVolumeClaim by name. Returns None on 404."""
+        if self._read_limiter:
+            self._read_limiter.acquire()
+        try:
+            return self.get_core_v1_api().read_namespaced_persistent_volume_claim(
+                name=name,
+                namespace=namespace,
+            )
+        except ApiException as e:
+            if e.status == 404:
+                return None
+            raise
+
+    def create_pvc(
+        self,
+        namespace: str,
+        body: Any,
+    ) -> Any:
+        """Create a PersistentVolumeClaim."""
+        if self._write_limiter:
+            self._write_limiter.acquire()
+        return self.get_core_v1_api().create_namespaced_persistent_volume_claim(
+            namespace=namespace,
+            body=body,
+        )
+
+    # ------------------------------------------------------------------
     # Secret operations
     # ------------------------------------------------------------------
 
@@ -268,9 +290,6 @@ class K8sClient:
             body=body,
         )
 
-    # ------------------------------------------------------------------
-    # Pod operations
-    # ------------------------------------------------------------------
 
     def list_pods(
         self,
@@ -285,10 +304,6 @@ class K8sClient:
             label_selector=label_selector,
         )
         return resp.items
-
-    # ------------------------------------------------------------------
-    # RuntimeClass operations
-    # ------------------------------------------------------------------
 
     def read_runtime_class(self, name: str) -> Any:
         """Read a RuntimeClass from the cluster."""

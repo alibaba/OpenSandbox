@@ -32,13 +32,16 @@ from opensandbox.exceptions import (
     SandboxReadyTimeoutException,
 )
 from opensandbox.models.sandboxes import (
+    CreateSnapshotRequest,
     NetworkPolicy,
     NetworkRule,
+    PlatformSpec,
     SandboxEndpoint,
     SandboxImageSpec,
     SandboxInfo,
     SandboxMetrics,
     SandboxRenewResponse,
+    SnapshotInfo,
     Volume,
 )
 from opensandbox.sync.adapters.factory import AdapterFactorySync
@@ -197,6 +200,24 @@ class SandboxSync:
             self.id, port, self.connection_config.use_server_proxy
         )
 
+    def get_signed_endpoint(self, port: int, expires: int) -> SandboxEndpoint:
+        """
+        Get a signed endpoint URL with an OSEP-0011 route token.
+
+        Args:
+            port: The port number to get the endpoint for
+            expires: Unix epoch seconds for the signed route token expiry
+
+        Returns:
+            Endpoint information with a signed URL
+
+        Raises:
+            SandboxException: if endpoint cannot be retrieved
+        """
+        return self._sandbox_service.get_signed_sandbox_endpoint(
+            self.id, port, expires, self.connection_config.use_server_proxy
+        )
+
     def get_metrics(self) -> SandboxMetrics:
         """
         Get the current resource usage metrics for this sandbox.
@@ -232,6 +253,12 @@ class SandboxSync:
             new_expiration,
         )
         return self._sandbox_service.renew_sandbox_expiration(self.id, new_expiration)
+
+    def create_snapshot(self, name: str | None = None) -> SnapshotInfo:
+        """Create a persistent snapshot from this sandbox (blocking)."""
+        return self._sandbox_service.create_snapshot(
+            self.id, CreateSnapshotRequest(name=name)
+        )
 
     def get_egress_policy(self) -> NetworkPolicy:
         """
@@ -382,15 +409,18 @@ class SandboxSync:
     @classmethod
     def create(
         cls,
-        image: SandboxImageSpec | str,
+        image: SandboxImageSpec | str | None = None,
         *,
+        snapshot_id: str | None = None,
         timeout: timedelta | None = timedelta(minutes=10),
         ready_timeout: timedelta = timedelta(seconds=30),
         env: dict[str, str] | None = None,
         metadata: dict[str, str] | None = None,
         resource: dict[str, str] | None = None,
+        platform: PlatformSpec | None = None,
         network_policy: NetworkPolicy | None = None,
         extensions: dict[str, str] | None = None,
+        secure_access: bool = False,
         entrypoint: list[str] | None = None,
         volumes: list[Volume] | None = None,
         connection_config: ConnectionConfigSync | None = None,
@@ -411,6 +441,7 @@ class SandboxSync:
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
+            secure_access: Whether to enable secured access for sandbox endpoints.
             entrypoint: Command to run as entrypoint
             volumes: Optional list of volumes to mount in the sandbox.
             connection_config: Connection configuration
@@ -424,6 +455,11 @@ class SandboxSync:
         Raises:
             SandboxException: if sandbox creation or initialization fails
         """
+        if (image is None) == (snapshot_id is None):
+            raise InvalidArgumentException(
+                "Exactly one of image or snapshot_id must be specified"
+            )
+
         config = (connection_config or ConnectionConfigSync()).with_transport_if_missing()
         entrypoint = entrypoint or ["tail", "-f", "/dev/null"]
         env = env or {}
@@ -434,10 +470,11 @@ class SandboxSync:
         if isinstance(image, str):
             image = SandboxImageSpec(image=image)
 
+        startup_source = image.image if image is not None else snapshot_id
         timeout_log = "manual-cleanup" if timeout is None else f"{timeout.total_seconds()}s"
         logger.info(
-            "Creating sandbox with image: %s (timeout: %s)",
-            image.image,
+            "Creating sandbox with startup source: %s (timeout: %s)",
+            startup_source,
             timeout_log,
         )
         factory = AdapterFactorySync(config)
@@ -447,15 +484,18 @@ class SandboxSync:
         try:
             sandbox_service = factory.create_sandbox_service()
             response = sandbox_service.create_sandbox(
-                image,
-                entrypoint,
-                env,
-                metadata,
-                timeout,
-                resource,
-                network_policy,
-                extensions,
-                volumes,
+                spec=image,
+                entrypoint=entrypoint,
+                env=env,
+                metadata=metadata,
+                timeout=timeout,
+                resource=resource,
+                network_policy=network_policy,
+                extensions=extensions,
+                volumes=volumes,
+                platform=platform,
+                secure_access=secure_access,
+                snapshot_id=snapshot_id,
             )
             sandbox_id = response.id
             execd_endpoint = sandbox_service.get_sandbox_endpoint(

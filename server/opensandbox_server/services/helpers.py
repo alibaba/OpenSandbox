@@ -93,6 +93,31 @@ def parse_nano_cpus(value: Optional[str]) -> Optional[int]:
     return int(cpus * 1_000_000_000)
 
 
+def parse_gpu_request(value: Optional[str]) -> Optional[int]:
+    """Convert GPU limit string to a device count.
+
+    Accepts a positive integer string (e.g. ``"1"``, ``"2"``) or the literal
+    ``"all"`` to request every available GPU. Returns ``-1`` for ``"all"``
+    (the sentinel the Docker Engine uses for unbounded device requests),
+    a positive int for a numeric count, and ``None`` when unset or the
+    value cannot be parsed.
+    """
+    if not value:
+        return None
+    gpu_str = value.strip().lower()
+    if gpu_str == "all":
+        return -1
+    try:
+        count = int(gpu_str)
+    except ValueError:
+        logger.warning("Invalid GPU limit format '%s'; ignoring.", value)
+        return None
+    if count <= 0:
+        logger.warning("GPU limit must be positive. Got '%s'. Ignoring.", value)
+        return None
+    return count
+
+
 def parse_timestamp(timestamp: Optional[str]) -> datetime:
     """
     Parse RFC3339 timestamp into timezone-aware datetime. Fallback to now.
@@ -164,9 +189,14 @@ def format_ingress_endpoint(
     ingress_config: Optional[IngressConfig],
     sandbox_id: str,
     port: int,
+    expires_b36: Optional[str] = None,
+    signature: Optional[str] = None,
 ) -> Optional[Endpoint]:
     """
     Build an ingress-based endpoint string for a sandbox.
+
+    When *expires_b36* and *signature* are provided, the endpoint embeds a
+    signed route token (OSEP-0011). Otherwise a plain ingress endpoint is returned.
 
     Returns None when ingress is not in gateway mode.
     """
@@ -178,16 +208,24 @@ def format_ingress_endpoint(
 
     address = gateway_cfg.address
     route_mode = gateway_cfg.route.mode
+    is_signed = expires_b36 is not None and signature is not None
 
     if route_mode == GATEWAY_ROUTE_MODE_WILDCARD:
         base = address[2:] if address.startswith("*.") else address
+        if is_signed:
+            return Endpoint(endpoint=f"{sandbox_id}-{port}-{expires_b36}-{signature}.{base}")
         return Endpoint(endpoint=f"{sandbox_id}-{port}.{base}")
 
     if route_mode == GATEWAY_ROUTE_MODE_URI:
+        if is_signed:
+            return Endpoint(endpoint=f"{address}/{sandbox_id}/{port}/{expires_b36}/{signature}")
         return Endpoint(endpoint=f"{address}/{sandbox_id}/{port}")
 
     if route_mode == GATEWAY_ROUTE_MODE_HEADER:
-        header_value = f"{sandbox_id}-{port}"
+        if is_signed:
+            header_value = f"{sandbox_id}-{port}-{expires_b36}-{signature}"
+        else:
+            header_value = f"{sandbox_id}-{port}"
         return Endpoint(
             endpoint=address,
             headers={OPEN_SANDBOX_INGRESS_HEADER: header_value},
@@ -199,6 +237,7 @@ def format_ingress_endpoint(
 __all__ = [
     "parse_memory_limit",
     "parse_nano_cpus",
+    "parse_gpu_request",
     "parse_timestamp",
     "normalize_external_endpoint_url",
     "format_ingress_endpoint",

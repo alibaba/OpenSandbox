@@ -50,6 +50,7 @@ function sandboxCreateOptions() {
       NODE_VERSION: "22",
       PYTHON_VERSION: "3.12",
       EXECD_LOG_FILE: "/tmp/opensandbox-e2e/logs/execd.log",
+      EXECD_API_GRACE_SHUTDOWN: "3s", EXECD_JUPYTER_IDLE_POLL_INTERVAL: "200ms",
     },
     healthCheckPollingInterval: 200,
     volumes: [
@@ -103,6 +104,11 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function shouldIsolateSandboxPerTest(testName: string): boolean {
+  // Isolate high-flakiness categories only: run + concurrent + interrupt.
+  return /^0[2-7]\s/.test(testName);
+}
+
 /**
  * Retry an async operation up to ``maxRetries`` times.  On retryable socket /
  * session errors the sandbox is health-checked (and recreated if dead) before
@@ -137,7 +143,11 @@ beforeAll(async () => {
   await recreateSandbox();
 }, 10 * 60_000);
 
-beforeEach(async () => {
+beforeEach(async (ctx) => {
+  if (shouldIsolateSandboxPerTest(ctx.task.name)) {
+    await recreateSandbox();
+    return;
+  }
   await ensureSandboxAlive();
 }, 5 * 60_000);
 

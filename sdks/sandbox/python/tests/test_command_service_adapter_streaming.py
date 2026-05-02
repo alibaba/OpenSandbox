@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -77,6 +78,18 @@ class _SseTransport(httpx.AsyncBaseTransport):
                 request=request,
             )
 
+        if request.url.path == "/command" and payload.get("command") == "exit null":
+            sse = (
+                b'data: {"type":"init","text":"exec-null","timestamp":1}\n\n'
+                b'data: {"type":"error","error":{"ename":"CommandExecError","evalue":"fork/exec /usr/bin/bash: resource temporarily unavailable","traceback":null},"timestamp":2}\n\n'
+            )
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "text/event-stream"},
+                content=sse,
+                request=request,
+            )
+
         return httpx.Response(500, content=b"boom", request=request)
 
 
@@ -127,6 +140,21 @@ async def test_run_command_streaming_non_zero_exit_updates_exit_code() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_command_streaming_tolerates_null_traceback() -> None:
+    cfg = ConnectionConfig(protocol="http", transport=_SseTransport())
+    endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
+    adapter = CommandsAdapter(cfg, endpoint)
+
+    execution = await adapter.run("exit null")
+
+    assert execution.id == "exec-null"
+    assert execution.error is not None
+    assert execution.error.value == "fork/exec /usr/bin/bash: resource temporarily unavailable"
+    assert execution.error.traceback == []
+    assert execution.complete is None
+
+
+@pytest.mark.asyncio
 async def test_run_command_rejects_blank_command() -> None:
     cfg = ConnectionConfig(protocol="http")
     endpoint = SandboxEndpoint(endpoint="localhost:44772", port=44772)
@@ -158,7 +186,7 @@ async def test_run_in_session_streaming_uses_generated_fields_and_exit_code() ->
         "sess-1",
         "pwd",
         working_directory="/var",
-        timeout=5000,
+        timeout=timedelta(seconds=5),
     )
 
     assert execution.logs.stdout[0].text == "/var"

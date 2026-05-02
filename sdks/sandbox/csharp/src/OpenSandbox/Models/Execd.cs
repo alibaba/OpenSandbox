@@ -403,9 +403,10 @@ public class RunInSessionOptions
     public string? WorkingDirectory { get; set; }
 
     /// <summary>
-    /// Gets or sets the maximum execution time in milliseconds.
+    /// Gets or sets the maximum execution time in seconds.
     /// </summary>
-    public long? Timeout { get; set; }
+    public int? TimeoutSeconds { get; set; }
+
 }
 
 /// <summary>

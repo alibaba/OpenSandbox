@@ -59,7 +59,7 @@ class BaseSandboxTemplateManager:
                     f"got {type(self._template).__name__}"
                 )
 
-            logger.info("Loaded %s template from %s", self._template_kind, template_path)
+            logger.info(f"Loaded {self._template_kind} template from {template_path}")
         except (FileNotFoundError, ValueError):
             raise
         except Exception as e:

@@ -28,7 +28,9 @@ import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommand
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos;
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxFilter;
 import com.alibaba.opensandbox.sandbox.domain.pool.AcquirePolicy;
+import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry;
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolCreationSpec;
+import com.alibaba.opensandbox.sandbox.domain.pool.PoolLifecycleState;
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolState;
 import com.alibaba.opensandbox.sandbox.infrastructure.pool.InMemoryPoolStateStore;
 import com.alibaba.opensandbox.sandbox.pool.SandboxPool;
@@ -36,6 +38,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -45,6 +48,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,7 +86,7 @@ public class SandboxPoolSingleNodeE2ETest extends BaseE2ETest {
                         .image(getSandboxImage())
                         .entrypoint(List.of("tail -f /dev/null"))
                         .metadata(Map.of("tag", tag, "suite", "sandbox-pool-e2e"))
-                        .env(Map.of("E2E_TEST", "true"))
+                        .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
                         .build();
         pool =
                 SandboxPool.builder()
@@ -537,7 +541,7 @@ public class SandboxPoolSingleNodeE2ETest extends BaseE2ETest {
                                                             tagA,
                                                             "suite",
                                                             "sandbox-pool-e2e"))
-                                            .env(Map.of("E2E_TEST", "true"))
+                                            .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
                                             .build())
                             .reconcileInterval(Duration.ofSeconds(2))
                             .drainTimeout(Duration.ofMillis(200))
@@ -576,7 +580,7 @@ public class SandboxPoolSingleNodeE2ETest extends BaseE2ETest {
                                                             tagB,
                                                             "suite",
                                                             "sandbox-pool-e2e"))
-                                            .env(Map.of("E2E_TEST", "true"))
+                                            .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
                                             .build())
                             .reconcileInterval(Duration.ofSeconds(2))
                             .drainTimeout(Duration.ofMillis(200))
@@ -696,7 +700,7 @@ public class SandboxPoolSingleNodeE2ETest extends BaseE2ETest {
                                                             badTag,
                                                             "suite",
                                                             "sandbox-pool-e2e"))
-                                            .env(Map.of("E2E_TEST", "true"))
+                                            .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
                                             .build())
                             .degradedThreshold(1)
                             .reconcileInterval(Duration.ofSeconds(1))
@@ -760,7 +764,7 @@ public class SandboxPoolSingleNodeE2ETest extends BaseE2ETest {
                                                             badTag,
                                                             "suite",
                                                             "sandbox-pool-e2e"))
-                                            .env(Map.of("E2E_TEST", "true"))
+                                            .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
                                             .build())
                             .degradedThreshold(1)
                             .reconcileInterval(Duration.ofSeconds(1))
@@ -822,7 +826,7 @@ public class SandboxPoolSingleNodeE2ETest extends BaseE2ETest {
                                                             goodTag,
                                                             "suite",
                                                             "sandbox-pool-e2e"))
-                                            .env(Map.of("E2E_TEST", "true"))
+                                            .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
                                             .build())
                             .reconcileInterval(Duration.ofSeconds(2))
                             .drainTimeout(Duration.ofMillis(100))
@@ -860,6 +864,129 @@ public class SandboxPoolSingleNodeE2ETest extends BaseE2ETest {
             }
             cleanupTaggedSandboxes(goodTag);
         }
+    }
+
+    @Test
+    @Order(16)
+    @DisplayName("warmupSandboxPreparer prepares idle sandboxes before acquire")
+    @Timeout(value = 4, unit = TimeUnit.MINUTES)
+    void testWarmupSandboxPreparerAppliesBeforeAcquire() throws InterruptedException {
+        pool.resize(0);
+        pool.releaseAllIdle();
+        pool.shutdown(false);
+
+        String preparedTag = "e2e-pool-prepared-" + UUID.randomUUID().toString().substring(0, 8);
+        String preparedPoolName = "pool-prepared-" + preparedTag;
+        String markerPath = "/tmp/pool-prepared-marker.txt";
+        SandboxPool preparedPool = null;
+        try {
+            preparedPool =
+                    SandboxPool.builder()
+                            .poolName(preparedPoolName)
+                            .ownerId("owner-prepared-" + preparedTag)
+                            .maxIdle(1)
+                            .warmupConcurrency(1)
+                            .stateStore(new InMemoryPoolStateStore())
+                            .connectionConfig(sharedConnectionConfig)
+                            .creationSpec(
+                                    PoolCreationSpec.builder()
+                                            .image(getSandboxImage())
+                                            .entrypoint(List.of("tail -f /dev/null"))
+                                            .metadata(
+                                                    Map.of(
+                                                            "tag",
+                                                            preparedTag,
+                                                            "suite",
+                                                            "sandbox-pool-e2e"))
+                                            .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
+                                            .build())
+                            .warmupSandboxPreparer(
+                                    sandbox ->
+                                            sandbox.files()
+                                                    .writeFile(
+                                                            markerPath,
+                                                            "prepared-by-warmup-" + preparedTag))
+                            .reconcileInterval(Duration.ofSeconds(2))
+                            .drainTimeout(Duration.ofMillis(200))
+                            .build();
+            preparedPool.start();
+
+            SandboxPool finalPreparedPool = preparedPool;
+            eventually(
+                    "prepared pool reaches healthy idle state",
+                    Duration.ofMinutes(2),
+                    Duration.ofSeconds(2),
+                    () ->
+                            finalPreparedPool.snapshot().getState() == PoolState.HEALTHY
+                                    && finalPreparedPool.snapshot().getIdleCount() >= 1);
+
+            Sandbox sandbox = preparedPool.acquire(Duration.ofMinutes(5), AcquirePolicy.FAIL_FAST);
+            borrowed.add(sandbox);
+            assertTrue(sandbox.isHealthy(), "prepared idle sandbox should be healthy");
+            assertEquals(
+                    "prepared-by-warmup-" + preparedTag,
+                    sandbox.files().readFile(markerPath).trim(),
+                    "warmup preparer should materialize marker before acquire");
+        } finally {
+            if (preparedPool != null) {
+                try {
+                    preparedPool.resize(0);
+                    preparedPool.releaseAllIdle();
+                } catch (Exception ignored) {
+                }
+                try {
+                    preparedPool.shutdown(false);
+                } catch (Exception ignored) {
+                }
+            }
+            cleanupTaggedSandboxes(preparedTag);
+        }
+    }
+
+    @Test
+    @Order(17)
+    @DisplayName("snapshot exposes lifecycle maxIdle and idle entry details")
+    @Timeout(value = 4, unit = TimeUnit.MINUTES)
+    void testSnapshotExposesLifecycleAndIdleEntries() throws InterruptedException {
+        eventually(
+                "pool reaches healthy state for snapshot validation",
+                Duration.ofMinutes(2),
+                Duration.ofSeconds(2),
+                () ->
+                        pool.snapshot().getState() == PoolState.HEALTHY
+                                && pool.snapshot().getIdleCount() >= 1);
+
+        assertEquals(PoolLifecycleState.RUNNING, pool.snapshot().getLifecycleState());
+        assertEquals(MAX_IDLE, pool.snapshot().getMaxIdle());
+        assertTrue(pool.snapshot().getInFlightOperations() >= 0);
+        assertTrue(pool.snapshot().getFailureCount() >= 0);
+
+        List<IdleEntry> idleEntries = pool.snapshotIdleEntries();
+        assertFalse(
+                idleEntries.isEmpty(), "snapshotIdleEntries should expose warmed idle sandboxes");
+        assertTrue(
+                idleEntries.stream().allMatch(entry -> entry.getExpiresAt() != null),
+                "idle entry expiration should be populated");
+
+        Set<String> idleIds =
+                idleEntries.stream().map(IdleEntry::getSandboxId).collect(Collectors.toSet());
+
+        Sandbox sandbox = pool.acquire(Duration.ofMinutes(5), AcquirePolicy.FAIL_FAST);
+        borrowed.add(sandbox);
+        assertTrue(
+                idleIds.contains(sandbox.getId()),
+                "acquired sandbox should come from idle snapshot");
+
+        pool.resize(1);
+        eventually(
+                "snapshot maxIdle reflects resize",
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(1),
+                () -> pool.snapshot().getMaxIdle() == 1);
+
+        pool.shutdown(false);
+        assertEquals(PoolLifecycleState.STOPPED, pool.snapshot().getLifecycleState());
+        assertEquals(PoolState.STOPPED, pool.snapshot().getState());
     }
 
     private void cleanupTaggedSandboxes() {

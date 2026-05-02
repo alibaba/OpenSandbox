@@ -23,11 +23,14 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolAcquireFailedExcept
 import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolEmptyException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolNotRunningException
 import com.alibaba.opensandbox.sandbox.domain.pool.AcquirePolicy
+import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolConfig
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolCreationSpec
+import com.alibaba.opensandbox.sandbox.domain.pool.PoolLifecycleState
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolSnapshot
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolState
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolStateStore
+import com.alibaba.opensandbox.sandbox.domain.pool.SandboxPreparer
 import com.alibaba.opensandbox.sandbox.infrastructure.pool.PoolReconciler
 import com.alibaba.opensandbox.sandbox.infrastructure.pool.ReconcileState
 import org.slf4j.LoggerFactory
@@ -79,10 +82,11 @@ import java.util.concurrent.locks.ReentrantLock
  */
 class SandboxPool internal constructor(
     config: PoolConfig,
+    private val sandboxManagerFactory: (ConnectionConfig) -> SandboxManager = { cfg ->
+        SandboxManager.builder().connectionConfig(cfg).build()
+    },
 ) {
     private val logger = LoggerFactory.getLogger(SandboxPool::class.java)
-
-    private val idleTtl = Duration.ofHours(24)
 
     private val config: PoolConfig = config
     private val stateStore: PoolStateStore = config.stateStore
@@ -113,7 +117,8 @@ class SandboxPool internal constructor(
         }
         lifecycleState.set(LifecycleState.STARTING)
         try {
-            sandboxManager = SandboxManager.builder().connectionConfig(connectionConfig.copyWithoutConnectionPool()).build()
+            sandboxManager = createSandboxManager()
+            stateStore.setIdleEntryTtl(config.poolName, config.idleTimeout)
             if (stateStore.getMaxIdle(config.poolName) == null) {
                 stateStore.setMaxIdle(config.poolName, config.maxIdle)
             }
@@ -201,8 +206,13 @@ class SandboxPool internal constructor(
                     val sandbox =
                         Sandbox.connector()
                             .sandboxId(sandboxId)
+                            .connectTimeout(config.acquireReadyTimeout)
+                            .healthCheckPollingInterval(config.acquireHealthCheckPollingInterval)
+                            .skipHealthCheck(config.acquireSkipHealthCheck)
                             .connectionConfig(connectionConfig)
-                            .connect()
+                            .run {
+                                config.acquireHealthCheck?.let { healthCheck(it) } ?: this
+                            }.connect()
                     sandboxTimeout?.let { sandbox.renew(it) }
                     logger.debug(
                         "Acquire from idle: pool_name={} sandbox_id={} policy={}",
@@ -274,26 +284,51 @@ class SandboxPool internal constructor(
      * Takes all idle sandbox IDs from the store and terminates each sandbox (best-effort).
      * Use this to release held resources, e.g. before process exit on single-node, or to reset the idle buffer.
      * In distributed mode this is best-effort: concurrent putIdle on other nodes may add new idle during the loop.
-     * If the pool is not running, [sandboxManager] may be null and kill is skipped; the store is still drained.
+     * If the pool is not running, a temporary [SandboxManager] is created on demand so remote idle sandboxes can
+     * still be killed. Failure to create that manager does not prevent draining idle IDs from the store.
      *
-     * @return Number of idle sandboxes that were taken and (when possible) killed.
+     * @return Number of idle sandboxes that were taken from the store and scheduled for best-effort kill.
      */
     fun releaseAllIdle(): Int {
         val poolName = config.poolName
         var count = 0
-        while (true) {
-            val sandboxId = stateStore.tryTakeIdle(poolName) ?: break
-            count++
-            try {
-                sandboxManager?.killSandbox(sandboxId)
-            } catch (e: Exception) {
-                logger.warn(
-                    "releaseAllIdle: failed to kill sandbox (best-effort): pool_name={} sandbox_id={} error={}",
-                    poolName,
-                    sandboxId,
-                    e.message,
-                )
+        var temporaryManager: SandboxManager? = null
+        var killUnavailableLogged = false
+        try {
+            while (true) {
+                val sandboxId = stateStore.tryTakeIdle(poolName) ?: break
+                count++
+                try {
+                    val manager =
+                        sandboxManager ?: temporaryManager ?: try {
+                            createSandboxManager().also { temporaryManager = it }
+                        } catch (e: Exception) {
+                            if (!killUnavailableLogged) {
+                                logger.warn(
+                                    "releaseAllIdle: failed to create sandbox manager; draining idle ids without remote kill: " +
+                                        "pool_name={} error={}",
+                                    poolName,
+                                    e.message,
+                                )
+                                killUnavailableLogged = true
+                            }
+                            null
+                        }
+                    if (manager == null) {
+                        continue
+                    }
+                    manager.killSandbox(sandboxId)
+                } catch (e: Exception) {
+                    logger.warn(
+                        "releaseAllIdle: failed to kill sandbox (best-effort): pool_name={} sandbox_id={} error={}",
+                        poolName,
+                        sandboxId,
+                        e.message,
+                    )
+                }
             }
+        } finally {
+            temporaryManager?.close()
         }
         if (count > 0) {
             logger.info("releaseAllIdle: released {} idle sandbox(es): pool_name={}", count, poolName)
@@ -305,8 +340,9 @@ class SandboxPool internal constructor(
      * Returns a point-in-time snapshot of pool state for observability.
      */
     fun snapshot(): PoolSnapshot {
+        val lifecycleState = lifecycleState.get()
         val state =
-            when (lifecycleState.get()) {
+            when (lifecycleState) {
                 LifecycleState.NOT_STARTED,
                 LifecycleState.STOPPED,
                 -> PoolState.STOPPED
@@ -316,9 +352,21 @@ class SandboxPool internal constructor(
         val counters = stateStore.snapshotCounters(config.poolName)
         return PoolSnapshot(
             state = state,
+            lifecycleState = lifecycleState.toPublicState(),
             idleCount = counters.idleCount,
+            maxIdle = resolveMaxIdle(),
+            failureCount = reconcileState.failureCount,
+            backoffActive = reconcileState.isBackoffActive(),
             lastError = reconcileState.lastError,
+            inFlightOperations = inFlightOperations.get(),
         )
+    }
+
+    /**
+     * Returns a point-in-time snapshot of idle entries visible from the backing state store for this pool.
+     */
+    fun snapshotIdleEntries(): List<IdleEntry> {
+        return stateStore.snapshotIdleEntries(config.poolName)
     }
 
     /**
@@ -360,13 +408,15 @@ class SandboxPool internal constructor(
 
     private fun resolveMaxIdle(): Int = stateStore.getMaxIdle(config.poolName) ?: currentMaxIdle
 
+    private fun createSandboxManager(): SandboxManager = sandboxManagerFactory(connectionConfig.copyWithoutConnectionPool())
+
     private fun runReconcileTick() {
         if (lifecycleState.get() != LifecycleState.RUNNING) return
         val executor = warmupExecutor ?: return
         beginOperation()
         try {
             if (lifecycleState.get() != LifecycleState.RUNNING) return
-            val reconcileConfig = config.copy(maxIdle = resolveMaxIdle())
+            val reconcileConfig = config.withMaxIdle(resolveMaxIdle())
             PoolReconciler.runReconcileTick(
                 config = reconcileConfig,
                 stateStore = stateStore,
@@ -389,9 +439,25 @@ class SandboxPool internal constructor(
         beginOperation()
         return try {
             val sandbox = buildSandboxFromSpec()
-            val id = sandbox.id
-            sandbox.close()
-            id
+            try {
+                config.warmupSandboxPreparer?.prepare(sandbox)
+                sandbox.id
+            } catch (e: Exception) {
+                try {
+                    sandbox.kill()
+                } catch (cleanupEx: Exception) {
+                    logger.warn(
+                        "Pool warmup sandbox preparer cleanup failed: pool_name={} sandbox_id={} error={}",
+                        config.poolName,
+                        sandbox.id,
+                        cleanupEx.message,
+                    )
+                    e.addSuppressed(cleanupEx)
+                }
+                throw e
+            } finally {
+                sandbox.close()
+            }
         } catch (e: Exception) {
             logger.warn("Pool create sandbox failed: poolName={}", config.poolName, e)
             throw e
@@ -401,22 +467,31 @@ class SandboxPool internal constructor(
     }
 
     private fun buildSandboxFromSpec(): Sandbox {
-        val b =
-            Sandbox.builder()
-                .imageSpec(creationSpec.imageSpec)
-                .entrypoint(creationSpec.entrypoint)
-                .resource(creationSpec.resource)
-                .env(creationSpec.env)
-                .metadata(creationSpec.metadata)
-                .volumes(creationSpec.volumes ?: emptyList())
-                .timeout(idleTtl)
-                .connectionConfig(connectionConfig)
-        val builder = creationSpec.networkPolicy?.let { b.networkPolicy(it) } ?: b
+        val builder =
+            creationSpec.applyToBuilder(
+                Sandbox.builder()
+                    .timeout(config.idleTimeout)
+                    .readyTimeout(config.warmupReadyTimeout)
+                    .healthCheckPollingInterval(config.warmupHealthCheckPollingInterval)
+                    .skipHealthCheck(config.warmupSkipHealthCheck)
+                    .connectionConfig(connectionConfig),
+            )
+        config.warmupHealthCheck?.let { builder.healthCheck(it) }
         return builder.build()
     }
 
     private fun directCreate(sandboxTimeout: Duration?): Sandbox {
-        val sandbox = buildSandboxFromSpec()
+        val builder =
+            creationSpec.applyToBuilder(
+                Sandbox.builder()
+                    .timeout(config.idleTimeout)
+                    .readyTimeout(config.acquireReadyTimeout)
+                    .healthCheckPollingInterval(config.acquireHealthCheckPollingInterval)
+                    .skipHealthCheck(config.acquireSkipHealthCheck)
+                    .connectionConfig(connectionConfig),
+            )
+        config.acquireHealthCheck?.let { builder.healthCheck(it) }
+        val sandbox = builder.build()
         sandboxTimeout?.let { sandbox.renew(it) }
         return sandbox
     }
@@ -536,6 +611,16 @@ class SandboxPool internal constructor(
         RUNNING,
         DRAINING,
         STOPPED,
+        ;
+
+        fun toPublicState(): PoolLifecycleState =
+            when (this) {
+                NOT_STARTED -> PoolLifecycleState.NOT_STARTED
+                STARTING -> PoolLifecycleState.STARTING
+                RUNNING -> PoolLifecycleState.RUNNING
+                DRAINING -> PoolLifecycleState.DRAINING
+                STOPPED -> PoolLifecycleState.STOPPED
+            }
     }
 
     companion object {
@@ -601,8 +686,58 @@ class SandboxPool internal constructor(
             return this
         }
 
+        fun acquireReadyTimeout(acquireReadyTimeout: Duration): Builder {
+            configBuilder.acquireReadyTimeout(acquireReadyTimeout)
+            return this
+        }
+
+        fun acquireHealthCheckPollingInterval(acquireHealthCheckPollingInterval: Duration): Builder {
+            configBuilder.acquireHealthCheckPollingInterval(acquireHealthCheckPollingInterval)
+            return this
+        }
+
+        fun acquireHealthCheck(acquireHealthCheck: (Sandbox) -> Boolean): Builder {
+            configBuilder.acquireHealthCheck(acquireHealthCheck)
+            return this
+        }
+
+        fun acquireSkipHealthCheck(acquireSkipHealthCheck: Boolean = true): Builder {
+            configBuilder.acquireSkipHealthCheck(acquireSkipHealthCheck)
+            return this
+        }
+
+        fun warmupReadyTimeout(warmupReadyTimeout: Duration): Builder {
+            configBuilder.warmupReadyTimeout(warmupReadyTimeout)
+            return this
+        }
+
+        fun warmupHealthCheckPollingInterval(warmupHealthCheckPollingInterval: Duration): Builder {
+            configBuilder.warmupHealthCheckPollingInterval(warmupHealthCheckPollingInterval)
+            return this
+        }
+
+        fun warmupHealthCheck(warmupHealthCheck: (Sandbox) -> Boolean): Builder {
+            configBuilder.warmupHealthCheck(warmupHealthCheck)
+            return this
+        }
+
+        fun warmupSandboxPreparer(warmupSandboxPreparer: SandboxPreparer): Builder {
+            configBuilder.warmupSandboxPreparer(warmupSandboxPreparer)
+            return this
+        }
+
+        fun warmupSkipHealthCheck(warmupSkipHealthCheck: Boolean = true): Builder {
+            configBuilder.warmupSkipHealthCheck(warmupSkipHealthCheck)
+            return this
+        }
+
         fun drainTimeout(drainTimeout: Duration): Builder {
             configBuilder.drainTimeout(drainTimeout)
+            return this
+        }
+
+        fun idleTimeout(idleTimeout: Duration): Builder {
+            configBuilder.idleTimeout(idleTimeout)
             return this
         }
 
@@ -613,4 +748,19 @@ class SandboxPool internal constructor(
             return SandboxPool(cfg)
         }
     }
+}
+
+internal fun PoolCreationSpec.applyToBuilder(builder: Sandbox.Builder): Sandbox.Builder {
+    val configuredBuilder =
+        builder
+            .imageSpec(imageSpec)
+            .entrypoint(entrypoint)
+            .resource(resource)
+            .env(env)
+            .metadata(metadata)
+            .extensions(extensions)
+            .volumes(volumes ?: emptyList())
+            .secureAccess(secureAccess)
+
+    return networkPolicy?.let { configuredBuilder.networkPolicy(it) } ?: configuredBuilder
 }

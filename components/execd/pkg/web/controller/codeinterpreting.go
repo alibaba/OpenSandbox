@@ -28,6 +28,7 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/flag"
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
+	"github.com/alibaba/opensandbox/execd/pkg/telemetry"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 )
 
@@ -63,7 +64,7 @@ type codeExecutionRunner interface {
 	SeekBackgroundCommandOutput(session string, cursor int64) ([]byte, int64, error)
 	DeleteBashSession(sessionID string) error
 	Interrupt(sessionID string) error
-	CreatePTYSession(id, cwd string) runtime.PTYSession
+	CreatePTYSession(id, cwd string) (runtime.PTYSession, error)
 	GetPTYSession(id string) runtime.PTYSession
 	DeletePTYSession(id string) error
 	GetPTYSessionStatus(id string) (bool, int64, error)
@@ -141,6 +142,18 @@ func (c *CodeInterpretingController) RunCode() {
 		deferResumeCleanup(c)
 		c.resumeEnabled = false
 	}()
+	execStart := time.Now()
+	var recordOnce sync.Once
+	recordExecution := func(result string) {
+		recordOnce.Do(func() {
+			telemetry.RecordExecutionDuration(
+				ctx,
+				"run_code",
+				result,
+				float64(time.Since(execStart))/float64(time.Millisecond),
+			)
+		})
+	}
 	runCodeRequest := c.buildExecuteCodeRequest(request)
 	eventsHandler := c.setServerEventsHandler(ctx)
 
@@ -157,11 +170,13 @@ func (c *CodeInterpretingController) RunCode() {
 	origComplete := eventsHandler.OnExecuteComplete
 	eventsHandler.OnExecuteComplete = func(executionTime time.Duration) {
 		origComplete(executionTime)
+		recordExecution("success")
 		signalComplete()
 	}
 	origError := eventsHandler.OnExecuteError
 	eventsHandler.OnExecuteError = func(err *execute.ErrorOutput) {
 		origError(err)
+		recordExecution("failure")
 		signalComplete()
 	}
 	runCodeRequest.Hooks = eventsHandler
@@ -169,6 +184,7 @@ func (c *CodeInterpretingController) RunCode() {
 	c.setupSSEResponse()
 	err = codeRunner.Execute(runCodeRequest)
 	if err != nil {
+		recordExecution("failure")
 		c.RespondError(
 			http.StatusInternalServerError,
 			model.ErrorCodeRuntimeError,
@@ -356,6 +372,18 @@ func (c *CodeInterpretingController) RunInSession() {
 	}
 	ctx, cancel := context.WithCancel(c.ctx.Request.Context())
 	defer cancel()
+	execStart := time.Now()
+	var recordOnce sync.Once
+	recordExecution := func(result string) {
+		recordOnce.Do(func() {
+			telemetry.RecordExecutionDuration(
+				ctx,
+				"run_in_session",
+				result,
+				float64(time.Since(execStart))/float64(time.Millisecond),
+			)
+		})
+	}
 
 	// completeCh is closed when OnExecuteComplete fires, meaning the final SSE
 	// event has been written and flushed. We only wait for this callback as a
@@ -371,11 +399,13 @@ func (c *CodeInterpretingController) RunInSession() {
 	origComplete := hooks.OnExecuteComplete
 	hooks.OnExecuteComplete = func(executionTime time.Duration) {
 		origComplete(executionTime)
+		recordExecution("success")
 		signalComplete()
 	}
 	origError := hooks.OnExecuteError
 	hooks.OnExecuteError = func(err *execute.ErrorOutput) {
 		origError(err)
+		recordExecution("failure")
 		signalComplete()
 	}
 	runReq.Hooks = hooks
@@ -383,6 +413,7 @@ func (c *CodeInterpretingController) RunInSession() {
 	c.setupSSEResponse()
 	err := codeRunner.RunInBashSession(ctx, runReq)
 	if err != nil {
+		recordExecution("failure")
 		c.RespondError(
 			http.StatusInternalServerError,
 			model.ErrorCodeRuntimeError,

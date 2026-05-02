@@ -80,7 +80,7 @@ function toRunCommandRequest(command: string, opts?: RunCommandOpts): ApiRunComm
 
 function toRunInSessionRequest(
   command: string,
-  opts?: { workingDirectory?: string; timeout?: number },
+  opts?: { workingDirectory?: string; timeoutSeconds?: number },
 ): ApiRunInSessionRequest {
   const body: ApiRunInSessionRequest = {
     command,
@@ -88,8 +88,8 @@ function toRunInSessionRequest(
   if (opts?.workingDirectory != null) {
     body.cwd = opts.workingDirectory;
   }
-  if (opts?.timeout != null) {
-    body.timeout = opts.timeout;
+  if (opts?.timeoutSeconds != null) {
+    body.timeout = Math.round(opts.timeoutSeconds * 1000);
   }
   return body;
 }
@@ -158,7 +158,7 @@ export class CommandsAdapter implements ExecdCommands {
   private buildRunInSessionStreamSpec(
     sessionId: string,
     command: string,
-    opts?: { workingDirectory?: string; timeout?: number },
+    opts?: { workingDirectory?: string; timeoutSeconds?: number },
   ): StreamingExecutionSpec<ApiRunInSessionRequest> {
     assertNonBlank(sessionId, "sessionId");
     assertNonBlank(command, "command");
@@ -304,7 +304,7 @@ export class CommandsAdapter implements ExecdCommands {
   async *runInSessionStream(
     sessionId: string,
     command: string,
-    opts?: { workingDirectory?: string; timeout?: number },
+    opts?: { workingDirectory?: string; timeoutSeconds?: number },
     signal?: AbortSignal,
   ): AsyncIterable<ServerStreamEvent> {
     for await (const ev of this.streamExecution(
@@ -318,7 +318,7 @@ export class CommandsAdapter implements ExecdCommands {
   async runInSession(
     sessionId: string,
     command: string,
-    options?: { workingDirectory?: string; timeout?: number },
+    options?: { workingDirectory?: string; timeoutSeconds?: number },
     handlers?: ExecutionHandlers,
     signal?: AbortSignal,
   ): Promise<CommandExecution> {

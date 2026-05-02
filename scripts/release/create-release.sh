@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+
+# Copyright 2026 Alibaba Group Holding Ltd.
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#     http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 set -euo pipefail
 
 usage() {
@@ -17,6 +32,7 @@ Required:
                         java/code-interpreter
                         csharp/sandbox
                         csharp/code-interpreter
+                        sdks/sandbox/go
                         cli
                         server
                         docker/execd
@@ -37,6 +53,8 @@ Options:
   --push                Push tag to origin (required to trigger tag-based workflows).
   --dry-run             Print computed results without creating tag/release.
   --initial-release     Allow release without previous tag (uses full history).
+  --sign-tag            Create a cryptographically signed git tag using the local
+                        git signing configuration. Defaults to an annotated tag.
   --help                Show this help.
 
 Examples:
@@ -62,6 +80,18 @@ die() {
 require_cmd() {
   local cmd="$1"
   command -v "$cmd" >/dev/null 2>&1 || die "Missing required command: $cmd"
+}
+
+remote_tag_commit() {
+  local tag="$1"
+  local commit
+
+  commit="$(git ls-remote origin "refs/tags/${tag}^{}" | awk 'NR == 1 { print $1 }')"
+  if [[ -z "$commit" ]]; then
+    commit="$(git ls-remote origin "refs/tags/${tag}" | awk 'NR == 1 { print $1 }')"
+  fi
+
+  printf '%s' "$commit"
 }
 
 is_semver_like() {
@@ -217,6 +247,7 @@ DRY_RUN=false
 PUSH_TAG=false
 INITIAL_RELEASE=false
 NO_PATH_FILTER=false
+SIGN_TAG=false
 CUSTOM_PATH_FILTERS=()
 
 while [[ $# -gt 0 ]]; do
@@ -251,6 +282,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --push)
       PUSH_TAG=true
+      shift
+      ;;
+    --sign-tag)
+      SIGN_TAG=true
       shift
       ;;
     --initial-release)
@@ -339,6 +374,13 @@ case "$TARGET" in
     WORKFLOW_HINT=".github/workflows/publish-csharp-sdks.yml"
     TARGET_PATH_FILTERS=("sdks/code-interpreter/csharp" "specs/execd-api.yaml")
     ;;
+  sdks/sandbox/go|go/sandbox)
+    TARGET="sdks/sandbox/go"
+    TAG_NEEDS_V=true
+    DISPLAY_NAME="Go Sandbox SDK"
+    WORKFLOW_HINT=".github/workflows/release-generic.yml"
+    TARGET_PATH_FILTERS=("sdks/sandbox/go" "specs/sandbox-lifecycle.yml")
+    ;;
   cli)
     TAG_NEEDS_V=true
     DISPLAY_NAME="OpenSandbox CLI"
@@ -401,6 +443,14 @@ else
   NEW_TAG="${TARGET}/${VERSION}"
   TAG_PREFIX="${TARGET}/"
   VERSION_LABEL="$VERSION"
+fi
+
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+  {
+    echo "tag=${NEW_TAG}"
+    echo "display_name=${DISPLAY_NAME}"
+    echo "version_label=${VERSION_LABEL}"
+  } >>"${GITHUB_OUTPUT}"
 fi
 
 if [[ -n "$FROM_TAG" ]] && ! git rev-parse -q --verify "refs/tags/${FROM_TAG}" >/dev/null; then
@@ -627,8 +677,13 @@ fi
 if git rev-parse -q --verify "refs/tags/${NEW_TAG}" >/dev/null; then
   warn "Tag '${NEW_TAG}' already exists. Reusing existing tag."
 else
-  git tag -a "$NEW_TAG" -m "release: ${DISPLAY_NAME} ${VERSION_LABEL}"
-  log "Created tag: ${NEW_TAG}"
+  if [[ "$SIGN_TAG" == true ]]; then
+    git tag -s "$NEW_TAG" -m "release: ${DISPLAY_NAME} ${VERSION_LABEL}"
+    log "Created signed tag: ${NEW_TAG}"
+  else
+    git tag -a "$NEW_TAG" -m "release: ${DISPLAY_NAME} ${VERSION_LABEL}"
+    log "Created annotated tag: ${NEW_TAG}"
+  fi
 fi
 
 if [[ "$PUSH_TAG" == true ]]; then
@@ -636,6 +691,15 @@ if [[ "$PUSH_TAG" == true ]]; then
   log "Pushed tag to origin: ${NEW_TAG}"
 else
   warn "Tag not pushed. Use --push to trigger tag-based publish workflows."
+fi
+
+LOCAL_TAG_COMMIT="$(git rev-parse "${NEW_TAG}^{commit}")"
+REMOTE_TAG_COMMIT="$(remote_tag_commit "$NEW_TAG")"
+if [[ -z "$REMOTE_TAG_COMMIT" ]]; then
+  die "Tag '${NEW_TAG}' does not exist on origin. Pass --push or push the tag before creating a GitHub Release."
+fi
+if [[ "$LOCAL_TAG_COMMIT" != "$REMOTE_TAG_COMMIT" ]]; then
+  die "Local tag '${NEW_TAG}' resolves to ${LOCAL_TAG_COMMIT}, but origin resolves to ${REMOTE_TAG_COMMIT}. Refusing to create or update the GitHub Release."
 fi
 
 RELEASE_TITLE="${DISPLAY_NAME} ${VERSION_LABEL}"
@@ -646,6 +710,7 @@ if gh release view "$NEW_TAG" >/dev/null 2>&1; then
   log "Updated GitHub Release: ${NEW_TAG}"
 else
   gh release create "$NEW_TAG" \
+    --verify-tag \
     --title "$RELEASE_TITLE" \
     --notes-file "$NOTES_FILE"
   log "Created GitHub Release: ${NEW_TAG}"

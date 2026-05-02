@@ -32,6 +32,8 @@ import (
 
 type stubProxy struct {
 	updated *policy.NetworkPolicy
+	deny    []policy.EgressRule
+	allow   []policy.EgressRule
 }
 
 func (s *stubProxy) CurrentPolicy() *policy.NetworkPolicy {
@@ -40,6 +42,11 @@ func (s *stubProxy) CurrentPolicy() *policy.NetworkPolicy {
 
 func (s *stubProxy) UpdatePolicy(p *policy.NetworkPolicy) {
 	s.updated = p
+}
+
+func (s *stubProxy) UpdateAlwaysRules(alwaysDeny, alwaysAllow []policy.EgressRule) {
+	s.deny = append([]policy.EgressRule(nil), alwaysDeny...)
+	s.allow = append([]policy.EgressRule(nil), alwaysAllow...)
 }
 
 type stubNft struct {
@@ -56,6 +63,33 @@ func (s *stubNft) ApplyStatic(_ context.Context, p *policy.NetworkPolicy) error 
 
 func (s *stubNft) AddResolvedIPs(_ context.Context, _ []nftables.ResolvedIP) error {
 	return nil
+}
+
+func (s *stubNft) RemoveEnforcement(_ context.Context) error {
+	return nil
+}
+
+func TestHandlePolicy_AlwaysDenyMergedIntoNft(t *testing.T) {
+	deny, err := policy.ParseValidatedEgressRule(policy.ActionDeny, "9.9.9.9")
+	require.NoError(t, err)
+	proxy := &stubProxy{}
+	nft := &stubNft{}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+	srv.setAlwaysRules([]policy.EgressRule{deny}, nil)
+
+	body := `{"defaultAction":"deny","egress":[{"action":"allow","target":"9.9.9.9"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "expected 200 OK")
+	require.NotNil(t, nft.applied, "expected nft applied")
+	_, _, denyV4, _ := nft.applied.StaticIPSets()
+	require.Contains(t, denyV4, "9.9.9.9", "always deny must appear in nft static deny set")
+	require.Len(t, proxy.updated.Egress, 1, "persisted/user policy must not include always rules")
+	require.Equal(t, "9.9.9.9", proxy.updated.Egress[0].Target)
 }
 
 func TestHandlePolicy_AppliesNftAndUpdatesProxy(t *testing.T) {

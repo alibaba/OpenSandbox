@@ -98,6 +98,12 @@ interface PoolStateStore {
     fun snapshotCounters(poolName: String): StoreCounters
 
     /**
+     * Returns a point-in-time snapshot of current idle entries for the pool.
+     * Ordering should follow the store's best-effort borrow order when possible.
+     */
+    fun snapshotIdleEntries(poolName: String): List<IdleEntry>
+
+    /**
      * Returns the cluster-wide max idle target for the pool, if set.
      * Used in distributed mode so that [resize] on any node is visible to the leader.
      * Return null to use the calling node's local config (e.g. single-node InMemory returns null).
@@ -113,4 +119,15 @@ interface PoolStateStore {
         poolName: String,
         maxIdle: Int,
     )
+
+    /**
+     * Configures idle-entry TTL semantics for the given pool.
+     * Default is no-op so existing distributed stores can opt in explicitly.
+     */
+    fun setIdleEntryTtl(
+        poolName: String,
+        idleTtl: Duration,
+    ) {
+        // Default no-op.
+    }
 }

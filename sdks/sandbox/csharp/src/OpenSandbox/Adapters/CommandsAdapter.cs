@@ -287,7 +287,9 @@ internal sealed class CommandsAdapter : IExecdCommands
         {
             Command = command,
             Cwd = options?.WorkingDirectory,
-            Timeout = options?.Timeout
+            Timeout = options?.TimeoutSeconds is not null
+                ? options.TimeoutSeconds.Value * 1000L
+                : null
         };
     }
 

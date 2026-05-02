@@ -30,9 +30,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/alibaba/opensandbox/internal/safego"
+
 	"github.com/alibaba/opensandbox/execd/pkg/jupyter/execute"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
-	"github.com/alibaba/opensandbox/execd/pkg/util/safego"
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 )
 
 // getShell returns the preferred shell, falling back to sh if bash is not available.
@@ -103,9 +105,14 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	stderrPath := c.stderrFileName(session)
 
 	startAt := time.Now()
-	log.Info("received command: %v", request.Code)
+	log.Info("received command: %v", log.SanitizeCommand(request.Code))
 	shell := getShell()
 	cmd := exec.CommandContext(ctx, shell, "-c", request.Code)
+	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
+	cwd, err := pathutil.ExpandPathWithEnv(request.Cwd, extraEnv)
+	if err != nil {
+		return fmt.Errorf("resolve request cwd %s: %w", request.Cwd, err)
+	}
 
 	// Configure credentials and process group
 	cred, err := buildCredential(request.Uid, request.Gid)
@@ -119,9 +126,8 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
 	cmd.Env = mergeEnvs(os.Environ(), extraEnv)
-	cmd.Dir = request.Cwd
+	cmd.Dir = cwd
 
 	done := make(chan struct{}, 1)
 	var wg sync.WaitGroup
@@ -140,7 +146,11 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		close(done)
 		wg.Wait()
 		request.Hooks.OnExecuteInit(session)
-		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "CommandExecError", EValue: err.Error()})
+		request.Hooks.OnExecuteError(&execute.ErrorOutput{
+			EName:     "CommandExecError",
+			EValue:    err.Error(),
+			Traceback: []string{err.Error()},
+		})
 		log.Error("CommandExecError: error starting commands: %v", err)
 		return nil
 	}
@@ -157,7 +167,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	c.storeCommandKernel(session, kernel)
 	request.Hooks.OnExecuteInit(session)
 
-	go func() {
+	safego.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
@@ -172,7 +182,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 				}
 			}
 		}
-	}()
+	})
 
 	err = cmd.Wait()
 	close(done)
@@ -230,14 +240,21 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	defer signal.Reset()
 
 	startAt := time.Now()
-	log.Info("received command: %v", request.Code)
+	log.Info("received command: %v", log.SanitizeCommand(request.Code))
 	shell := getShell()
 	cmd := exec.CommandContext(ctx, shell, "-c", request.Code)
-	cmd.Dir = request.Cwd
+	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
+	cwd, err := pathutil.ExpandPathWithEnv(request.Cwd, extraEnv)
+	if err != nil {
+		cancel()
+		return fmt.Errorf("resolve cwd: %w", err)
+	}
+	cmd.Dir = cwd
 	// Configure credentials and process group
 	cred, err := buildCredential(request.Uid, request.Gid)
 	if err != nil {
-		log.Error("failed to build credentials: %v", err)
+		cancel()
+		return fmt.Errorf("build credential: %w", err)
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		Setpgid:    true,
@@ -246,7 +263,6 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 
 	cmd.Stdout = pipe
 	cmd.Stderr = pipe
-	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
 	cmd.Env = mergeEnvs(os.Environ(), extraEnv)
 
 	// use DevNull as stdin so interactive programs exit immediately.

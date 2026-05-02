@@ -20,6 +20,7 @@ import com.alibaba.opensandbox.sandbox.HttpClientProvider
 import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
 import com.alibaba.opensandbox.sandbox.domain.exceptions.InvalidArgumentException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException
+import com.alibaba.opensandbox.sandbox.domain.models.execd.SECURE_ACCESS_HEADER
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.ExecutionHandlers
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunCommandRequest
 import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.RunInSessionRequest
@@ -40,6 +41,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
 class CommandsAdapterTest {
     // CommandsAdapter unit tests
@@ -130,6 +132,59 @@ class CommandsAdapterTest {
         assertEquals("debug", envs?.get("LOG_LEVEL")?.jsonPrimitive?.content)
         // Builder defaults background to false; request body always includes it
         assertEquals(false, requestBodyJson["background"]?.jsonPrimitive?.booleanOrNull)
+    }
+
+    @Test
+    fun `endpoint headers should be sent to streaming and generated api requests`() {
+        val host = mockWebServer.hostName
+        val port = mockWebServer.port
+        val endpointProvider =
+            HttpClientProvider(
+                ConnectionConfig.builder()
+                    .domain("$host:$port")
+                    .protocol("http")
+                    .build(),
+            )
+        try {
+            val adapter =
+                CommandsAdapter(
+                    endpointProvider,
+                    SandboxEndpoint(
+                        "$host:$port",
+                        mapOf(
+                            SECURE_ACCESS_HEADER to "secure-token",
+                            "OpenSandbox-Ingress-To" to "sandbox-44772",
+                        ),
+                    ),
+                )
+
+            val completeEvent = """{"type":"execution_complete","execution_time":1,"timestamp":1672531200000}"""
+            mockWebServer.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setBody("$completeEvent\n"),
+            )
+
+            adapter.run(RunCommandRequest.builder().command("echo secure").build())
+
+            val runRequest = mockWebServer.takeRequest()
+            assertEquals("secure-token", runRequest.getHeader(SECURE_ACCESS_HEADER))
+            assertEquals("sandbox-44772", runRequest.getHeader("OpenSandbox-Ingress-To"))
+
+            mockWebServer.enqueue(
+                MockResponse()
+                    .setResponseCode(200)
+                    .setBody("""{"session_id":"sess-secure"}"""),
+            )
+
+            adapter.createSession("/workspace")
+
+            val sessionRequest = mockWebServer.takeRequest()
+            assertEquals("secure-token", sessionRequest.getHeader(SECURE_ACCESS_HEADER))
+            assertEquals("sandbox-44772", sessionRequest.getHeader("OpenSandbox-Ingress-To"))
+        } finally {
+            endpointProvider.close()
+        }
     }
 
     @Test
@@ -285,7 +340,7 @@ data: {"type":"execution_complete","execution_time":100,"timestamp":167253120100
                 RunInSessionRequest.builder()
                     .command("echo Hello")
                     .workingDirectory("/workspace")
-                    .timeout(5000)
+                    .timeout(5.seconds)
                     .handlers(handlers)
                     .build(),
             )

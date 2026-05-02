@@ -59,7 +59,14 @@ func (c *PTYController) CreatePTYSession() {
 	}
 
 	id := runtime.NewPTYSessionID()
-	codeRunner.CreatePTYSession(id, req.Cwd)
+	_, err := codeRunner.CreatePTYSession(id, req.Cwd)
+	if err != nil {
+		c.RespondError(
+			http.StatusInternalServerError,
+			model.ErrorCodeRuntimeError,
+			fmt.Sprintf("error creating pty session: %v", err),
+		)
+	}
 	c.ctx.JSON(http.StatusCreated, model.CreatePTYSessionResponse{SessionID: id})
 }
 

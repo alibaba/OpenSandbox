@@ -10,22 +10,27 @@ This directory contains OpenAPI specification documents for the OpenSandbox proj
 
 **Sandbox Lifecycle Management API**
 
-Defines the complete lifecycle interfaces for creating, managing, and destroying sandbox environments directly from container images.
+Defines the complete lifecycle interfaces for creating, managing, and destroying sandbox environments from container images or snapshots.
 
 **Core Features:**
 - **Sandbox Management**: Create, list, query, and delete sandbox instances with metadata filters and pagination
 - **State Control**: Pause and resume sandbox execution
 - **Lifecycle States**: Supports transitions across Pending → Running → Pausing → Paused → Stopping → Terminated, and error handling with `Failed`
-- **Resource & Runtime Configuration**: Specify CPU/memory/GPU resource limits, required `entrypoint`, environment variables, and opaque `extensions`
+- **Resource & Runtime Configuration**: Specify CPU/memory/GPU resource limits, image startup `entrypoint`, optional `secureAccess`, environment variables, and opaque `extensions`
 - **Image Support**: Create sandboxes from public or private registries, including registry auth
 - **Timeout Management**: Mandatory `timeout` on creation with explicit renewal via API
-- **Endpoint Access**: Retrieve public access endpoints for services running inside sandboxes
+- **Endpoint Access**: Retrieve public access endpoints for services running inside sandboxes,including required headers when secured access is enabled
+- **Snapshot Management**: Create snapshots from sandboxes, list snapshots, and delete snapshots
 
 **Main Endpoints (base path `/v1`):**
-- `POST /sandboxes` - Create a sandbox from an image with timeout and resource limits
+- `POST /sandboxes` - Create a sandbox from an image or snapshot with timeout and resource limits
 - `GET /sandboxes` - List sandboxes with state/metadata filters and pagination
-- `GET /sandboxes/{sandboxId}` - Get full sandbox details (including image and entrypoint)
+- `GET /sandboxes/{sandboxId}` - Get full sandbox details (including startup source and entrypoint)
 - `DELETE /sandboxes/{sandboxId}` - Delete a sandbox
+- `POST /sandboxes/{sandboxId}/snapshots` - Create a snapshot from a sandbox
+- `GET /snapshots` - List snapshots with optional sandbox filtering and pagination
+- `GET /snapshots/{snapshotId}` - Get snapshot state and metadata
+- `DELETE /snapshots/{snapshotId}` - Delete a snapshot
 - `POST /sandboxes/{sandboxId}/pause` - Pause a sandbox (asynchronous)
 - `POST /sandboxes/{sandboxId}/resume` - Resume a paused sandbox
 - `POST /sandboxes/{sandboxId}/renew-expiration` - Renew sandbox expiration (TTL)
@@ -35,7 +40,21 @@ Defines the complete lifecycle interfaces for creating, managing, and destroying
 - HTTP Header: `OPEN-SANDBOX-API-KEY: your-api-key`
 - Environment Variable: `OPEN_SANDBOX_API_KEY` (for SDK clients)
 
-### 2. execd-api.yaml
+### 2. diagnostic-api.yml
+
+**Sandbox Diagnostics API**
+
+Defines best-effort troubleshooting descriptors for sandbox diagnostic logs and events. The descriptors either embed plain-text diagnostic content inline or return a download URL for the content. This spec does not define a structured audit or observability model.
+
+**Main Endpoints (base path `/v1`):**
+- `GET /sandboxes/{sandboxId}/diagnostics/logs` - Retrieve a diagnostic log content descriptor for an optional scope
+- `GET /sandboxes/{sandboxId}/diagnostics/events` - Retrieve a diagnostic event content descriptor for an optional scope
+
+**Authentication:**
+- HTTP Header: `OPEN-SANDBOX-API-KEY: your-api-key`
+- Environment Variable: `OPEN_SANDBOX_API_KEY` (for SDK clients)
+
+### 3. execd-api.yaml
 
 **Code Execution API Inside Sandbox**
 
@@ -86,7 +105,7 @@ Defines interfaces for executing code, commands, and file operations within sand
 - `GET /metrics` - Get system resource metrics
 - `GET /metrics/watch` - Watch system metrics in real-time (SSE stream)
 
-### 3. egress-api.yaml
+### 4. egress-api.yaml
 
 **Sandbox Egress Runtime API**
 
@@ -133,4 +152,4 @@ Supports flexible resource configuration (similar to Kubernetes):
 Supports Unix-style file permission management:
 - Owner
 - Group
-- Permission mode (octal format, e.g., 755)
+- Permission mode values such as 644 or 755

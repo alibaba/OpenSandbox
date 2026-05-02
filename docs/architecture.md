@@ -201,12 +201,12 @@ The OpenSandbox server is a FastAPI-based service providing:
 
 **Features:**
 - Built-in **[BatchSandbox](https://github.com/alibaba/OpenSandbox/tree/main/kubernetes)** runtime with sandbox pooling, high-throughput batch creation, and heterogeneous task orchestration; also compatible with **[SIG agent-sandbox](https://github.com/kubernetes-sigs/agent-sandbox)** as an alternative runtime
+- Rootfs snapshot-based pause/resume for Kubernetes sandboxes via `BatchSandbox.spec.pause` + internal `SandboxSnapshot`
 - Support for different secure container runtimes (e.g., kata-containers, gVisor)
 - Helm-based deployment for controller and server, see [documentation](https://github.com/alibaba/OpenSandbox/blob/main/kubernetes/charts/opensandbox/README.md)
 
 **Planned Features:**
 - Unified network storage mounting (ossfs, NAS, custom PVC) in both pooled and non-pooled modes
-- Pause/resume support
 
 #### Custom Runtime
 

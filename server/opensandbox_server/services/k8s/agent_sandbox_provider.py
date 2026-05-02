@@ -22,29 +22,24 @@ import re
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from kubernetes.client import (
-    V1Container,
-    V1EnvVar,
-    V1ResourceRequirements,
-    V1VolumeMount,
-)
-
-from opensandbox_server.config import AppConfig, EGRESS_MODE_DNS
+from opensandbox_server.config import AppConfig, DEFAULT_EGRESS_DISABLE_IPV6, EGRESS_MODE_DNS
 from opensandbox_server.services.helpers import format_ingress_endpoint
-from opensandbox_server.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
+from opensandbox_server.api.schema import Endpoint, ImageSpec, NetworkPolicy, PlatformSpec, Volume
 from opensandbox_server.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from opensandbox_server.services.k8s.client import K8sClient
 from opensandbox_server.services.k8s.egress_helper import (
     apply_egress_to_spec,
-    build_security_context_for_sandbox_container,
-    prep_execd_init_for_egress,
 )
-from opensandbox_server.services.k8s.security_context import (
-    build_security_context_from_dict,
-    serialize_security_context_to_dict,
+from opensandbox_server.services.k8s.provider_common import (
+    _build_execd_init_container,
+    _build_main_container,
+    _container_to_dict,
+    _extract_platform_unschedulable_message_from_pod,
+    _workload_platform_constraint_scope,
 )
 from opensandbox_server.services.k8s.volume_helper import apply_volumes_to_pod_spec
 from opensandbox_server.services.k8s.workload_provider import WorkloadProvider
+from opensandbox_server.services.k8s.windows_profile import is_windows_profile
 from opensandbox_server.services.runtime_resolver import SecureRuntimeResolver
 
 logger = logging.getLogger(__name__)
@@ -76,9 +71,7 @@ def _to_dns1035_label(value: str, prefix: str = "sandbox") -> str:
 
 
 class AgentSandboxProvider(WorkloadProvider):
-    """
-    Workload provider using kubernetes-sigs/agent-sandbox Sandbox CRD.
-    """
+    """Workload provider for agent-sandbox Sandbox CRDs."""
 
     def __init__(
         self,
@@ -102,10 +95,15 @@ class AgentSandboxProvider(WorkloadProvider):
         self.ingress_config = app_config.ingress if app_config else None
         self.execd_init_resources = k8s_config.execd_init_resources if k8s_config else None
 
-        # Initialize secure runtime resolver
         self.resolver = SecureRuntimeResolver(app_config) if app_config else None
         self.runtime_class = (
             self.resolver.get_k8s_runtime_class() if self.resolver else None
+        )
+
+        self.egress_disable_ipv6 = (
+            bool(app_config.egress.disable_ipv6)
+            if app_config and app_config.egress is not None
+            else DEFAULT_EGRESS_DISABLE_IPV6
         )
 
     def _resource_name(self, sandbox_id: str) -> str:
@@ -137,17 +135,17 @@ class AgentSandboxProvider(WorkloadProvider):
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
         volumes: Optional[List[Volume]] = None,
+        platform: Optional[PlatformSpec] = None,
         annotations: Optional[Dict[str, str]] = None,
         egress_auth_token: Optional[str] = None,
         egress_mode: str = EGRESS_MODE_DNS,
     ) -> Dict[str, Any]:
         """Create an agent-sandbox Sandbox CRD workload."""
+        if is_windows_profile(platform):
+            raise ValueError("agent-sandbox does not support platform.os=windows.")
+
         if self.runtime_class:
-            logger.info(
-                "Using Kubernetes RuntimeClass '%s' for sandbox %s",
-                self.runtime_class,
-                sandbox_id,
-            )
+            logger.info(f"Using Kubernetes RuntimeClass '{self.runtime_class}' for sandbox {sandbox_id}")
 
         pod_spec = self._build_pod_spec(
             image_spec=image_spec,
@@ -161,12 +159,12 @@ class AgentSandboxProvider(WorkloadProvider):
             egress_mode=egress_mode,
         )
 
-        # Add user-specified volumes if provided
         if volumes:
             apply_volumes_to_pod_spec(pod_spec, volumes)
 
         if self.service_account:
             pod_spec["serviceAccountName"] = self.service_account
+        self._apply_platform_node_selector(pod_spec, platform)
 
         resource_name = self._resource_name(sandbox_id)
         spec = {
@@ -193,11 +191,13 @@ class AgentSandboxProvider(WorkloadProvider):
             runtime_manifest["metadata"]["annotations"] = annotations
 
         sandbox = self.template_manager.merge_with_runtime_values(runtime_manifest)
-        # Set or strip shutdownTime after merge so we override any template value
         if expires_at is None:
             sandbox["spec"].pop("shutdownTime", None)
         else:
             sandbox["spec"]["shutdownTime"] = expires_at.isoformat()
+        if platform is not None:
+            merged_pod_spec = sandbox.get("spec", {}).get("podTemplate", {}).get("spec", {})
+            WorkloadProvider.ensure_platform_compatible_with_affinity(merged_pod_spec, platform)
 
         created = self.k8s_client.create_custom_object(
             group=self.group,
@@ -212,6 +212,26 @@ class AgentSandboxProvider(WorkloadProvider):
             "uid": created["metadata"]["uid"],
         }
 
+    def _apply_platform_node_selector(
+        self,
+        pod_spec: Dict[str, Any],
+        platform: Optional[PlatformSpec],
+    ) -> None:
+        if platform is None:
+            return
+
+        template = self.template_manager.get_base_template()
+        template_spec = (
+            template.get("spec", {})
+            .get("podTemplate", {})
+            .get("spec", {})
+        )
+        WorkloadProvider.apply_platform_node_selector(
+            pod_spec=pod_spec,
+            template_spec=template_spec if isinstance(template_spec, dict) else {},
+            platform=platform,
+        )
+
     def _build_pod_spec(
         self,
         image_spec: ImageSpec,
@@ -225,24 +245,27 @@ class AgentSandboxProvider(WorkloadProvider):
         egress_mode: str = EGRESS_MODE_DNS,
     ) -> Dict[str, Any]:
         """Build pod spec dict for the Sandbox CRD."""
-        disable_ipv6_for_egress = network_policy is not None and egress_image is not None
-        init_container = self._build_execd_init_container(
-            execd_image, disable_ipv6_for_egress=disable_ipv6_for_egress
+        disable_ipv6_for_egress = (
+            network_policy is not None
+            and egress_image is not None
+            and self.egress_disable_ipv6
         )
-        main_container = self._build_main_container(
+        init_container = _build_execd_init_container(
+            execd_image,
+            self.execd_init_resources,
+            disable_ipv6_for_egress=disable_ipv6_for_egress,
+        )
+        main_container = _build_main_container(
             image_spec=image_spec,
             entrypoint=entrypoint,
             env=env,
             resource_limits=resource_limits,
-            include_execd_volume=True,
             has_network_policy=network_policy is not None,
         )
         
-        containers = [self._container_to_dict(main_container)]
-        
-        # Build base pod spec
+        containers = [_container_to_dict(main_container)]
         pod_spec: Dict[str, Any] = {
-            "initContainers": [self._container_to_dict(init_container)],
+            "initContainers": [_container_to_dict(init_container)],
             "containers": containers,
             "volumes": [
                 {
@@ -252,11 +275,9 @@ class AgentSandboxProvider(WorkloadProvider):
             ],
         }
 
-        # Inject runtimeClassName if secure runtime is configured
         if self.runtime_class:
             pod_spec["runtimeClassName"] = self.runtime_class
 
-        # Add egress sidecar if network policy is provided
         apply_egress_to_spec(
             containers=containers,
             network_policy=network_policy,
@@ -266,123 +287,6 @@ class AgentSandboxProvider(WorkloadProvider):
         )
 
         return pod_spec
-
-    def _build_execd_init_container(
-        self,
-        execd_image: str,
-        *,
-        disable_ipv6_for_egress: bool = False,
-    ) -> V1Container:
-        """Build init container that copies execd binary to the shared volume."""
-        script = (
-            "cp ./execd /opt/opensandbox/bin/execd && "
-            "cp ./bootstrap.sh /opt/opensandbox/bin/bootstrap.sh && "
-            "chmod +x /opt/opensandbox/bin/execd && "
-            "chmod +x /opt/opensandbox/bin/bootstrap.sh"
-        )
-        security_context = None
-        if disable_ipv6_for_egress:
-            script, sc_dict = prep_execd_init_for_egress(script)
-            security_context = build_security_context_from_dict(sc_dict)
-
-        resources = None
-        if self.execd_init_resources:
-            resources = V1ResourceRequirements(
-                limits=self.execd_init_resources.limits,
-                requests=self.execd_init_resources.requests,
-            )
-
-        return V1Container(
-            name="execd-installer",
-            image=execd_image,
-            command=["/bin/sh", "-c"],
-            args=[script],
-            volume_mounts=[
-                V1VolumeMount(
-                    name="opensandbox-bin",
-                    mount_path="/opt/opensandbox/bin",
-                )
-            ],
-            resources=resources,
-            security_context=security_context,
-        )
-
-    def _build_main_container(
-        self,
-        image_spec: ImageSpec,
-        entrypoint: List[str],
-        env: Dict[str, str],
-        resource_limits: Dict[str, str],
-        include_execd_volume: bool,
-        has_network_policy: bool = False,
-    ) -> V1Container:
-        env_vars = [V1EnvVar(name=k, value=v) for k, v in env.items()]
-        env_vars.append(V1EnvVar(name="EXECD", value="/opt/opensandbox/bin/execd"))
-
-        resources = None
-        if resource_limits:
-            resources = V1ResourceRequirements(
-                limits=resource_limits,
-                requests=resource_limits,
-            )
-
-        wrapped_command = ["/opt/opensandbox/bin/bootstrap.sh"] + entrypoint
-
-        volume_mounts = None
-        if include_execd_volume:
-            volume_mounts = [
-                V1VolumeMount(
-                    name="opensandbox-bin",
-                    mount_path="/opt/opensandbox/bin",
-                )
-            ]
-
-        # Apply security context when network policy is enabled
-        security_context = None
-        if has_network_policy:
-            security_context_dict = build_security_context_for_sandbox_container(True)
-            security_context = build_security_context_from_dict(security_context_dict)
-
-        return V1Container(
-            name="sandbox",
-            image=image_spec.uri,
-            command=wrapped_command,
-            env=env_vars if env_vars else None,
-            resources=resources,
-            volume_mounts=volume_mounts,
-            security_context=security_context,
-        )
-
-    def _container_to_dict(self, container: V1Container) -> Dict[str, Any]:
-        """Convert a V1Container object to a plain dict for CRD body."""
-        result: Dict[str, Any] = {
-            "name": container.name,
-            "image": container.image,
-        }
-
-        if container.command:
-            result["command"] = container.command
-        if container.args:
-            result["args"] = container.args
-        if container.env:
-            result["env"] = [{"name": e.name, "value": e.value} for e in container.env]
-        if container.resources:
-            result["resources"] = {}
-            if container.resources.limits:
-                result["resources"]["limits"] = container.resources.limits
-            if container.resources.requests:
-                result["resources"]["requests"] = container.resources.requests
-        if container.volume_mounts:
-            result["volumeMounts"] = [
-                {"name": vm.name, "mountPath": vm.mount_path}
-                for vm in container.volume_mounts
-            ]
-        if container.security_context:
-            security_context_dict = serialize_security_context_to_dict(container.security_context)
-            if security_context_dict:
-                result["securityContext"] = security_context_dict
-
-        return result
 
     def get_workload(self, sandbox_id: str, namespace: str) -> Optional[Dict[str, Any]]:
         """Get Sandbox CRD by sandbox ID, trying all candidate resource names."""
@@ -458,7 +362,7 @@ class AgentSandboxProvider(WorkloadProvider):
         try:
             return datetime.fromisoformat(shutdown_time_str.replace("Z", "+00:00"))
         except (ValueError, TypeError) as e:
-            logger.warning("Invalid shutdownTime format: %s, error: %s", shutdown_time_str, e)
+            logger.warning(f"Invalid shutdownTime format: {shutdown_time_str}, error: {e}")
             return None
 
     def get_status(self, workload: Dict[str, Any]) -> Dict[str, Any]:
@@ -495,11 +399,25 @@ class AgentSandboxProvider(WorkloadProvider):
         reason = ready_condition.get("reason")
         message = ready_condition.get("message")
         last_transition_at = ready_condition.get("lastTransitionTime") or creation_timestamp
+        has_platform_constraints, has_non_platform_constraints = _workload_platform_constraint_scope(
+            workload,
+            "podTemplate",
+            self.analyze_platform_constraints_in_pod_spec,
+        )
 
         if cond_status == "True":
             state = "Running"
         elif reason == "SandboxExpired":
             state = "Terminated"
+        elif cond_status == "False" and self.is_platform_unschedulable(
+            reason,
+            message,
+            has_platform_constraints,
+            has_non_platform_constraints,
+        ):
+            state = "Failed"
+            reason = "POD_PLATFORM_UNSCHEDULABLE"
+            message = message or "Pod scheduling constraints cannot be satisfied."
         elif cond_status == "False":
             state = "Pending"
         else:
@@ -513,14 +431,7 @@ class AgentSandboxProvider(WorkloadProvider):
         }
 
     def _pod_state_from_selector(self, workload: Dict[str, Any]) -> Optional[tuple[str, str, str]]:
-        """Resolve state from Pod list via label selector.
-
-        Returns three-state tuple (state, reason, message):
-        - Running: Pod phase Running and has IP
-        - Allocated: Pod has IP assigned but not Running yet
-        - Pending: Pod scheduled but no IP yet
-        Returns None if selector/namespace missing or API call fails.
-        """
+        """Resolve running/allocated/pending state from selected pods."""
         status = workload.get("status", {})
         selector = status.get("selector")
         namespace = workload.get("metadata", {}).get("namespace")
@@ -535,15 +446,40 @@ class AgentSandboxProvider(WorkloadProvider):
         except Exception:
             return None
 
+        has_platform_constraints, has_non_platform_constraints = _workload_platform_constraint_scope(
+            workload,
+            "podTemplate",
+            self.analyze_platform_constraints_in_pod_spec,
+        )
         for pod in pods:
-            if pod.status:
-                if pod.status.pod_ip and pod.status.phase == "Running":
+            unschedulable_message = _extract_platform_unschedulable_message_from_pod(
+                pod,
+                has_platform_constraints,
+                has_non_platform_constraints,
+                self.is_platform_unschedulable,
+            )
+            if unschedulable_message:
+                return ("Failed", "POD_PLATFORM_UNSCHEDULABLE", unschedulable_message)
+
+            pod_status = pod.get("status") if isinstance(pod, dict) else getattr(pod, "status", None)
+            if pod_status:
+                pod_ip = (
+                    pod_status.get("podIP")
+                    if isinstance(pod_status, dict)
+                    else getattr(pod_status, "pod_ip", None)
+                )
+                pod_phase = (
+                    pod_status.get("phase")
+                    if isinstance(pod_status, dict)
+                    else getattr(pod_status, "phase", None)
+                )
+                if pod_ip and pod_phase == "Running":
                     return (
                         "Running",
                         "POD_READY",
                         "Pod is running with IP assigned",
                     )
-                if pod.status.pod_ip:
+                if pod_ip:
                     return (
                         "Allocated",
                         "IP_ASSIGNED",
@@ -561,7 +497,6 @@ class AgentSandboxProvider(WorkloadProvider):
         return None
 
     def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[Endpoint]:
-        # ingress-based endpoint if configured (gateway)
         ingress_endpoint = format_ingress_endpoint(self.ingress_config, sandbox_id, port)
         if ingress_endpoint:
             return ingress_endpoint
@@ -579,7 +514,7 @@ class AgentSandboxProvider(WorkloadProvider):
                     if pod.status and pod.status.pod_ip and pod.status.phase == "Running":
                         return Endpoint(endpoint=f"{pod.status.pod_ip}:{port}")
             except Exception as e:
-                logger.warning("Failed to resolve pod endpoint: %s", e)
+                logger.warning(f"Failed to resolve pod endpoint: {e}")
 
         service_fqdn = status.get("serviceFQDN")
         if service_fqdn:

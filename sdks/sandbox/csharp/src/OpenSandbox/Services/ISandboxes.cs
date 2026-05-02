@@ -104,6 +104,23 @@ public interface ISandboxes
         RenewSandboxExpirationRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<SnapshotInfo> CreateSnapshotAsync(
+        string sandboxId,
+        CreateSnapshotRequest? request = null,
+        CancellationToken cancellationToken = default);
+
+    Task<SnapshotInfo> GetSnapshotAsync(
+        string snapshotId,
+        CancellationToken cancellationToken = default);
+
+    Task<ListSnapshotsResponse> ListSnapshotsAsync(
+        ListSnapshotsParams? @params = null,
+        CancellationToken cancellationToken = default);
+
+    Task DeleteSnapshotAsync(
+        string snapshotId,
+        CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Gets the endpoint for a sandbox port.
     /// </summary>
@@ -117,6 +134,24 @@ public interface ISandboxes
     Task<Endpoint> GetSandboxEndpointAsync(
         string sandboxId,
         int port,
+        bool useServerProxy = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets a signed endpoint for a sandbox port with an OSEP-0011 route token.
+    /// </summary>
+    /// <param name="sandboxId">The sandbox ID.</param>
+    /// <param name="port">The port number.</param>
+    /// <param name="expires">Unix epoch seconds for the signed route token expiry.</param>
+    /// <param name="useServerProxy">Whether to return a server-proxied URL.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The endpoint information.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when arguments are invalid.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
+    Task<Endpoint> GetSignedSandboxEndpointAsync(
+        string sandboxId,
+        int port,
+        long expires,
         bool useServerProxy = false,
         CancellationToken cancellationToken = default);
 }

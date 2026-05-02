@@ -23,10 +23,14 @@ from typing import Any
 
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.models.sandboxes import (
+    CreateSnapshotRequest,
     PagedSandboxInfos,
+    PagedSnapshotInfos,
     SandboxFilter,
     SandboxInfo,
     SandboxRenewResponse,
+    SnapshotFilter,
+    SnapshotInfo,
 )
 from opensandbox.sync.adapters.factory import AdapterFactorySync
 from opensandbox.sync.services.sandbox import SandboxesSync
@@ -182,6 +186,24 @@ class SandboxManagerSync:
         """
         logger.info("Resuming sandbox: %s", sandbox_id)
         self._sandbox_service.resume_sandbox(sandbox_id)
+
+    def create_snapshot(self, sandbox_id: str, name: str | None = None) -> SnapshotInfo:
+        """Create a snapshot from a sandbox (blocking)."""
+        return self._sandbox_service.create_snapshot(
+            sandbox_id, CreateSnapshotRequest(name=name)
+        )
+
+    def get_snapshot(self, snapshot_id: str) -> SnapshotInfo:
+        """Get information for a snapshot by id (blocking)."""
+        return self._sandbox_service.get_snapshot(snapshot_id)
+
+    def list_snapshots(self, filter: SnapshotFilter) -> PagedSnapshotInfos:
+        """List snapshots with filtering options (blocking)."""
+        return self._sandbox_service.list_snapshots(filter)
+
+    def delete_snapshot(self, snapshot_id: str) -> None:
+        """Delete a snapshot by id (blocking)."""
+        self._sandbox_service.delete_snapshot(snapshot_id)
 
     def close(self) -> None:
         """

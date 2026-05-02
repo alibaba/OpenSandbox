@@ -9,12 +9,15 @@ fullnameOverride: "opensandbox-server"
 # -- Override the namespace (default: opensandbox-system)
 namespaceOverride: ""
 
+# -- Image pull secrets for the server deployment. Each entry: {name: <secret-name>}.
+imagePullSecrets: []
+
 # Server configuration
 server:
   # -- Server image configuration
   image:
     repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server
-    tag: "v0.1.8"
+    tag: "v0.1.12"
 
   # -- Number of server replicas
   replicaCount: 2
@@ -38,7 +41,7 @@ server:
     gatewayRouteMode: "header"
     image:
       repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ingress
-      tag: "v1.0.5"
+      tag: "v1.0.6"
     replicaCount: 2
     port: 28888
     dataplaneNamespace: "opensandbox"
@@ -51,18 +54,28 @@ server:
       requests:
         cpu: "1"
         memory: 4Gi
+    # OSEP-0011 signing keys shared between server and ingress.
+    # When keys are provided, the server signs route tokens with the active key
+    # and the ingress gateway verifies them.
+    secureAccess:
+      activeKey: ""
+      # List of signing keys. Each entry: { key_id: "a", key: "<base64-secret>" }.
+      # key_id must be exactly one character in [0-9a-z].
+      keys: []
 
 # -- Server config (TOML). Mounted at /etc/opensandbox/config.toml.
 configToml: |
   [server]
   host = "0.0.0.0"
   port = 80
-  log_level = "INFO"
   api_key = ""
+
+  [log]
+  level = "INFO"
 
   [runtime]
   type = "kubernetes"
-  execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9"
+  execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.14"
 
   [kubernetes]
   kubeconfig_path = ""
@@ -74,6 +87,6 @@ configToml: |
   batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
   
   [egress]
-  image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.4"
+  image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.10"
   mode = "dns+nft"
 

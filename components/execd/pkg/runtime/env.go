@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
 )
 
 // loadExtraEnvFromFile reads key=value lines from EXECD_ENVS (if set).
@@ -29,10 +30,15 @@ func loadExtraEnvFromFile() map[string]string {
 	if path == "" {
 		return nil
 	}
-
-	data, err := os.ReadFile(path)
+	resolvedPath, err := pathutil.ExpandPath(path)
 	if err != nil {
-		log.Warn("EXECD_ENVS: failed to read file %s: %v", path, err)
+		log.Warn("EXECD_ENVS: failed to resolve file path %s: %v", path, err)
+		return nil
+	}
+
+	data, err := os.ReadFile(resolvedPath)
+	if err != nil {
+		log.Warn("EXECD_ENVS: failed to read file %s: %v", resolvedPath, err)
 		return nil
 	}
 

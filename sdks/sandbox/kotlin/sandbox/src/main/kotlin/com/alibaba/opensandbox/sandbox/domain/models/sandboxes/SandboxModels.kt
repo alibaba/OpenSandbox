@@ -218,6 +218,47 @@ class SandboxImageAuth private constructor(
 }
 
 /**
+ * Runtime platform constraint for sandbox provisioning.
+ *
+ * @property os Target operating system (linux or windows)
+ * @property arch Target CPU architecture (amd64 or arm64)
+ */
+class PlatformSpec private constructor(
+    val os: String,
+    val arch: String,
+) {
+    companion object {
+        @JvmStatic
+        fun builder(): Builder = Builder()
+    }
+
+    class Builder {
+        private var os: String? = null
+        private var arch: String? = null
+
+        fun os(os: String): Builder {
+            require(os == "linux" || os == "windows") { "Platform os must be one of: linux, windows" }
+            this.os = os
+            return this
+        }
+
+        fun arch(arch: String): Builder {
+            require(arch == "amd64" || arch == "arm64") {
+                "Platform arch must be one of: amd64, arm64"
+            }
+            this.arch = arch
+            return this
+        }
+
+        fun build(): PlatformSpec {
+            val osValue = os ?: throw IllegalArgumentException("Platform os must be specified")
+            val archValue = arch ?: throw IllegalArgumentException("Platform arch must be specified")
+            return PlatformSpec(os = osValue, arch = archValue)
+        }
+    }
+}
+
+/**
  * Egress rule for matching network targets.
  *
  * @property action Whether to allow or deny matching targets.
@@ -328,6 +369,8 @@ class Host private constructor(
     val path: String,
 ) {
     companion object {
+        private val HOST_PATH_PATTERN = Regex("""^(/|[A-Za-z]:[\\/])""")
+
         @JvmStatic
         fun builder(): Builder = Builder()
 
@@ -339,7 +382,9 @@ class Host private constructor(
         private var path: String? = null
 
         fun path(path: String): Builder {
-            require(path.startsWith("/")) { "Host path must be an absolute path starting with '/'" }
+            require(HOST_PATH_PATTERN.containsMatchIn(path)) {
+                "Host path must be an absolute path starting with '/' or a Windows drive letter (e.g. 'C:\\' or 'D:/')"
+            }
             this.path = path
             return this
         }
@@ -352,15 +397,27 @@ class Host private constructor(
 }
 
 /**
- * Kubernetes PersistentVolumeClaim mount backend.
+ * Platform-managed named volume backend.
  *
- * References an existing PVC in the same namespace as the sandbox pod.
- * Only available in Kubernetes runtime.
+ * Runtime-neutral abstraction for referencing a pre-existing named volume:
+ * - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+ * - Docker: maps to a Docker named volume.
  *
- * @property claimName Name of the PersistentVolumeClaim in the same namespace
+ * @property claimName Name of the platform volume. In Kubernetes this is the PVC name;
+ * in Docker this is the named volume name.
+ * @property createIfNotExists When true (default), auto-create volume if absent.
+ * @property deleteOnSandboxTermination When true, delete auto-created Docker volume on sandbox deletion.
+ * @property storageClass Kubernetes StorageClass for auto-created PVCs. Null means default class.
+ * @property storage PVC storage request for auto-created PVCs (e.g. "1Gi").
+ * @property accessModes Access modes for auto-created PVCs (e.g. ["ReadWriteOnce"]).
  */
 class PVC private constructor(
     val claimName: String,
+    val createIfNotExists: Boolean,
+    val deleteOnSandboxTermination: Boolean,
+    val storageClass: String?,
+    val storage: String?,
+    val accessModes: List<String>?,
 ) {
     companion object {
         @JvmStatic
@@ -372,6 +429,11 @@ class PVC private constructor(
 
     class Builder {
         private var claimName: String? = null
+        private var createIfNotExists: Boolean = true
+        private var deleteOnSandboxTermination: Boolean = false
+        private var storageClass: String? = null
+        private var storage: String? = null
+        private var accessModes: List<String>? = null
 
         fun claimName(claimName: String): Builder {
             require(claimName.isNotBlank()) { "Claim name cannot be blank" }
@@ -379,9 +441,46 @@ class PVC private constructor(
             return this
         }
 
+        fun createIfNotExists(createIfNotExists: Boolean): Builder {
+            this.createIfNotExists = createIfNotExists
+            return this
+        }
+
+        fun deleteOnSandboxTermination(deleteOnSandboxTermination: Boolean): Builder {
+            this.deleteOnSandboxTermination = deleteOnSandboxTermination
+            return this
+        }
+
+        fun storageClass(storageClass: String?): Builder {
+            this.storageClass = storageClass
+            return this
+        }
+
+        fun storage(storage: String?): Builder {
+            this.storage = storage
+            return this
+        }
+
+        fun accessModes(accessModes: List<String>?): Builder {
+            this.accessModes = accessModes
+            return this
+        }
+
+        fun accessModes(vararg accessModes: String): Builder {
+            this.accessModes = accessModes.toList()
+            return this
+        }
+
         fun build(): PVC {
             val claimNameValue = claimName ?: throw IllegalArgumentException("Claim name must be specified")
-            return PVC(claimName = claimNameValue)
+            return PVC(
+                claimName = claimNameValue,
+                createIfNotExists = createIfNotExists,
+                deleteOnSandboxTermination = deleteOnSandboxTermination,
+                storageClass = storageClass,
+                storage = storage,
+                accessModes = accessModes,
+            )
         }
     }
 }
@@ -613,6 +712,7 @@ class Volume private constructor(
  * @property expiresAt Timestamp when the sandbox is scheduled for automatic termination. Null means manual cleanup mode.
  * @property createdAt Timestamp when the sandbox was created
  * @property image Image specification used to create this sandbox
+ * @property platform Effective platform used for sandbox provisioning
  * @property metadata Custom metadata attached to the sandbox
  */
 class SandboxInfo(
@@ -621,7 +721,9 @@ class SandboxInfo(
     val entrypoint: List<String>,
     val expiresAt: OffsetDateTime?,
     val createdAt: OffsetDateTime,
-    val image: SandboxImageSpec,
+    val image: SandboxImageSpec? = null,
+    val snapshotId: String? = null,
+    val platform: PlatformSpec? = null,
     val metadata: Map<String, String>? = null,
 )
 
@@ -644,9 +746,79 @@ class SandboxStatus(
  * Response returned when a sandbox is created.
  *
  * @property id Unique identifier of the newly created sandbox
+ * @property platform Effective platform used for sandbox provisioning
  */
 class SandboxCreateResponse(
     val id: String,
+    val platform: PlatformSpec? = null,
+)
+
+class SnapshotStatus(
+    val state: String,
+    val reason: String?,
+    val message: String?,
+    val lastTransitionAt: OffsetDateTime?,
+)
+
+class SnapshotInfo(
+    val id: String,
+    val sandboxId: String,
+    val name: String? = null,
+    val status: SnapshotStatus,
+    val createdAt: OffsetDateTime,
+)
+
+class SnapshotFilter private constructor(
+    val sandboxId: String?,
+    val states: List<String>?,
+    val pageSize: Int?,
+    val page: Int?,
+) {
+    companion object {
+        @JvmStatic
+        fun builder(): Builder = Builder()
+    }
+
+    class Builder {
+        private var sandboxId: String? = null
+        private var states: List<String>? = null
+        private var pageSize: Int? = null
+        private var page: Int? = null
+
+        fun sandboxId(sandboxId: String): Builder {
+            this.sandboxId = sandboxId
+            return this
+        }
+
+        fun states(states: List<String>): Builder {
+            this.states = states
+            return this
+        }
+
+        fun states(vararg states: String): Builder {
+            this.states = states.toList()
+            return this
+        }
+
+        fun pageSize(pageSize: Int): Builder {
+            require(pageSize > 0) { "Page size must be positive" }
+            this.pageSize = pageSize
+            return this
+        }
+
+        fun page(page: Int): Builder {
+            require(page > 0) { "Page must be positive" }
+            this.page = page
+            return this
+        }
+
+        fun build(): SnapshotFilter = SnapshotFilter(sandboxId, states, pageSize, page)
+    }
+}
+
+class PagedSnapshotInfos(
+    val snapshotInfos: List<SnapshotInfo>,
+    val pagination: PaginationInfo,
 )
 
 /**

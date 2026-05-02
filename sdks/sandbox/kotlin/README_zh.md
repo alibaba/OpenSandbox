@@ -232,12 +232,14 @@ SandboxPool pool = SandboxPool.builder()
     .poolName("demo-pool")
     .ownerId("worker-1")
     .maxIdle(3)
+    .warmupReadyTimeout(Duration.ofSeconds(45))
     .stateStore(new InMemoryPoolStateStore()) // 单机实现
     .connectionConfig(config)
     .creationSpec(
         PoolCreationSpec.builder()
             .image("ubuntu:22.04")
             .entrypoint(java.util.List.of("tail", "-f", "/dev/null"))
+            .extension("storage.id", "dataset-001")
             .build()
     )
     .build();
@@ -258,6 +260,7 @@ pool.shutdown(true);
 - 在 `DRAINING` / `STOPPED` 状态，`acquire()` 会抛出 `PoolNotRunningException`。
 - `ownerId` 表示主锁持有者身份（节点/进程标识），不是池子标识；
   如果不传，SDK 会自动生成基于 UUID 的默认值。
+- 如果你需要在 warmup 成功后、`putIdle` 之前对沙箱做预处理，可以使用 `warmupSandboxPreparer(...)`。
 
 
 > 在分布式部署场景下，需要由业务方自行提供 `PoolStateStore` 实现，并保证其满足分布式语义：原子 `tryTakeIdle`、`put/remove` 幂等、主锁所有权与续约、不同 `poolName` 隔离、以及计数一致性。

@@ -26,6 +26,21 @@ function createSandboxesStub() {
     async renewSandboxExpiration(sandboxId, body) {
       calls.push({ method: "renewSandboxExpiration", args: [sandboxId, body] });
     },
+    async createSnapshot(sandboxId, body) {
+      calls.push({ method: "createSnapshot", args: [sandboxId, body] });
+      return { id: "snap-1", sandboxId, status: { state: "Creating" }, createdAt: new Date() };
+    },
+    async getSnapshot(snapshotId) {
+      calls.push({ method: "getSnapshot", args: [snapshotId] });
+      return { id: snapshotId };
+    },
+    async listSnapshots(filter) {
+      calls.push({ method: "listSnapshots", args: [filter] });
+      return { items: [{ id: "snap-1" }] };
+    },
+    async deleteSnapshot(snapshotId) {
+      calls.push({ method: "deleteSnapshot", args: [snapshotId] });
+    },
   };
   return { sandboxes, calls };
 }
@@ -63,6 +78,13 @@ test("SandboxManager delegates lifecycle operations and closes its transport", a
   await manager.resumeSandbox("sbx-42");
   await manager.killSandbox("sbx-42");
   await manager.renewSandbox("sbx-42", 30);
+  const snapshot = await manager.createSnapshot("sbx-42", { name: "before-upgrade" });
+  assert.equal(snapshot.id, "snap-1");
+  const snapshots = await manager.listSnapshots({ sandboxId: "sbx-42", states: ["Ready"] });
+  assert.equal(snapshots.items[0].id, "snap-1");
+  const loadedSnapshot = await manager.getSnapshot("snap-1");
+  assert.equal(loadedSnapshot.id, "snap-1");
+  await manager.deleteSnapshot("snap-1");
   await manager.close();
 
   assert.deepEqual(
@@ -74,6 +96,10 @@ test("SandboxManager delegates lifecycle operations and closes its transport", a
       "resumeSandbox",
       "deleteSandbox",
       "renewSandboxExpiration",
+      "createSnapshot",
+      "listSnapshots",
+      "getSnapshot",
+      "deleteSnapshot",
     ],
   );
   assert.deepEqual(calls[0].args[0], {
@@ -85,5 +111,9 @@ test("SandboxManager delegates lifecycle operations and closes its transport", a
   assert.equal(calls[5].args[0], "sbx-42");
   assert.ok(typeof calls[5].args[1].expiresAt === "string");
   assert.ok(Number.isFinite(Date.parse(calls[5].args[1].expiresAt)));
+  assert.deepEqual(calls[6].args, ["sbx-42", { name: "before-upgrade" }]);
+  assert.deepEqual(calls[7].args[0], { sandboxId: "sbx-42", states: ["Ready"] });
+  assert.equal(calls[8].args[0], "snap-1");
+  assert.equal(calls[9].args[0], "snap-1");
   assert.equal(closeCalls, 1);
 });

@@ -67,7 +67,9 @@ func (c *Controller) runSQL(ctx context.Context, request *ExecuteCodeRequest) er
 func (c *Controller) executeSelectSQLQuery(ctx context.Context, request *ExecuteCodeRequest) error {
 	startAt := time.Now()
 
-	rows, err := c.db.QueryContext(ctx, request.Code)
+	// The SQL runtime intentionally executes the user's submitted SQL program
+	// against the sandbox-local database; no trusted query template is composed here.
+	rows, err := c.db.QueryContext(ctx, request.Code) // lgtm[go/sql-injection]
 	if err != nil {
 		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBQueryError", EValue: err.Error()})
 		return nil
@@ -131,7 +133,9 @@ func (c *Controller) executeSelectSQLQuery(ctx context.Context, request *Execute
 func (c *Controller) executeUpdateSQLQuery(ctx context.Context, request *ExecuteCodeRequest) error {
 	startAt := time.Now()
 
-	result, err := c.db.ExecContext(ctx, request.Code)
+	// The SQL runtime intentionally executes the user's submitted SQL program
+	// against the sandbox-local database; no trusted query template is composed here.
+	result, err := c.db.ExecContext(ctx, request.Code) // lgtm[go/sql-injection]
 	if err != nil {
 		request.Hooks.OnExecuteError(&execute.ErrorOutput{EName: "DBExecError", EValue: err.Error()})
 		return err

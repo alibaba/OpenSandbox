@@ -15,12 +15,13 @@
 package main
 
 import (
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,17 +62,18 @@ func TestAllowIPsForNft_FiltersInvalid(t *testing.T) {
 func TestAllowIPsForNft_Cap(t *testing.T) {
 	dir := t.TempDir()
 	resolv := filepath.Join(dir, "resolv.conf")
-	content := "nameserver 10.0.0.1\nnameserver 10.0.0.2\nnameserver 10.0.0.3\nnameserver 10.0.0.4\n"
+	var lines []string
+	for i := 1; i <= 11; i++ {
+		lines = append(lines, fmt.Sprintf("nameserver 10.0.0.%d", i))
+	}
+	content := strings.Join(lines, "\n") + "\n"
 	require.NoError(t, os.WriteFile(resolv, []byte(content), 0644))
-	old := os.Getenv(constants.EnvMaxNameservers)
-	defer os.Setenv(constants.EnvMaxNameservers, old)
-	os.Setenv(constants.EnvMaxNameservers, "2")
 
 	ips := AllowIPsForNft(resolv)
-	// 127.0.0.1 + 2 nameservers (cap)
-	require.Len(t, ips, 3, "expected 3 IPs (127.0.0.1 + 2 capped)")
+	// 127.0.0.1 + first 10 nameservers (fixed cap)
+	require.Len(t, ips, 11, "expected 11 IPs (127.0.0.1 + 10 from resolv)")
 	require.Equal(t, netip.MustParseAddr("10.0.0.1"), ips[1], "expected first nameserver to be 10.0.0.1")
-	require.Equal(t, netip.MustParseAddr("10.0.0.2"), ips[2], "expected second nameserver to be 10.0.0.2")
+	require.Equal(t, netip.MustParseAddr("10.0.0.10"), ips[10], "expected tenth nameserver to be 10.0.0.10")
 }
 
 func TestIsValidNameserverIP(t *testing.T) {
@@ -94,29 +96,5 @@ func TestIsValidNameserverIP(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("isValidNameserverIP(%s) = %v, want %v", tt.ip, got, tt.want)
 		}
-	}
-}
-
-func TestMaxNameserversFromEnv(t *testing.T) {
-	old := os.Getenv(constants.EnvMaxNameservers)
-	defer os.Setenv(constants.EnvMaxNameservers, old)
-
-	for _, s := range []string{"", "x", "-1"} {
-		os.Setenv(constants.EnvMaxNameservers, s)
-		if got := maxNameserversFromEnv(); got != constants.DefaultMaxNameservers {
-			t.Errorf("maxNameserversFromEnv(%q) = %d, want default %d", s, got, constants.DefaultMaxNameservers)
-		}
-	}
-	os.Setenv(constants.EnvMaxNameservers, "0")
-	if got := maxNameserversFromEnv(); got != 0 {
-		t.Errorf("maxNameserversFromEnv(0) = %d, want 0", got)
-	}
-	os.Setenv(constants.EnvMaxNameservers, "5")
-	if got := maxNameserversFromEnv(); got != 5 {
-		t.Errorf("maxNameserversFromEnv(5) = %d, want 5", got)
-	}
-	os.Setenv(constants.EnvMaxNameservers, "99")
-	if got := maxNameserversFromEnv(); got != 10 {
-		t.Errorf("maxNameserversFromEnv(99) = %d, want 10 (capped)", got)
 	}
 }

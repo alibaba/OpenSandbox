@@ -21,14 +21,15 @@ helpers to access the parsed settings throughout the application.
 
 from __future__ import annotations
 
+import base64
 import ipaddress
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional
+from typing import Any, ClassVar, Dict, Literal, Optional
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 try:  # Python 3.11+
     import tomllib  # type: ignore[attr-defined]
@@ -40,7 +41,7 @@ logger = logging.getLogger(__name__)
 CONFIG_ENV_VAR = "SANDBOX_CONFIG_PATH"
 DEFAULT_CONFIG_PATH = Path.home() / ".sandbox.toml"
 
-_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
+_HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?:\.(?!-)[A-Za-z0-9-]{1,63})*$")
 _WILDCARD_DOMAIN_RE = re.compile(r"^\*\.(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
 _IPV4_WITH_PORT_RE = re.compile(r"^(?P<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d{1,5}))?$")
 
@@ -79,8 +80,21 @@ def _is_valid_ip_or_ip_port(address: str) -> bool:
     return 1 <= port <= 65535
 
 
-def _is_valid_domain(host: str) -> bool:
-    return bool(_DOMAIN_RE.match(host))
+def _is_valid_hostname(address: str) -> bool:
+    host = address
+    port_str: Optional[str] = None
+
+    if ":" in address:
+        host, _, port_str = address.rpartition(":")
+        if not host or not port_str:
+            return False
+        if not port_str.isdigit():
+            return False
+        port = int(port_str)
+        if not (1 <= port <= 65535):
+            return False
+
+    return bool(_HOSTNAME_RE.match(host))
 
 
 def _is_wildcard_domain(host: str) -> bool:
@@ -152,6 +166,115 @@ class RenewIntentConfig(BaseModel):
     )
 
 
+_KEY_ID_RE = re.compile(r"^[0-9a-z]$")
+
+
+def _try_decode_base64(s: str) -> bytes | None:
+    """Accept both padded and unpadded base64."""
+    try:
+        return base64.b64decode(s, validate=True)
+    except Exception:
+        pass
+    try:
+        padded = s + "=" * ((4 - len(s) % 4) % 4)
+        return base64.b64decode(padded, validate=True)
+    except Exception:
+        return None
+
+
+class SecureAccessKey(BaseModel):
+    """A signing key entry for OSEP-0011 signed route verification."""
+
+    key_id: str = Field(
+        ...,
+        min_length=1,
+        max_length=1,
+        description="Key identifier, exactly one character in ``[0-9a-z]``.",
+    )
+    key: str = Field(
+        ...,
+        min_length=1,
+        description="Base64-encoded signing key secret bytes.",
+    )
+
+    @field_validator("key_id")
+    @classmethod
+    def validate_key_id_char(cls, v: str) -> str:
+        if not _KEY_ID_RE.match(v):
+            raise ValueError(
+                f"key_id must be exactly one character [0-9a-z], got {v!r}"
+            )
+        return v
+
+    @field_validator("key")
+    @classmethod
+    def validate_key_is_base64(cls, v: str) -> str:
+        decoded = _try_decode_base64(v)
+        if decoded is None:
+            raise ValueError(f"key is not valid base64: {v!r}")
+        if not decoded:
+            raise ValueError("key must decode to at least 1 byte")
+        return v
+
+    def get_secret_bytes(self) -> bytes:
+        decoded = _try_decode_base64(self.key)
+        assert decoded is not None, "key was validated at construction"
+        return decoded
+
+
+class SecureAccessConfig(BaseModel):
+    """OSEP-0011 secure access signing configuration."""
+
+    active_key: str = Field(
+        ...,
+        min_length=1,
+        max_length=1,
+        description=(
+            "Identifier of the active signing key. Must reference a ``key_id`` "
+            "present in ``keys``. Exactly one character ``[0-9a-z]``."
+        ),
+    )
+    keys: list[SecureAccessKey] = Field(
+        ...,
+        min_length=1,
+        description="List of signing keys available for route signing and verification.",
+    )
+
+    @field_validator("active_key")
+    @classmethod
+    def validate_active_key_char(cls, v: str) -> str:
+        if not _KEY_ID_RE.match(v):
+            raise ValueError(
+                f"active_key must be exactly one character [0-9a-z], got {v!r}"
+            )
+        return v
+
+    @model_validator(mode="after")
+    def ensure_active_key_exists(self) -> "SecureAccessConfig":
+        seen = set()
+        for k in self.keys:
+            if k.key_id in seen:
+                raise ValueError(
+                    f"duplicate secure_access key_id {k.key_id!r}; "
+                    "each key_id must be unique"
+                )
+            seen.add(k.key_id)
+        if self.active_key not in seen:
+            raise ValueError(
+                f"active_key {self.active_key!r} not found in secure_access.keys; "
+                f"available keys: {sorted(seen)}"
+            )
+        return self
+
+    def get_active_secret_bytes(self) -> bytes:
+        for k in self.keys:
+            if k.key_id == self.active_key:
+                return k.get_secret_bytes()
+        raise RuntimeError(
+            f"active_key {self.active_key!r} not in keys list"
+        )
+
+
 class GatewayRouteModeConfig(BaseModel):
     """Routing strategy for gateway ingress exposure."""
 
@@ -193,6 +316,15 @@ class IngressConfig(BaseModel):
         default=None,
         description="Gateway configuration required when mode = 'gateway'.",
     )
+    secure_access: Optional[SecureAccessConfig] = Field(
+        default=None,
+        description=(
+            "OSEP-0011 secure access signing configuration. "
+            "When set, the server can issue signed route tokens and static "
+            "SecureAccessTokens for sandbox endpoints. "
+            "Requires ingress.mode = 'gateway'."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_ingress_mode(self) -> "IngressConfig":
@@ -200,6 +332,11 @@ class IngressConfig(BaseModel):
             raise ValueError("gateway block must be provided when ingress.mode = 'gateway'.")
         if self.mode == INGRESS_MODE_DIRECT and self.gateway is not None:
             raise ValueError("gateway block must be omitted unless ingress.mode = 'gateway'.")
+
+        if self.secure_access is not None and self.mode != INGRESS_MODE_GATEWAY:
+            raise ValueError(
+                "secure_access block requires ingress.mode = 'gateway'."
+            )
 
         if self.mode == INGRESS_MODE_GATEWAY and self.gateway:
             route_mode = self.gateway.route.mode
@@ -219,11 +356,77 @@ class IngressConfig(BaseModel):
                     raise ValueError(
                         "ingress.gateway.address must not contain wildcard when gateway.route.mode is not wildcard."
                     )
-                if not (_is_valid_domain(hostport) or _is_valid_ip_or_ip_port(hostport)):
-                    raise ValueError(
-                        "ingress.gateway.address must be a valid domain, IP, or IP:port when gateway.route.mode is not wildcard."
-                    )
+                if route_mode == GATEWAY_ROUTE_MODE_HEADER:
+                    if not (_is_valid_hostname(hostport) or _is_valid_ip_or_ip_port(hostport)):
+                        raise ValueError(
+                            "ingress.gateway.address must be a valid hostname, hostname:port, IP, or IP:port "
+                            "when gateway.route.mode is header."
+                        )
+                elif route_mode == GATEWAY_ROUTE_MODE_URI:
+                    if not hostport.strip():
+                        raise ValueError(
+                            "ingress.gateway.address must not be empty when gateway.route.mode is uri."
+                        )
         return self
+
+
+class LogConfig(BaseModel):
+    """Logging configuration."""
+
+    level: str = Field(
+        default="INFO",
+        description="Python logging level for the server process.",
+        min_length=3,
+    )
+    file_enabled: bool = Field(
+        default=False,
+        description=(
+            "When true, logs are written to rotating files instead of stdout. "
+            "Uses default paths (/var/log/opensandbox/) unless file_path/access_file_path are set."
+        ),
+    )
+    file_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to the main log file. When file_enabled=true and this is unset, "
+            "defaults to ~/logs/opensandbox/server.log."
+        ),
+    )
+    access_file_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to the HTTP access log file. When file_enabled=true, access logs are written "
+            "to a separate file by default (~/logs/opensandbox/access.log). Set this to override "
+            "the path. Example: '~/logs/opensandbox/access.log'."
+        ),
+    )
+    file_max_bytes: int = Field(
+        default=100 * 1024 * 1024,  # 100MB
+        ge=1,
+        description="Maximum size of each log file in bytes before rotation (default: 100MB).",
+    )
+    file_backup_count: int = Field(
+        default=5,
+        ge=0,
+        description="Number of backup log files to keep after rotation (default: 5).",
+    )
+
+    # Default paths when file_enabled=true and user paths are not set.
+    # Uses ~/logs/opensandbox/ which is writable for non-root users.
+    DEFAULT_FILE_PATH: ClassVar[str] = str(Path.home() / "logs" / "opensandbox" / "server.log")
+    DEFAULT_ACCESS_FILE_PATH: ClassVar[str] = str(Path.home() / "logs" / "opensandbox" / "access.log")
+
+    def resolved_file_path(self) -> Optional[str]:
+        """Return the effective file path, using default if file_enabled and not overridden."""
+        if not self.file_enabled:
+            return None
+        return self.file_path or self.DEFAULT_FILE_PATH
+
+    def resolved_access_file_path(self) -> Optional[str]:
+        """Return the effective access file path (defaults to separate file when file_enabled)."""
+        if not self.file_enabled:
+            return None
+        return self.access_file_path or self.DEFAULT_ACCESS_FILE_PATH
 
 
 class ServerConfig(BaseModel):
@@ -240,10 +443,13 @@ class ServerConfig(BaseModel):
         le=65535,
         description="Port exposed by the lifecycle API server.",
     )
-    log_level: str = Field(
-        default="INFO",
-        description="Python logging level for the server process.",
-        min_length=3,
+    timeout_keep_alive: int = Field(
+        default=30,
+        ge=1,
+        description=(
+            "Idle keep-alive timeout in seconds passed to uvicorn. "
+            "Connections idle longer than this may be closed by the server."
+        ),
     )
     api_key: Optional[str] = Field(
         default=None,
@@ -357,6 +563,14 @@ class KubernetesRuntimeConfig(BaseModel):
             "If unset, no resource constraints are applied."
         ),
     )
+    image_pull_policy: Optional[str] = Field(
+        default="IfNotPresent",
+        description=(
+            "Image pull policy for sandbox containers. "
+            "Values: Always, IfNotPresent, Never. "
+            "Can be overridden per-sandbox via image.pull_policy in create request."
+        ),
+    )
 
 
 class ExecdInitResources(BaseModel):
@@ -396,8 +610,15 @@ class StorageConfig(BaseModel):
         default_factory=list,
         description=(
             "Allowlist of host path prefixes permitted for host bind mounts. "
-            "If empty, all host paths are allowed (not recommended for production). "
+            "If empty, host bind mounts are rejected. "
             "Each entry must be an absolute path (e.g., '/data/opensandbox')."
+        ),
+    )
+    volume_default_size: str = Field(
+        default="1Gi",
+        description=(
+            "Default storage size for auto-created PVCs when the caller does "
+            "not specify a size in the PVC provisioning hints."
         ),
     )
     ossfs_mount_root: str = Field(
@@ -409,6 +630,7 @@ class StorageConfig(BaseModel):
         ),
     )
 
+DEFAULT_EGRESS_DISABLE_IPV6 = True
 
 class EgressConfig(BaseModel):
     """Egress sidecar configuration."""
@@ -424,6 +646,14 @@ class EgressConfig(BaseModel):
     ] = Field(
         default=EGRESS_MODE_DNS,
         description="Egress enforcement passed to the sidecar as OPENSANDBOX_EGRESS_MODE (dns or dns+nft).",
+    )
+    disable_ipv6: bool = Field(
+        default=DEFAULT_EGRESS_DISABLE_IPV6,
+        description=(
+            "Default true: egress IPv6 support is incomplete, especially on Kubernetes runtime. "
+            "Set false only if you intentionally leave IPv6 enabled in the sandbox netns "
+            "(e.g. IPv4-only CNI or experimenting with IPv6 egress despite gaps)."
+        ),
     )
 
 
@@ -555,10 +785,28 @@ class DockerConfig(BaseModel):
     )
 
 
+class StoreConfig(BaseModel):
+    """Persistence backend for server-managed server resources."""
+
+    type: Literal["sqlite"] = Field(
+        default="sqlite",
+        description="Server persistence backend type. SQLite is the default local persistent backend.",
+    )
+    path: str = Field(
+        default=str(Path.home() / ".opensandbox" / "opensandbox.db"),
+        description="Filesystem path to the SQLite database used for server metadata persistence.",
+        min_length=1,
+    )
+
+
 class AppConfig(BaseModel):
     """Root application configuration model."""
 
     server: ServerConfig = Field(default_factory=ServerConfig)
+    log: LogConfig = Field(
+        default_factory=LogConfig,
+        description="Logging configuration (level, file output, rotation).",
+    )
     renew_intent: RenewIntentConfig = Field(
         default_factory=RenewIntentConfig,
         description="Auto-renew sandbox expiration when reverse-proxy access is observed.",
@@ -569,12 +817,15 @@ class AppConfig(BaseModel):
     ingress: Optional[IngressConfig] = None
     docker: DockerConfig = Field(default_factory=DockerConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    store: StoreConfig = Field(
+        default_factory=StoreConfig,
+        description="Persistence backend configuration for server-managed resources.",
+    )
     egress: Optional[EgressConfig] = None
     secure_runtime: Optional[SecureRuntimeConfig] = Field(
         default=None,
         description="Secure container runtime configuration (gVisor, Kata, Firecracker).",
     )
-
     @model_validator(mode="after")
     def validate_runtime_blocks(self) -> "AppConfig":
         if self.runtime.type == "docker":
@@ -688,14 +939,18 @@ __all__ = [
     "RenewIntentConfig",
     "RenewIntentRedisConfig",
     "ServerConfig",
+    "LogConfig",
     "RuntimeConfig",
     "IngressConfig",
     "GatewayConfig",
     "GatewayRouteModeConfig",
+    "SecureAccessConfig",
+    "SecureAccessKey",
     "INGRESS_MODE_DIRECT",
     "INGRESS_MODE_GATEWAY",
     "DockerConfig",
     "StorageConfig",
+    "StoreConfig",
     "KubernetesRuntimeConfig",
     "EgressConfig",
     "EGRESS_MODE_DNS",

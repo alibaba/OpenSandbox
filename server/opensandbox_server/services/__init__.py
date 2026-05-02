@@ -19,9 +19,43 @@ from opensandbox_server.services.extension_service import ExtensionService, requ
 from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
 from opensandbox_server.services.factory import create_sandbox_service
 from opensandbox_server.services.sandbox_service import SandboxService
+from opensandbox_server.services.snapshot_models import (
+    SnapshotRecord,
+    SnapshotRestoreConfig,
+    SnapshotState,
+    SnapshotStatusRecord,
+)
+from opensandbox_server.services.snapshot_repository import (
+    SnapshotListQuery,
+    SnapshotListResult,
+    SnapshotRepository,
+)
+from opensandbox_server.services.snapshot_runtime import (
+    NoopSnapshotRuntime,
+    SnapshotRuntime,
+    SnapshotRuntimeStatus,
+)
+from opensandbox_server.services.snapshot_service import (
+    PersistedSnapshotService,
+    SnapshotService,
+    create_snapshot_service,
+)
 
 __all__ = [
     "SandboxService",
+    "SnapshotState",
+    "SnapshotRestoreConfig",
+    "SnapshotStatusRecord",
+    "SnapshotRecord",
+    "SnapshotRepository",
+    "SnapshotRuntime",
+    "SnapshotRuntimeStatus",
+    "NoopSnapshotRuntime",
+    "SnapshotListQuery",
+    "SnapshotListResult",
+    "SnapshotService",
+    "PersistedSnapshotService",
+    "create_snapshot_service",
     "ExtensionService",
     "require_extension_service",
     "DockerSandboxService",

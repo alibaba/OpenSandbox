@@ -96,13 +96,14 @@ var _ = BeforeSuite(func() {
 		Client:   k8sManager.GetClient(),
 		Scheme:   k8sManager.GetScheme(),
 		Recorder: k8sManager.GetEventRecorderFor("test-batch-sandbox-controller"),
-	}).SetupWithManager(k8sManager)).Should(Succeed())
+	}).SetupWithManager(k8sManager, 32)).Should(Succeed())
 	Expect((&PoolReconciler{
-		Client:    k8sManager.GetClient(),
-		Scheme:    k8sManager.GetScheme(),
-		Recorder:  k8sManager.GetEventRecorderFor("test-pool-controller"),
-		Allocator: NewDefaultAllocator(k8sManager.GetClient()),
-	}).SetupWithManager(k8sManager)).Should(Succeed())
+		Client:     k8sManager.GetClient(),
+		Scheme:     k8sManager.GetScheme(),
+		Recorder:   k8sManager.GetEventRecorderFor("test-pool-controller"),
+		Allocator:  NewDefaultAllocator(k8sManager.GetClient()),
+		RestConfig: cfg,
+	}).SetupWithManager(k8sManager, 128)).Should(Succeed())
 	// TODO more reconciler goes HERE
 
 	By("try to start manager")
@@ -120,7 +121,9 @@ func startTestManager(ctx context.Context, mgr manager.Manager) *sync.WaitGroup 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		Expect(mgr.Start(ctx)).Should(Succeed(), "failed to start manager")
+		defer GinkgoRecover()
+		err := mgr.Start(ctx)
+		Expect(err).ShouldNot(HaveOccurred(), "failed to start manager")
 	}()
 	return wg
 }

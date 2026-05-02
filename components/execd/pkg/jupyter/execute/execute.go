@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alibaba/opensandbox/internal/safego"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
@@ -90,7 +91,7 @@ func (c *Client) Connect(wsURL string) error {
 	c.registerDefaultHandlers()
 
 	// Start message receiving goroutine
-	go c.receiveMessages()
+	safego.Go(func() { c.receiveMessages() })
 
 	return nil
 }
@@ -286,7 +287,7 @@ func (c *Client) handleExecutionStatus(msg *Message, state *streamExecutionState
 		return
 	}
 	state.executeDone = true
-	go c.finalizeExecution(state, resultChan)
+	safego.Go(func() { c.finalizeExecution(state, resultChan) })
 }
 
 func (c *Client) finalizeExecution(state *streamExecutionState, resultChan chan *ExecutionResult) {
@@ -300,7 +301,7 @@ func (c *Client) finalizeExecution(state *streamExecutionState, resultChan chan 
 
 	pollInterval := execdflag.JupyterIdlePollInterval
 	if pollInterval <= 0 {
-		pollInterval = 10 * time.Millisecond
+		pollInterval = 100 * time.Millisecond
 	}
 
 	for {

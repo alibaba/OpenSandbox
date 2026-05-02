@@ -59,6 +59,24 @@ public class ImageSpec
 }
 
 /// <summary>
+/// Runtime platform constraint for sandbox provisioning.
+/// </summary>
+public class PlatformSpec
+{
+    /// <summary>
+    /// Gets or sets the target operating system.
+    /// </summary>
+    [JsonPropertyName("os")]
+    public required string Os { get; set; }
+
+    /// <summary>
+    /// Gets or sets the target CPU architecture.
+    /// </summary>
+    [JsonPropertyName("arch")]
+    public required string Arch { get; set; }
+}
+
+/// <summary>
 /// Action for a network rule.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -120,6 +138,8 @@ public class Host
 {
     /// <summary>
     /// Gets or sets the absolute host path.
+    /// Must start with '/' (Unix) or a drive letter such as 'C:\' or 'D:/'
+    /// (Windows), and be under an allowed prefix.
     /// </summary>
     [JsonPropertyName("path")]
     public required string Path { get; set; }
@@ -135,6 +155,36 @@ public class PVC
     /// </summary>
     [JsonPropertyName("claimName")]
     public required string ClaimName { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to auto-create the volume if it does not exist. Defaults to true.
+    /// </summary>
+    [JsonPropertyName("createIfNotExists")]
+    public bool? CreateIfNotExists { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether auto-created Docker volumes should be removed on sandbox deletion.
+    /// </summary>
+    [JsonPropertyName("deleteOnSandboxTermination")]
+    public bool? DeleteOnSandboxTermination { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Kubernetes StorageClass for auto-created PVCs. Ignored for Docker.
+    /// </summary>
+    [JsonPropertyName("storageClass")]
+    public string? StorageClass { get; set; }
+
+    /// <summary>
+    /// Gets or sets the storage request for auto-created PVCs (e.g. "1Gi"). Ignored for Docker.
+    /// </summary>
+    [JsonPropertyName("storage")]
+    public string? Storage { get; set; }
+
+    /// <summary>
+    /// Gets or sets access modes for auto-created PVCs (e.g. "ReadWriteOnce"). Ignored for Docker.
+    /// </summary>
+    [JsonPropertyName("accessModes")]
+    public IReadOnlyList<string>? AccessModes { get; set; }
 }
 
 /// <summary>
@@ -267,7 +317,13 @@ public class SandboxInfo
     /// Gets or sets the container image specification.
     /// </summary>
     [JsonPropertyName("image")]
-    public required ImageSpec Image { get; set; }
+    public ImageSpec? Image { get; set; }
+
+    /// <summary>
+    /// Gets or sets the snapshot identifier used to restore this sandbox.
+    /// </summary>
+    [JsonPropertyName("snapshotId")]
+    public string? SnapshotId { get; set; }
 
     /// <summary>
     /// Gets or sets the entrypoint command.
@@ -286,6 +342,12 @@ public class SandboxInfo
     /// </summary>
     [JsonPropertyName("status")]
     public required SandboxStatus Status { get; set; }
+
+    /// <summary>
+    /// Gets or sets the effective platform used for sandbox provisioning.
+    /// </summary>
+    [JsonPropertyName("platform")]
+    public PlatformSpec? Platform { get; set; }
 
     /// <summary>
     /// Gets or sets the sandbox creation time.
@@ -309,13 +371,19 @@ public class CreateSandboxRequest
     /// Gets or sets the container image specification.
     /// </summary>
     [JsonPropertyName("image")]
-    public required ImageSpec Image { get; set; }
+    public ImageSpec? Image { get; set; }
+
+    /// <summary>
+    /// Gets or sets the snapshot identifier to restore from.
+    /// </summary>
+    [JsonPropertyName("snapshotId")]
+    public string? SnapshotId { get; set; }
 
     /// <summary>
     /// Gets or sets the entrypoint command.
     /// </summary>
     [JsonPropertyName("entrypoint")]
-    public required IReadOnlyList<string> Entrypoint { get; set; }
+    public IReadOnlyList<string>? Entrypoint { get; set; }
 
     /// <summary>
     /// Gets or sets the timeout in seconds.
@@ -336,6 +404,12 @@ public class CreateSandboxRequest
     public IReadOnlyDictionary<string, string>? Env { get; set; }
 
     /// <summary>
+    /// Gets or sets whether to enable secured access for sandbox endpoints.
+    /// </summary>
+    [JsonPropertyName("secureAccess")]
+    public bool? SecureAccess { get; set; }
+
+    /// <summary>
     /// Gets or sets the custom metadata tags.
     /// </summary>
     [JsonPropertyName("metadata")]
@@ -346,6 +420,12 @@ public class CreateSandboxRequest
     /// </summary>
     [JsonPropertyName("networkPolicy")]
     public NetworkPolicy? NetworkPolicy { get; set; }
+
+    /// <summary>
+    /// Gets or sets an optional platform constraint for sandbox provisioning.
+    /// </summary>
+    [JsonPropertyName("platform")]
+    public PlatformSpec? Platform { get; set; }
 
     /// <summary>
     /// Gets or sets storage volumes to mount into the sandbox.
@@ -378,6 +458,12 @@ public class CreateSandboxResponse
     public required SandboxStatus Status { get; set; }
 
     /// <summary>
+    /// Gets or sets the effective platform used for sandbox provisioning.
+    /// </summary>
+    [JsonPropertyName("platform")]
+    public PlatformSpec? Platform { get; set; }
+
+    /// <summary>
     /// Gets or sets the custom metadata tags.
     /// </summary>
     [JsonPropertyName("metadata")]
@@ -400,6 +486,54 @@ public class CreateSandboxResponse
     /// </summary>
     [JsonPropertyName("entrypoint")]
     public required IReadOnlyList<string> Entrypoint { get; set; }
+}
+
+/// <summary>
+/// Status of a snapshot.
+/// </summary>
+public class SnapshotStatus
+{
+    [JsonPropertyName("state")]
+    public required string State { get; set; }
+
+    [JsonPropertyName("reason")]
+    public string? Reason { get; set; }
+
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    [JsonPropertyName("lastTransitionAt")]
+    public DateTime? LastTransitionAt { get; set; }
+}
+
+/// <summary>
+/// Information about a snapshot.
+/// </summary>
+public class SnapshotInfo
+{
+    [JsonPropertyName("id")]
+    public required string Id { get; set; }
+
+    [JsonPropertyName("sandboxId")]
+    public required string SandboxId { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("status")]
+    public required SnapshotStatus Status { get; set; }
+
+    [JsonPropertyName("createdAt")]
+    public required DateTime CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Request to create a snapshot.
+/// </summary>
+public class CreateSnapshotRequest
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
 }
 
 /// <summary>
@@ -479,6 +613,29 @@ public class ListSandboxesParams
     /// <summary>
     /// Gets or sets the page size.
     /// </summary>
+    public int? PageSize { get; set; }
+}
+
+/// <summary>
+/// Response from listing snapshots.
+/// </summary>
+public class ListSnapshotsResponse
+{
+    [JsonPropertyName("items")]
+    public required IReadOnlyList<SnapshotInfo> Items { get; set; }
+
+    [JsonPropertyName("pagination")]
+    public PaginationInfo? Pagination { get; set; }
+}
+
+/// <summary>
+/// Parameters for listing snapshots.
+/// </summary>
+public class ListSnapshotsParams
+{
+    public string? SandboxId { get; set; }
+    public IReadOnlyList<string>? States { get; set; }
+    public int? Page { get; set; }
     public int? PageSize { get; set; }
 }
 

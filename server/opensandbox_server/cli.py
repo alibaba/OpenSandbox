@@ -292,6 +292,7 @@ def main() -> None:
         port=server_main.app_config.server.port,
         reload=args.reload,
         log_config=server_main._log_config,
+        timeout_keep_alive=server_main.app_config.server.timeout_keep_alive,
     )
 
 

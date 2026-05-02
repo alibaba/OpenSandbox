@@ -159,7 +159,7 @@ logs.Debug("received event: type=%s", eventType)
 Always use `safego.Go` to prevent panics:
 
 ```go
-import "github.com/alibaba/opensandbox/execd/pkg/util/safego"
+import "github.com/alibaba/opensandbox/internal/safego"
 
 safego.Go(func() {
     processInBackground()

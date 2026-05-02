@@ -54,12 +54,14 @@ This guide provides comprehensive information for developers working on OpenSand
    [server]
    host = "0.0.0.0"
    port = 8080
-   log_level = "DEBUG"
    api_key = "your-secret-api-key-change-this"
+
+   [log]
+   level = "DEBUG"
 
    [runtime]
    type = "docker"
-   execd_image = "opensandbox/execd:v1.0.9"
+   execd_image = "opensandbox/execd:v1.0.14"
 
    [docker]
    network_mode = "host"
@@ -204,7 +206,7 @@ uv run pytest
 uv run pytest tests/test_docker_service.py
 
 # With coverage
-uv run pytest --cov=opensandbox_server --cov-report=html
+uv run pytest --cov=opensandbox_server --cov-report=term --cov-fail-under=80
 ```
 
 ### Writing Tests
@@ -296,8 +298,8 @@ def get_sandbox(self, sandbox_id: str) -> Sandbox:
 ### Enable Debug Logging
 
 ```toml
-[server]
-log_level = "DEBUG"
+[log]
+level = "DEBUG"
 ```
 
 ### Interactive Debugging

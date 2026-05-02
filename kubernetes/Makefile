@@ -54,6 +54,8 @@ OPERATOR_SDK_VERSION ?= v1.42.0
 CONTROLLER_IMG ?= controller:dev
 # TASK_EXECUTOR_IMG defines the image for the task-executor service.
 TASK_EXECUTOR_IMG ?= task-executor:dev
+# IMAGE_COMMITTER_IMG defines the image for the image-committer service.
+IMAGE_COMMITTER_IMG ?= image-committer:dev
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -124,6 +126,7 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 KIND_CLUSTER ?= sandbox-k8s-test-e2e
 KIND_K8S_VERSION ?= v1.22.4
 GINKGO_ARGS ?=
+E2E_TIMEOUT ?= 30m
 
 .PHONY: install-kind
 install-kind: ## Install Kind using go install if not already installed
@@ -145,12 +148,24 @@ setup-test-e2e: install-kind ## Set up a Kind cluster for e2e tests if it does n
 			$(KIND) create cluster --name $(KIND_CLUSTER) --image kindest/node:$(KIND_K8S_VERSION) ;; \
 	esac
 
+.PHONY: test-e2e-pause-resume
+test-e2e-pause-resume: setup-test-e2e manifests generate fmt vet 
+	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \
+		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -ginkgo.focus="PauseResume" -timeout $(E2E_TIMEOUT) $(GINKGO_ARGS)
+	$(MAKE) cleanup-test-e2e
+
+.PHONY: test-e2e-main
+test-e2e-main: setup-test-e2e manifests generate fmt vet 
+	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \
+		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(GINKGO_ARGS)
+	$(MAKE) cleanup-test-e2e
+
 .PHONY: test-e2e
 test-e2e: setup-test-e2e manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind. Use GINKGO_ARGS to pass additional arguments.
 	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \
-		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v $(GINKGO_ARGS)
+		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e/ -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(GINKGO_ARGS)
 	CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG) \
-		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e_task/ -v -ginkgo.v $(GINKGO_ARGS)
+		KIND_CLUSTER=$(KIND_CLUSTER) go test ./test/e2e_task/ -v -ginkgo.v -timeout $(E2E_TIMEOUT) $(GINKGO_ARGS)
 	$(MAKE) cleanup-test-e2e
 	$(MAKE) test-gvisor CONTROLLER_IMG=$(CONTROLLER_IMG) TASK_EXECUTOR_IMG=$(TASK_EXECUTOR_IMG)
 	$(MAKE) cleanup-gvisor
@@ -239,17 +254,21 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 ##@ Build
 
+PROJECT_GOFLAGS := -trimpath -buildvcs=false
+GO_BUILD_FLAGS := $(strip $(GOFLAGS) $(PROJECT_GOFLAGS))
+GO_LDFLAGS := $(strip $(LDFLAGS) -buildid= -B none)
+
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/controller/main.go
+	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o bin/manager ./cmd/controller
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/controller/main.go
+	go run ./cmd/controller
 
 .PHONY: task-executor-build
 task-executor-build: ## Build task-executor binary.
-	go build -o bin/task-executor ./cmd/task-executor
+	go build $(GO_BUILD_FLAGS) -ldflags "$(GO_LDFLAGS)" -o bin/task-executor ./cmd/task-executor
 
 .PHONY: task-executor-run
 task-executor-run: ## Run task-executor from your host.
@@ -266,11 +285,19 @@ docker-build: docker-build-controller
 
 .PHONY: docker-build-controller
 docker-build-controller: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build $(DOCKER_BUILD_ARGS) --build-arg PACKAGE=cmd/controller/main.go -t ${CONTROLLER_IMG} .
+	$(CONTAINER_TOOL) build $(DOCKER_BUILD_ARGS) --build-arg PACKAGE=./cmd/controller -t ${CONTROLLER_IMG} .
 
 .PHONY: docker-build-task-executor
 docker-build-task-executor: ## Build docker image with task-executor.
 	$(CONTAINER_TOOL) build $(DOCKER_BUILD_ARGS) --build-arg PACKAGE=cmd/task-executor/main.go --build-arg USERID=0 -t ${TASK_EXECUTOR_IMG} .
+
+.PHONY: docker-build-image-committer
+docker-build-image-committer: ## Build docker image for image commit operations.
+	$(CONTAINER_TOOL) build $(DOCKER_BUILD_ARGS) -f Dockerfile.image-committer -t ${IMAGE_COMMITTER_IMG} .
+
+.PHONY: docker-push-image-committer
+docker-push-image-committer: ## Push docker image for image-committer.
+	$(CONTAINER_TOOL) push ${IMAGE_COMMITTER_IMG}
 
 .PHONY: docker-push
 # docker-push: ## Push docker image with the manager.

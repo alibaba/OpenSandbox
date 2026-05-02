@@ -21,7 +21,7 @@ dotnet add package Alibaba.OpenSandbox.CodeInterpreter
 ### PackageReference
 
 ```xml
-<PackageReference Include="Alibaba.OpenSandbox.CodeInterpreter" Version="0.1.0" />
+<PackageReference Include="Alibaba.OpenSandbox.CodeInterpreter" Version="0.1.1" />
 ```
 
 ## 快速开始

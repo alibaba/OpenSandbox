@@ -21,7 +21,6 @@ enforce the same preconditions before performing runtime-specific work.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
@@ -31,7 +30,7 @@ import re
 from opensandbox_server.services.constants import RESERVED_LABEL_PREFIX, SandboxErrorCodes
 
 if TYPE_CHECKING:
-    from opensandbox_server.api.schema import NetworkPolicy, OSSFS, Volume
+    from opensandbox_server.api.schema import NetworkPolicy, OSSFS, PlatformSpec, Volume
     from opensandbox_server.config import EgressConfig
 
 
@@ -56,6 +55,17 @@ DNS_LABEL_PATTERN = r"[a-z0-9]([-a-z0-9]*[a-z0-9])?"
 DNS_SUBDOMAIN_RE = re.compile(rf"^(?:{DNS_LABEL_PATTERN}\.)*{DNS_LABEL_PATTERN}$")
 LABEL_NAME_RE = re.compile(r"^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$")
 LABEL_VALUE_RE = re.compile(r"^([A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?)?$")
+HOST_PATH_RE = re.compile(r"^(/|[A-Za-z]:[\\/])")
+
+
+def _normalize_prefix_path(path: str) -> str:
+    normalized = path.replace("\\", "/")
+    # Windows drive letters are case-insensitive; canonicalize for comparisons.
+    if re.match(r"^[A-Za-z]:", normalized):
+        normalized = normalized[0].lower() + normalized[1:]
+    if len(normalized) > 1 and normalized.endswith("/"):
+        return normalized[:-1]
+    return normalized
 
 
 def _is_valid_label_key(key: str) -> bool:
@@ -94,14 +104,6 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
     if not metadata:
         return
     for key, value in metadata.items():
-        if not isinstance(key, str) or not isinstance(value, str):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail={
-                    "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
-                    "message": "Metadata keys and values must be strings.",
-                },
-            )
         if key.startswith(RESERVED_LABEL_PREFIX):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -118,7 +120,7 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
-                    "message": f"Metadata key '{key}' is not a valid Kubernetes label key.",
+                    "message": f"Metadata key '{key}' is invalid: must be either a name or a DNS-subdomain prefix and name separated by /, where the name is up to 63 characters and matches [A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?, and the optional prefix is a valid DNS subdomain up to 253 characters.",
                 },
             )
         if not _is_valid_label_value(value):
@@ -126,7 +128,7 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": SandboxErrorCodes.INVALID_METADATA_LABEL,
-                    "message": f"Metadata value '{value}' is not a valid Kubernetes label value.",
+                    "message": f"Metadata value '{value}' is invalid: must be 63 characters or less, start/end with an alphanumeric character, and contain only alphanumeric, '-', '_', or '.' characters.",
                 },
             )
 
@@ -229,6 +231,50 @@ def calculate_expiration_or_raise(created_at: datetime, timeout_seconds: int) ->
                 ),
             },
         ) from exc
+
+
+def ensure_platform_valid(platform: Optional["PlatformSpec"]) -> None:
+    """
+    Validate platform os/arch values for v1 platform contract.
+
+    Supported values in this iteration:
+    - os: linux, windows
+    - arch:
+      - linux: amd64, arm64
+      - windows: amd64, arm64
+    """
+    if platform is None:
+        return
+
+    supported_os = {"linux", "windows"}
+    supported_arch = {"amd64", "arm64"}
+    normalized_os = platform.os.strip().lower()
+    normalized_arch = platform.arch.strip().lower()
+
+    if normalized_os not in supported_os:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    f"Unsupported platform.os '{platform.os}'. "
+                    f"Supported values: {sorted(supported_os)}."
+                ),
+            },
+        )
+    if normalized_arch not in supported_arch:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    f"Unsupported platform.arch '{platform.arch}'. "
+                    f"Supported values: {sorted(supported_arch)}."
+                ),
+            },
+        )
+    platform.os = normalized_os
+    platform.arch = normalized_arch
 
 
 # Volume name must be a valid DNS label
@@ -365,20 +411,24 @@ def ensure_valid_host_path(
             },
         )
 
-    if not os.path.isabs(path):
+    if not HOST_PATH_RE.match(path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
                 "code": SandboxErrorCodes.INVALID_HOST_PATH,
-                "message": f"Host path '{path}' must be an absolute path.",
+                "message": (
+                    f"Host path '{path}' must be an absolute path starting with '/' "
+                    "or a Windows drive letter (e.g. 'C:\\' or 'D:/')."
+                ),
             },
         )
 
     # Normalize separators to forward slashes for consistent security checks.
-    # Strip the drive prefix (e.g. "C:") so that "C:/" is not mis-detected as
-    # containing "//".
-    _drive, _tail = os.path.splitdrive(path)
-    _tail_fwd = _tail.replace("\\", "/")
+    # Keep checks cross-platform by parsing drive prefixes without relying on
+    # os.path.splitdrive behavior of the host OS.
+    _path_fwd = path.replace("\\", "/")
+    _windows_drive_match = re.match(r"^[A-Za-z]:/", _path_fwd)
+    _tail_fwd = _path_fwd[2:] if _windows_drive_match else _path_fwd
 
     # Reject path traversal components
     if "/.." in _tail_fwd or _tail_fwd == "/..":
@@ -402,10 +452,12 @@ def ensure_valid_host_path(
 
     # Check against allowed prefixes if provided
     if allowed_prefixes is not None:
-        norm_path = os.path.normpath(path)
+        # Normalize separators for cross-platform prefix checks so Windows-style
+        # paths can be validated consistently even when server runs on Unix.
+        norm_path = _normalize_prefix_path(path)
         is_allowed = any(
-            norm_path == os.path.normpath(prefix)
-            or norm_path.startswith(os.path.normpath(prefix) + os.sep)
+            norm_path == _normalize_prefix_path(prefix)
+            or norm_path.startswith(_normalize_prefix_path(prefix) + "/")
             for prefix in allowed_prefixes
         )
         if not is_allowed:
@@ -640,6 +692,7 @@ __all__ = [
     "ensure_entrypoint",
     "ensure_future_expiration",
     "ensure_valid_port",
+    "ensure_platform_valid",
     "ensure_metadata_labels",
     "ensure_egress_configured",
     "ensure_valid_volume_name",

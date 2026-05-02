@@ -4,16 +4,18 @@ configs:
       [server]
       host = "0.0.0.0"
       port = 8090
-      log_level = "INFO"
+
+      [log]
+      level = "INFO"
 
       [runtime]
       type = "docker"
-      # execd_image = "opensandbox/execd:v1.0.9"
-      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.9"
+      # execd_image = "opensandbox/execd:v1.0.14"
+      execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.14"
 
       [egress]
-      image = "opensandbox/egress:v1.0.4"
-      # image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.4"
+      image = "opensandbox/egress:v1.0.10"
+      # image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.10"
 
       [docker]
       network_mode = "bridge"

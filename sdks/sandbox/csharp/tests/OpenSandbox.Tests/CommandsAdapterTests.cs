@@ -356,7 +356,7 @@ data: {"type":"error","error":{"ename":"CommandExecError","evalue":"","traceback
         var run = await adapter.RunInSessionAsync(
             "sess-1",
             "pwd",
-            new RunInSessionOptions { WorkingDirectory = "/var", Timeout = 5000 });
+            new RunInSessionOptions { WorkingDirectory = "/var", TimeoutSeconds = 5 });
 
         run.Should().NotBeNull();
         run.Logs.Stdout.Should().ContainSingle(m => m.Text == "/var");

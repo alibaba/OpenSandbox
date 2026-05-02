@@ -16,6 +16,7 @@ package model
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -47,6 +48,17 @@ func TestRunCommandRequestValidate(t *testing.T) {
 	req.TimeoutMs = 10
 	req.Command = ""
 	require.Error(t, req.Validate(), "expected validation error when command is empty")
+}
+
+func TestRunCommandRequestValidateCwd(t *testing.T) {
+	tmp := t.TempDir()
+	req := RunCommandRequest{Command: "ls", Cwd: tmp}
+	require.NoError(t, req.Validate())
+
+	req.Cwd = filepath.Join(tmp, "missing-subdir")
+	err := req.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "working directory")
 }
 
 func ptr32(v uint32) *uint32 { return &v }

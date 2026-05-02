@@ -70,6 +70,13 @@ class TestJsonOutput:
         assert data[0]["id"] == "1"
         assert data[1]["name"] == "b"
 
+    def test_success_renders_structured_json(self, capsys: pytest.CaptureFixture[str]) -> None:
+        fmt = OutputFormatter("json", color=False)
+        fmt.success("done")
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data == {"status": "ok", "message": "done"}
+
 
 # ---------------------------------------------------------------------------
 # YAML output
@@ -103,7 +110,7 @@ class TestTableOutput:
         fmt = OutputFormatter("table", color=False)
         fmt.print_dict({"host": "example.com", "port": 8080}, title="Config")
         captured = capsys.readouterr()
-        assert "example.com" in captured.out
+        assert any(cell == "example.com" for cell in captured.out.split())
         assert "8080" in captured.out
         assert "Config" in captured.out
 

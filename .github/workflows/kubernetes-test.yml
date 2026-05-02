@@ -49,6 +49,15 @@ jobs:
         with:
           go-version: '1.24.0'
 
+      - name: Check gofmt
+        working-directory: kubernetes
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "$files"
+            exit 1
+          fi
+
       - name: Run golint
         working-directory: kubernetes
         run: |

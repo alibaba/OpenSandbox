@@ -19,6 +19,7 @@ Sandbox-related data models.
 Models for sandbox creation, configuration, status, and lifecycle management.
 """
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -94,6 +95,17 @@ class SandboxImageSpec(BaseModel):
         return v
 
 
+class PlatformSpec(BaseModel):
+    """Runtime platform constraint for sandbox provisioning."""
+
+    os: Literal["linux", "windows"] = Field(
+        description="Target operating system for sandbox provisioning."
+    )
+    arch: Literal["amd64", "arm64"] = Field(
+        description="Target CPU architecture for sandbox provisioning."
+    )
+
+
 class NetworkRule(BaseModel):
     """
     Egress rule for matching network targets.
@@ -136,6 +148,9 @@ class NetworkPolicy(BaseModel):
 # Volume Models
 # ============================================================================
 
+# Matches Unix absolute paths (/…) and Windows drive-letter paths (C:\ or C:/).
+# Aligned with server-side pattern in server/opensandbox_server/api/schema.py.
+_HOST_PATH_RE = re.compile(r"^(/|[A-Za-z]:[\\/])")
 
 class Host(BaseModel):
     """
@@ -152,22 +167,65 @@ class Host(BaseModel):
     @field_validator("path")
     @classmethod
     def path_must_be_absolute(cls, v: str) -> str:
-        if not v.startswith("/"):
-            raise ValueError("Host path must be an absolute path starting with '/'")
+        if not _HOST_PATH_RE.match(v):
+            raise ValueError(
+                "Host path must be an absolute path starting with '/' "
+                "or a Windows drive letter (e.g. 'C:\\' or 'D:/')"
+            )
         return v
 
 
 class PVC(BaseModel):
     """
-    Kubernetes PersistentVolumeClaim mount backend.
+    Platform-managed named volume backend.
 
-    References an existing PVC in the same namespace as the sandbox pod.
-    Only available in Kubernetes runtime.
+    Runtime-neutral abstraction for referencing a pre-existing named volume:
+    - Kubernetes: maps to a PersistentVolumeClaim in the same namespace.
+    - Docker: maps to a Docker named volume.
     """
 
     claim_name: str = Field(
-        description="Name of the PersistentVolumeClaim in the same namespace.",
+        description=(
+            "Name of the platform volume. In Kubernetes this is the PVC name; "
+            "in Docker this is the named volume name."
+        ),
         alias="claimName",
+    )
+    create_if_not_exists: bool = Field(
+        default=True,
+        alias="createIfNotExists",
+        description="When true, auto-create the volume if it does not exist.",
+    )
+    delete_on_sandbox_termination: bool = Field(
+        default=False,
+        alias="deleteOnSandboxTermination",
+        description=(
+            "When true, auto-created Docker volume is removed on sandbox deletion. "
+            "Ignored for Kubernetes PVCs."
+        ),
+    )
+    storage_class: str | None = Field(
+        default=None,
+        alias="storageClass",
+        description=(
+            "Kubernetes StorageClass for auto-created PVCs. "
+            "Null means cluster default. Ignored for Docker."
+        ),
+    )
+    storage: str | None = Field(
+        default=None,
+        description=(
+            "Storage capacity request for auto-created PVCs (e.g. '1Gi'). "
+            "Ignored for Docker."
+        ),
+    )
+    access_modes: list[str] | None = Field(
+        default=None,
+        alias="accessModes",
+        description=(
+            "Access modes for auto-created PVCs (e.g. ['ReadWriteOnce']). "
+            "Ignored for Docker."
+        ),
     )
 
     model_config = ConfigDict(populate_by_name=True)
@@ -325,6 +383,44 @@ class SandboxStatus(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class SnapshotStatus(BaseModel):
+    """
+    Status information for a snapshot.
+    """
+
+    state: str = Field(description="Current snapshot lifecycle state")
+    reason: str | None = Field(
+        default=None, description="Short reason code for current state"
+    )
+    message: str | None = Field(
+        default=None, description="Human-readable status message"
+    )
+    last_transition_at: datetime | None = Field(
+        default=None,
+        description="Timestamp of last state transition",
+        alias="last_transition_at",
+    )
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SnapshotInfo(BaseModel):
+    """
+    Detailed information about a snapshot instance.
+    """
+
+    id: str = Field(description="Unique identifier of the snapshot")
+    sandbox_id: str = Field(
+        description="Source sandbox identifier used to create this snapshot",
+        alias="sandbox_id",
+    )
+    name: str | None = Field(default=None, description="Optional snapshot name")
+    status: SnapshotStatus = Field(description="Current status of the snapshot")
+    created_at: datetime = Field(description="Creation timestamp", alias="created_at")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class SandboxInfo(BaseModel):
     """
     Detailed information about a sandbox instance.
@@ -344,6 +440,14 @@ class SandboxInfo(BaseModel):
     image: SandboxImageSpec | None = Field(
         default=None, description="Image specification used to create sandbox"
     )
+    snapshot_id: str | None = Field(
+        default=None,
+        description="Snapshot identifier used to restore sandbox",
+        alias="snapshot_id",
+    )
+    platform: PlatformSpec | None = Field(
+        default=None, description="Effective platform used for sandbox provisioning."
+    )
     metadata: dict[str, str] | None = Field(default=None, description="Custom metadata")
 
     model_config = ConfigDict(populate_by_name=True)
@@ -355,6 +459,17 @@ class SandboxCreateResponse(BaseModel):
     """
 
     id: str = Field(description="Unique identifier of the newly created sandbox")
+    platform: PlatformSpec | None = Field(
+        default=None, description="Effective platform used for sandbox provisioning."
+    )
+
+
+class CreateSnapshotRequest(BaseModel):
+    """
+    Request returned when creating a snapshot.
+    """
+
+    name: str | None = Field(default=None, description="Optional snapshot name")
 
 
 class SandboxRenewResponse(BaseModel):
@@ -387,7 +502,7 @@ class PaginationInfo(BaseModel):
     Pagination metadata.
     """
 
-    page: int = Field(description="Current page number (0-indexed)")
+    page: int = Field(description="Current page number (1-indexed)")
     page_size: int = Field(description="Number of items per page", alias="page_size")
     total_items: int = Field(
         description="Total number of items across all pages", alias="total_items"
@@ -413,6 +528,19 @@ class PagedSandboxInfos(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class PagedSnapshotInfos(BaseModel):
+    """
+    A paginated list of snapshot information.
+    """
+
+    snapshot_infos: list[SnapshotInfo] = Field(
+        description="List of snapshot details for current page", alias="snapshot_infos"
+    )
+    pagination: PaginationInfo = Field(description="Pagination metadata")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class SandboxFilter(BaseModel):
     """
     Filter criteria for listing sandboxes.
@@ -427,7 +555,7 @@ class SandboxFilter(BaseModel):
     page_size: int | None = Field(
         default=None, description="Number of items per page", alias="page_size"
     )
-    page: int | None = Field(default=None, description="Page number (0-indexed)")
+    page: int | None = Field(default=None, description="Page number (1-indexed)")
 
     @field_validator("page_size")
     @classmethod
@@ -439,6 +567,41 @@ class SandboxFilter(BaseModel):
     @field_validator("page")
     @classmethod
     def page_must_be_non_negative(cls, v: int | None) -> int | None:
+        if v is not None and v < 0:
+            raise ValueError("Page must be non-negative")
+        return v
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class SnapshotFilter(BaseModel):
+    """
+    Filter criteria for listing snapshots.
+    """
+
+    sandbox_id: str | None = Field(
+        default=None,
+        description="Filter by source sandbox id",
+        alias="sandbox_id",
+    )
+    states: list[str] | None = Field(
+        default=None, description="Filter by snapshot states"
+    )
+    page_size: int | None = Field(
+        default=None, description="Number of items per page", alias="page_size"
+    )
+    page: int | None = Field(default=None, description="Page number (1-indexed)")
+
+    @field_validator("page_size")
+    @classmethod
+    def snapshot_page_size_must_be_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("Page size must be positive")
+        return v
+
+    @field_validator("page")
+    @classmethod
+    def snapshot_page_must_be_non_negative(cls, v: int | None) -> int | None:
         if v is not None and v < 0:
             raise ValueError("Page must be non-negative")
         return v
