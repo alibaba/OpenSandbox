@@ -55,10 +55,11 @@ func TestRunCommandRequestValidateCwd(t *testing.T) {
 	req := RunCommandRequest{Command: "ls", Cwd: tmp}
 	require.NoError(t, req.Validate())
 
+	// Cwd is not validated for existence — the runtime resolves it. Only
+	// structural constraints (non-empty command, non-negative timeout, uid/gid)
+	// are enforced at the API layer.
 	req.Cwd = filepath.Join(tmp, "missing-subdir")
-	err := req.Validate()
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "working directory")
+	require.NoError(t, req.Validate())
 }
 
 func ptr32(v uint32) *uint32 { return &v }
