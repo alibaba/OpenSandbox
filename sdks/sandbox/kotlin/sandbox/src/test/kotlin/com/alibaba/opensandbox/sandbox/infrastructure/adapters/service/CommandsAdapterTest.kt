@@ -452,7 +452,9 @@ data: {"type":"execution_complete","execution_time":100,"timestamp":167253120100
                             for (eid in startEid..(totalLines + 1)) {
                                 appendLine("""{"type":"stdout","text":"line${eid - 1}","timestamp":1672531200000,"eid":$eid}""")
                             }
-                            appendLine("""{"type":"execution_complete","execution_time":100,"timestamp":1672531201000,"eid":${totalLines + 2}}""")
+                            appendLine(
+                                """{"type":"execution_complete","execution_time":100,"timestamp":1672531201000,"eid":${totalLines + 2}}""",
+                            )
                         }
                         MockResponse()
                             .setResponseCode(200)
