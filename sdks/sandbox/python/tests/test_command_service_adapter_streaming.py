@@ -40,7 +40,7 @@ class _ErrorAfterAsyncStream(httpx.AsyncByteStream):
         try:
             chunk = next(self._chunks)
         except StopIteration:
-            raise httpx.ReadError("simulated disconnect")
+            raise httpx.ReadError("simulated disconnect") from None
         if chunk is None:
             raise httpx.ReadError("simulated disconnect")
         return chunk
