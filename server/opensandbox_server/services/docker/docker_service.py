@@ -54,7 +54,7 @@ from opensandbox_server.api.schema import (
     PlatformSpec,
 )
 from opensandbox_server.config import AppConfig, get_config
-from opensandbox_server.services.docker_diagnostics import DockerDiagnosticsMixin
+from opensandbox_server.services.docker.docker_diagnostics import DockerDiagnosticsMixin
 from opensandbox_server.services.docker.runtime import (
     DockerRuntimeMixin,
 )
@@ -65,16 +65,18 @@ from opensandbox_server.services.docker.networking import (
     DockerNetworkingMixin,
 )
 from opensandbox_server.services.docker.container_ops import DockerContainerOpsMixin
-from opensandbox_server.services.docker_port_allocator import (
+from opensandbox_server.services.docker.port_allocator import (
     allocate_port_bindings,
     normalize_port_bindings,
 )
-from opensandbox_server.services.docker_windows_profile import (
-    apply_windows_runtime_host_config_defaults,
+from opensandbox_server.services.windows_profile_common import (
     inject_windows_resource_limits_env,
     inject_windows_user_ports,
     is_windows_platform,
     validate_windows_resource_limits,
+)
+from opensandbox_server.services.docker.windows_profile import (
+    apply_windows_runtime_host_config_defaults,
     validate_windows_runtime_prerequisites,
 )
 from opensandbox_server.services.extension_service import ExtensionService
@@ -99,7 +101,7 @@ from opensandbox_server.services.helpers import (
     matches_filter,
     parse_timestamp,
 )
-from opensandbox_server.services.ossfs_mixin import OSSFSMixin
+from opensandbox_server.services.docker.ossfs_mixin import OSSFSMixin
 from opensandbox_server.services.sandbox_service import SandboxService
 from opensandbox_server.services.runtime_resolver import SecureRuntimeResolver
 from opensandbox_server.services.snapshot_restore import resolve_sandbox_image_from_request

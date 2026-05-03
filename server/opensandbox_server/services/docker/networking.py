@@ -40,7 +40,7 @@ from opensandbox_server.services.constants import (
     SANDBOX_HTTP_PORT_LABEL,
     SandboxErrorCodes,
 )
-from opensandbox_server.services.docker_port_allocator import (
+from opensandbox_server.services.docker.port_allocator import (
     normalize_container_port_spec,
     normalize_port_bindings,
 )

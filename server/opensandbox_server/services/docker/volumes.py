@@ -34,7 +34,7 @@ from opensandbox_server.services.constants import (
     SANDBOX_PLATFORM_OS_LABEL,
     SandboxErrorCodes,
 )
-from opensandbox_server.services.docker_windows_profile import WINDOWS_OEM_VOLUME_PREFIX
+from opensandbox_server.services.docker.windows_profile import WINDOWS_OEM_VOLUME_PREFIX
 from opensandbox_server.services.validators import (
     ensure_valid_host_path,
     ensure_volumes_valid,

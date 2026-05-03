@@ -55,14 +55,16 @@ from opensandbox_server.services.docker.runtime import (
     BOOTSTRAP_PATH,
 )
 
-from opensandbox_server.services.docker_port_allocator import (
+from opensandbox_server.services.docker.port_allocator import (
     normalize_container_port_spec,
 )
-from opensandbox_server.services.docker_windows_profile import (
+from opensandbox_server.services.windows_profile_common import (
+    is_windows_platform,
+)
+from opensandbox_server.services.docker.windows_profile import (
     fetch_execd_install_bat,
     fetch_execd_windows_binary,
     install_windows_oem_scripts,
-    is_windows_platform,
     normalize_bootstrap_command,
     resolve_docker_platform,
 )

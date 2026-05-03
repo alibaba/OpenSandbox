@@ -18,12 +18,14 @@ import pytest
 from fastapi import HTTPException
 
 from opensandbox_server.api.schema import PlatformSpec
-from opensandbox_server.services.docker_windows_profile import (
-    apply_windows_runtime_host_config_defaults,
+from opensandbox_server.services.windows_profile_common import (
     inject_windows_resource_limits_env,
     inject_windows_user_ports,
-    resolve_docker_platform,
     validate_windows_resource_limits,
+)
+from opensandbox_server.services.docker.windows_profile import (
+    apply_windows_runtime_host_config_defaults,
+    resolve_docker_platform,
     validate_windows_runtime_prerequisites,
 )
 
@@ -52,7 +54,7 @@ def test_apply_windows_runtime_host_config_defaults_removes_net_admin_from_cap_d
 
 
 def test_validate_windows_runtime_prerequisites_reports_missing_devices():
-    with patch("opensandbox_server.services.docker_windows_profile.os.path.exists", return_value=False):
+    with patch("opensandbox_server.services.docker.windows_profile.os.path.exists", return_value=False):
         with pytest.raises(HTTPException) as exc_info:
             validate_windows_runtime_prerequisites()
 

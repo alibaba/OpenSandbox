@@ -18,7 +18,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 import pytest
 
-from opensandbox_server.services.docker_snapshot_runtime import (
+from opensandbox_server.services.docker.snapshot_runtime import (
     DockerSnapshotRuntime,
     build_snapshot_image_ref,
 )

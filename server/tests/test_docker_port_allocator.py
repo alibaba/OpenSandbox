@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from opensandbox_server.services import docker_port_allocator
+from opensandbox_server.services.docker import port_allocator
 
 
 class _FakeSocket:
@@ -35,22 +35,22 @@ class _FakeSocket:
 def test_allocate_host_port_probes_docker_publish_address(monkeypatch) -> None:
     bound_addresses: list[tuple[str, int]] = []
 
-    monkeypatch.setattr(docker_port_allocator.random, "randint", lambda min_port, max_port: 45678)
+    monkeypatch.setattr(port_allocator.random, "randint", lambda min_port, max_port: 45678)
     monkeypatch.setattr(
-        docker_port_allocator.socket,
+        port_allocator.socket,
         "socket",
         lambda family, sock_type: _FakeSocket(bound_addresses),
     )
 
-    port = docker_port_allocator.allocate_host_port(min_port=45678, max_port=45678, attempts=1)
+    port = port_allocator.allocate_host_port(min_port=45678, max_port=45678, attempts=1)
 
     assert port == 45678
-    assert bound_addresses == [(docker_port_allocator.PORT_PROBE_HOST, 45678)]
+    assert bound_addresses == [(port_allocator.PORT_PROBE_HOST, 45678)]
 
 
 def test_allocate_port_bindings_keep_docker_publish_host(monkeypatch) -> None:
-    monkeypatch.setattr(docker_port_allocator, "allocate_host_port", lambda: 45678)
+    monkeypatch.setattr(port_allocator, "allocate_host_port", lambda: 45678)
 
-    bindings = docker_port_allocator.allocate_port_bindings(["8080"])
+    bindings = port_allocator.allocate_port_bindings(["8080"])
 
-    assert bindings == {"8080": (docker_port_allocator.DOCKER_PUBLISH_HOST, 45678)}
+    assert bindings == {"8080": (port_allocator.DOCKER_PUBLISH_HOST, 45678)}
