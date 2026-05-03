@@ -68,7 +68,7 @@ class _DisconnectInjectStream(httpx.AsyncByteStream):
         if self._chunk_count >= self._disconnect_after:
             raise httpx.ReadError("simulated disconnect for e2e test")
         try:
-            chunk = await type(self._real).__anext__(self._real)
+            chunk = await self._real.__anext__()
         except StopAsyncIteration:
             raise
         self._chunk_count += 1
