@@ -18,7 +18,7 @@ import pytest
 from fastapi import HTTPException
 
 from opensandbox_server.api.schema import PlatformSpec
-from opensandbox_server.services.windows_profile_common import (
+from opensandbox_server.services.windows_common import (
     inject_windows_resource_limits_env,
     inject_windows_user_ports,
     validate_windows_resource_limits,

@@ -33,7 +33,7 @@ from docker.errors import DockerException
 from fastapi import HTTPException, status
 
 from opensandbox_server.services.constants import SandboxErrorCodes
-from opensandbox_server.services.windows_profile_common import is_windows_platform
+from opensandbox_server.services.windows_common import is_windows_platform
 
 if TYPE_CHECKING:
     from opensandbox_server.api.schema import PlatformSpec

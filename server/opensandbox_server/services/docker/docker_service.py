@@ -69,7 +69,7 @@ from opensandbox_server.services.docker.port_allocator import (
     allocate_port_bindings,
     normalize_port_bindings,
 )
-from opensandbox_server.services.windows_profile_common import (
+from opensandbox_server.services.windows_common import (
     inject_windows_resource_limits_env,
     inject_windows_user_ports,
     is_windows_platform,

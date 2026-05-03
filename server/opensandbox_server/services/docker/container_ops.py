@@ -58,7 +58,7 @@ from opensandbox_server.services.docker.runtime import (
 from opensandbox_server.services.docker.port_allocator import (
     normalize_container_port_spec,
 )
-from opensandbox_server.services.windows_profile_common import (
+from opensandbox_server.services.windows_common import (
     is_windows_platform,
 )
 from opensandbox_server.services.docker.windows_profile import (
