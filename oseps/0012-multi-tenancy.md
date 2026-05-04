@@ -19,12 +19,13 @@ status: draft
   - [Notes/Constraints/Caveats](#notesconstraintscaveats)
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
-  - [Configuration Model](#configuration-model)
-  - [Tenant Data Model](#tenant-data-model)
-  - [auth Middleware Changes](#auth-middleware-changes)
-  - [Sandbox Service: Dynamic Namespace Resolution](#sandbox-service-dynamic-namespace-resolution)
-  - [Hot Reload via fsnotify](#hot-reload-via-fsnotify)
-  - [Kubernetes RBAC Requirements](#kubernetes-rbac-requirements)
+  - [Step 1: Tenant Data Model + Config Loading](#step-1-tenant-data-model--config-loading)
+  - [Step 2: Hot Reload via fsnotify](#step-2-hot-reload-via-fsnotify)
+  - [Step 3: Auth Middleware — Tenant-Aware Key Resolution](#step-3-auth-middleware--tenant-aware-key-resolution)
+  - [Step 4: Sandbox Service — Dynamic Namespace Resolution](#step-4-sandbox-service--dynamic-namespace-resolution)
+  - [Step 5: Startup Guards — Docker Rejection + Namespace Validation](#step-5-startup-guards--docker-rejection--namespace-validation)
+  - [Step 6: Deployment Manifests — ConfigMaps + RBAC](#step-6-deployment-manifests--configmaps--rbac)
+  - [Tenant Isolation Model (Reference)](#tenant-isolation-model-reference)
 - [Test Plan](#test-plan)
 - [Drawbacks](#drawbacks)
 - [Alternatives](#alternatives)
@@ -136,106 +137,34 @@ Request with OPEN-SANDBOX-API-KEY header
 
 ## Design Details
 
-### Configuration Model
-
-**`tenants.toml` — no changes to `server.toml`:**
-
-```toml
-# tenants.toml
-# File existence activates multi-tenant mode.
-# Delete or rename this file to revert to single-tenant mode.
-
-[[tenants]]
-name = "team-alpha"
-namespace = "opensandbox-alpha"
-api_keys = [
-    "osk-4xz...",
-    "osk-9yz...",     # second key for rotation
-]
-
-[[tenants]]
-name = "team-beta"
-namespace = "opensandbox-beta"
-api_keys = ["osk-b3t4..."]
-```
-
-**Environment variable override:**
-
-```
-SANDBOX_TENANTS_CONFIG_PATH=/etc/opensandbox/tenants.d/tenants.toml
-```
-
-**Kubernetes deployment (two ConfigMaps, separate concerns):**
-
-```yaml
-# Server infrastructure config — restart on change
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: opensandbox-server
-data:
-  server.toml: |
-    [server]
-    host = "0.0.0.0"
-    port = 8080
-    [runtime]
-    type = "kubernetes"
-    execd_image = "..."
-    # ... no api_key needed when using tenants ...
+Implementation split into 6 ordered steps. Each step lists files changed, dependencies, and verification criteria.
 
 ---
-# Tenant config — fsnotify hot reload, no restart
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: opensandbox-tenants
-data:
-  tenants.toml: |
-    [[tenants]]
-    name = "team-alpha"
-    namespace = "opensandbox-alpha"
-    api_keys = ["osk-xxx"]
 
----
-apiVersion: apps/v1
-kind: Deployment
-spec:
-  template:
-    spec:
-      containers:
-      - name: server
-        volumeMounts:
-        - name: server-config
-          mountPath: /etc/opensandbox/server.d
-        - name: tenant-config
-          mountPath: /etc/opensandbox/tenants.d
-      volumes:
-      - name: server-config
-        configMap:
-          name: opensandbox-server
-      - name: tenant-config
-        configMap:
-          name: opensandbox-tenants
-```
+### Step 1: Tenant Data Model + Config Loading
 
-### Tenant Data Model
+**Files:** `opensandbox_server/tenants/__init__.py` (new), `opensandbox_server/tenants/models.py` (new)
+
+**Depends on:** nothing (no other step blocks)
+
+**What:**
 
 ```python
-# New file: opensandbox_server/tenants/models.py
+# opensandbox_server/tenants/models.py
+
+from pydantic import BaseModel, model_validator
 
 class TenantEntry(BaseModel):
-    """A tenant with API keys and a K8s namespace."""
-    name: str                          # unique identifier, e.g. "team-alpha"
-    namespace: str                     # K8s namespace for sandbox workloads
-    api_keys: list[str]                # at least one; supports key rotation
+    name: str
+    namespace: str
+    api_keys: list[str]
 
 class TenantsConfig(BaseModel):
     entries: list[TenantEntry]
 
     @model_validator(mode="after")
     def _reject_duplicate_keys(self) -> "TenantsConfig":
-        """Reject duplicate API keys across tenants — a hard config error."""
-        seen: dict[str, str] = {}  # api_key -> tenant name
+        seen: dict[str, str] = {}
         for entry in self.entries:
             for k in entry.api_keys:
                 if k in seen:
@@ -245,144 +174,81 @@ class TenantsConfig(BaseModel):
                     )
                 seen[k] = entry.name
         return self
+```
 
-    def lookup(self, api_key: str) -> Optional[TenantEntry]:
-        """Constant-time lookup across all tenant keys."""
-        for entry in self.entries:
-            for k in entry.api_keys:
-                if secrets.compare_digest(k, api_key):
-                    return entry
+```python
+# opensandbox_server/tenants/__init__.py
+
+import os
+import tomllib
+from pathlib import Path
+from .models import TenantsConfig
+
+DEFAULT_PATH = Path.home() / ".opensandbox" / "tenants.toml"
+
+def load_tenants_config(path: Path | None = None) -> TenantsConfig | None:
+    """Return parsed config, or None if file absent (single-tenant mode)."""
+    if path is None:
+        path = Path(os.environ.get("SANDBOX_TENANTS_CONFIG_PATH", DEFAULT_PATH))
+    if not path.exists():
         return None
+    data = tomllib.loads(path.read_text())
+    return TenantsConfig(entries=[
+        {"name": t["name"], "namespace": t["namespace"], "api_keys": t["api_keys"]}
+        for t in data.get("tenants", [])
+    ])
+
+def validate_namespaces(config: TenantsConfig, k8s_client) -> list[str]:
+    """Check all tenant namespaces exist. Return list of missing namespaces."""
+    missing = []
+    for entry in config.entries:
+        try:
+            k8s_client.core_v1_api.read_namespace(entry.namespace)
+        except Exception:
+            missing.append(entry.namespace)
+    return missing
 ```
 
-### Auth Middleware Changes
+**Verification:** Unit test `TenantsConfig._reject_duplicate_keys` raises on duplicate; `load_tenants_config` returns `None` when file absent; returns `TenantsConfig` when file present.
 
-`AuthMiddleware._load_api_keys()` current behavior: returns `set[str]` from `server.api_key`.
-
-**New behavior when `tenants.toml` exists:**
-- Load `TenantsConfig` from file, build `{api_key: TenantEntry}` dict
-- Reject `server.api_key` — it is not in the tenant map
-- `dispatch()` injects `TenantEntry` into `request.state.tenant` via `ContextVar`
-
-```python
-# middleware/auth.py — key_changes
-
-def _load_api_keys(self) -> dict[str, Optional[TenantEntry]]:
-    tenants_cfg = load_tenants_config()
-    if tenants_cfg is not None:
-        # Multi-tenant mode: server.api_key is ignored.
-        # TenantsConfig model_validator already rejected duplicates.
-        return {k: e for e in tenants_cfg.entries for k in e.api_keys}
-
-    # Single-tenant mode: legacy behavior
-    key = self.config.server.api_key
-    if key and key.strip():
-        return {key: None}
-    return {}
-```
-
-### Sandbox Service: Dynamic Namespace Resolution
-
-`KubernetesSandboxService` uses `self.namespace` today. With multi-tenancy:
-
-```python
-# kubernetes_service.py — key changes
-
-def _namespace_for(self, tenant: Optional[TenantEntry]) -> str:
-    if tenant is not None:
-        return tenant.namespace
-    return self.namespace  # single-tenant fallback
-
-async def create_sandbox(self, request):
-    tenant = get_current_tenant()
-    ns = self._namespace_for(tenant)
-    labels["opensandbox.io/tenant"] = tenant.name if tenant else "default"
-    # ... use ns instead of self.namespace throughout ...
-
-def list_sandboxes(self, request):
-    tenant = get_current_tenant()
-    ns = self._namespace_for(tenant)
-    workloads = self.workload_provider.list_workloads(namespace=ns, ...)
-    # ...
-```
-
-**Docker runtime guard:**
-
-```python
-# main.py or factory.py
-
-if app_config.runtime.type == "docker" and tenants_config is not None:
-    logger.error("tenants.toml is not supported with runtime.type='docker'")
-    raise SystemExit(1)
-```
-
-### Tenant Isolation via Kubernetes Namespace
-
-The server does not enforce resource limits. Tenant isolation is provided entirely by Kubernetes namespace mechanisms:
-
-| Isolation dimension | K8s mechanism | Scope |
-|--------------------|---------------|-------|
-| Resource quota | `ResourceQuota` | Per-namespace CPU, memory, storage caps |
-| Default limits | `LimitRange` | Per-namespace default and max container resources |
-| Network policy | `NetworkPolicy` | Per-namespace ingress/egress rules |
-| Sandbox count | `count/batchsandboxes` via `ResourceQuota` | Per-namespace CR count limit |
-| RBAC | `RoleBinding` | Per-namespace API access control |
-
-Each tenant's namespace is configured independently by the cluster administrator. The server's only responsibility is placing sandbox workloads in the correct namespace. All enforcement is handled by the Kubernetes scheduler and admission controllers.
-
-Example per-namespace configuration:
-
-```yaml
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: tenant-quota
-  namespace: opensandbox-alpha
-spec:
-  hard:
-    count/batchsandboxes.sandbox.opensandbox.io: "100"
-    requests.cpu: "50"
-    requests.memory: "100Gi"
-    requests.storage: "500Gi"
 ---
-apiVersion: v1
-kind: LimitRange
-metadata:
-  name: tenant-limits
-  namespace: opensandbox-alpha
-spec:
-  limits:
-  - type: Container
-    default:
-      cpu: "2"
-      memory: "4Gi"
-    defaultRequest:
-      cpu: "100m"
-      memory: "128Mi"
-```
 
-### Hot Reload via fsnotify
+### Step 2: Hot Reload via fsnotify
+
+**Files:** `opensandbox_server/tenants/loader.py` (new)
+
+**Depends on:** Step 1 (imports models)
+
+**What:**
 
 ```python
-# New file: opensandbox_server/tenants/loader.py
+# opensandbox_server/tenants/loader.py
+
+import threading
+import tomllib
+from pathlib import Path
+from watchfiles import watch
+from .models import TenantEntry
 
 class TenantLoader:
-    """Load and watch tenants.toml for changes."""
+    """Thread-safe in-memory tenant registry. Reloads on file change."""
 
     def __init__(self, path: Path):
         self._entries: dict[str, TenantEntry] = {}
         self._lock = threading.Lock()
+        self._path = path
+        self._stop_event = threading.Event()
         if path.exists():
-            self._reload(path)
-            self._start_watcher(path)
+            self._reload()
+            self._start_watcher()
 
-    def lookup(self, api_key: str) -> Optional[TenantEntry]:
+    def lookup(self, api_key: str) -> TenantEntry | None:
         with self._lock:
             return self._entries.get(api_key)
 
-    def _reload(self, path: Path) -> None:
-        data = tomllib.loads(path.read_text())
-        new_entries = {}
+    def _reload(self) -> None:
+        data = tomllib.loads(self._path.read_text())
+        new_entries: dict[str, TenantEntry] = {}
         for raw in data.get("tenants", []):
             entry = TenantEntry(**raw)
             for k in entry.api_keys:
@@ -395,18 +261,280 @@ class TenantLoader:
         with self._lock:
             self._entries = new_entries
 
-    def _start_watcher(self, path: Path) -> None:
-        # watchfiles on parent dir for ConfigMap atomic symlink swap
-        ...
+    def _start_watcher(self) -> None:
+        """Watch parent dir for ConfigMap atomic symlink swap."""
+        parent = self._path.parent
+        def _watch():
+            for changes in watch(parent, stop_event=self._stop_event):
+                for _change_type, changed_path in changes:
+                    if Path(changed_path).resolve() == self._path.resolve():
+                        try:
+                            self._reload()
+                        except Exception:
+                            pass  # log, keep old entries
+        t = threading.Thread(target=_watch, daemon=True)
+        t.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
 ```
 
-`AuthMiddleware` holds a `TenantLoader` reference and calls `loader.lookup(api_key)` on each request. The read lock is only held for the dict access.
+**Verification:** Unit test: file deleted mid-run → entries cleared; new key added → `lookup` returns new entry immediately.
 
-### Kubernetes RBAC Requirements
+---
 
-Multi-tenancy requires the server's ServiceAccount to operate across multiple namespaces:
+### Step 3: Auth Middleware — Tenant-Aware Key Resolution
+
+**Files:** `opensandbox_server/middleware/auth.py` (modify)
+
+**Depends on:** Step 1, Step 2 (uses `TenantLoader` and `TenantsConfig`)
+
+**What:**
+
+Existing `_load_api_keys()` returns `set[str]`. Change return type to `dict[str, TenantEntry | None]`:
+
+```python
+# middleware/auth.py
+
+def __init__(self, app, config, tenant_loader=None):
+    self.app = app
+    self.config = config
+    self.tenant_loader = tenant_loader  # None in single-tenant mode
+    self._valid_api_keys: dict[str, TenantEntry | None] = self._load_api_keys()
+
+def _load_api_keys(self) -> dict[str, TenantEntry | None]:
+    if self.tenant_loader is not None:
+        # Multi-tenant: server.api_key is rejected.
+        if self.config.server.api_key:
+            raise SystemExit(
+                "server.api_key must not be set when tenants.toml is present. "
+                "Migrate the key into tenants.toml."
+            )
+        # Return empty dict — TenantLoader handles lookup at request time.
+        return {}
+
+    # Single-tenant: legacy behavior
+    key = self.config.server.api_key
+    if key and key.strip():
+        return {key: None}
+    return {}
+
+def _authenticate(self, request) -> TenantEntry | None:
+    api_key = request.headers.get("OPEN-SANDBOX-API-KEY", "")
+    if self.tenant_loader is not None:
+        return self.tenant_loader.lookup(api_key)
+    # Single-tenant: dict lookup with constant-time compare
+    for k in self._valid_api_keys:
+        if secrets.compare_digest(k, api_key):
+            return None  # None means single-tenant, no tenant context
+    return None  # auth failed
+```
+
+`dispatch()` injects tenant into request state:
+
+```python
+# In dispatch():
+tenant = self._authenticate(request)
+if tenant is None and self.tenant_loader is not None:
+    return 401 response  # multi-tenant mode: key not found
+if tenant is None and not self._valid_api_keys:
+    return 401 response  # single-tenant mode: key not found
+# tenant is None with valid _valid_api_keys = single-tenant, allow
+request.state.tenant = tenant  # TenantEntry or None
+# Set ContextVar for downstream access
+_current_tenant.set(tenant)
+```
+
+Add ContextVar for sandbox service access:
+
+```python
+# middleware/auth.py (top-level)
+
+import contextvars
+
+_current_tenant: contextvars.ContextVar[TenantEntry | None] = \
+    contextvars.ContextVar("current_tenant", default=None)
+
+def get_current_tenant() -> TenantEntry | None:
+    return _current_tenant.get()
+```
+
+**Verification:** Unit test: multi-tenant mode rejects `server.api_key` at startup; valid tenant key → request passes with `request.state.tenant` set; invalid key → 401.
+
+---
+
+### Step 4: Sandbox Service — Dynamic Namespace Resolution
+
+**Files:** `opensandbox_server/services/kubernetes_service.py` (modify)
+
+**Depends on:** Step 3 (calls `get_current_tenant()`)
+
+**What:**
+
+Replace all `self.namespace` usage with runtime-resolved namespace:
+
+```python
+# kubernetes_service.py
+
+from opensandbox_server.middleware.auth import get_current_tenant
+
+class KubernetesSandboxService:
+    def _resolve_namespace(self) -> str:
+        tenant = get_current_tenant()
+        if tenant is not None:
+            return tenant.namespace
+        return self.namespace  # config file default
+
+    def _resolve_tenant_name(self) -> str:
+        tenant = get_current_tenant()
+        return tenant.name if tenant else "default"
+
+    async def create_sandbox(self, request):
+        ns = self._resolve_namespace()
+        labels = {
+            "app.kubernetes.io/managed-by": "opensandbox",
+            "opensandbox.io/tenant": self._resolve_tenant_name(),
+        }
+        # ... use ns instead of self.namespace for all K8s API calls ...
+
+    def list_sandboxes(self, request):
+        ns = self._resolve_namespace()
+        return self.workload_provider.list_workloads(namespace=ns)
+
+    def get_sandbox(self, sandbox_id):
+        ns = self._resolve_namespace()
+        return self.workload_provider.get_workload(sandbox_id, namespace=ns)
+
+    def delete_sandbox(self, sandbox_id):
+        ns = self._resolve_namespace()
+        return self.workload_provider.delete_workload(sandbox_id, namespace=ns)
+```
+
+**Proxy route ownership check** — add before proxying:
+
+```python
+# In proxy handler:
+sandbox = sandbox_service.get_sandbox(sandbox_id)
+if sandbox is None:
+    return 404
+# If sandbox has tenant label, verify it matches request tenant
+sandbox_tenant = sandbox.labels.get("opensandbox.io/tenant")
+current_tenant = get_current_tenant()
+if current_tenant and sandbox_tenant != current_tenant.name:
+    return 404  # don't leak existence
+```
+
+**Verification:** Integration test: create with tenant A key → sandbox in ns-a with label; list with tenant B key → empty; get tenant A sandbox with tenant B key → 404.
+
+---
+
+### Step 5: Startup Guards — Docker Rejection + Namespace Validation
+
+**Files:** `opensandbox_server/main.py` or `opensandbox_server/app.py` (modify)
+
+**Depends on:** Step 1, Step 2
+
+**What:**
+
+```python
+# main.py — near startup, after config load, before server start
+
+def _validate_tenant_startup(app_config, tenants_config, tenant_loader):
+    # Guard 1: Docker + tenants.toml = error
+    if app_config.runtime.type == "docker" and tenants_config is not None:
+        raise SystemExit(
+            "tenants.toml is not supported with runtime.type='docker'. "
+            "Remove tenants.toml or switch to runtime.type='kubernetes'."
+        )
+
+    # Guard 2: All tenant namespaces must exist
+    if tenants_config is not None:
+        missing = validate_namespaces(tenants_config, k8s_client)
+        if missing:
+            raise SystemExit(
+                f"Tenant namespaces not found: {missing}. "
+                f"Create namespaces before starting the server."
+            )
+
+    # Guard 3: server.api_key must not coexist with tenants.toml
+    if tenants_config is not None and app_config.server.api_key:
+        raise SystemExit(
+            "server.api_key is set but tenants.toml is present. "
+            "Remove server.api_key from server.toml."
+        )
+```
+
+**Verification:** Unit test: Docker+tenants → `SystemExit`; missing namespace → `SystemExit` with list; `server.api_key`+tenants → `SystemExit`.
+
+---
+
+### Step 6: Deployment Manifests — ConfigMaps + RBAC
+
+**Files:** `deploy/kubernetes/*.yaml` (modify), `deploy/kubernetes/rbac.yaml` (modify)
+
+**Depends on:** Steps 1–5 complete (server code ready)
+
+**6a. Split ConfigMaps:**
 
 ```yaml
+# deploy/kubernetes/configmap-server.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-server
+data:
+  server.toml: |
+    [server]
+    host = "0.0.0.0"
+    port = 8080
+    [runtime]
+    type = "kubernetes"
+    execd_image = "opensandbox/execd:latest"
+
+---
+# deploy/kubernetes/configmap-tenants.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-tenants
+data:
+  tenants.toml: |
+    [[tenants]]
+    name = "team-alpha"
+    namespace = "opensandbox-alpha"
+    api_keys = ["osk-xxx"]
+```
+
+**6b. Deployment volume mounts:**
+
+```yaml
+# deploy/kubernetes/deployment.yaml — add to existing
+spec:
+  template:
+    spec:
+      containers:
+      - name: server
+        volumeMounts:
+        - name: server-config
+          mountPath: /etc/opensandbox/server.d
+        - name: tenant-config
+          mountPath: /etc/opensandbox/tenants.d
+        env:
+        - name: SANDBOX_TENANTS_CONFIG_PATH
+          value: /etc/opensandbox/tenants.d/tenants.toml
+      volumes:
+      - name: server-config
+        configMap:
+          name: opensandbox-server
+      - name: tenant-config
+        configMap:
+          name: opensandbox-tenants
+```
+
+**6c. RBAC upgrade — Role → ClusterRole:**
+
+```yaml
+# deploy/kubernetes/rbac.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -431,6 +559,48 @@ subjects:
   - kind: ServiceAccount
     name: opensandbox-server
     namespace: opensandbox-system
+```
+
+### Tenant Isolation Model (Reference)
+
+Server does not enforce quotas. Isolation delegated to K8s:
+
+| Isolation dimension | K8s mechanism | Scope |
+|--------------------|---------------|-------|
+| Resource quota | `ResourceQuota` | Per-ns CPU, memory, storage |
+| Default limits | `LimitRange` | Per-ns default container resources |
+| Network policy | `NetworkPolicy` | Per-ns ingress/egress |
+| Sandbox count | `count/batchsandboxes` via `ResourceQuota` | Per-ns CR count |
+| RBAC | `RoleBinding` | Per-ns API access |
+
+Example per-tenant namespace setup (cluster admin responsibility):
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: tenant-quota
+  namespace: opensandbox-alpha
+spec:
+  hard:
+    count/batchsandboxes.sandbox.opensandbox.io: "100"
+    requests.cpu: "50"
+    requests.memory: "100Gi"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: tenant-limits
+  namespace: opensandbox-alpha
+spec:
+  limits:
+  - type: Container
+    default:
+      cpu: "2"
+      memory: "4Gi"
+    defaultRequest:
+      cpu: "100m"
+      memory: "128Mi"
 ```
 
 ## Test Plan
