@@ -22,7 +22,7 @@ All business logic is delegated to the service layer that backs each operation.
 import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter, Header, Query, Request, status
+from fastapi import APIRouter, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response
 
 from opensandbox_server.extensions import validate_extensions
@@ -47,6 +47,14 @@ from opensandbox_server.api.schema import (
 )
 from opensandbox_server.services.factory import create_sandbox_service
 from opensandbox_server.services.snapshot_service import create_snapshot_service
+from opensandbox_server.api.lifecycle_helpers import (
+    apply_reserved_metadata_for_create,
+    authorize_mutating_action,
+    get_principal,
+    log_mutation_audit,
+    merge_list_scope_from_request,
+)
+from opensandbox_server.middleware.authorization import LifecycleAction, authorize_action
 
 # Initialize router
 router = APIRouter(tags=["Sandboxes"])
@@ -69,12 +77,14 @@ snapshot_service = create_snapshot_service(sandbox_service)
         202: {"description": "Sandbox creation accepted for asynchronous provisioning"},
         400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
         401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
+        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
         409: {"model": ErrorResponse, "description": "The operation conflicts with the current state"},
         500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
     },
 )
 async def create_sandbox(
-    request: CreateSandboxRequest,
+    http_request: Request,
+    body: CreateSandboxRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> CreateSandboxResponse:
     """
@@ -85,7 +95,7 @@ async def create_sandbox(
     the specified image without requiring a pre-created template.
 
     Args:
-        request: Sandbox creation request
+        body: Sandbox creation request
         x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
@@ -94,8 +104,46 @@ async def create_sandbox(
     Raises:
         HTTPException: If sandbox creation scheduling fails
     """
-    validate_extensions(request.extensions)
-    return await sandbox_service.create_sandbox(request)
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.CREATE,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+    )
+    body = apply_reserved_metadata_for_create(body, principal, cfg)
+    validate_extensions(body.extensions)
+    try:
+        res = await sandbox_service.create_sandbox(body)
+        log_mutation_audit(
+            http_request, action=LifecycleAction.CREATE, sandbox_id=res.id, outcome="success"
+        )
+        return res
+    except HTTPException as exc:
+        err = exc.detail
+        if isinstance(err, dict):
+            code = err.get("code")
+        else:
+            code = None
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.CREATE,
+            sandbox_id=None,
+            outcome="error",
+            error_code=code,
+        )
+        raise
+    except Exception:
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.CREATE,
+            sandbox_id=None,
+            outcome="error",
+            error_code="UNEXPECTED",
+        )
+        raise
 
 
 # Search endpoint
@@ -111,6 +159,7 @@ async def create_sandbox(
     },
 )
 async def list_sandboxes(
+    http_request: Request,
     state: Optional[List[str]] = Query(None, description="Filter by lifecycle state. Pass multiple times for OR logic."),
     metadata: Optional[str] = Query(None, description="Arbitrary metadata key-value pairs for filtering (URL encoded)."),
     page: int = Query(1, ge=1, description="Page number for pagination"),
@@ -150,17 +199,28 @@ async def list_sandboxes(
             )
 
     # Construct request object
-    request = ListSandboxesRequest(
+    list_req = ListSandboxesRequest(
         filter=SandboxFilter(state=state, metadata=metadata_dict if metadata_dict else None),
-        pagination=PaginationRequest(page=page, pageSize=page_size)
+        pagination=PaginationRequest(page=page, pageSize=page_size),
     )
 
     import logging
+
     logger = logging.getLogger(__name__)
-    logger.info("ListSandboxes: %s", request.filter)
+    logger.info("ListSandboxes: %s", list_req.filter)
+
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_action(
+        principal,
+        LifecycleAction.LIST_SANDBOXES,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+    )
+    list_req = merge_list_scope_from_request(http_request, list_req, cfg)
 
     # Delegate to the service layer for filtering and pagination
-    return sandbox_service.list_sandboxes(request)
+    return sandbox_service.list_sandboxes(list_req)
 
 
 @router.get(
@@ -176,6 +236,7 @@ async def list_sandboxes(
     },
 )
 async def get_sandbox(
+    http_request: Request,
     sandbox_id: str,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Sandbox:
@@ -195,8 +256,23 @@ async def get_sandbox(
     Raises:
         HTTPException: If sandbox not found or access denied
     """
-    # Delegate to the service layer for sandbox lookup
-    return sandbox_service.get_sandbox(sandbox_id)
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_action(
+        principal,
+        LifecycleAction.GET_SANDBOX,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+    )
+    box = sandbox_service.get_sandbox(sandbox_id)
+    authorize_action(
+        principal,
+        LifecycleAction.GET_SANDBOX,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox=box,
+    )
+    return box
 
 
 @router.delete(
@@ -212,6 +288,7 @@ async def get_sandbox(
     },
 )
 async def delete_sandbox(
+    http_request: Request,
     sandbox_id: str,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Response:
@@ -230,8 +307,64 @@ async def delete_sandbox(
     Raises:
         HTTPException: If sandbox not found or deletion fails
     """
-    # Delegate to the service layer for deletion
-    sandbox_service.delete_sandbox(sandbox_id)
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.DELETE,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+    )
+    try:
+        box = sandbox_service.get_sandbox(sandbox_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            log_mutation_audit(
+                http_request,
+                action=LifecycleAction.DELETE,
+                sandbox_id=sandbox_id,
+                outcome="not_found",
+            )
+        raise
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.DELETE,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+        sandbox=box,
+    )
+    try:
+        sandbox_service.delete_sandbox(sandbox_id)
+        log_mutation_audit(
+            http_request, action=LifecycleAction.DELETE, sandbox_id=sandbox_id, outcome="success"
+        )
+    except HTTPException as exc:
+        err = exc.detail
+        if isinstance(err, dict):
+            code = err.get("code")
+        else:
+            code = None
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.DELETE,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code=code,
+        )
+        raise
+    except Exception:
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.DELETE,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code="UNEXPECTED",
+        )
+        raise
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -252,6 +385,7 @@ async def delete_sandbox(
     },
 )
 async def pause_sandbox(
+    http_request: Request,
     sandbox_id: str,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Response:
@@ -271,8 +405,64 @@ async def pause_sandbox(
     Raises:
         HTTPException: If sandbox not found or cannot be paused
     """
-    # Delegate to the service layer for pause orchestration
-    sandbox_service.pause_sandbox(sandbox_id)
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.PAUSE,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+    )
+    try:
+        box = sandbox_service.get_sandbox(sandbox_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            log_mutation_audit(
+                http_request,
+                action=LifecycleAction.PAUSE,
+                sandbox_id=sandbox_id,
+                outcome="not_found",
+            )
+        raise
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.PAUSE,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+        sandbox=box,
+    )
+    try:
+        sandbox_service.pause_sandbox(sandbox_id)
+        log_mutation_audit(
+            http_request, action=LifecycleAction.PAUSE, sandbox_id=sandbox_id, outcome="success"
+        )
+    except HTTPException as exc:
+        err = exc.detail
+        if isinstance(err, dict):
+            code = err.get("code")
+        else:
+            code = None
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.PAUSE,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code=code,
+        )
+        raise
+    except Exception:
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.PAUSE,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code="UNEXPECTED",
+        )
+        raise
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -289,6 +479,7 @@ async def pause_sandbox(
     },
 )
 async def resume_sandbox(
+    http_request: Request,
     sandbox_id: str,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> Response:
@@ -308,8 +499,64 @@ async def resume_sandbox(
     Raises:
         HTTPException: If sandbox not found or cannot be resumed
     """
-    # Delegate to the service layer for resume orchestration
-    sandbox_service.resume_sandbox(sandbox_id)
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.RESUME,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+    )
+    try:
+        box = sandbox_service.get_sandbox(sandbox_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            log_mutation_audit(
+                http_request,
+                action=LifecycleAction.RESUME,
+                sandbox_id=sandbox_id,
+                outcome="not_found",
+            )
+        raise
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.RESUME,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+        sandbox=box,
+    )
+    try:
+        sandbox_service.resume_sandbox(sandbox_id)
+        log_mutation_audit(
+            http_request, action=LifecycleAction.RESUME, sandbox_id=sandbox_id, outcome="success"
+        )
+    except HTTPException as exc:
+        err = exc.detail
+        if isinstance(err, dict):
+            code = err.get("code")
+        else:
+            code = None
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.RESUME,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code=code,
+        )
+        raise
+    except Exception:
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.RESUME,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code="UNEXPECTED",
+        )
+        raise
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -328,8 +575,9 @@ async def resume_sandbox(
     },
 )
 async def renew_sandbox_expiration(
+    http_request: Request,
     sandbox_id: str,
-    request: RenewSandboxExpirationRequest,
+    renew_body: RenewSandboxExpirationRequest,
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
 ) -> RenewSandboxExpirationResponse:
     """
@@ -340,7 +588,7 @@ async def renew_sandbox_expiration(
 
     Args:
         sandbox_id: Unique sandbox identifier
-        request: Renewal request with new expiration time
+        renew_body: Renewal request with new expiration time
         x_request_id: Unique request identifier for tracing (optional; server generates if omitted).
 
     Returns:
@@ -349,8 +597,65 @@ async def renew_sandbox_expiration(
     Raises:
         HTTPException: If sandbox not found or renewal fails
     """
-    # Delegate to the service layer for expiration updates
-    return sandbox_service.renew_expiration(sandbox_id, request)
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.RENEW,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+    )
+    try:
+        box = sandbox_service.get_sandbox(sandbox_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            log_mutation_audit(
+                http_request,
+                action=LifecycleAction.RENEW,
+                sandbox_id=sandbox_id,
+                outcome="not_found",
+            )
+        raise
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.RENEW,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+        sandbox=box,
+    )
+    try:
+        res = sandbox_service.renew_expiration(sandbox_id, renew_body)
+        log_mutation_audit(
+            http_request, action=LifecycleAction.RENEW, sandbox_id=sandbox_id, outcome="success"
+        )
+        return res
+    except HTTPException as exc:
+        err = exc.detail
+        if isinstance(err, dict):
+            code = err.get("code")
+        else:
+            code = None
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.RENEW,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code=code,
+        )
+        raise
+    except Exception:
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.RENEW,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code="UNEXPECTED",
+        )
+        raise
 
 
 # ============================================================================
@@ -488,7 +793,7 @@ async def delete_snapshot(
     },
 )
 async def get_sandbox_endpoint(
-    request: Request,
+    http_request: Request,
     sandbox_id: str,
     port: int,
     use_server_proxy: bool = Query(False, description="Whether to return a server-proxied URL"),
@@ -507,7 +812,7 @@ async def get_sandbox_endpoint(
     This requires the ingress gateway to be configured with secure_access signing keys.
 
     Args:
-        request: FastAPI request object
+        http_request: FastAPI request object
         sandbox_id: Unique sandbox identifier
         port: Port number where the service is listening inside the sandbox (1-65535)
         use_server_proxy: Whether to return a server-proxied URL
@@ -523,12 +828,28 @@ async def get_sandbox_endpoint(
         HTTPException: If sandbox not found, endpoint not available, or signed
             routes are not supported by the runtime/configuration (400).
     """
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_action(
+        principal,
+        LifecycleAction.GET_ENDPOINT,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+    )
+    box = sandbox_service.get_sandbox(sandbox_id)
+    authorize_action(
+        principal,
+        LifecycleAction.GET_ENDPOINT,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox=box,
+    )
     # Delegate to the service layer for endpoint resolution
     endpoint = sandbox_service.get_endpoint(sandbox_id, port, expires=expires)
 
     if use_server_proxy:
         # Prefer configured external address when available.
-        base_url = str(request.base_url).rstrip("/")
+        base_url = str(http_request.base_url).rstrip("/")
         eip = (get_config().server.eip or "").strip().rstrip("/")
         if eip:
             base_url = eip
