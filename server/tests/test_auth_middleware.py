@@ -12,11 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from fastapi import FastAPI
+import tempfile
+from pathlib import Path
+
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from opensandbox_server.config import AppConfig, IngressConfig, RuntimeConfig, ServerConfig
-from opensandbox_server.middleware.auth import AuthMiddleware
+from opensandbox_server.middleware.auth import AuthMiddleware, get_current_tenant
+from opensandbox_server.tenants.loader import TenantLoader
 
 
 def _app_config_with_api_key() -> AppConfig:
@@ -131,3 +135,135 @@ def test_auth_middleware_is_proxy_path_accepts_valid_shapes():
     # Non-numeric port must not skip auth (malformed path → 401, not 422)
     assert AuthMiddleware._is_proxy_path("/sandboxes/s1/proxy/not-a-port/x") is False
     assert AuthMiddleware._is_proxy_path("/sandboxes/s1/proxy/8080x/") is False
+
+
+# ---------------------------------------------------------------------------
+# Multi-tenant auth
+# ---------------------------------------------------------------------------
+
+TENANTS_TOML = """\
+[[tenants]]
+name = "alpha"
+namespace = "ns-alpha"
+api_keys = ["key-alpha-1", "key-alpha-2"]
+
+[[tenants]]
+name = "beta"
+namespace = "ns-beta"
+api_keys = ["key-beta-1"]
+"""
+
+
+def _multi_tenant_config() -> AppConfig:
+    return AppConfig(
+        server=ServerConfig(api_key=""),  # must be empty in multi-tenant mode
+        runtime=RuntimeConfig(type="kubernetes", execd_image="opensandbox/execd:latest"),
+        ingress=IngressConfig(mode="direct"),
+    )
+
+
+def _build_multi_tenant_app(loader: TenantLoader):
+    app = FastAPI()
+    config = _multi_tenant_config()
+    app.add_middleware(AuthMiddleware, config=config, tenant_loader=loader)
+
+    @app.get("/secured")
+    def secured_endpoint(request: Request):
+        tenant = get_current_tenant()
+        return {"ok": True, "tenant": tenant.name, "namespace": tenant.namespace}
+
+    return app
+
+
+def test_multi_tenant_accepts_valid_tenant_key():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = Path(tmpdir) / "tenants.toml"
+        p.write_text(TENANTS_TOML)
+        loader = TenantLoader(p)
+        try:
+            client = TestClient(_build_multi_tenant_app(loader))
+            resp = client.get("/secured", headers={"OPEN-SANDBOX-API-KEY": "key-alpha-1"})
+            assert resp.status_code == 200
+            assert resp.json()["tenant"] == "alpha"
+            assert resp.json()["namespace"] == "ns-alpha"
+        finally:
+            loader.stop()
+
+
+def test_multi_tenant_accepts_second_key_same_tenant():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = Path(tmpdir) / "tenants.toml"
+        p.write_text(TENANTS_TOML)
+        loader = TenantLoader(p)
+        try:
+            client = TestClient(_build_multi_tenant_app(loader))
+            resp = client.get("/secured", headers={"OPEN-SANDBOX-API-KEY": "key-alpha-2"})
+            assert resp.status_code == 200
+            assert resp.json()["tenant"] == "alpha"
+        finally:
+            loader.stop()
+
+
+def test_multi_tenant_accepts_different_tenant_key():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = Path(tmpdir) / "tenants.toml"
+        p.write_text(TENANTS_TOML)
+        loader = TenantLoader(p)
+        try:
+            client = TestClient(_build_multi_tenant_app(loader))
+            resp = client.get("/secured", headers={"OPEN-SANDBOX-API-KEY": "key-beta-1"})
+            assert resp.status_code == 200
+            assert resp.json()["tenant"] == "beta"
+            assert resp.json()["namespace"] == "ns-beta"
+        finally:
+            loader.stop()
+
+
+def test_multi_tenant_rejects_unknown_key():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = Path(tmpdir) / "tenants.toml"
+        p.write_text(TENANTS_TOML)
+        loader = TenantLoader(p)
+        try:
+            client = TestClient(_build_multi_tenant_app(loader))
+            resp = client.get("/secured", headers={"OPEN-SANDBOX-API-KEY": "unknown-key"})
+            assert resp.status_code == 401
+            assert resp.json()["code"] == "INVALID_API_KEY"
+        finally:
+            loader.stop()
+
+
+def test_multi_tenant_rejects_missing_key():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = Path(tmpdir) / "tenants.toml"
+        p.write_text(TENANTS_TOML)
+        loader = TenantLoader(p)
+        try:
+            client = TestClient(_build_multi_tenant_app(loader))
+            resp = client.get("/secured")
+            assert resp.status_code == 401
+            assert resp.json()["code"] == "MISSING_API_KEY"
+        finally:
+            loader.stop()
+
+
+def test_multi_tenant_proxy_path_still_exempt():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        p = Path(tmpdir) / "tenants.toml"
+        p.write_text(TENANTS_TOML)
+        loader = TenantLoader(p)
+        try:
+            app = FastAPI()
+            config = _multi_tenant_config()
+            app.add_middleware(AuthMiddleware, config=config, tenant_loader=loader)
+
+            @app.get("/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}")
+            def proxy_echo(sandbox_id: str, port: int, full_path: str):
+                return {"proxied": True}
+
+            client = TestClient(app)
+            resp = client.get("/sandboxes/sbx-1/proxy/8080/foo")
+            assert resp.status_code == 200
+            assert resp.json()["proxied"] is True
+        finally:
+            loader.stop()
