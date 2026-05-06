@@ -79,6 +79,7 @@ def test_parse_sandbox_error_from_invalid_utf8_bytes_fallback_message() -> None:
 
 def test_handle_api_error_raises_with_parsed_message() -> None:
     class Parsed:
+        code = "BAD_REQUEST"
         message = "bad request"
 
     class Resp:
@@ -90,6 +91,8 @@ def test_handle_api_error_raises_with_parsed_message() -> None:
         handle_api_error(Resp(), "Op")
     assert "bad request" in str(ei.value)
     assert ei.value.request_id == "req-123"
+    assert ei.value.error.code == "BAD_REQUEST"
+    assert ei.value.error.message == "bad request"
 
 
 def test_handle_api_error_noop_on_success() -> None:

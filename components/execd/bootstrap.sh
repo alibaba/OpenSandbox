@@ -161,7 +161,6 @@ if [ -z "$SHELL_BIN" ]; then
 	fi
 fi
 
-set -x
 if [ "$CMD" != "" ]; then
 	"$SHELL_BIN" -c "$CMD" &
 	CMD_PID=$!

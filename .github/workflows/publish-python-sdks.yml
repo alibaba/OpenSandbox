@@ -2,6 +2,9 @@ name: Publish Python SDKs
 
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
 
 on:
   push:
@@ -38,6 +41,12 @@ jobs:
         run: |
           uv build
 
+      - name: Attest built package
+        if: startsWith(github.ref, 'refs/tags/python/sandbox/v')
+        uses: actions/attest@v4
+        with:
+          subject-path: sdks/sandbox/python/dist/*
+
       - name: Publish to PyPI
         working-directory: sdks/sandbox/python
         env:
@@ -67,6 +76,12 @@ jobs:
         run: |
           uv build
 
+      - name: Attest built package
+        if: startsWith(github.ref, 'refs/tags/python/code-interpreter/v')
+        uses: actions/attest@v4
+        with:
+          subject-path: sdks/code-interpreter/python/dist/*
+
       - name: Publish to PyPI
         working-directory: sdks/code-interpreter/python
         env:
@@ -95,6 +110,12 @@ jobs:
         working-directory: sdks/mcp/sandbox/python
         run: |
           uv build
+
+      - name: Attest built package
+        if: startsWith(github.ref, 'refs/tags/python/mcp/sandbox/v')
+        uses: actions/attest@v4
+        with:
+          subject-path: sdks/mcp/sandbox/python/dist/*
 
       - name: Publish to PyPI
         working-directory: sdks/mcp/sandbox/python

@@ -17,7 +17,7 @@ import stat
 
 import pytest
 
-from opensandbox_server.services.ossfs_mixin import OSSFSMixin
+from opensandbox_server.services.docker.ossfs_mixin import OSSFSMixin
 
 
 def test_write_ossfs_private_config_file_writes_content(tmp_path) -> None:

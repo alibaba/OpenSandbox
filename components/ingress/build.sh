@@ -35,6 +35,7 @@ TAG=${TAG:-latest}
 VERSION=${VERSION:-$(git describe --tags --always --dirty 2>/dev/null || echo "dev")}
 GIT_COMMIT=${GIT_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo "unknown")}
 BUILD_TIME=${BUILD_TIME:-$(default_build_time)}
+BUILD_METADATA_FILE=${BUILD_METADATA_FILE:-build/ingress-image-metadata.json}
 BUILD_ARGS=()
 for name in GOFLAGS LDFLAGS CGO_ENABLED CC CXX CFLAGS CXXFLAGS CGO_CFLAGS CGO_CXXFLAGS CGO_LDFLAGS; do
   build_arg_if_set "${name}"
@@ -42,6 +43,7 @@ done
 
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || realpath "$(dirname "$0")/../..")
 cd "${REPO_ROOT}"
+mkdir -p "$(dirname "${BUILD_METADATA_FILE}")"
 
 docker buildx rm ingress-builder || true
 
@@ -66,5 +68,6 @@ docker buildx build \
   --build-arg GIT_COMMIT="${GIT_COMMIT}" \
   --build-arg BUILD_TIME="${BUILD_TIME}" \
   --platform linux/amd64,linux/arm64 \
+  --metadata-file "${BUILD_METADATA_FILE}" \
   --push \
   .

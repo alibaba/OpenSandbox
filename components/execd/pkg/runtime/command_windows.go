@@ -43,7 +43,7 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	}
 
 	startAt := time.Now()
-	log.Info("received command: %v", request.Code)
+	log.Info("received command: %v", log.SanitizeCommand(request.Code))
 	cmd := exec.CommandContext(ctx, "cmd", "/C", request.Code)
 	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
 	cwd, err := pathutil.ExpandPathWithEnv(request.Cwd, extraEnv)
@@ -121,7 +121,7 @@ func (c *Controller) runBackgroundCommand(ctx context.Context, cancel context.Ca
 	stderrPath := c.combinedOutputFileName(session)
 
 	startAt := time.Now()
-	log.Info("received command: %v", request.Code)
+	log.Info("received command: %v", log.SanitizeCommand(request.Code))
 	cmd := exec.CommandContext(ctx, "cmd", "/C", request.Code)
 	extraEnv := mergeExtraEnvs(loadExtraEnvFromFile(), request.Envs)
 	cwd, err := pathutil.ExpandPathWithEnv(request.Cwd, extraEnv)

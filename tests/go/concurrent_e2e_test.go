@@ -17,6 +17,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,7 +46,7 @@ func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
 			defer wg.Done()
 			sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 				Image: getSandboxImage(),
-				Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
+				Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms"},
 				Metadata: map[string]string{
 					"test":  "go-e2e-concurrent",
 					"index": fmt.Sprintf("%d", idx),
@@ -89,7 +90,16 @@ func TestConcurrent_CreateFiveSandboxes(t *testing.T) {
 		cmdWg.Add(1)
 		go func(idx int) {
 			defer cmdWg.Done()
-			exec, err := sandboxes[idx].RunCommand(ctx, fmt.Sprintf("echo sandbox-%d", idx), nil)
+			// Retry: execd SSE endpoint may return empty stream before fully ready
+			var exec *opensandbox.Execution
+			var err error
+			for attempt := 0; attempt < 3; attempt++ {
+				exec, err = sandboxes[idx].RunCommand(ctx, fmt.Sprintf("echo sandbox-%d", idx), nil)
+				if err == nil || !strings.Contains(err.Error(), "empty sse stream") {
+					break
+				}
+				time.Sleep(500 * time.Millisecond)
+			}
 			if !assert.NoError(t, err, "command on sandbox %d", idx) {
 				return
 			}

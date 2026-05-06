@@ -126,6 +126,9 @@ spec:
             - name: SANDBOX_TENANTS_CONFIG_PATH
               value: "/etc/opensandbox/tenants.toml"
 {{- end }}
+            {{- with .Values.server.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           volumeMounts:
             - name: config
               mountPath: /etc/opensandbox/config.toml

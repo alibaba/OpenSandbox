@@ -381,7 +381,7 @@ class TestCodeInterpreterE2E:
                 "PYTHON_VERSION": "3.12",
                 "EXECD_LOG_FILE": "/tmp/opensandbox-e2e/logs/execd.log",
                 "EXECD_API_GRACE_SHUTDOWN": "3s",
-                "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s",
+                "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms",
             },
             health_check_polling_interval=timedelta(milliseconds=500),
             volumes=[
@@ -434,7 +434,7 @@ class TestCodeInterpreterE2E:
                 "PYTHON_VERSION": "3.12",
                 "EXECD_LOG_FILE": "/tmp/opensandbox-e2e/logs/execd.log",
                 "EXECD_API_GRACE_SHUTDOWN": "3s",
-                "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s",
+                "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms",
             },
             health_check_polling_interval=timedelta(milliseconds=500),
             volumes=[

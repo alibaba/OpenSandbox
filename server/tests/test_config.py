@@ -84,6 +84,73 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     assert loaded.kubernetes is not None
 
 
+def test_load_config_env_override_api_key(tmp_path, monkeypatch):
+    """OPENSANDBOX_SERVER_API_KEY should override server.api_key from TOML."""
+    _reset_config(monkeypatch)
+    monkeypatch.setenv("OPENSANDBOX_SERVER_API_KEY", "env-secret-key")
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+        api_key = "toml-secret-key"
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.server.api_key == "env-secret-key"
+
+
+def test_load_config_env_api_key_without_toml_key(tmp_path, monkeypatch):
+    """OPENSANDBOX_SERVER_API_KEY should work even when TOML omits api_key."""
+    _reset_config(monkeypatch)
+    monkeypatch.setenv("OPENSANDBOX_SERVER_API_KEY", "env-only-key")
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.server.api_key == "env-only-key"
+
+
+def test_load_config_without_env_uses_toml_api_key(tmp_path, monkeypatch):
+    """When OPENSANDBOX_SERVER_API_KEY is unset, TOML api_key should be used."""
+    _reset_config(monkeypatch)
+    toml = textwrap.dedent(
+        """
+        [server]
+        host = "127.0.0.1"
+        port = 9000
+        api_key = "toml-secret-key"
+
+        [runtime]
+        type = "docker"
+        execd_image = "opensandbox/execd:test"
+        """
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(toml)
+
+    loaded = config_module.load_config(config_path)
+    assert loaded.server.api_key == "toml-secret-key"
+
+
 def test_docker_runtime_disallows_kubernetes_block():
     server_cfg = ServerConfig()
     runtime_cfg = RuntimeConfig(type="docker", execd_image="busybox:latest")

@@ -202,6 +202,90 @@ async def test_create_sandbox_restore_from_snapshot(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_create_sandbox_http_error_preserves_wrapped_error_detail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from opensandbox.api.lifecycle.models.error_response import ErrorResponse
+
+    async def _fake_asyncio_detailed(*, client, body):
+        return _Resp(
+            status_code=409,
+            parsed=ErrorResponse(
+                code="K8S_API_ERROR",
+                message="Failed to create sandbox: pool exhausted",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "opensandbox.api.lifecycle.api.sandboxes.post_sandboxes.asyncio_detailed",
+        _fake_asyncio_detailed,
+    )
+
+    adapter = SandboxesAdapter(ConnectionConfig(domain="example.com:8080", api_key="k"))
+
+    with pytest.raises(SandboxApiException) as exc_info:
+        await adapter.create_sandbox(
+            spec=SandboxImageSpec("python:3.11"),
+            entrypoint=["/bin/sh"],
+            env={},
+            metadata={},
+            timeout=timedelta(seconds=3),
+            resource={"cpu": "100m"},
+            platform=None,
+            network_policy=None,
+            extensions={},
+            volumes=None,
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.error.code == "K8S_API_ERROR"
+    assert exc.error.message == "Failed to create sandbox: pool exhausted"
+    assert "pool exhausted" in str(exc)
+
+
+@pytest.mark.asyncio
+async def test_create_sandbox_unexpected_status_preserves_fastapi_detail_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from opensandbox.api.lifecycle.errors import UnexpectedStatus
+
+    async def _fake_asyncio_detailed(*, client, body):
+        raise UnexpectedStatus(
+            409,
+            b'{"detail":{"code":"K8S_API_ERROR","message":"Failed to create sandbox: pool exhausted"}}',
+        )
+
+    monkeypatch.setattr(
+        "opensandbox.api.lifecycle.api.sandboxes.post_sandboxes.asyncio_detailed",
+        _fake_asyncio_detailed,
+    )
+
+    adapter = SandboxesAdapter(ConnectionConfig(domain="example.com:8080", api_key="k"))
+
+    with pytest.raises(SandboxApiException) as exc_info:
+        await adapter.create_sandbox(
+            spec=SandboxImageSpec("python:3.11"),
+            entrypoint=["/bin/sh"],
+            env={},
+            metadata={},
+            timeout=timedelta(seconds=3),
+            resource={"cpu": "100m"},
+            platform=None,
+            network_policy=None,
+            extensions={},
+            volumes=None,
+        )
+
+    exc = exc_info.value
+    assert exc.status_code == 409
+    assert exc.error is not None
+    assert exc.error.code == "K8S_API_ERROR"
+    assert exc.error.message == "Failed to create sandbox: pool exhausted"
+    assert "HTTP 409" in str(exc)
+
+
+@pytest.mark.asyncio
 async def test_create_sandbox_empty_response_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fake_asyncio_detailed(*, client, body):
         return _Resp(status_code=200, parsed=None)

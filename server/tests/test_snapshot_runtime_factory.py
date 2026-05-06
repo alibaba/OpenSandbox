@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from opensandbox_server.services.docker_snapshot_runtime import DockerSnapshotRuntime
+from opensandbox_server.services.docker.snapshot_runtime import DockerSnapshotRuntime
 from opensandbox_server.services.snapshot_runtime import NoopSnapshotRuntime
 from opensandbox_server.services.snapshot_runtime_factory import create_snapshot_runtime
 

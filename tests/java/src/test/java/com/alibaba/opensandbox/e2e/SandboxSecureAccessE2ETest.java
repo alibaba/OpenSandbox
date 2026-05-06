@@ -60,7 +60,7 @@ public class SandboxSecureAccessE2ETest extends BaseE2ETest {
                         .readyTimeout(Duration.ofSeconds(60))
                         .secureAccess()
                         .env("EXECD_API_GRACE_SHUTDOWN", "3s")
-                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s")
+                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms")
                         .metadata(Map.of("tag", "secure-access-java-e2e-test"))
                         .build();
 
@@ -137,7 +137,7 @@ public class SandboxSecureAccessE2ETest extends BaseE2ETest {
                         .timeout(Duration.ofMinutes(2))
                         .readyTimeout(Duration.ofSeconds(60))
                         .env("EXECD_API_GRACE_SHUTDOWN", "3s")
-                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s")
+                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms")
                         .metadata(Map.of("tag", "non-secure-access-java-e2e-test"))
                         .build();
 

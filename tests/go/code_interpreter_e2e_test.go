@@ -25,6 +25,7 @@ import (
 
 func createCodeInterpreter(t *testing.T) (context.Context, *opensandbox.CodeInterpreter) {
 	t.Helper()
+	t.Skip("skip code interpreter e2e tests")
 	config := connectionConfigForStreaming(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)

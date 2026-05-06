@@ -405,7 +405,7 @@ public class SandboxPoolPseudoDistributedE2ETest extends BaseE2ETest {
                         .image(getSandboxImage())
                         .entrypoint(List.of("tail -f /dev/null"))
                         .metadata(Map.of("tag", tag, "suite", "sandbox-pool-pseudo-dist-e2e"))
-                        .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s"))
+                        .env(Map.of("E2E_TEST", "true", "EXECD_API_GRACE_SHUTDOWN", "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms"))
                         .build();
         return SandboxPool.builder()
                 .poolName(poolName)

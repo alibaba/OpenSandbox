@@ -19,6 +19,9 @@
   <a href="https://www.apache.org/licenses/LICENSE-2.0.html">
     <img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="license" />
   </a>
+  <a href="https://www.bestpractices.dev/projects/12588">
+    <img src="https://www.bestpractices.dev/projects/12588/badge" alt="OpenSSF Best Practices" />
+  </a>
   <a href="https://badge.fury.io/py/opensandbox">
     <img src="https://badge.fury.io/py/opensandbox.svg" alt="PyPI version" />
   </a>
@@ -290,6 +293,7 @@ For detailed architecture, see [docs/architecture.md](docs/architecture.md).
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) – Overall architecture & design philosophy
+- [docs/release-verification.md](docs/release-verification.md) - Release signing and artifact verification
 - [oseps/README.md](oseps/README.md) – OpenSandbox Enhancement Proposals
 - SDK
   - Sandbox base SDK ([Java/Kotlin SDK](sdks/sandbox/kotlin/README.md), [Python SDK](sdks/sandbox/python/README.md), [JavaScript/TypeScript SDK](sdks/sandbox/javascript/README.md), [C#/.NET SDK](sdks/sandbox/csharp/README.md)), [Go SDK](sdks/sandbox/go/README.md) - includes sandbox lifecycle, command execution, file operations

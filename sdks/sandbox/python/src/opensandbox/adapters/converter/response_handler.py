@@ -28,7 +28,7 @@ import logging
 from http import HTTPStatus
 from typing import Any, TypeVar
 
-from opensandbox.exceptions import SandboxApiException
+from opensandbox.exceptions import SandboxApiException, SandboxError
 
 logger = logging.getLogger(__name__)
 
@@ -118,17 +118,27 @@ def handle_api_error(response_obj: Any, operation_name: str = "API call") -> Non
 
     if status_code >= 300:
         error_message = f"{operation_name} failed: HTTP {status_code}"
+        sandbox_error: SandboxError | None = None
 
         if hasattr(response_obj, "parsed") and response_obj.parsed is not None:
-            if hasattr(response_obj.parsed, "message"):
-                error_message = (
-                    f"{operation_name} failed: {response_obj.parsed.message}"
+            parsed = response_obj.parsed
+            parsed_code = getattr(parsed, "code", None)
+            parsed_message = getattr(parsed, "message", None)
+
+            if parsed_message:
+                error_message = f"{operation_name} failed: {parsed_message}"
+            elif parsed_code:
+                error_message = f"{operation_name} failed: {parsed_code}"
+
+            if parsed_code:
+                sandbox_error = SandboxError(
+                    code=str(parsed_code),
+                    message=str(parsed_message or ""),
                 )
-            elif hasattr(response_obj.parsed, "code"):
-                error_message = f"{operation_name} failed: {response_obj.parsed.code}"
 
         raise SandboxApiException(
             message=error_message,
             status_code=status_code,
             request_id=request_id,
+            error=sandbox_error,
         )

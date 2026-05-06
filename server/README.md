@@ -257,7 +257,7 @@ uv run pytest
 
 **Run with coverage**:
 ```bash
-uv run pytest --cov=opensandbox_server --cov-report=html
+uv run pytest --cov=opensandbox_server --cov-report=term --cov-fail-under=80
 ```
 
 **Run specific test**:

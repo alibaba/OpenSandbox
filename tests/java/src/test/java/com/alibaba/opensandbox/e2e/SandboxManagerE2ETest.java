@@ -69,7 +69,7 @@ public class SandboxManagerE2ETest extends BaseE2ETest {
                         .metadata(Map.of("tag", tag, "team", "t1", "env", "prod"))
                         .env("E2E_TEST", "true")
                         .env("EXECD_API_GRACE_SHUTDOWN", "3s")
-                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s")
+                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms")
                         .healthCheckPollingInterval(Duration.ofMillis(500))
                         .build();
         s2 =
@@ -82,7 +82,7 @@ public class SandboxManagerE2ETest extends BaseE2ETest {
                         .metadata(Map.of("tag", tag, "team", "t1", "env", "dev"))
                         .env("E2E_TEST", "true")
                         .env("EXECD_API_GRACE_SHUTDOWN", "3s")
-                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s")
+                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms")
                         .healthCheckPollingInterval(Duration.ofMillis(500))
                         .build();
         s3 =
@@ -95,7 +95,7 @@ public class SandboxManagerE2ETest extends BaseE2ETest {
                         .metadata(Map.of("tag", tag, "env", "prod"))
                         .env("E2E_TEST", "true")
                         .env("EXECD_API_GRACE_SHUTDOWN", "3s")
-                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "1s")
+                        .env("EXECD_JUPYTER_IDLE_POLL_INTERVAL", "200ms")
                         .healthCheckPollingInterval(Duration.ofMillis(500))
                         .build();
 

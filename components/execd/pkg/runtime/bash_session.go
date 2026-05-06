@@ -217,7 +217,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	cmd.Stderr = cmd.Stdout
 
 	if err := cmd.Start(); err != nil {
-		log.Error("start bash session failed: %v (command: %q)", err, request.Code)
+		log.Error("start bash session failed: %v (command: %q)", err, log.SanitizeCommand(request.Code))
 		return fmt.Errorf("start bash: %w", err)
 	}
 	defer s.untrackCurrentProcess()
@@ -261,13 +261,13 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	waitErr := cmd.Wait()
 
 	if scanErr != nil {
-		log.Error("read stdout failed: %v (command: %q)", scanErr, request.Code)
+		log.Error("read stdout failed: %v (command: %q)", scanErr, log.SanitizeCommand(request.Code))
 		return fmt.Errorf("read stdout: %w", scanErr)
 	}
 
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		log.Error("timeout after %s while running command: %q", wait, request.Code)
-		return fmt.Errorf("timeout after %s while running command %q", wait, request.Code)
+		log.Error("timeout after %s while running command: %q", wait, log.SanitizeCommand(request.Code))
+		return fmt.Errorf("timeout after %s", wait)
 	}
 
 	if exitCode == nil && cmd.ProcessState != nil {
@@ -287,7 +287,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 
 	var exitErr *exec.ExitError
 	if waitErr != nil && !errors.As(waitErr, &exitErr) {
-		log.Error("command wait failed: %v (command: %q)", waitErr, request.Code)
+		log.Error("command wait failed: %v (command: %q)", waitErr, log.SanitizeCommand(request.Code))
 		return waitErr
 	}
 
@@ -308,7 +308,7 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 				Traceback: []string{errMsg},
 			})
 		}
-		log.Error("CommandExecError: %s (command: %q)", errMsg, request.Code)
+		log.Error("CommandExecError: %s (command: %q)", errMsg, log.SanitizeCommand(request.Code))
 		return nil
 	}
 

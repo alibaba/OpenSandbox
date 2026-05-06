@@ -234,8 +234,11 @@ def _parse_error_body(body: Any) -> SandboxError | None:
                     message=body,
                 )
 
-        # Extract code and message from dict
+        # FastAPI HTTPException bodies are commonly wrapped as {"detail": {"code": ..., "message": ...}}.
         if isinstance(body, dict):
+            if isinstance(body.get("detail"), dict):
+                body = body["detail"]
+
             code: str | None = body.get("code")
             message: str | None = body.get("message")
 

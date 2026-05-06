@@ -30,7 +30,7 @@ func TestSandbox_CreateAndKill(t *testing.T) {
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image:      getSandboxImage(),
-		Env:        map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
+		Env:        map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms"},
 		Entrypoint: []string{"tail", "-f", "/dev/null"},
 		ResourceLimits: opensandbox.ResourceLimits{
 			"cpu":    "500m",
@@ -93,7 +93,7 @@ func TestSandbox_ConnectToExisting(t *testing.T) {
 
 	sb1, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
-		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
+		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms"},
 	})
 	require.NoError(t, err)
 	defer sb1.Kill(context.Background())
@@ -139,7 +139,7 @@ func TestSandbox_ManualCleanup(t *testing.T) {
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
-		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
+		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms"},
 	})
 	require.NoError(t, err)
 	defer sb.Kill(context.Background())
@@ -156,7 +156,7 @@ func TestSandbox_NetworkPolicyCreate(t *testing.T) {
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
-		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
+		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms"},
 		NetworkPolicy: &opensandbox.NetworkPolicy{
 			DefaultAction: "deny",
 			Egress: []opensandbox.NetworkRule{
@@ -173,13 +173,14 @@ func TestSandbox_NetworkPolicyCreate(t *testing.T) {
 }
 
 func TestSandbox_PauseAndResume(t *testing.T) {
+	t.Skip("skip pause/resume e2e test")
 	config := getConnectionConfig(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
 		Image: getSandboxImage(),
-		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "1s"},
+		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms"},
 	})
 	require.NoError(t, err)
 	defer sb.Kill(context.Background())

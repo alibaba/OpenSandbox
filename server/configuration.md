@@ -340,6 +340,7 @@ These are read by the server or runtime code in addition to the TOML file:
 | Variable | Where used | Description |
 |----------|------------|-------------|
 | `SANDBOX_CONFIG_PATH` | `config.py`, CLI | Path to the TOML file. Overrides the default `~/.sandbox.toml` when set. |
+| `OPENSANDBOX_SERVER_API_KEY` | `config.py` | Overrides the API key from the TOML file. |
 | `DOCKER_HOST` | Docker service | Standard Docker daemon address (e.g. `unix:///var/run/docker.sock`). |
 | `PENDING_FAILURE_TTL` | Docker service | Seconds to retain **failed Pending** sandboxes before cleanup; default **`3600`**. |
 | `SANDBOX_TENANTS_CONFIG_PATH` | `tenants/__init__.py` | Path to the multi-tenancy TOML file. Overrides the default `~/.opensandbox/tenants.toml` when set. |

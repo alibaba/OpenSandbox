@@ -277,7 +277,7 @@ def test_get_endpoint_bridge_uses_docker_host_ip_when_server_in_container():
     }
     mock_client.containers.list.return_value = [mock_container]
 
-    with patch("opensandbox_server.services.docker._running_inside_docker_container", return_value=True):
+    with patch("opensandbox_server.services.docker.networking._running_inside_docker_container", return_value=True):
         endpoint = service.get_endpoint("sbx-123", 44772, resolve_internal=False)
 
     assert endpoint.endpoint == "10.57.1.91:40109/proxy/44772"

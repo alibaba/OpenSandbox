@@ -91,5 +91,5 @@ func InitFlags() {
 
 	// Log final values
 	log.Info("Jupyter server host is: %s", JupyterServerHost)
-	log.Info("Jupyter server token is: %s", JupyterServerToken)
+	log.Info("Jupyter server token is: %s", log.MaskToken(JupyterServerToken))
 }

@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 CONFIG_ENV_VAR = "SANDBOX_CONFIG_PATH"
 DEFAULT_CONFIG_PATH = Path.home() / ".sandbox.toml"
 
+API_KEY_ENV_VAR = "OPENSANDBOX_SERVER_API_KEY"
+
 _HOSTNAME_RE = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?:\.(?!-)[A-Za-z0-9-]{1,63})*$")
 _WILDCARD_DOMAIN_RE = re.compile(r"^\*\.(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
 _IPV4_WITH_PORT_RE = re.compile(r"^(?P<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d{1,5}))?$")
@@ -883,6 +885,12 @@ def _load_toml_data(path: Path) -> dict[str, Any]:
         raise
 
 
+def _apply_env_overrides(config: AppConfig) -> None:
+    """Apply environment variable overrides to parsed configuration."""
+    if API_KEY_ENV_VAR in os.environ:
+        config.server.api_key = os.environ[API_KEY_ENV_VAR]
+
+
 def load_config(path: str | Path | None = None) -> AppConfig:
     """
     Load configuration from TOML file and store it globally.
@@ -909,6 +917,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         logger.error("Invalid configuration in %s: %s", resolved_path, exc)
         raise
 
+    _apply_env_overrides(_config)
     _config_path = resolved_path
     return _config
 

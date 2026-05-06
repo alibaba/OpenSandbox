@@ -35,7 +35,7 @@ def create_snapshot_runtime(
     if runtime_type == "docker":
         if docker_client is None:
             raise ValueError("docker_client is required when runtime.type = 'docker'.")
-        from opensandbox_server.services.docker_snapshot_runtime import DockerSnapshotRuntime
+        from opensandbox_server.services.docker.snapshot_runtime import DockerSnapshotRuntime
 
         return DockerSnapshotRuntime(docker_client)
 
