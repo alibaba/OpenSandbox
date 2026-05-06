@@ -49,7 +49,7 @@ server:
     gatewayRouteMode: "header"
     image:
       repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ingress
-      tag: "v1.0.6"
+      tag: "v1.0.7"
     replicaCount: 2
     port: 28888
     dataplaneNamespace: "opensandbox"
