@@ -179,6 +179,13 @@ if app_config.console.enabled:
             _SPAStaticFiles(directory=str(_console_dist), html=True),
             name="console",
         )
+    else:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "console.enabled = true but console/dist was not found at %s; "
+            "the console will not be served. Run 'npm run build' in the console/ directory.",
+            _console_dist,
+        )
 
 DEFAULT_ERROR_CODE = "GENERAL::UNKNOWN_ERROR"
 DEFAULT_ERROR_MESSAGE = "An unexpected error occurred."

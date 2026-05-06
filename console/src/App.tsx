@@ -46,11 +46,10 @@ export function App() {
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/65 px-6 py-3 backdrop-blur dark:border-[#2e2e32] dark:bg-[#1b1b1f]/65 sm:px-8">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4">
           <Link to="/" className="flex items-center gap-2 hover:no-underline">
-            <img
-              src="https://raw.githubusercontent.com/alibaba/OpenSandbox/main/docs/assets/logo.svg"
-              alt="OpenSandbox logo"
-              className="h-7 w-7 rounded-sm"
-            />
+            <svg aria-label="OpenSandbox logo" role="img" viewBox="0 0 28 28" className="h-7 w-7 rounded-sm" xmlns="http://www.w3.org/2000/svg">
+              <rect width="28" height="28" rx="4" fill="#2563eb" />
+              <path d="M7 8.5h14v2.5H7V8.5Zm0 4.5h14v2.5H7V13Zm0 4.5h9v2.5H7V17.5Z" fill="white" />
+            </svg>
             <span className="text-lg font-semibold text-slate-800 dark:text-slate-100">OpenSandbox</span>
           </Link>
           <div className="ml-auto flex items-center gap-5">

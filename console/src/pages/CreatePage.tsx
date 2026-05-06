@@ -35,7 +35,7 @@ export function CreatePage() {
         timeout,
         resourceLimits: { cpu, memory: mem },
         entrypoint: ep,
-        env: { CONSOLE: "1" },
+        env: undefined,
       });
       nav(`/sandboxes/${encodeURIComponent(res.id)}`);
     } catch (ex) {
@@ -63,7 +63,7 @@ export function CreatePage() {
         </footer>
         <div className="rounded-xl border border-red-500/35 bg-red-500/10 px-4 py-3 text-red-700 dark:text-red-300" role="alert">
           <strong>Read-only role.</strong> You cannot create sandboxes. Ask an operator to change your
-          <code> X-OpenSandbox-Roles</code> to <code>operator</code> (or set <code> VITE_DEV_IDENTITY_ROLES=operator</code>{" "}
+          <code> X-OpenSandbox-Roles</code> to <code>operator</code> (or set <code> VITE_UI_ROLE=operator</code>{" "}
           for the dev UI hint).
         </div>
       </div>

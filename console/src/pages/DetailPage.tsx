@@ -181,7 +181,9 @@ export function DetailPage() {
         <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Get endpoint</h2>
         <p className="text-sm text-slate-600 dark:text-slate-400">Resolves a published port to a reachable host (per server ingress settings).</p>
         <div className="mb-3 flex items-center gap-2">
+          <label className="sr-only" htmlFor="port-input">Port</label>
           <input
+            id="port-input"
             className="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-200 dark:border-[#3c3f44] dark:bg-[#202127] dark:text-slate-100 dark:focus:border-blue-300 dark:focus:ring-blue-900/40"
             value={port}
             onChange={(e) => setPort(e.target.value)}

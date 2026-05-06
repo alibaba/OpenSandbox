@@ -137,7 +137,7 @@ export function ListPage() {
           <button
             type="button"
             className="inline-flex h-10 items-center justify-center rounded-[20px] bg-[#ebedf0] px-5 text-sm font-medium text-[#3c3f44] transition hover:bg-[#e4e6ea] disabled:cursor-not-allowed disabled:opacity-45 dark:bg-[#32363f] dark:text-[#dfdfd6] dark:hover:bg-[#3a3f4a]"
-            disabled={loading}
+            disabled={loading || data?.pagination?.hasNextPage === false}
             onClick={() => setPage((p) => p + 1)}
           >
             Next

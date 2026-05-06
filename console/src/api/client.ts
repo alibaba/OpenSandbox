@@ -63,7 +63,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       message = parsed.text;
     }
     if (!message && res.status === 500) {
-      message = "API proxy returned 500. Ensure the server is running on http://127.0.0.1:8080.";
+      message = "The API returned an internal server error (500). Check the server and proxy logs for details.";
     }
     if (!message) {
       message = res.statusText || `HTTP ${res.status}`;

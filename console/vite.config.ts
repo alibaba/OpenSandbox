@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const team = env.VITE_DEV_IDENTITY_TEAM ?? "";
   const roles = env.VITE_DEV_IDENTITY_ROLES ?? "operator";
   const proxy: Record<string, import("vite").ProxyOptions> = {
-    [env.VITE_API_BASE_PATH ?? "/v1"]: {
+    [env.VITE_API_PREFIX ?? env.VITE_API_BASE_PATH ?? "/v1"]: {
       target: env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:8080",
       changeOrigin: true,
       configure(p) {
