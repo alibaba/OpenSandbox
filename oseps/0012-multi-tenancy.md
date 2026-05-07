@@ -60,6 +60,7 @@ Multi-tenancy gives each tenant its own namespace and API key(s), single server 
 ### Non-Goals
 
 - Docker runtime multi-tenancy — Docker has no namespace concept; `tenants.toml` with Docker is a startup error, not silently ignored
+- Ingress gateway tenant isolation — ingress is a data-plane routing layer, intentionally tenant-unaware; isolation at proxy layer relies on unguessable sandbox IDs + signed tokens + K8s NetworkPolicy
 - Dynamic tenant CRUD via REST API (future OSEP)
 - Per-tenant rate limiting at server layer (delegate to K8s/ingress)
 - Server-side resource quotas (delegate to K8s ResourceQuota)
@@ -281,15 +282,14 @@ Methods affected: `create_sandbox`, `list_sandboxes`, `get_sandbox`, `delete_san
 
 **Sandbox labels on create:** add `opensandbox.io/tenant = <tenant_name>`.
 
-**Proxy route ownership guard (pseudocode):**
-```
-proxy_handler(sandbox_id):
-  sandbox = get_sandbox(sandbox_id)
-  if not sandbox → 404
-  sandbox_tenant = sandbox.labels["opensandbox.io/tenant"]
-  current_tenant = get_current_tenant()
-  if current_tenant and sandbox_tenant != current_tenant.name → 404  # don't leak existence
-```
+**Proxy route ownership:** proxy routes (`/sandboxes/{id}/proxy/{port}/...`) bypass API key auth by design — end users hitting sandboxes don't carry `OPEN-SANDBOX-API-KEY`. Ingress gateway is intentionally tenant-unaware.
+
+Isolation at proxy layer relies on:
+- **Unguessable sandbox IDs** (random UUIDs) — knowing one tenant's sandbox ID doesn't reveal another's
+- **Signed route tokens** (OSEP-0011) — time-limited, cryptographically bound to a single sandbox
+- **K8s namespace isolation** — even if traffic reaches a pod, NetworkPolicy restricts cross-namespace pod-to-pod communication
+
+No tenant context is injected on proxy paths. The server resolves the sandbox endpoint purely by sandbox ID and forwards. Tenancy is enforced at lifecycle API boundaries (create/get/list/delete), not at data-plane proxy boundaries.
 
 ---
 
