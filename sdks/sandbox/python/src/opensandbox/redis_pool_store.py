@@ -18,11 +18,30 @@
 from __future__ import annotations
 
 import base64
+import inspect
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from opensandbox.exceptions import PoolStateStoreUnavailableException
 from opensandbox.pool_types import IdleEntry, StoreCounters
+
+try:
+    from redis import Redis
+except ImportError as exc:  # pragma: no cover
+    raise ImportError(
+        'Install opensandbox[pool-redis] to use opensandbox.pool_redis'
+    ) from exc
+
+_REQUIRED_REDIS_METHODS = (
+    "eval",
+    "get",
+    "set",
+    "hdel",
+    "lrem",
+    "hlen",
+    "lrange",
+    "hgetall",
+)
 
 
 class RedisPoolStateStore:
@@ -91,7 +110,8 @@ end
 return 1
 """
 
-    def __init__(self, redis: Any, key_prefix: str = DEFAULT_KEY_PREFIX) -> None:
+    def __init__(self, redis: Redis, key_prefix: str = DEFAULT_KEY_PREFIX) -> None:
+        _validate_sync_redis_client(redis)
         self._redis = redis
         self._key_prefix = key_prefix
         self._default_idle_ttl = timedelta(hours=24)
@@ -196,17 +216,26 @@ return 1
     def snapshot_counters(self, pool_name: str) -> StoreCounters:
         def op() -> StoreCounters:
             self.reap_expired_idle(pool_name, datetime.now(timezone.utc))
-            return StoreCounters(idle_count=int(self._redis.hlen(self._idle_expires_key(pool_name))))
+            idle_count = cast(int, self._redis.hlen(self._idle_expires_key(pool_name)))
+            return StoreCounters(idle_count=idle_count)
 
         return self._execute("snapshot_counters", pool_name, op)
 
     def snapshot_idle_entries(self, pool_name: str) -> list[IdleEntry]:
         def op() -> list[IdleEntry]:
             self.reap_expired_idle(pool_name, datetime.now(timezone.utc))
-            ids = [_decode(v) for v in self._redis.lrange(self._idle_list_key(pool_name), 0, -1)]
+            raw_ids = cast(
+                list[Any],
+                self._redis.lrange(self._idle_list_key(pool_name), 0, -1),
+            )
+            ids = [_decode(v) for v in raw_ids]
+            raw_expires_by_id = cast(
+                dict[Any, Any],
+                self._redis.hgetall(self._idle_expires_key(pool_name)),
+            )
             expires_by_id = {
                 _decode(k): _decode(v)
-                for k, v in self._redis.hgetall(self._idle_expires_key(pool_name)).items()
+                for k, v in raw_expires_by_id.items()
             }
             entries: list[IdleEntry] = []
             for sandbox_id in ids:
@@ -317,3 +346,22 @@ def _validate_owner_and_ttl(owner_id: str, ttl: timedelta) -> None:
         raise ValueError("owner_id must not be blank")
     if ttl.total_seconds() <= 0:
         raise ValueError("ttl must be positive")
+
+
+def _validate_sync_redis_client(redis: Any) -> None:
+    if not isinstance(redis, Redis):
+        raise TypeError(
+            "RedisPoolStateStore requires a redis.Redis client; "
+            "use AsyncRedisPoolStateStore for redis.asyncio.Redis"
+        )
+    for method_name in _REQUIRED_REDIS_METHODS:
+        method = getattr(redis, method_name, None)
+        if not callable(method):
+            raise TypeError(
+                f"RedisPoolStateStore requires a Redis client with callable {method_name}()"
+            )
+        if inspect.iscoroutinefunction(method):
+            raise TypeError(
+                "RedisPoolStateStore requires a synchronous Redis client; "
+                "use redis.Redis, not redis.asyncio.Redis"
+            )

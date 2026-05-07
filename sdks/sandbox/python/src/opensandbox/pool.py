@@ -17,7 +17,6 @@
 
 from opensandbox._async_pool_store import InMemoryAsyncPoolStateStore
 from opensandbox._pool_store import InMemoryPoolStateStore
-from opensandbox.async_redis_pool_store import AsyncRedisPoolStateStore
 from opensandbox.pool_async import AsyncSandboxPool, SandboxPoolAsync
 from opensandbox.pool_types import (
     AcquirePolicy,
@@ -32,7 +31,6 @@ from opensandbox.pool_types import (
     PoolStateStore,
     StoreCounters,
 )
-from opensandbox.redis_pool_store import RedisPoolStateStore
 from opensandbox.sync.pool import SandboxPoolSync
 
 SandboxPool = SandboxPoolSync
@@ -41,7 +39,6 @@ __all__ = [
     "AcquirePolicy",
     "AsyncPoolConfig",
     "AsyncPoolStateStore",
-    "AsyncRedisPoolStateStore",
     "AsyncSandboxPool",
     "IdleEntry",
     "InMemoryAsyncPoolStateStore",
@@ -52,7 +49,6 @@ __all__ = [
     "PoolSnapshot",
     "PoolState",
     "PoolStateStore",
-    "RedisPoolStateStore",
     "SandboxPoolAsync",
     "SandboxPool",
     "SandboxPoolSync",

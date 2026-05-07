@@ -5,9 +5,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from redis import Redis
 
 from opensandbox.exceptions import PoolStateStoreUnavailableException
-from opensandbox.pool import RedisPoolStateStore
+from opensandbox.pool_redis import RedisPoolStateStore
 
 
 @pytest.fixture()
@@ -97,12 +98,84 @@ def test_redis_store_wraps_client_failures() -> None:
         store.get_max_idle("pool")
 
 
-class _BrokenRedis:
+def test_redis_store_rejects_async_client_shape() -> None:
+    with pytest.raises(TypeError, match="synchronous Redis client"):
+        RedisPoolStateStore(_FakeAsyncRedisShape())
+
+
+class _BrokenRedis(Redis):
+    def __init__(self) -> None:
+        pass
+
+    def eval(self, script: str, numkeys: int, *args: str) -> str | int | None:
+        raise RuntimeError("redis unavailable")
+
     def get(self, key: str) -> str | None:
         raise RuntimeError("redis unavailable")
 
+    def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        nx: bool = False,
+        px: int | None = None,
+    ) -> bool:
+        raise RuntimeError("redis unavailable")
 
-class _FakeRedis:
+    def hdel(self, key: str, field: str) -> int:
+        raise RuntimeError("redis unavailable")
+
+    def lrem(self, key: str, count: int, value: str) -> int:
+        raise RuntimeError("redis unavailable")
+
+    def hlen(self, key: str) -> int:
+        raise RuntimeError("redis unavailable")
+
+    def lrange(self, key: str, start: int, stop: int) -> list[str]:
+        raise RuntimeError("redis unavailable")
+
+    def hgetall(self, key: str) -> dict[str, str]:
+        raise RuntimeError("redis unavailable")
+
+
+class _FakeAsyncRedisShape(Redis):
+    def __init__(self) -> None:
+        pass
+
+    async def eval(self, script: str, numkeys: int, *args: str) -> str | int | None:
+        return None
+
+    async def get(self, key: str) -> str | None:
+        return None
+
+    async def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        nx: bool = False,
+        px: int | None = None,
+    ) -> bool:
+        return True
+
+    async def hdel(self, key: str, field: str) -> int:
+        return 0
+
+    async def lrem(self, key: str, count: int, value: str) -> int:
+        return 0
+
+    async def hlen(self, key: str) -> int:
+        return 0
+
+    async def lrange(self, key: str, start: int, stop: int) -> list[str]:
+        return []
+
+    async def hgetall(self, key: str) -> dict[str, str]:
+        return {}
+
+
+class _FakeRedis(Redis):
     """Small Redis double for RedisPoolStateStore unit tests."""
 
     def __init__(self) -> None:

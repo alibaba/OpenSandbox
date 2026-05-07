@@ -187,8 +187,9 @@ The store does not create or close Redis clients.
 ```python
 import redis
 
-from opensandbox import PoolCreationSpec, RedisPoolStateStore, SandboxPoolSync
+from opensandbox import PoolCreationSpec, SandboxPoolSync
 from opensandbox.config import ConnectionConfigSync
+from opensandbox.pool_redis import RedisPoolStateStore
 
 redis_client = redis.Redis.from_url(
     "redis://user:password@redis.example.com:6379/0",

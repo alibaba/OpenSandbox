@@ -18,18 +18,28 @@
 from __future__ import annotations
 
 import base64
+import inspect
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from opensandbox.exceptions import PoolStateStoreUnavailableException
 from opensandbox.pool_types import IdleEntry, StoreCounters
 from opensandbox.redis_pool_store import (
     RedisPoolStateStore,
+    Redis,
+    _REQUIRED_REDIS_METHODS,
     _decode,
     _millis,
     _validate_owner_and_ttl,
 )
+
+try:
+    from redis.asyncio import Redis as AsyncRedis
+except ImportError as exc:  # pragma: no cover
+    raise ImportError(
+        'Install opensandbox[pool-redis] to use opensandbox.pool_redis'
+    ) from exc
 
 T = TypeVar("T")
 
@@ -39,7 +49,8 @@ class AsyncRedisPoolStateStore:
 
     DEFAULT_KEY_PREFIX = RedisPoolStateStore.DEFAULT_KEY_PREFIX
 
-    def __init__(self, redis: Any, key_prefix: str = DEFAULT_KEY_PREFIX) -> None:
+    def __init__(self, redis: AsyncRedis, key_prefix: str = DEFAULT_KEY_PREFIX) -> None:
+        _validate_async_redis_client(redis)
         self._redis = redis
         self._key_prefix = key_prefix
         self._default_idle_ttl = timedelta(hours=24)
@@ -48,11 +59,14 @@ class AsyncRedisPoolStateStore:
         result = await self._execute(
             "try_take_idle",
             pool_name,
-            lambda: self._redis.eval(
-                RedisPoolStateStore._TAKE_IDLE_SCRIPT,
-                2,
-                self._idle_list_key(pool_name),
-                self._idle_expires_key(pool_name),
+            lambda: cast(
+                Awaitable[Any],
+                self._redis.eval(
+                    RedisPoolStateStore._TAKE_IDLE_SCRIPT,
+                    2,
+                    self._idle_list_key(pool_name),
+                    self._idle_expires_key(pool_name),
+                ),
             ),
         )
         return _decode(result) if result is not None else None
@@ -64,13 +78,16 @@ class AsyncRedisPoolStateStore:
         await self._execute(
             "put_idle",
             pool_name,
-            lambda: self._redis.eval(
-                RedisPoolStateStore._PUT_IDLE_SCRIPT,
-                2,
-                self._idle_list_key(pool_name),
-                self._idle_expires_key(pool_name),
-                sandbox_id,
-                str(ttl_millis),
+            lambda: cast(
+                Awaitable[Any],
+                self._redis.eval(
+                    RedisPoolStateStore._PUT_IDLE_SCRIPT,
+                    2,
+                    self._idle_list_key(pool_name),
+                    self._idle_expires_key(pool_name),
+                    sandbox_id,
+                    str(ttl_millis),
+                ),
             ),
         )
 
@@ -79,8 +96,14 @@ class AsyncRedisPoolStateStore:
             "remove_idle",
             pool_name,
             lambda: _gather_tuple(
-                self._redis.hdel(self._idle_expires_key(pool_name), sandbox_id),
-                self._redis.lrem(self._idle_list_key(pool_name), 0, sandbox_id),
+                cast(
+                    Awaitable[Any],
+                    self._redis.hdel(self._idle_expires_key(pool_name), sandbox_id),
+                ),
+                cast(
+                    Awaitable[Any],
+                    self._redis.lrem(self._idle_list_key(pool_name), 0, sandbox_id),
+                ),
             ),
         )
 
@@ -109,12 +132,15 @@ class AsyncRedisPoolStateStore:
         result = await self._execute(
             "renew_primary_lock",
             pool_name,
-            lambda: self._redis.eval(
-                RedisPoolStateStore._RENEW_LOCK_SCRIPT,
-                1,
-                self._primary_lock_key(pool_name),
-                owner_id,
-                str(max(1, _millis(ttl))),
+            lambda: cast(
+                Awaitable[Any],
+                self._redis.eval(
+                    RedisPoolStateStore._RENEW_LOCK_SCRIPT,
+                    1,
+                    self._primary_lock_key(pool_name),
+                    owner_id,
+                    str(max(1, _millis(ttl))),
+                ),
             ),
         )
         return result == 1 or result == b"1"
@@ -123,11 +149,14 @@ class AsyncRedisPoolStateStore:
         await self._execute(
             "release_primary_lock",
             pool_name,
-            lambda: self._redis.eval(
-                RedisPoolStateStore._RELEASE_LOCK_SCRIPT,
-                1,
-                self._primary_lock_key(pool_name),
-                owner_id,
+            lambda: cast(
+                Awaitable[Any],
+                self._redis.eval(
+                    RedisPoolStateStore._RELEASE_LOCK_SCRIPT,
+                    1,
+                    self._primary_lock_key(pool_name),
+                    owner_id,
+                ),
             ),
         )
 
@@ -135,19 +164,29 @@ class AsyncRedisPoolStateStore:
         await self._execute(
             "reap_expired_idle",
             pool_name,
-            lambda: self._redis.eval(
-                RedisPoolStateStore._REAP_EXPIRED_SCRIPT,
-                2,
-                self._idle_list_key(pool_name),
-                self._idle_expires_key(pool_name),
+            lambda: cast(
+                Awaitable[Any],
+                self._redis.eval(
+                    RedisPoolStateStore._REAP_EXPIRED_SCRIPT,
+                    2,
+                    self._idle_list_key(pool_name),
+                    self._idle_expires_key(pool_name),
+                ),
             ),
         )
 
     async def snapshot_counters(self, pool_name: str) -> StoreCounters:
         async def op() -> StoreCounters:
             await self.reap_expired_idle(pool_name, datetime.now(timezone.utc))
+            idle_count = cast(
+                int,
+                await cast(
+                    Awaitable[Any],
+                    self._redis.hlen(self._idle_expires_key(pool_name)),
+                ),
+            )
             return StoreCounters(
-                idle_count=int(await self._redis.hlen(self._idle_expires_key(pool_name)))
+                idle_count=idle_count
             )
 
         return await self._execute("snapshot_counters", pool_name, op)
@@ -155,15 +194,24 @@ class AsyncRedisPoolStateStore:
     async def snapshot_idle_entries(self, pool_name: str) -> list[IdleEntry]:
         async def op() -> list[IdleEntry]:
             await self.reap_expired_idle(pool_name, datetime.now(timezone.utc))
-            ids = [
-                _decode(v)
-                for v in await self._redis.lrange(self._idle_list_key(pool_name), 0, -1)
-            ]
+            raw_ids = cast(
+                list[Any],
+                await cast(
+                    Awaitable[Any],
+                    self._redis.lrange(self._idle_list_key(pool_name), 0, -1),
+                ),
+            )
+            ids = [_decode(v) for v in raw_ids]
+            raw_expires_by_id = cast(
+                dict[Any, Any],
+                await cast(
+                    Awaitable[Any],
+                    self._redis.hgetall(self._idle_expires_key(pool_name)),
+                ),
+            )
             expires_by_id = {
                 _decode(k): _decode(v)
-                for k, v in (
-                    await self._redis.hgetall(self._idle_expires_key(pool_name))
-                ).items()
+                for k, v in raw_expires_by_id.items()
             }
             entries: list[IdleEntry] = []
             for sandbox_id in ids:
@@ -267,3 +315,22 @@ async def _gather_tuple(*awaitables: Awaitable[Any]) -> tuple[Any, ...]:
     import asyncio
 
     return tuple(await asyncio.gather(*awaitables))
+
+
+def _validate_async_redis_client(redis: Any) -> None:
+    if isinstance(redis, Redis) or not isinstance(redis, AsyncRedis):
+        raise TypeError(
+            "AsyncRedisPoolStateStore requires a redis.asyncio.Redis client; "
+            "use RedisPoolStateStore for redis.Redis"
+        )
+    for method_name in _REQUIRED_REDIS_METHODS:
+        method = getattr(redis, method_name, None)
+        if not callable(method):
+            raise TypeError(
+                f"AsyncRedisPoolStateStore requires a Redis client with callable {method_name}()"
+            )
+        if not inspect.iscoroutinefunction(method):
+            raise TypeError(
+                "AsyncRedisPoolStateStore requires an async Redis client; "
+                "use redis.asyncio.Redis, not redis.Redis"
+            )

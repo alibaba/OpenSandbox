@@ -41,9 +41,9 @@ from opensandbox.pool import (
     PoolCreationSpec,
     PoolState,
     PoolStateStore,
-    RedisPoolStateStore,
     SandboxPoolSync,
 )
+from opensandbox.pool_redis import RedisPoolStateStore
 
 from tests.base_e2e_test import (
     create_connection_config_sync,

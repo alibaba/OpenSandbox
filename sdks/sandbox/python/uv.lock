@@ -427,6 +427,7 @@ dev = [
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
+    { name = "redis" },
     { name = "ruff" },
 ]
 
@@ -447,6 +448,7 @@ dev = [
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "pytest-cov", specifier = ">=4.0.0" },
+    { name = "redis", specifier = ">=5.0,<6.0" },
     { name = "ruff", specifier = ">=0.14.8" },
 ]
 

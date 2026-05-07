@@ -5,10 +5,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from redis.asyncio import Redis as AsyncRedis
 from test_redis_pool_store import _FakeRedis
 
 from opensandbox.exceptions import PoolStateStoreUnavailableException
-from opensandbox.pool import AsyncRedisPoolStateStore
+from opensandbox.pool_redis import AsyncRedisPoolStateStore
 
 
 @pytest.fixture()
@@ -108,12 +109,48 @@ async def test_async_redis_store_wraps_client_failures() -> None:
         await store.get_max_idle("pool")
 
 
-class _BrokenAsyncRedis:
+def test_async_redis_store_rejects_sync_client_shape() -> None:
+    with pytest.raises(TypeError, match="redis.asyncio.Redis"):
+        AsyncRedisPoolStateStore(_FakeRedis())
+
+
+class _BrokenAsyncRedis(AsyncRedis):
+    def __init__(self) -> None:
+        pass
+
+    async def eval(self, script: str, numkeys: int, *args: str) -> str | int | None:
+        raise RuntimeError("redis unavailable")
+
     async def get(self, key: str) -> str | None:
         raise RuntimeError("redis unavailable")
 
+    async def set(
+        self,
+        key: str,
+        value: str,
+        *,
+        nx: bool = False,
+        px: int | None = None,
+    ) -> bool:
+        raise RuntimeError("redis unavailable")
 
-class _FakeAsyncRedis:
+    async def hdel(self, key: str, field: str) -> int:
+        raise RuntimeError("redis unavailable")
+
+    async def lrem(self, key: str, count: int, value: str) -> int:
+        raise RuntimeError("redis unavailable")
+
+    async def hlen(self, key: str) -> int:
+        raise RuntimeError("redis unavailable")
+
+    async def lrange(self, key: str, start: int, stop: int) -> list[str]:
+        raise RuntimeError("redis unavailable")
+
+    async def hgetall(self, key: str) -> dict[str, str]:
+        raise RuntimeError("redis unavailable")
+
+
+class _FakeAsyncRedis(AsyncRedis):
     def __init__(self) -> None:
         self._sync = _FakeRedis()
 

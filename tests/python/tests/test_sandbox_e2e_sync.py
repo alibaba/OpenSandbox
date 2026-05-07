@@ -414,7 +414,7 @@ class TestSandboxE2ESync:
 
             # Step 1: Verify the host marker file is visible inside the sandbox
             # Retry: bind mount propagation can sometimes lag on first access
-            for attempt in range(5):
+            for _attempt in range(5):
                 result = sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
                 if result.logs.stdout:
                     break
@@ -432,7 +432,7 @@ class TestSandboxE2ESync:
 
             # Step 3: Verify the written file is readable
             # Retry: written data may not be immediately visible through bind mount
-            for attempt in range(5):
+            for _attempt in range(5):
                 result = sandbox.commands.run(f"cat {container_mount_path}/sandbox-output.txt")
                 if result.logs.stdout:
                     break
@@ -497,7 +497,7 @@ class TestSandboxE2ESync:
 
             # Step 1: Verify the host marker file is readable
             # Retry: bind mount propagation can sometimes lag on first access
-            for attempt in range(5):
+            for _attempt in range(5):
                 result = sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
                 if result.logs.stdout:
                     break
@@ -559,7 +559,7 @@ class TestSandboxE2ESync:
 
             # Step 1: Verify the marker file seeded into the named volume is readable
             # Retry: bind mount propagation can sometimes lag on first access
-            for attempt in range(5):
+            for _attempt in range(5):
                 result = sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
                 if result.logs.stdout:
                     break
@@ -577,7 +577,7 @@ class TestSandboxE2ESync:
 
             # Step 3: Verify the written file is readable
             # Retry: written data may not be immediately visible through bind mount
-            for attempt in range(5):
+            for _attempt in range(5):
                 result = sandbox.commands.run(f"cat {container_mount_path}/pvc-output.txt")
                 if result.logs.stdout:
                     break
@@ -639,7 +639,7 @@ class TestSandboxE2ESync:
 
             # Step 1: Verify the marker file is readable
             # Retry: bind mount propagation can sometimes lag on first access
-            for attempt in range(5):
+            for _attempt in range(5):
                 result = sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
                 if result.logs.stdout:
                     break
@@ -702,7 +702,7 @@ class TestSandboxE2ESync:
 
             # Step 1: Verify the subpath marker file is readable
             # Retry: bind mount propagation can sometimes lag on first access
-            for attempt in range(5):
+            for _attempt in range(5):
                 result = sandbox.commands.run(f"cat {container_mount_path}/marker.txt")
                 if result.logs.stdout:
                     break

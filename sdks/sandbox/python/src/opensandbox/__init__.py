@@ -102,12 +102,10 @@ from importlib.metadata import version as _pkg_version
 from opensandbox.manager import SandboxManager
 from opensandbox.pool import (
     AcquirePolicy,
-    AsyncRedisPoolStateStore,
     AsyncSandboxPool,
     InMemoryAsyncPoolStateStore,
     InMemoryPoolStateStore,
     PoolCreationSpec,
-    RedisPoolStateStore,
     SandboxPool,
     SandboxPoolAsync,
 )
@@ -133,6 +131,4 @@ __all__ = [
     "PoolCreationSpec",
     "InMemoryAsyncPoolStateStore",
     "InMemoryPoolStateStore",
-    "AsyncRedisPoolStateStore",
-    "RedisPoolStateStore",
 ]

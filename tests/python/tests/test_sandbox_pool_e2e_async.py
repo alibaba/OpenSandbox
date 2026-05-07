@@ -34,13 +34,13 @@ from opensandbox.models.sandboxes import SandboxFilter
 from opensandbox.pool import (
     AcquirePolicy,
     AsyncPoolStateStore,
-    AsyncRedisPoolStateStore,
     InMemoryAsyncPoolStateStore,
     PoolCreationSpec,
     PoolSnapshot,
     PoolState,
     SandboxPoolAsync,
 )
+from opensandbox.pool_redis import AsyncRedisPoolStateStore
 
 from tests.base_e2e_test import (
     create_connection_config,

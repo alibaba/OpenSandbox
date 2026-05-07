@@ -185,8 +185,9 @@ Redis client 由业务方自己创建和配置，然后传给 `RedisPoolStateSto
 ```python
 import redis
 
-from opensandbox import PoolCreationSpec, RedisPoolStateStore, SandboxPoolSync
+from opensandbox import PoolCreationSpec, SandboxPoolSync
 from opensandbox.config import ConnectionConfigSync
+from opensandbox.pool_redis import RedisPoolStateStore
 
 redis_client = redis.Redis.from_url(
     "redis://user:password@redis.example.com:6379/0",
