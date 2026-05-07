@@ -25,7 +25,7 @@ server:
   # -- Server image configuration
   image:
     repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server
-    tag: "v0.1.12"
+    tag: "v0.1.13"
 
   # -- Number of server replicas
   replicaCount: 2
@@ -49,7 +49,7 @@ server:
     gatewayRouteMode: "header"
     image:
       repository: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ingress
-      tag: "v1.0.6"
+      tag: "v1.0.7"
     replicaCount: 2
     port: 28888
     dataplaneNamespace: "opensandbox"
@@ -83,7 +83,7 @@ configToml: |
 
   [runtime]
   type = "kubernetes"
-  execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.14"
+  execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.15"
 
   [kubernetes]
   kubeconfig_path = ""
@@ -91,10 +91,10 @@ configToml: |
   informer_enabled = true
   informer_resync_seconds = 300
   informer_watch_timeout_seconds = 60
+  snapshot_create_timeout_seconds = 900
   workload_provider = "batchsandbox"
   batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
   
   [egress]
   image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.10"
   mode = "dns+nft"
-

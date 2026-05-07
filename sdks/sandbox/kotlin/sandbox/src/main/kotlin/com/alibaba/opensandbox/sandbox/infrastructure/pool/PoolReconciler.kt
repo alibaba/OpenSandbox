@@ -24,9 +24,9 @@ import java.util.concurrent.Callable
 import java.util.concurrent.ExecutorService
 
 /**
- * Runs one reconcile tick: leader-gated replenish and TTL reap.
+ * Runs one reconcile tick: leader-gated replenish/shrink and TTL reap.
  *
- * Only the current primary lock holder performs create + putIdle.
+ * Only the current primary lock holder performs idle maintenance writes.
  * Leader does not voluntarily release the lock; it is only lost when renew fails or TTL expires.
  * Call from a periodic scheduler; [createOne] should call lifecycle create and return the new sandbox ID or null on failure.
  */
@@ -35,15 +35,15 @@ internal object PoolReconciler {
 
     /**
      * Runs a single reconcile tick. If this node does not hold the primary lock, returns immediately.
-     * Otherwise: reaps expired idle, snapshots counters, then creates up to min(deficit, warmupConcurrency)
-     * sandboxes via [createOne] concurrently using [warmupExecutor].
+     * Otherwise: reaps expired idle, snapshots counters, then shrinks excess idle or creates up to
+     * min(deficit, warmupConcurrency) sandboxes via [createOne] concurrently using [warmupExecutor].
      * Lock is not released at end of tick (distributed implementations rely on TTL or renew failure to release).
      */
     fun runReconcileTick(
         config: PoolConfig,
         stateStore: PoolStateStore,
         createOne: () -> String?,
-        onOrphanedCreated: (String) -> Unit = {},
+        onDiscardSandbox: (String) -> Unit = {},
         reconcileState: ReconcileState,
         warmupExecutor: ExecutorService,
     ) {
@@ -55,7 +55,7 @@ internal object PoolReconciler {
             logger.trace("Reconcile skip (not primary): pool_name={}", poolName)
             return
         }
-        runPrimaryReplenishOnce(config, stateStore, createOne, onOrphanedCreated, reconcileState, warmupExecutor)
+        runPrimaryReplenishOnce(config, stateStore, createOne, onDiscardSandbox, reconcileState, warmupExecutor)
         // Do not release primary lock here; leader holds until renew fails or TTL expires.
     }
 
@@ -63,7 +63,7 @@ internal object PoolReconciler {
         config: PoolConfig,
         stateStore: PoolStateStore,
         createOne: () -> String?,
-        onOrphanedCreated: (String) -> Unit,
+        onDiscardSandbox: (String) -> Unit,
         reconcileState: ReconcileState,
         warmupExecutor: ExecutorService,
     ) {
@@ -74,6 +74,13 @@ internal object PoolReconciler {
 
         stateStore.reapExpiredIdle(poolName, now)
         val counters = stateStore.snapshotCounters(poolName)
+        val excess = (counters.idleCount - config.maxIdle).coerceAtLeast(0)
+        val toRemove = minOf(excess, config.warmupConcurrency)
+        if (toRemove > 0) {
+            shrinkExcessIdle(config, stateStore, onDiscardSandbox, toRemove)
+            return
+        }
+
         val deficit = (config.maxIdle - counters.idleCount).coerceAtLeast(0)
         val toCreate = minOf(deficit, config.warmupConcurrency)
 
@@ -130,7 +137,7 @@ internal object PoolReconciler {
                 val orphanedCount = createdSandboxIds.size - index
                 for (orphanedIndex in index until createdSandboxIds.size) {
                     try {
-                        onOrphanedCreated(createdSandboxIds[orphanedIndex])
+                        onDiscardSandbox(createdSandboxIds[orphanedIndex])
                     } catch (e: Exception) {
                         logger.warn(
                             "Reconcile orphaned sandbox cleanup failed: pool_name={} sandbox_id={} error={}",
@@ -162,7 +169,7 @@ internal object PoolReconciler {
                         // best-effort remove; continue cleanup path
                     }
                     try {
-                        onOrphanedCreated(orphanedId)
+                        onDiscardSandbox(orphanedId)
                     } catch (cleanupError: Exception) {
                         logger.warn(
                             "Reconcile orphaned sandbox cleanup failed after putIdle error: pool_name={} sandbox_id={} error={}",
@@ -185,5 +192,43 @@ internal object PoolReconciler {
         if (created > 0) {
             logger.debug("Reconcile created {} sandboxes: pool_name={}", created, poolName)
         }
+    }
+
+    private fun shrinkExcessIdle(
+        config: PoolConfig,
+        stateStore: PoolStateStore,
+        onDiscardSandbox: (String) -> Unit,
+        toRemove: Int,
+    ) {
+        val poolName = config.poolName
+        val ownerId = config.ownerId
+        val ttl = config.primaryLockTtl
+        var removed = 0
+
+        repeat(toRemove) {
+            if (!stateStore.renewPrimaryLock(poolName, ownerId, ttl)) {
+                logger.warn(
+                    "Reconcile lost primary lock before shrinking idle: pool_name={} removed={}",
+                    poolName,
+                    removed,
+                )
+                return
+            }
+            val sandboxId = stateStore.tryTakeIdle(poolName) ?: return
+            try {
+                onDiscardSandbox(sandboxId)
+            } catch (e: Exception) {
+                logger.warn(
+                    "Reconcile shrink sandbox cleanup failed: pool_name={} sandbox_id={} error={}",
+                    poolName,
+                    sandboxId,
+                    e.message,
+                )
+            }
+            removed++
+        }
+
+        stateStore.renewPrimaryLock(poolName, ownerId, ttl)
+        logger.debug("Reconcile shrunk {} idle sandbox(es): pool_name={}", removed, poolName)
     }
 }

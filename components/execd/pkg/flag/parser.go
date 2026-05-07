@@ -27,6 +27,7 @@ import (
 const (
 	jupyterHostEnv             = "JUPYTER_HOST"
 	jupyterTokenEnv            = "JUPYTER_TOKEN"
+	accessTokenEnv             = "EXECD_ACCESS_TOKEN"
 	gracefulShutdownTimeoutEnv = "EXECD_API_GRACE_SHUTDOWN"
 	jupyterIdlePollIntervalEnv = "EXECD_JUPYTER_IDLE_POLL_INTERVAL"
 )
@@ -50,6 +51,10 @@ func InitFlags() {
 
 	if jupyterTokenFromEnv := os.Getenv(jupyterTokenEnv); jupyterTokenFromEnv != "" {
 		JupyterServerToken = jupyterTokenFromEnv
+	}
+
+	if accessTokenFromEnv := os.Getenv(accessTokenEnv); accessTokenFromEnv != "" {
+		ServerAccessToken = accessTokenFromEnv
 	}
 
 	// Then define flags with current values as defaults

@@ -41,6 +41,7 @@ import (
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller"
+	poolassign "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/poolassign"
 	cryptoutil "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/crypto"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/fieldindex"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils/logging"
@@ -410,11 +411,19 @@ func main() {
 	poolConcurrency := concurrencyConfig.Get(poolKindName, defaultPoolConcurrency)
 	setupLog.Info("controller concurrency configured", batchSandboxKindName, batchSandboxConcurrency, poolKindName, poolConcurrency)
 
+	profileStore := poolassign.NewProfileStore()
+	_ = profileStore.LoadDefault()
+	if err := profileStore.SetupWithManager(mgr, os.Getenv("POD_NAMESPACE")); err != nil {
+		setupLog.Error(err, "failed to setup pool assign profiles ConfigMap watch")
+		os.Exit(1)
+	}
+
 	if err := (&controller.BatchSandboxReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		Recorder:         mgr.GetEventRecorderFor("batchsandbox-controller"),
 		ResumePullSecret: resumePullSecret,
+		ProfileStore:     profileStore,
 	}).SetupWithManager(mgr, batchSandboxConcurrency); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BatchSandbox")
 		os.Exit(1)

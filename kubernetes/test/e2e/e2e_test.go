@@ -4362,6 +4362,732 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 	})
 
+	Context("Pool Auto-Assign", func() {
+		BeforeAll(func() {
+			By("waiting for controller to be ready")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-l", "control-plane=controller-manager",
+					"-n", namespace, "-o", "jsonpath={.items[0].status.phase}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("Running"))
+			}, 2*time.Minute).Should(Succeed())
+		})
+
+		It("should auto-assign BatchSandbox without template to the only Pool when poolRef is *", func() {
+			const poolName = "test-pool-auto-assign"
+			const testNamespace = "default"
+
+			By("creating a Pool")
+			poolYAML, err := renderTemplate("testdata/pool-basic.yaml", map[string]interface{}{
+				"PoolName":     poolName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    4,
+				"BufferMin":    2,
+				"PoolMax":      6,
+				"PoolMin":      3,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolFile := filepath.Join("/tmp", poolName+".yaml")
+			err = os.WriteFile(poolFile, []byte(poolYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolFile)
+
+			cmd := exec.Command("kubectl", "apply", "-f", poolFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for Pool pods to be Running")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", testNamespace,
+					"-l", fmt.Sprintf("sandbox.opensandbox.io/pool-name=%s", poolName),
+					"--field-selector=status.phase=Running",
+					"-o", "jsonpath={.items[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				pods := strings.Fields(output)
+				g.Expect(len(pods)).To(BeNumerically(">=", 3))
+			}, 3*time.Minute).Should(Succeed())
+
+			By("creating a BatchSandbox without template and poolRef: *")
+			const batchSandboxName = "test-bs-auto-assign"
+			bsYAML, err := renderTemplate("testdata/batchsandbox-auto-assign.yaml", map[string]interface{}{
+				"BatchSandboxName": batchSandboxName,
+				"Namespace":        testNamespace,
+				"Replicas":         2,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			bsFile := filepath.Join("/tmp", batchSandboxName+".yaml")
+			err = os.WriteFile(bsFile, []byte(bsYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(bsFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", bsFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying poolRef was updated from * to the actual Pool name")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+					"-o", "jsonpath={.spec.poolRef}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(poolName))
+			}, 2*time.Minute).Should(Succeed())
+
+			By("verifying pods are allocated to the BatchSandbox")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+					"-o", "jsonpath={.status.allocated}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal("2"))
+			}, 2*time.Minute).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", batchSandboxName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should auto-assign to the image-matching Pool among multiple Pools", func() {
+			const poolMatchName = "test-pool-match"
+			const poolOtherName = "test-pool-other"
+			const testNamespace = "default"
+
+			By("creating pool-match with the sandbox image")
+			poolMatchYAML, err := renderTemplate("testdata/pool-basic.yaml", map[string]interface{}{
+				"PoolName":     poolMatchName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolMatchFile := filepath.Join("/tmp", poolMatchName+".yaml")
+			err = os.WriteFile(poolMatchFile, []byte(poolMatchYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolMatchFile)
+
+			cmd := exec.Command("kubectl", "apply", "-f", poolMatchFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating pool-other with a different image")
+			poolOtherYAML := fmt.Sprintf(`apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: busybox:1.36
+        command: ["sleep", "3600"]
+  capacitySpec:
+    bufferMax: 3
+    bufferMin: 2
+    poolMax: 5
+    poolMin: 2`, poolOtherName, testNamespace)
+			poolOtherFile := filepath.Join("/tmp", poolOtherName+".yaml")
+			err = os.WriteFile(poolOtherFile, []byte(poolOtherYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolOtherFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolOtherFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for pool-match pods to be Running")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", testNamespace,
+					"-l", fmt.Sprintf("sandbox.opensandbox.io/pool-name=%s", poolMatchName),
+					"--field-selector=status.phase=Running",
+					"-o", "jsonpath={.items[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				pods := strings.Fields(output)
+				g.Expect(len(pods)).To(BeNumerically(">=", 2))
+			}, 3*time.Minute).Should(Succeed())
+
+			By("creating a BatchSandbox with template specifying the sandbox image")
+			const batchSandboxName = "test-bs-image-match"
+			bsYAML, err := renderTemplate("testdata/batchsandbox-auto-assign-with-template.yaml", map[string]interface{}{
+				"BatchSandboxName": batchSandboxName,
+				"Namespace":        testNamespace,
+				"Replicas":         1,
+				"SandboxImage":     utils.SandboxImage,
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			bsFile := filepath.Join("/tmp", batchSandboxName+".yaml")
+			err = os.WriteFile(bsFile, []byte(bsYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(bsFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", bsFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying poolRef was updated to the image-matching Pool")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+					"-o", "jsonpath={.spec.poolRef}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(poolMatchName))
+			}, 2*time.Minute).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", batchSandboxName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolMatchName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolOtherName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should auto-assign to the nodeSelector-matching Pool among multiple Pools", func() {
+			const poolSSDName = "test-pool-ssd"
+			const poolHDDName = "test-pool-hdd"
+			const testNamespace = "default"
+
+			By("labeling the Kind node with disk=ssd for nodeSelector scheduling")
+			cmd := exec.Command("kubectl", "label", "node", "sandbox-k8s-test-e2e-control-plane", "disk=ssd", "--overwrite")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				cmd := exec.Command("kubectl", "label", "node", "sandbox-k8s-test-e2e-control-plane", "disk-")
+				_, _ = utils.Run(cmd)
+			}()
+
+			By("creating pool-ssd with nodeSelector disk=ssd")
+			poolSSDYAML, err := renderTemplate("testdata/pool-with-nodeselector.yaml", map[string]interface{}{
+				"PoolName":     poolSSDName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+				"NodeSelector": map[string]interface{}{"disk": "ssd"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolSSDFile := filepath.Join("/tmp", poolSSDName+".yaml")
+			err = os.WriteFile(poolSSDFile, []byte(poolSSDYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolSSDFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolSSDFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating pool-hdd with nodeSelector disk=hdd")
+			poolHDDYAML, err := renderTemplate("testdata/pool-with-nodeselector.yaml", map[string]interface{}{
+				"PoolName":     poolHDDName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+				"NodeSelector": map[string]interface{}{"disk": "hdd"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolHDDFile := filepath.Join("/tmp", poolHDDName+".yaml")
+			err = os.WriteFile(poolHDDFile, []byte(poolHDDYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolHDDFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolHDDFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for pool-ssd pods to be Running")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", testNamespace,
+					"-l", fmt.Sprintf("sandbox.opensandbox.io/pool-name=%s", poolSSDName),
+					"--field-selector=status.phase=Running",
+					"-o", "jsonpath={.items[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				pods := strings.Fields(output)
+				g.Expect(len(pods)).To(BeNumerically(">=", 2))
+			}, 3*time.Minute).Should(Succeed())
+
+			By("creating a BatchSandbox with template specifying nodeSelector disk=ssd")
+			const batchSandboxName = "test-bs-nodeselector"
+			bsYAML, err := renderTemplate("testdata/batchsandbox-auto-assign-with-template.yaml", map[string]interface{}{
+				"BatchSandboxName": batchSandboxName,
+				"Namespace":        testNamespace,
+				"Replicas":         1,
+				"SandboxImage":     utils.SandboxImage,
+				"NodeSelector":     map[string]interface{}{"disk": "ssd"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			bsFile := filepath.Join("/tmp", batchSandboxName+".yaml")
+			err = os.WriteFile(bsFile, []byte(bsYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(bsFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", bsFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying poolRef was updated to the nodeSelector-matching Pool")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+					"-o", "jsonpath={.spec.poolRef}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(poolSSDName))
+			}, 2*time.Minute).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", batchSandboxName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolSSDName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolHDDName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should auto-assign to the Pool whose labels match BatchSandbox nodeAffinity", func() {
+			const poolGPUName = "test-pool-gpu"
+			const poolCPUName = "test-pool-cpu"
+			const testNamespace = "default"
+
+			By("creating pool-gpu with label accelerator=gpu")
+			poolGPUYAML, err := renderTemplate("testdata/pool-with-nodeselector.yaml", map[string]interface{}{
+				"PoolName":     poolGPUName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+				"Labels":       map[string]interface{}{"accelerator": "gpu"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolGPUFile := filepath.Join("/tmp", poolGPUName+".yaml")
+			err = os.WriteFile(poolGPUFile, []byte(poolGPUYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolGPUFile)
+
+			cmd := exec.Command("kubectl", "apply", "-f", poolGPUFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating pool-cpu with label accelerator=cpu")
+			poolCPUYAML, err := renderTemplate("testdata/pool-with-nodeselector.yaml", map[string]interface{}{
+				"PoolName":     poolCPUName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+				"Labels":       map[string]interface{}{"accelerator": "cpu"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolCPUFile := filepath.Join("/tmp", poolCPUName+".yaml")
+			err = os.WriteFile(poolCPUFile, []byte(poolCPUYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolCPUFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolCPUFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for pool-gpu pods to be Running")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", testNamespace,
+					"-l", fmt.Sprintf("sandbox.opensandbox.io/pool-name=%s", poolGPUName),
+					"--field-selector=status.phase=Running",
+					"-o", "jsonpath={.items[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				pods := strings.Fields(output)
+				g.Expect(len(pods)).To(BeNumerically(">=", 2))
+			}, 3*time.Minute).Should(Succeed())
+
+			By("creating a BatchSandbox with nodeAffinity requiring accelerator=gpu")
+			const batchSandboxName = "test-bs-affinity"
+			bsYAML, err := renderTemplate("testdata/batchsandbox-auto-assign-with-template.yaml", map[string]interface{}{
+				"BatchSandboxName": batchSandboxName,
+				"Namespace":        testNamespace,
+				"Replicas":         1,
+				"SandboxImage":     utils.SandboxImage,
+				"AffinityYAML":     "\n        nodeAffinity:\n          requiredDuringSchedulingIgnoredDuringExecution:\n            nodeSelectorTerms:\n            - matchExpressions:\n              - key: accelerator\n                operator: In\n                values:\n                - gpu",
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			bsFile := filepath.Join("/tmp", batchSandboxName+".yaml")
+			err = os.WriteFile(bsFile, []byte(bsYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(bsFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", bsFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying poolRef was updated to the Pool with matching labels")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+					"-o", "jsonpath={.spec.poolRef}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(poolGPUName))
+			}, 2*time.Minute).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", batchSandboxName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolGPUName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolCPUName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should auto-assign to the Pool whose labels match BatchSandbox nodeSelector", func() {
+			const poolGPUName = "test-pool-label-gpu"
+			const poolCPUName = "test-pool-label-cpu"
+			const testNamespace = "default"
+
+			By("creating pool-label-gpu with label accelerator=gpu")
+			poolGPUYAML, err := renderTemplate("testdata/pool-with-nodeselector.yaml", map[string]interface{}{
+				"PoolName":     poolGPUName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+				"Labels":       map[string]interface{}{"accelerator": "gpu"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolGPUFile := filepath.Join("/tmp", poolGPUName+".yaml")
+			err = os.WriteFile(poolGPUFile, []byte(poolGPUYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolGPUFile)
+
+			cmd := exec.Command("kubectl", "apply", "-f", poolGPUFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating pool-label-cpu with label accelerator=cpu")
+			poolCPUYAML, err := renderTemplate("testdata/pool-with-nodeselector.yaml", map[string]interface{}{
+				"PoolName":     poolCPUName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+				"Labels":       map[string]interface{}{"accelerator": "cpu"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolCPUFile := filepath.Join("/tmp", poolCPUName+".yaml")
+			err = os.WriteFile(poolCPUFile, []byte(poolCPUYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolCPUFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolCPUFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for pool-label-gpu pods to be Running")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", testNamespace,
+					"-l", fmt.Sprintf("sandbox.opensandbox.io/pool-name=%s", poolGPUName),
+					"--field-selector=status.phase=Running",
+					"-o", "jsonpath={.items[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				pods := strings.Fields(output)
+				g.Expect(len(pods)).To(BeNumerically(">=", 2))
+			}, 3*time.Minute).Should(Succeed())
+
+			By("creating a BatchSandbox with nodeSelector accelerator=gpu")
+			const batchSandboxName = "test-bs-nodeselector-labels"
+			bsYAML, err := renderTemplate("testdata/batchsandbox-auto-assign-with-template.yaml", map[string]interface{}{
+				"BatchSandboxName": batchSandboxName,
+				"Namespace":        testNamespace,
+				"Replicas":         1,
+				"SandboxImage":     utils.SandboxImage,
+				"NodeSelector":     map[string]interface{}{"accelerator": "gpu"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			bsFile := filepath.Join("/tmp", batchSandboxName+".yaml")
+			err = os.WriteFile(bsFile, []byte(bsYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(bsFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", bsFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying poolRef was updated to the Pool with matching labels")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+					"-o", "jsonpath={.spec.poolRef}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(poolGPUName))
+			}, 2*time.Minute).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", batchSandboxName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolGPUName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolCPUName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should auto-assign to the Pool whose nodeSelector matches BatchSandbox nodeAffinity", func() {
+			const poolSSDName = "test-pool-ns-ssd"
+			const poolHDDName = "test-pool-ns-hdd"
+			const testNamespace = "default"
+
+			By("labeling the Kind node with disk=ssd for nodeSelector scheduling")
+			cmd := exec.Command("kubectl", "label", "node", "sandbox-k8s-test-e2e-control-plane", "disk=ssd", "--overwrite")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+			defer func() {
+				cmd := exec.Command("kubectl", "label", "node", "sandbox-k8s-test-e2e-control-plane", "disk-")
+				_, _ = utils.Run(cmd)
+			}()
+
+			By("creating pool-ns-ssd with nodeSelector disk=ssd")
+			poolSSDYAML, err := renderTemplate("testdata/pool-with-nodeselector.yaml", map[string]interface{}{
+				"PoolName":     poolSSDName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+				"NodeSelector": map[string]interface{}{"disk": "ssd"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolSSDFile := filepath.Join("/tmp", poolSSDName+".yaml")
+			err = os.WriteFile(poolSSDFile, []byte(poolSSDYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolSSDFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolSSDFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating pool-ns-hdd with nodeSelector disk=hdd")
+			poolHDDYAML, err := renderTemplate("testdata/pool-with-nodeselector.yaml", map[string]interface{}{
+				"PoolName":     poolHDDName,
+				"SandboxImage": utils.SandboxImage,
+				"Namespace":    testNamespace,
+				"BufferMax":    3,
+				"BufferMin":    2,
+				"PoolMax":      5,
+				"PoolMin":      2,
+				"NodeSelector": map[string]interface{}{"disk": "hdd"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			poolHDDFile := filepath.Join("/tmp", poolHDDName+".yaml")
+			err = os.WriteFile(poolHDDFile, []byte(poolHDDYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolHDDFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolHDDFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for pool-ns-ssd pods to be Running")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", testNamespace,
+					"-l", fmt.Sprintf("sandbox.opensandbox.io/pool-name=%s", poolSSDName),
+					"--field-selector=status.phase=Running",
+					"-o", "jsonpath={.items[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				pods := strings.Fields(output)
+				g.Expect(len(pods)).To(BeNumerically(">=", 2))
+			}, 3*time.Minute).Should(Succeed())
+
+			By("creating a BatchSandbox with nodeAffinity requiring disk=ssd")
+			const batchSandboxName = "test-bs-affinity-nodeselector"
+			bsYAML, err := renderTemplate("testdata/batchsandbox-auto-assign-with-template.yaml", map[string]interface{}{
+				"BatchSandboxName": batchSandboxName,
+				"Namespace":        testNamespace,
+				"Replicas":         1,
+				"SandboxImage":     utils.SandboxImage,
+				"AffinityYAML":     "\n        nodeAffinity:\n          requiredDuringSchedulingIgnoredDuringExecution:\n            nodeSelectorTerms:\n            - matchExpressions:\n              - key: disk\n                operator: In\n                values:\n                - ssd",
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			bsFile := filepath.Join("/tmp", batchSandboxName+".yaml")
+			err = os.WriteFile(bsFile, []byte(bsYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(bsFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", bsFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying poolRef was updated to the Pool with matching nodeSelector")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+					"-o", "jsonpath={.spec.poolRef}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(poolSSDName))
+			}, 2*time.Minute).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", batchSandboxName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolSSDName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolHDDName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+		})
+
+		It("should auto-assign to the Pool satisfying resource requests", func() {
+			const poolLargeName = "test-pool-large"
+			const poolSmallName = "test-pool-small"
+			const testNamespace = "default"
+
+			By("creating pool-large with container CPU request 500m")
+			poolLargeYAML := fmt.Sprintf(`apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: %s
+        command: ["sleep", "3600"]
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+  capacitySpec:
+    bufferMax: 3
+    bufferMin: 2
+    poolMax: 5
+    poolMin: 2`, poolLargeName, testNamespace, utils.SandboxImage)
+			poolLargeFile := filepath.Join("/tmp", poolLargeName+".yaml")
+			err := os.WriteFile(poolLargeFile, []byte(poolLargeYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolLargeFile)
+
+			cmd := exec.Command("kubectl", "apply", "-f", poolLargeFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("creating pool-small with container CPU request 50m")
+			poolSmallYAML := fmt.Sprintf(`apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: %s
+        command: ["sleep", "3600"]
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "32Mi"
+  capacitySpec:
+    bufferMax: 3
+    bufferMin: 2
+    poolMax: 5
+    poolMin: 2`, poolSmallName, testNamespace, utils.SandboxImage)
+			poolSmallFile := filepath.Join("/tmp", poolSmallName+".yaml")
+			err = os.WriteFile(poolSmallFile, []byte(poolSmallYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(poolSmallFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", poolSmallFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("waiting for pool-large pods to be Running")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "pods", "-n", testNamespace,
+					"-l", fmt.Sprintf("sandbox.opensandbox.io/pool-name=%s", poolLargeName),
+					"--field-selector=status.phase=Running",
+					"-o", "jsonpath={.items[*].metadata.name}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				pods := strings.Fields(output)
+				g.Expect(len(pods)).To(BeNumerically(">=", 2))
+			}, 3*time.Minute).Should(Succeed())
+
+			By("creating a BatchSandbox requesting CPU 200m which pool-small cannot satisfy")
+			const batchSandboxName = "test-bs-resource"
+			bsYAML, err := renderTemplate("testdata/batchsandbox-auto-assign-with-template.yaml", map[string]interface{}{
+				"BatchSandboxName": batchSandboxName,
+				"Namespace":        testNamespace,
+				"Replicas":         1,
+				"SandboxImage":     utils.SandboxImage,
+				"Resources":        map[string]interface{}{"cpu": "200m", "memory": "128Mi"},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			bsFile := filepath.Join("/tmp", batchSandboxName+".yaml")
+			err = os.WriteFile(bsFile, []byte(bsYAML), 0644)
+			Expect(err).NotTo(HaveOccurred())
+			defer os.Remove(bsFile)
+
+			cmd = exec.Command("kubectl", "apply", "-f", bsFile)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("verifying poolRef was updated to the resource-sufficient Pool")
+			Eventually(func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "batchsandbox", batchSandboxName, "-n", testNamespace,
+					"-o", "jsonpath={.spec.poolRef}")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+				g.Expect(output).To(Equal(poolLargeName))
+			}, 2*time.Minute).Should(Succeed())
+
+			By("cleaning up")
+			cmd = exec.Command("kubectl", "delete", "batchsandbox", batchSandboxName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolLargeName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "pool", poolSmallName, "-n", testNamespace)
+			_, _ = utils.Run(cmd)
+		})
+	})
+
 })
 
 // waitPoolStable waits until pool.status.available + pool.status.allocated == pool.status.total,

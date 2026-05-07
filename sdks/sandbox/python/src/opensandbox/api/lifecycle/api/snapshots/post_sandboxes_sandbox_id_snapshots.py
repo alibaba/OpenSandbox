@@ -115,8 +115,10 @@ def sync_detailed(
     """Create a snapshot from a sandbox
 
      Create a persistent point-in-time snapshot from the sandbox's current state.
-    The returned snapshot id identifies the created artifact. Snapshot creation may
-    temporarily pause the sandbox while the runtime captures provider-supported state.
+    The source sandbox must be `Running`. The returned snapshot id identifies
+    the created artifact. Snapshot creation may temporarily pause the sandbox
+    while the runtime captures provider-supported state, then the source
+    sandbox continues running.
 
     Args:
         sandbox_id (str):
@@ -151,8 +153,10 @@ def sync(
     """Create a snapshot from a sandbox
 
      Create a persistent point-in-time snapshot from the sandbox's current state.
-    The returned snapshot id identifies the created artifact. Snapshot creation may
-    temporarily pause the sandbox while the runtime captures provider-supported state.
+    The source sandbox must be `Running`. The returned snapshot id identifies
+    the created artifact. Snapshot creation may temporarily pause the sandbox
+    while the runtime captures provider-supported state, then the source
+    sandbox continues running.
 
     Args:
         sandbox_id (str):
@@ -182,8 +186,10 @@ async def asyncio_detailed(
     """Create a snapshot from a sandbox
 
      Create a persistent point-in-time snapshot from the sandbox's current state.
-    The returned snapshot id identifies the created artifact. Snapshot creation may
-    temporarily pause the sandbox while the runtime captures provider-supported state.
+    The source sandbox must be `Running`. The returned snapshot id identifies
+    the created artifact. Snapshot creation may temporarily pause the sandbox
+    while the runtime captures provider-supported state, then the source
+    sandbox continues running.
 
     Args:
         sandbox_id (str):
@@ -216,8 +222,10 @@ async def asyncio(
     """Create a snapshot from a sandbox
 
      Create a persistent point-in-time snapshot from the sandbox's current state.
-    The returned snapshot id identifies the created artifact. Snapshot creation may
-    temporarily pause the sandbox while the runtime captures provider-supported state.
+    The source sandbox must be `Running`. The returned snapshot id identifies
+    the created artifact. Snapshot creation may temporarily pause the sandbox
+    while the runtime captures provider-supported state, then the source
+    sandbox continues running.
 
     Args:
         sandbox_id (str):

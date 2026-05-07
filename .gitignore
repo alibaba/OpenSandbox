@@ -279,3 +279,5 @@ console/output/
 console/playwright-report/
 console/tests/playwright-report/
 console/playwright.config.ts
+
+.qoder/

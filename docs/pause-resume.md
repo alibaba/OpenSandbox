@@ -276,7 +276,7 @@ The OpenSandbox controller requires the following RBAC permissions for pause/res
 
 ### Snapshot image naming
 
-Snapshot images are named:
+Internal pause/resume snapshot images are named:
 ```
 <snapshot-registry>/<sandboxName>-<containerName>:snap-gen<N>
 ```
@@ -285,6 +285,17 @@ For example, with `--snapshot-registry=registry.example.com/sandboxes`, sandbox 
 ```
 registry.example.com/sandboxes/my-sandbox-sandbox:snap-gen1
 ```
+
+Server-managed public snapshots use the same repository layout but a stable
+snapshot-id-derived tag:
+```
+<snapshot-registry>/<sandboxName>-<containerName>:snap-<snapshotIdHex>
+```
+
+The controller distinguishes the two modes by owner reference. Pause/resume
+snapshots are created by the `BatchSandbox` controller and have a controller
+ownerReference to the owning `BatchSandbox`; public snapshots are created by the
+Lifecycle server and do not use that ownerReference.
 
 ### Commit Job
 

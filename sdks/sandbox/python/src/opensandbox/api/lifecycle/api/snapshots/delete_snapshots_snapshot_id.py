@@ -91,8 +91,13 @@ def sync_detailed(
 ) -> Response[Any | ErrorResponse]:
     """Delete a snapshot
 
-     Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be
-    deleted.
+     Delete a persistent sandbox snapshot by id. Snapshots that are still
+    being created cannot be deleted.
+
+    For Kubernetes-backed snapshots, deletion removes OpenSandbox metadata
+    and Kubernetes coordination resources, but does not guarantee removal
+    of pushed OCI images from the configured registry. Use registry
+    retention or garbage collection policies for image lifecycle cleanup.
 
     Args:
         snapshot_id (str):
@@ -123,8 +128,13 @@ def sync(
 ) -> Any | ErrorResponse | None:
     """Delete a snapshot
 
-     Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be
-    deleted.
+     Delete a persistent sandbox snapshot by id. Snapshots that are still
+    being created cannot be deleted.
+
+    For Kubernetes-backed snapshots, deletion removes OpenSandbox metadata
+    and Kubernetes coordination resources, but does not guarantee removal
+    of pushed OCI images from the configured registry. Use registry
+    retention or garbage collection policies for image lifecycle cleanup.
 
     Args:
         snapshot_id (str):
@@ -150,8 +160,13 @@ async def asyncio_detailed(
 ) -> Response[Any | ErrorResponse]:
     """Delete a snapshot
 
-     Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be
-    deleted.
+     Delete a persistent sandbox snapshot by id. Snapshots that are still
+    being created cannot be deleted.
+
+    For Kubernetes-backed snapshots, deletion removes OpenSandbox metadata
+    and Kubernetes coordination resources, but does not guarantee removal
+    of pushed OCI images from the configured registry. Use registry
+    retention or garbage collection policies for image lifecycle cleanup.
 
     Args:
         snapshot_id (str):
@@ -180,8 +195,13 @@ async def asyncio(
 ) -> Any | ErrorResponse | None:
     """Delete a snapshot
 
-     Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be
-    deleted.
+     Delete a persistent sandbox snapshot by id. Snapshots that are still
+    being created cannot be deleted.
+
+    For Kubernetes-backed snapshots, deletion removes OpenSandbox metadata
+    and Kubernetes coordination resources, but does not guarantee removal
+    of pushed OCI images from the configured registry. Use registry
+    retention or garbage collection policies for image lifecycle cleanup.
 
     Args:
         snapshot_id (str):

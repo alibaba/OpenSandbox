@@ -651,6 +651,14 @@ class KubernetesRuntimeConfig(BaseModel):
         gt=0,
         description="Polling interval in seconds when waiting for a sandbox to become ready after creation.",
     )
+    snapshot_create_timeout_seconds: int = Field(
+        default=15 * 60,
+        ge=1,
+        description=(
+            "Timeout in seconds to wait for a Kubernetes public snapshot to become ready. "
+            "Set this greater than the controller snapshot commit-job-timeout."
+        ),
+    )
     execd_init_resources: Optional["ExecdInitResources"] = Field(
         default=None,
         description=(

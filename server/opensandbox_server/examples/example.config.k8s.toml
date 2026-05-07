@@ -32,7 +32,7 @@ level = "INFO"
 
 [runtime]
 type = "kubernetes"
-execd_image = "opensandbox/execd:v1.0.14"
+execd_image = "opensandbox/execd:v1.0.15"
 
 [storage]
 # Allowlist of host path prefixes permitted for bind mounts.
@@ -63,6 +63,10 @@ workload_provider = "batchsandbox"
 # Image pull policy for the BatchSandbox main container.
 # Values: "Always", "IfNotPresent", "Never".
 image_pull_policy = "IfNotPresent"
+
+# Public snapshot wait timeout. Keep this greater than the Kubernetes
+# controller snapshot commit-job-timeout.
+snapshot_create_timeout_seconds = 900
 
 # Path to the BatchSandbox template file
 batchsandbox_template_file = "~/batchsandbox-template.yaml"

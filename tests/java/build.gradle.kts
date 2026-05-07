@@ -48,6 +48,7 @@ configurations.configureEach {
 dependencies {
     // OpenSandbox Kotlin SDKs
     testImplementation("com.alibaba.opensandbox:sandbox:latest.integration")
+    testImplementation("com.alibaba.opensandbox:sandbox-pool-redis:latest.integration")
     testImplementation("com.alibaba.opensandbox:code-interpreter:latest.integration")
 
     // Test frameworks

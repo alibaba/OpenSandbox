@@ -197,7 +197,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 
                 if not workload:
                     logger.debug(f"Workload not found yet for sandbox {sandbox_id}")
-                    time.sleep(poll_interval_seconds)
+                    await asyncio.sleep(poll_interval_seconds)
                     continue
                 
                 status_info = _normalize_create_status(

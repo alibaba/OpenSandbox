@@ -5,6 +5,7 @@ on:
     branches: [ main ]
     paths:
       - 'kubernetes/**'
+      - '!kubernetes/docs/**'
 
 permissions:
   contents: read

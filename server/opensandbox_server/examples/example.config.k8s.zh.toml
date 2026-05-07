@@ -32,7 +32,7 @@ level = "INFO"
 
 [runtime]
 type = "kubernetes"
-execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.14"
+execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.15"
 
 [storage]
 # 允许进行 bind mount 的宿主机路径前缀白名单。
@@ -63,6 +63,10 @@ workload_provider = "batchsandbox"
 # BatchSandbox 主容器的镜像拉取策略。
 # 可选值："Always"、"IfNotPresent"、"Never"。
 image_pull_policy = "IfNotPresent"
+
+# public snapshot 等待超时时间。应大于 Kubernetes controller 的
+# snapshot commit-job-timeout。
+snapshot_create_timeout_seconds = 900
 
 # Path to the BatchSandbox template file
 # Replace with your path

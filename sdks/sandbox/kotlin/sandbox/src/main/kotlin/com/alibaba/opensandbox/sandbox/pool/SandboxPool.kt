@@ -37,7 +37,6 @@ import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
-import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -117,11 +116,10 @@ class SandboxPool internal constructor(
         }
         lifecycleState.set(LifecycleState.STARTING)
         try {
+            warnIfPrimaryLockTtlMayExpireDuringWarmup()
             sandboxManager = createSandboxManager()
             stateStore.setIdleEntryTtl(config.poolName, config.idleTimeout)
-            if (stateStore.getMaxIdle(config.poolName) == null) {
-                stateStore.setMaxIdle(config.poolName, config.maxIdle)
-            }
+            stateStore.setMaxIdle(config.poolName, config.maxIdle)
             warmupExecutor =
                 Executors.newFixedThreadPool(config.warmupConcurrency.coerceAtLeast(1)) { r ->
                     Thread(r, "sandbox-pool-warmup-${config.poolName}").apply { isDaemon = true }
@@ -160,6 +158,19 @@ class SandboxPool internal constructor(
             logger.error("Pool start failed: pool_name={}", config.poolName, e)
             throw e
         }
+    }
+
+    private fun warnIfPrimaryLockTtlMayExpireDuringWarmup() {
+        if (config.primaryLockTtl > config.warmupReadyTimeout) return
+        logger.warn(
+            "Pool primary lock TTL may expire during warmup: pool_name={} primary_lock_ttl_ms={} " +
+                "warmup_ready_timeout_ms={}. In distributed mode, configure primaryLockTtl greater than " +
+                "warmupReadyTimeout plus expected warmupSandboxPreparer time and buffer to avoid losing leadership " +
+                "while creating idle sandboxes.",
+            config.poolName,
+            config.primaryLockTtl.toMillis(),
+            config.warmupReadyTimeout.toMillis(),
+        )
     }
 
     /**
@@ -262,28 +273,21 @@ class SandboxPool internal constructor(
     /**
      * Updates the maximum idle target. In distributed mode the new value is written to the store
      * so the whole cluster (including the leader) uses it; in single-node only this process sees it.
-     * Triggers a reconcile tick without blocking on convergence.
+     * This method can be called from any node. Actual replenish or shrink work is performed
+     * asynchronously by the current primary during periodic reconcile.
      */
     fun resize(maxIdle: Int) {
         require(maxIdle >= 0) { "maxIdle must be >= 0" }
         stateStore.setMaxIdle(config.poolName, maxIdle)
         currentMaxIdle = maxIdle
-        if (lifecycleState.get() != LifecycleState.RUNNING) return
-        try {
-            scheduler?.execute { runReconcileTick() }
-        } catch (_: RejectedExecutionException) {
-            logger.debug(
-                "Resize reconcile trigger skipped because scheduler is shutting down: pool_name={} state={}",
-                config.poolName,
-                lifecycleState.get(),
-            )
-        }
     }
 
     /**
      * Takes all idle sandbox IDs from the store and terminates each sandbox (best-effort).
      * Use this to release held resources, e.g. before process exit on single-node, or to reset the idle buffer.
      * In distributed mode this is best-effort: concurrent putIdle on other nodes may add new idle during the loop.
+     * For a distributed idle drain, prefer [resize] to 0 and wait for snapshots to converge before using this
+     * method as a final cleanup pass.
      * If the pool is not running, a temporary [SandboxManager] is created on demand so remote idle sandboxes can
      * still be killed. Failure to create that manager does not prevent draining idle IDs from the store.
      *
@@ -421,7 +425,7 @@ class SandboxPool internal constructor(
                 config = reconcileConfig,
                 stateStore = stateStore,
                 createOne = { createOneSandbox() },
-                onOrphanedCreated = { sandboxId -> killSandboxBestEffort(sandboxId) },
+                onDiscardSandbox = { sandboxId -> killSandboxBestEffort(sandboxId) },
                 reconcileState = reconcileState,
                 warmupExecutor = executor,
             )
@@ -565,6 +569,20 @@ class SandboxPool internal constructor(
         scheduler = null
         warmupExecutor?.let { shutdownExecutor(it, "warmup") }
         warmupExecutor = null
+        releasePrimaryLockBestEffort()
+    }
+
+    private fun releasePrimaryLockBestEffort() {
+        try {
+            stateStore.releasePrimaryLock(config.poolName, config.ownerId)
+        } catch (e: Exception) {
+            logger.warn(
+                "Pool primary lock release failed (best-effort): pool_name={} owner_id={} error={}",
+                config.poolName,
+                config.ownerId,
+                e.message,
+            )
+        }
     }
 
     private fun shutdownExecutor(

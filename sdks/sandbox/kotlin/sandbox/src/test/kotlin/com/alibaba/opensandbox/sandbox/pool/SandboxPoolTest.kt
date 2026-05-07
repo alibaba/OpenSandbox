@@ -27,10 +27,13 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
 import com.alibaba.opensandbox.sandbox.domain.pool.AcquirePolicy
+import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolCreationSpec
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolLifecycleState
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolState
+import com.alibaba.opensandbox.sandbox.domain.pool.PoolStateStore
 import com.alibaba.opensandbox.sandbox.domain.pool.SandboxPreparer
+import com.alibaba.opensandbox.sandbox.domain.pool.StoreCounters
 import com.alibaba.opensandbox.sandbox.infrastructure.pool.InMemoryPoolStateStore
 import io.mockk.every
 import io.mockk.just
@@ -43,6 +46,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
@@ -122,6 +126,41 @@ class SandboxPoolTest {
         val snap = pool.snapshot()
         assertEquals(PoolState.STOPPED, snap.state)
         assertEquals(PoolLifecycleState.STOPPED, snap.lifecycleState)
+    }
+
+    @Test
+    fun `shutdown graceful releases primary lock best effort`() {
+        val store = RecordingPoolStateStore()
+        val pool = buildPool(store = store, maxIdle = 0)
+
+        pool.start()
+        pool.shutdown(graceful = true)
+
+        assertEquals(listOf("test-pool" to "test-owner"), store.releasedLocks)
+    }
+
+    @Test
+    fun `shutdown non-graceful releases primary lock best effort`() {
+        val store = RecordingPoolStateStore()
+        val pool = buildPool(store = store, maxIdle = 0)
+
+        pool.start()
+        pool.shutdown(graceful = false)
+
+        assertEquals(listOf("test-pool" to "test-owner"), store.releasedLocks)
+    }
+
+    @Test
+    fun `shutdown completes when primary lock release fails`() {
+        val store = RecordingPoolStateStore(releaseFails = true)
+        val pool = buildPool(store = store, maxIdle = 0)
+
+        pool.start()
+        pool.shutdown(graceful = true)
+
+        val snap = pool.snapshot()
+        assertEquals(PoolLifecycleState.STOPPED, snap.lifecycleState)
+        assertEquals(listOf("test-pool" to "test-owner"), store.releasedLocks)
     }
 
     @Test
@@ -478,14 +517,32 @@ class SandboxPoolTest {
         }
     }
 
-    private fun buildPool(): SandboxPool {
+    @Test
+    fun `start overwrites shared maxIdle with user config`() {
+        val store = RecordingPoolStateStore(initialMaxIdle = 0)
+        val pool = buildPool(store = store, maxIdle = 3)
+
+        pool.start()
+        try {
+            assertEquals(3, store.maxIdleByPool["test-pool"])
+            assertEquals(listOf("test-pool" to 3), store.setMaxIdleCalls)
+            assertEquals(3, pool.snapshot().maxIdle)
+        } finally {
+            pool.shutdown(graceful = false)
+        }
+    }
+
+    private fun buildPool(
+        store: PoolStateStore = InMemoryPoolStateStore(),
+        maxIdle: Int = 2,
+    ): SandboxPool {
         val config = ConnectionConfig.builder().build()
         val spec = PoolCreationSpec.builder().image("ubuntu:22.04").build()
         return SandboxPool.builder()
             .poolName("test-pool")
             .ownerId("test-owner")
-            .maxIdle(2)
-            .stateStore(InMemoryPoolStateStore())
+            .maxIdle(maxIdle)
+            .stateStore(store)
             .connectionConfig(config)
             .creationSpec(spec)
             .drainTimeout(Duration.ofMillis(50))
@@ -501,5 +558,76 @@ class SandboxPoolTest {
         val field = target.javaClass.getDeclaredField(fieldName)
         field.isAccessible = true
         field.set(target, value)
+    }
+
+    private class RecordingPoolStateStore(
+        private val releaseFails: Boolean = false,
+        initialMaxIdle: Int? = null,
+    ) : PoolStateStore {
+        val releasedLocks = mutableListOf<Pair<String, String>>()
+        val setMaxIdleCalls = mutableListOf<Pair<String, Int>>()
+        val maxIdleByPool = mutableMapOf<String, Int>()
+
+        init {
+            if (initialMaxIdle != null) {
+                maxIdleByPool["test-pool"] = initialMaxIdle
+            }
+        }
+
+        override fun tryTakeIdle(poolName: String): String? = null
+
+        override fun putIdle(
+            poolName: String,
+            sandboxId: String,
+        ) {
+        }
+
+        override fun removeIdle(
+            poolName: String,
+            sandboxId: String,
+        ) {
+        }
+
+        override fun tryAcquirePrimaryLock(
+            poolName: String,
+            ownerId: String,
+            ttl: Duration,
+        ): Boolean = true
+
+        override fun renewPrimaryLock(
+            poolName: String,
+            ownerId: String,
+            ttl: Duration,
+        ): Boolean = true
+
+        override fun releasePrimaryLock(
+            poolName: String,
+            ownerId: String,
+        ) {
+            releasedLocks += poolName to ownerId
+            if (releaseFails) {
+                throw RuntimeException("release failed")
+            }
+        }
+
+        override fun reapExpiredIdle(
+            poolName: String,
+            now: Instant,
+        ) {
+        }
+
+        override fun snapshotCounters(poolName: String): StoreCounters = StoreCounters(idleCount = 0)
+
+        override fun snapshotIdleEntries(poolName: String): List<IdleEntry> = emptyList()
+
+        override fun getMaxIdle(poolName: String): Int? = maxIdleByPool[poolName]
+
+        override fun setMaxIdle(
+            poolName: String,
+            maxIdle: Int,
+        ) {
+            setMaxIdleCalls += poolName to maxIdle
+            maxIdleByPool[poolName] = maxIdle
+        }
     }
 }

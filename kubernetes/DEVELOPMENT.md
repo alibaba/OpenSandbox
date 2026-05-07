@@ -6,17 +6,19 @@ This guide covers environment setup, project structure, architecture, coding sta
 
 Follow this workflow for every feature or significant change:
 
-1. **Define API and interfaces** — Determine CRD spec changes, annotation contract changes, and Go interface definitions first. Review with the team before proceeding. Run `make manifests generate` after changing `apis/` types.
+1. **Write a design proposal** — For any new feature or significant change, create a proposal document following the [template](./docs/proposals/YYYYMMDD-template.md) in `docs/proposals/`. Name it `YYYYMMDD-title.md` where `YYYYMMDD` is the date the proposal was first drafted. The proposal should cover motivation, API changes, annotation/label contract changes, implementation details, risks, and test plan. Submit the proposal as a PR for review before proceeding with implementation.
 
-2. **Write E2E test cases** — Write end-to-end test cases in black-box style before implementing the feature. E2E tests exercise the full controller stack against a real cluster and validate user-visible behavior, not internals. Add test data YAML to `test/e2e/testdata/` and test cases to `test/e2e/e2e_test.go` (or `test/e2e_task/` for task-executor features).
+2. **Define API and interfaces** — Determine CRD spec changes, annotation contract changes, and Go interface definitions first. Review with the team before proceeding. Run `make manifests generate` after changing `apis/` types.
 
-3. **Implement with TDD** — Write unit tests first, then implement the logic to make them pass. Unit tests use envtest and Ginkgo/Gomega. Run `make test` frequently during development.
+3. **Write E2E test cases** — Write end-to-end test cases in black-box style before implementing the feature. E2E tests exercise the full controller stack against a real cluster and validate user-visible behavior, not internals. Add test data YAML to `test/e2e/testdata/` and test cases to `test/e2e/e2e_test.go` (or `test/e2e_task/` for task-executor features).
 
-4. **Run UT and E2E to verify** — Run the full unit test suite (`make test`) and the E2E suite (`make test-e2e`) to confirm the feature works end-to-end. Both must pass before submitting.
+4. **Implement with TDD** — Write unit tests first, then implement the logic to make them pass. Unit tests use envtest and Ginkgo/Gomega. Run `make test` frequently during development.
 
-5. **Troubleshoot E2E failures** — If E2E tests fail, refer to [docs/E2E-TROUBLESHOOTING.md](./docs/E2E-TROUBLESHOOTING.md) for diagnosis and resolution steps.
+5. **Run UT and E2E to verify** — Run the full unit test suite (`make test`) and the E2E suite (`make test-e2e`) to confirm the feature works end-to-end. Both must pass before submitting.
 
-Repeat steps 1–5 until the feature is complete and all tests pass.
+6. **Troubleshoot E2E failures** — If E2E tests fail, refer to [docs/E2E-TROUBLESHOOTING.md](./docs/E2E-TROUBLESHOOTING.md) for diagnosis and resolution steps.
+
+Repeat steps 2–6 until the feature is complete and all tests pass.
 
 ## Prerequisites
 
@@ -102,6 +104,10 @@ kubernetes/
 │   ├── e2e_runtime/               # RuntimeClass e2e (gVisor)
 │   └── kind/                      # Kind cluster configs
 └── docs/                          # Design documents
+    ├── proposals/                 # Design proposals for new features and significant changes
+    │   ├── YYYYMMDD-template.md   # Proposal template
+    │   └── ...                    # Named as YYYYMMDD-title.md
+    └── ...
 ```
 
 ## Architecture

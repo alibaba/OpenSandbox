@@ -98,7 +98,7 @@ class PoolReconcilerStateTest {
                 config = config,
                 stateStore = stateStore,
                 createOne = { "id-${idGen.incrementAndGet()}" },
-                onOrphanedCreated = { orphaned += it },
+                onDiscardSandbox = { orphaned += it },
                 reconcileState = state,
                 warmupExecutor = warmupExecutor,
             )
@@ -137,7 +137,7 @@ class PoolReconcilerStateTest {
                 config = config,
                 stateStore = stateStore,
                 createOne = { "id-${idGen.incrementAndGet()}" },
-                onOrphanedCreated = { orphaned += it },
+                onDiscardSandbox = { orphaned += it },
                 reconcileState = state,
                 warmupExecutor = warmupExecutor,
             )
@@ -246,6 +246,104 @@ class PoolReconcilerStateTest {
 
         assertEquals(0, createCalls.get())
         assertEquals(emptyList<String>(), stateStore.putIdleIds)
+    }
+
+    @Test
+    fun `reconcile shrinks excess idle when current node is primary`() {
+        val stateStore = ShrinkStore(idleIds = listOf("id-1", "id-2", "id-3", "id-4", "id-5"))
+        val config =
+            PoolConfig.builder()
+                .poolName("pool-shrink")
+                .ownerId("owner-1")
+                .maxIdle(2)
+                .warmupConcurrency(2)
+                .stateStore(stateStore)
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .build()
+        val state = ReconcileState(degradedThreshold = 10)
+        val warmupExecutor = Executors.newFixedThreadPool(1)
+        val discarded = mutableListOf<String>()
+        val createCalls = AtomicInteger(0)
+
+        try {
+            PoolReconciler.runReconcileTick(
+                config = config,
+                stateStore = stateStore,
+                createOne = {
+                    createCalls.incrementAndGet()
+                    "new-id"
+                },
+                onDiscardSandbox = { discarded += it },
+                reconcileState = state,
+                warmupExecutor = warmupExecutor,
+            )
+        } finally {
+            warmupExecutor.shutdownNow()
+        }
+
+        assertEquals(0, createCalls.get())
+        assertEquals(listOf("id-1", "id-2"), discarded)
+        assertEquals(listOf("id-3", "id-4", "id-5"), stateStore.idleIds)
+    }
+
+    @Test
+    fun `reconcile does not shrink when current node is not primary`() {
+        val stateStore = SecondaryShrinkStore(idleIds = listOf("id-1", "id-2", "id-3"))
+        val config = buildConfig(ownerId = "owner-2", maxIdle = 1, stateStore = stateStore, poolName = "pool-secondary-shrink")
+        val state = ReconcileState(degradedThreshold = 10)
+        val warmupExecutor = Executors.newFixedThreadPool(1)
+        val discarded = mutableListOf<String>()
+
+        try {
+            PoolReconciler.runReconcileTick(
+                config = config,
+                stateStore = stateStore,
+                createOne = { "new-id" },
+                onDiscardSandbox = { discarded += it },
+                reconcileState = state,
+                warmupExecutor = warmupExecutor,
+            )
+        } finally {
+            warmupExecutor.shutdownNow()
+        }
+
+        assertEquals(emptyList<String>(), discarded)
+        assertEquals(listOf("id-1", "id-2", "id-3"), stateStore.idleIds)
+    }
+
+    @Test
+    fun `reconcile stops shrinking when primary renew fails`() {
+        val stateStore = ShrinkStore(idleIds = listOf("id-1", "id-2", "id-3"), renewFailuresAfter = 1)
+        val config =
+            PoolConfig.builder()
+                .poolName("pool-shrink-renew-fails")
+                .ownerId("owner-1")
+                .maxIdle(0)
+                .warmupConcurrency(3)
+                .stateStore(stateStore)
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .build()
+        val state = ReconcileState(degradedThreshold = 10)
+        val warmupExecutor = Executors.newFixedThreadPool(1)
+        val discarded = mutableListOf<String>()
+
+        try {
+            PoolReconciler.runReconcileTick(
+                config = config,
+                stateStore = stateStore,
+                createOne = { "new-id" },
+                onDiscardSandbox = { discarded += it },
+                reconcileState = state,
+                warmupExecutor = warmupExecutor,
+            )
+        } finally {
+            warmupExecutor.shutdownNow()
+        }
+
+        assertEquals(listOf("id-1"), discarded)
+        assertEquals(listOf("id-2", "id-3"), stateStore.idleIds)
     }
 
     private fun buildConfig(
@@ -557,5 +655,79 @@ class PoolReconcilerStateTest {
             maxIdle: Int,
         ) {
         }
+    }
+
+    private open class ShrinkStore(
+        idleIds: List<String>,
+        private val renewFailuresAfter: Int? = null,
+    ) : PoolStateStore {
+        val idleIds = idleIds.toMutableList()
+        private val renewCalls = AtomicInteger(0)
+
+        override fun tryTakeIdle(poolName: String): String? {
+            return if (idleIds.isEmpty()) null else idleIds.removeAt(0)
+        }
+
+        override fun putIdle(
+            poolName: String,
+            sandboxId: String,
+        ) {
+        }
+
+        override fun removeIdle(
+            poolName: String,
+            sandboxId: String,
+        ) {
+            idleIds.remove(sandboxId)
+        }
+
+        override fun tryAcquirePrimaryLock(
+            poolName: String,
+            ownerId: String,
+            ttl: Duration,
+        ): Boolean = true
+
+        override fun renewPrimaryLock(
+            poolName: String,
+            ownerId: String,
+            ttl: Duration,
+        ): Boolean {
+            val call = renewCalls.incrementAndGet()
+            return renewFailuresAfter == null || call <= renewFailuresAfter
+        }
+
+        override fun releasePrimaryLock(
+            poolName: String,
+            ownerId: String,
+        ) {
+        }
+
+        override fun reapExpiredIdle(
+            poolName: String,
+            now: Instant,
+        ) {
+        }
+
+        override fun snapshotCounters(poolName: String): StoreCounters = StoreCounters(idleCount = idleIds.size)
+
+        override fun snapshotIdleEntries(poolName: String) = emptyList<com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry>()
+
+        override fun getMaxIdle(poolName: String): Int? = null
+
+        override fun setMaxIdle(
+            poolName: String,
+            maxIdle: Int,
+        ) {
+        }
+    }
+
+    private class SecondaryShrinkStore(
+        idleIds: List<String>,
+    ) : ShrinkStore(idleIds) {
+        override fun tryAcquirePrimaryLock(
+            poolName: String,
+            ownerId: String,
+            ttl: Duration,
+        ): Boolean = false
     }
 }

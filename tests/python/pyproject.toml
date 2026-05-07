@@ -30,6 +30,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "opensandbox",
     "opensandbox-code-interpreter",
+    "redis>=5.0,<6.0",
 ]
 
 [dependency-groups]

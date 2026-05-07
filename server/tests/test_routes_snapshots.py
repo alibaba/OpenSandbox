@@ -220,7 +220,7 @@ def test_snapshot_routes_can_use_persisted_service(
     class StubSandboxService:
         @staticmethod
         def get_sandbox(sandbox_id: str):
-            return {"id": sandbox_id}
+            return {"id": sandbox_id, "status": {"state": "Running"}}
 
     class StubSnapshotRuntime:
         @staticmethod
@@ -268,7 +268,7 @@ def test_create_snapshot_returns_501_when_runtime_is_not_supported(
     class StubSandboxService:
         @staticmethod
         def get_sandbox(sandbox_id: str):
-            return {"id": sandbox_id}
+            return {"id": sandbox_id, "status": {"state": "Running"}}
 
     service = PersistedSnapshotService(
         SQLiteSnapshotRepository(tmp_path / "snapshots.db"),

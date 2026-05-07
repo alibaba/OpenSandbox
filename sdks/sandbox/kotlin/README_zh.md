@@ -263,7 +263,8 @@ pool.shutdown(true);
 - 如果你需要在 warmup 成功后、`putIdle` 之前对沙箱做预处理，可以使用 `warmupSandboxPreparer(...)`。
 
 
-> 在分布式部署场景下，需要由业务方自行提供 `PoolStateStore` 实现，并保证其满足分布式语义：原子 `tryTakeIdle`、`put/remove` 幂等、主锁所有权与续约、不同 `poolName` 隔离、以及计数一致性。
+> 在分布式部署场景下，可以使用可选模块 `com.alibaba.opensandbox:sandbox-pool-redis`，也可以自行提供 `PoolStateStore` 实现。Redis 模块接收业务方自己创建和管理的 Jedis client，因此 Redis 连接配置和生命周期仍由业务方负责。共享同一池命名空间的节点必须使用相同的 sandbox 创建与 warmup 定义；如果定义发生变化，建议使用新的 `poolName` 或命名空间。建议将 `primaryLockTtl` 配置为大于 `warmupReadyTimeout` 加上预期 warmup preparer 耗时和缓冲时间，否则节点可能在创建 idle sandbox 过程中失去主锁。
+> 分布式模式下，`resize(maxIdle)` 可以在任意节点调用；调用返回只表示目标值已写入共享状态存储，实际补池或缩容由当前主节点在周期性 reconcile 中执行。如果需要清空分布式 idle buffer，建议调用 `resize(0)` 并等待 `snapshot().idleCount == 0`；`releaseAllIdle()` 只适合作为 best-effort 的兜底清理。
 
 ## 配置说明
 

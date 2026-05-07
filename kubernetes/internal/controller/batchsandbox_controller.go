@@ -42,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	sandboxv1alpha1 "github.com/alibaba/OpenSandbox/sandbox-k8s/apis/sandbox/v1alpha1"
+	poolassign "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/poolassign"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/controller/strategy"
 	taskscheduler "github.com/alibaba/OpenSandbox/sandbox-k8s/internal/scheduler"
 	"github.com/alibaba/OpenSandbox/sandbox-k8s/internal/utils"
@@ -67,6 +68,7 @@ type BatchSandboxReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	Recorder       record.EventRecorder
+	ProfileStore   *poolassign.ProfileStore
 	taskSchedulers sync.Map
 	// ResumePullSecret is the K8s Secret name for pulling snapshot images during resume.
 	ResumePullSecret string
@@ -74,6 +76,7 @@ type BatchSandboxReconciler struct {
 
 // +kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=events,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=batchsandboxes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=batchsandboxes/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=sandbox.opensandbox.io,resources=batchsandboxes/finalizers,verbs=update
@@ -124,6 +127,19 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// task schedule
 	taskStrategy := strategy.NewTaskSchedulingStrategy(batchSbx)
 
+	// pool strategy
+	poolStrategy := strategy.NewPoolStrategy(batchSbx)
+
+	if profileName := poolStrategy.AssignProfile(); profileName != "" {
+		updated, err := r.assignPool(ctx, batchSbx, profileName)
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to auto-assign pool: %w", err)
+		}
+		if updated {
+			return ctrl.Result{}, nil
+		}
+	}
+
 	// handle finalizers
 	if batchSbx.DeletionTimestamp == nil {
 		if taskStrategy.NeedTaskScheduling() {
@@ -152,7 +168,6 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// sandbox from its pool). Recompute strategies from the latest object before listing pods so
 	// normal reconciliation does not keep using a stale pre-dispatch view.
 	taskStrategy = strategy.NewTaskSchedulingStrategy(batchSbx)
-	poolStrategy := strategy.NewPoolStrategy(batchSbx)
 
 	pods, err := r.listPods(ctx, poolStrategy, batchSbx)
 	if err != nil {
@@ -549,6 +564,41 @@ func parseIndex(pod *corev1.Pod) (int, error) {
 		return -1, gerrors.New("batchsandbox: Invalid pod Name")
 	}
 	return strconv.Atoi(pod.Name[idx+1:])
+}
+
+// assignPool selects a Pool for the BatchSandbox using the assign package and writes
+// the result back to spec.poolRef. Returns (true, nil) when the update was applied,
+// which triggers a new reconcile with the concrete poolRef.
+func (r *BatchSandboxReconciler) assignPool(ctx context.Context, batchSbx *sandboxv1alpha1.BatchSandbox, profileName string) (bool, error) {
+	log := logf.FromContext(ctx)
+
+	poolList := &sandboxv1alpha1.PoolList{}
+	if err := r.List(ctx, poolList, client.InNamespace(batchSbx.Namespace)); err != nil {
+		return false, fmt.Errorf("failed to list pools: %w", err)
+	}
+
+	pools := make([]*sandboxv1alpha1.Pool, 0, len(poolList.Items))
+	for i := range poolList.Items {
+		pools = append(pools, &poolList.Items[i])
+	}
+
+	profile := r.ProfileStore.GetProfile(profileName)
+	assigner := poolassign.NewDefaultAssigner(profile)
+
+	poolName, err := assigner.AssignPool(ctx, batchSbx, pools)
+	if err != nil {
+		return false, err
+	}
+
+	oldSbx := batchSbx.DeepCopy()
+	batchSbx.Spec.PoolRef = poolName
+	patch := client.MergeFrom(oldSbx)
+	if err := r.Patch(ctx, batchSbx, patch); err != nil {
+		return false, fmt.Errorf("failed to patch poolRef: %w", err)
+	}
+
+	log.Info("auto-assigned pool", "pool", poolName)
+	return true, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

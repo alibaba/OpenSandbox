@@ -7,14 +7,15 @@ You are working on OpenSandbox SDKs. Keep generated and handwritten code separat
 - `sandbox/**`
 - `code-interpreter/**`
 - `mcp/**`
+- workspace-level SDK build and release metadata
 
 If the task is driven by spec changes, also read `../specs/AGENTS.md`.
 
 ## Key Areas
 
-- `sandbox/python`, `sandbox/javascript`, `sandbox/kotlin`, `sandbox/csharp`
+- `sandbox/python`, `sandbox/javascript`, `sandbox/kotlin`, `sandbox/csharp`, `sandbox/go`
 - `code-interpreter/python`, `code-interpreter/javascript`, `code-interpreter/kotlin`, `code-interpreter/csharp`
-- `mcp/`
+- `mcp/sandbox/python`
 - Workspace config in `package.json`, `pnpm-workspace.yaml`, and shared build files
 
 ## Generated Code
@@ -26,6 +27,7 @@ Generator-owned paths include:
 - `sandbox/python/src/opensandbox/api/**`
 - `sandbox/javascript/src/api/*.ts`
 - `sandbox/kotlin/sandbox-api/build/generated/**`
+- language-specific OpenAPI outputs produced by local generator scripts or Gradle tasks
 
 Handwritten logic belongs in adapters, services, facades, converters, and stable SDK models.
 
@@ -60,11 +62,32 @@ uv run pytest tests/ -v
 uv build
 ```
 
+Python code-interpreter SDK:
+
+```bash
+cd sdks/code-interpreter/python
+uv sync
+uv run ruff check
+uv run pyright
+uv run pytest
+uv build
+```
+
 JavaScript sandbox SDK:
 
 ```bash
 cd sdks/sandbox/javascript
 pnpm run gen:api
+pnpm run lint
+pnpm run typecheck
+pnpm run build
+pnpm run test
+```
+
+JavaScript code-interpreter SDK:
+
+```bash
+cd sdks/code-interpreter/javascript
 pnpm run lint
 pnpm run typecheck
 pnpm run build
@@ -79,11 +102,19 @@ cd sdks/sandbox/kotlin
 ./gradlew spotlessApply :sandbox:test
 ```
 
+Go sandbox SDK:
+
+```bash
+cd sdks/sandbox/go
+go test ./...
+```
+
 ## Guardrails
 
 Always:
 
 - For spec-driven changes, regenerate affected SDK code, update handwritten layers, then run affected language checks.
+- For MCP changes, keep tool schemas, client setup docs, and sandbox SDK dependency behavior aligned.
 - Add a regression test for every bug fix.
 - Prefer tests for request mapping, response conversion, error mapping, streaming behavior, and resource cleanup.
 - Keep package-local validation fast before widening to multi-language verification.

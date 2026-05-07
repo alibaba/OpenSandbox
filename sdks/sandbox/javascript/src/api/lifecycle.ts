@@ -242,7 +242,13 @@ export interface paths {
         post?: never;
         /**
          * Delete a snapshot
-         * @description Delete a persistent sandbox snapshot by id. Snapshots that are still being created cannot be deleted.
+         * @description Delete a persistent sandbox snapshot by id. Snapshots that are still
+         *     being created cannot be deleted.
+         *
+         *     For Kubernetes-backed snapshots, deletion removes OpenSandbox metadata
+         *     and Kubernetes coordination resources, but does not guarantee removal
+         *     of pushed OCI images from the configured registry. Use registry
+         *     retention or garbage collection policies for image lifecycle cleanup.
          */
         delete: {
             parameters: {
@@ -377,8 +383,10 @@ export interface paths {
         /**
          * Create a snapshot from a sandbox
          * @description Create a persistent point-in-time snapshot from the sandbox's current state.
-         *     The returned snapshot id identifies the created artifact. Snapshot creation may
-         *     temporarily pause the sandbox while the runtime captures provider-supported state.
+         *     The source sandbox must be `Running`. The returned snapshot id identifies
+         *     the created artifact. Snapshot creation may temporarily pause the sandbox
+         *     while the runtime captures provider-supported state, then the source
+         *     sandbox continues running.
          */
         post: {
             parameters: {

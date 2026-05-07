@@ -40,6 +40,7 @@ from opensandbox_server.api.schema import (
     SnapshotStatus,
 )
 from opensandbox_server.repositories.snapshots.factory import create_snapshot_repository
+from opensandbox_server.services.constants import SnapshotErrorCodes
 from opensandbox_server.services.snapshot_runtime import (
     NoopSnapshotRuntime,
     SnapshotRuntime,
@@ -114,7 +115,8 @@ class PersistedSnapshotService(SnapshotService):
             self.recover_unfinished_snapshots()
 
     def create_snapshot(self, sandbox_id: str, request: CreateSnapshotRequest) -> Snapshot:
-        self._sandbox_service.get_sandbox(sandbox_id)
+        sandbox = self._sandbox_service.get_sandbox(sandbox_id)
+        self._ensure_source_sandbox_running(sandbox)
 
         if not self._snapshot_runtime.supports_create_snapshot():
             raise HTTPException(
@@ -194,9 +196,6 @@ class PersistedSnapshotService(SnapshotService):
                 },
             )
 
-        if record.status.state == SnapshotState.DELETING:
-            return
-
         if record.status.state == SnapshotState.CREATING:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -205,6 +204,11 @@ class PersistedSnapshotService(SnapshotService):
                     "message": f"Snapshot {snapshot_id} is still being created and cannot be deleted",
                 },
             )
+
+        if record.status.state != SnapshotState.DELETING:
+            record = self._mark_snapshot_deleting(record)
+            if record is None:
+                return
 
         self._snapshot_runtime.delete_snapshot(
             snapshot_id,
@@ -227,6 +231,43 @@ class PersistedSnapshotService(SnapshotService):
         from opensandbox_server.api.schema import PaginationRequest
 
         return PaginationRequest()
+
+    def _mark_snapshot_deleting(self, record: SnapshotRecord) -> SnapshotRecord | None:
+        now = datetime.now(timezone.utc)
+        deleting_record = SnapshotRecord(
+            id=record.id,
+            source_sandbox_id=record.source_sandbox_id,
+            name=record.name,
+            description=record.description,
+            restore_config=record.restore_config,
+            status=SnapshotStatusRecord(
+                state=SnapshotState.DELETING,
+                reason="snapshot_delete_requested",
+                message="Snapshot deletion requested.",
+                last_transition_at=now,
+            ),
+            created_at=record.created_at,
+            updated_at=now,
+        )
+        if self._snapshot_repository.update_if_state(
+            deleting_record,
+            record.status.state,
+        ):
+            return deleting_record
+
+        current_record = self._snapshot_repository.get(record.id)
+        if current_record is None:
+            return None
+        if current_record.status.state == SnapshotState.DELETING:
+            return current_record
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "SNAPSHOT::INVALID_STATE",
+                "message": f"Snapshot {record.id} changed state and cannot be deleted",
+            },
+        )
 
     def _create_snapshot_worker(self, record: SnapshotRecord) -> None:
         try:
@@ -332,6 +373,13 @@ class PersistedSnapshotService(SnapshotService):
                 record.id,
                 image=record.restore_config.image,
             )
+            if runtime_status.state == SnapshotState.CREATING:
+                future = self._snapshot_executor.submit(
+                    self._create_snapshot_worker,
+                    record,
+                )
+                future.add_done_callback(self._log_worker_failure)
+                return False
             self._complete_snapshot(record, runtime_status)
             return True
 
@@ -427,6 +475,33 @@ class PersistedSnapshotService(SnapshotService):
                 exc,
                 exc_info=True,
             )
+
+    @staticmethod
+    def _ensure_source_sandbox_running(sandbox) -> None:
+        state = PersistedSnapshotService._sandbox_state(sandbox)
+        if state == "Running":
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": SnapshotErrorCodes.INVALID_SOURCE_STATE,
+                "message": "Snapshot can only be created from a Running sandbox.",
+            },
+        )
+
+    @staticmethod
+    def _sandbox_state(sandbox) -> str | None:
+        if isinstance(sandbox, dict):
+            status_value = sandbox.get("status")
+            if isinstance(status_value, dict):
+                return status_value.get("state")
+            return getattr(status_value, "state", None)
+
+        status_value = getattr(sandbox, "status", None)
+        if isinstance(status_value, dict):
+            return status_value.get("state")
+        return getattr(status_value, "state", None)
 
     @staticmethod
     def _to_snapshot_response(record: SnapshotRecord) -> Snapshot:

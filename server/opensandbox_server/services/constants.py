@@ -114,6 +114,12 @@ class SandboxErrorCodes:
     INVALID_STATE = "KUBERNETES::INVALID_STATE"
 
 
+class SnapshotErrorCodes:
+    """Canonical error codes for snapshot service operations."""
+
+    INVALID_SOURCE_STATE = "SNAPSHOT::INVALID_SOURCE_STATE"
+
+
 __all__ = [
     "RESERVED_LABEL_PREFIX",
     "SANDBOX_ID_LABEL",
@@ -135,4 +141,5 @@ __all__ = [
     "EGRESS_MODE_ENV",
     "OPENSANDBOX_EGRESS_TOKEN",
     "SandboxErrorCodes",
+    "SnapshotErrorCodes",
 ]

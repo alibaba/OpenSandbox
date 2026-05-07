@@ -16,6 +16,7 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -75,7 +76,7 @@ func (r *SandboxSnapshotReconciler) handlePending(ctx context.Context, snapshot 
 
 	var containers []sandboxv1alpha1.ContainerSnapshot
 	for _, c := range sourceContainers {
-		imageURI := fmt.Sprintf("%s/%s-%s:snap-gen%d", r.SnapshotRegistry, bs.Name, c.Name, bs.Generation)
+		imageURI := r.snapshotImageURI(snapshot, bs, c.Name)
 		containers = append(containers, sandboxv1alpha1.ContainerSnapshot{
 			ContainerName: c.Name,
 			ImageURI:      imageURI,
@@ -239,6 +240,62 @@ func (r *SandboxSnapshotReconciler) findPodForSandbox(ctx context.Context, bs *s
 	}
 
 	return nil, fmt.Errorf("no running pod found for BatchSandbox %s", bs.Name)
+}
+
+func (r *SandboxSnapshotReconciler) snapshotImageURI(
+	snapshot *sandboxv1alpha1.SandboxSnapshot,
+	bs *sandboxv1alpha1.BatchSandbox,
+	containerName string,
+) string {
+	return fmt.Sprintf(
+		"%s/%s-%s:%s",
+		r.SnapshotRegistry,
+		bs.Name,
+		containerName,
+		snapshotImageTag(snapshot, bs),
+	)
+}
+
+func snapshotImageTag(snapshot *sandboxv1alpha1.SandboxSnapshot, bs *sandboxv1alpha1.BatchSandbox) string {
+	if hasBatchSandboxControllerOwner(snapshot) {
+		return fmt.Sprintf("snap-gen%d", bs.Generation)
+	}
+	return publicSnapshotImageTag(snapshot.Name)
+}
+
+func hasBatchSandboxControllerOwner(snapshot *sandboxv1alpha1.SandboxSnapshot) bool {
+	for _, owner := range snapshot.OwnerReferences {
+		if owner.Kind != "BatchSandbox" {
+			continue
+		}
+		if owner.Controller != nil && *owner.Controller {
+			return true
+		}
+	}
+	return false
+}
+
+func publicSnapshotImageTag(snapshotName string) string {
+	const publicSnapshotNamePrefix = "osb-snap-"
+	if strings.HasPrefix(snapshotName, publicSnapshotNamePrefix) {
+		suffix := strings.TrimPrefix(snapshotName, publicSnapshotNamePrefix)
+		if isLowerHex(suffix) && len(suffix) == 32 {
+			return "snap-" + suffix
+		}
+	}
+
+	sum := sha256.Sum256([]byte(snapshotName))
+	return fmt.Sprintf("snap-%x", sum)[:37]
+}
+
+func isLowerHex(value string) bool {
+	for _, ch := range value {
+		if (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (r *SandboxSnapshotReconciler) imageCommitterImage() string {

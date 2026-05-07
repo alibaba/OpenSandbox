@@ -539,7 +539,7 @@ class Sandbox:
                 )
 
             return sandbox
-        except Exception as e:
+        except BaseException as e:
             if sandbox_id and sandbox_service:
                 try:
                     logger.warning(
@@ -555,7 +555,11 @@ class Sandbox:
                     )
 
             await config.close_transport_if_owned()
+            if isinstance(e, asyncio.CancelledError):
+                raise
             if isinstance(e, SandboxException):
+                raise
+            if not isinstance(e, Exception):
                 raise
             logger.error("Unexpected exception during sandbox creation", exc_info=e)
             raise SandboxInternalException(

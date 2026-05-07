@@ -39,3 +39,35 @@ func TestInitFlagsSanitizesNonPositiveJupyterIdlePollIntervalFromCLI(t *testing.
 
 	require.Equal(t, defaultPollInterval, JupyterIdlePollInterval)
 }
+
+func TestInitFlagsServerAccessTokenFromEnv(t *testing.T) {
+	previousArgs := os.Args
+	previousCommandLine := flag.CommandLine
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	os.Args = []string{previousArgs[0]}
+	t.Cleanup(func() {
+		os.Args = previousArgs
+		flag.CommandLine = previousCommandLine
+	})
+	t.Setenv("EXECD_ACCESS_TOKEN", "test-token-from-env")
+
+	InitFlags()
+
+	require.Equal(t, "test-token-from-env", ServerAccessToken)
+}
+
+func TestInitFlagsCliOverridesEnvAccessToken(t *testing.T) {
+	previousArgs := os.Args
+	previousCommandLine := flag.CommandLine
+	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
+	os.Args = []string{previousArgs[0], "--access-token=cli-token"}
+	t.Cleanup(func() {
+		os.Args = previousArgs
+		flag.CommandLine = previousCommandLine
+	})
+	t.Setenv("EXECD_ACCESS_TOKEN", "env-token")
+
+	InitFlags()
+
+	require.Equal(t, "cli-token", ServerAccessToken)
+}

@@ -15,6 +15,7 @@
 #
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -286,6 +287,57 @@ async def test_create_resolves_egress_endpoint_and_builds_service(
             headers={"X-Port": str(DEFAULT_EGRESS_PORT)},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_create_cancellation_cleans_up_created_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _CreateResponse:
+        id = "sbx-created-before-cancel"
+
+    class _SandboxServiceCreateStub:
+        def __init__(self) -> None:
+            self.created = asyncio.Event()
+            self.killed: list[str] = []
+
+        async def create_sandbox(self, *_args, **_kwargs):
+            self.created.set()
+            return _CreateResponse()
+
+        async def get_sandbox_endpoint(
+            self,
+            sandbox_id: str,
+            port: int,
+            use_server_proxy: bool = False,
+        ) -> SandboxEndpoint:
+            del sandbox_id, port, use_server_proxy
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        async def kill_sandbox(self, sandbox_id: str) -> None:
+            self.killed.append(sandbox_id)
+
+    class _FactoryStub:
+        def __init__(self, connection_config: ConnectionConfig) -> None:
+            self.connection_config = connection_config
+
+        def create_sandbox_service(self):
+            return sandbox_service
+
+    sandbox_service = _SandboxServiceCreateStub()
+    monkeypatch.setattr("opensandbox.sandbox.AdapterFactory", _FactoryStub)
+
+    task = asyncio.create_task(
+        Sandbox.create("python:3.11", connection_config=ConnectionConfig())
+    )
+    await asyncio.wait_for(sandbox_service.created.wait(), timeout=1)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert sandbox_service.killed == ["sbx-created-before-cancel"]
 
 
 @pytest.mark.asyncio
