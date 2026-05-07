@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from concurrent.futures import Future
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -37,7 +38,12 @@ class StubSandboxService:
                 status_code=404,
                 detail={"code": "SANDBOX::NOT_FOUND", "message": f"Sandbox {sandbox_id} not found"},
         )
-        return {"id": sandbox_id}
+        return {
+            "id": sandbox_id,
+            "status": {
+                "state": "Running",
+            },
+        }
 
 
 class ImmediateExecutor:
@@ -138,6 +144,51 @@ def test_snapshot_service_persists_create_and_get(tmp_path) -> None:
     assert runtime.calls == [(created.id, "sbx-001")]
 
 
+def test_snapshot_service_rejects_create_when_source_sandbox_not_running(tmp_path) -> None:
+    repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
+    runtime = StubSnapshotRuntime()
+    sandbox_service = SimpleNamespace(
+        get_sandbox=lambda sandbox_id: SimpleNamespace(
+            id=sandbox_id,
+            status=SimpleNamespace(state="Paused"),
+        )
+    )
+    service = PersistedSnapshotService(
+        repo,
+        sandbox_service,
+        snapshot_runtime=runtime,
+        snapshot_executor=ImmediateExecutor(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint"))
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "SNAPSHOT::INVALID_SOURCE_STATE"
+    assert runtime.calls == []
+
+
+def test_snapshot_service_rejects_create_when_source_sandbox_state_missing(tmp_path) -> None:
+    repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
+    runtime = StubSnapshotRuntime()
+    sandbox_service = SimpleNamespace(
+        get_sandbox=lambda sandbox_id: SimpleNamespace(id=sandbox_id)
+    )
+    service = PersistedSnapshotService(
+        repo,
+        sandbox_service,
+        snapshot_runtime=runtime,
+        snapshot_executor=ImmediateExecutor(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint"))
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "SNAPSHOT::INVALID_SOURCE_STATE"
+    assert runtime.calls == []
+
+
 def test_snapshot_service_marks_snapshot_ready_from_worker(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
@@ -220,6 +271,34 @@ def test_snapshot_service_marks_snapshot_failed_when_worker_returns_none(tmp_pat
     assert stored is not None
     assert stored.status.state == SnapshotState.FAILED
     assert stored.status.reason == "snapshot_runtime_missing_result"
+
+
+def test_recover_unfinished_snapshot_reschedules_creating_runtime_status_without_progress(tmp_path) -> None:
+    repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
+    record = _snapshot_record("snap-in-progress", SnapshotState.CREATING)
+    repo.create(record)
+    runtime = StubSnapshotRuntime()
+    runtime.inspect_status_by_snapshot_id[record.id] = SnapshotRuntimeStatus(
+        state=SnapshotState.CREATING,
+        reason="snapshot_runtime_in_progress",
+        message="Snapshot is still being committed.",
+    )
+    executor = CapturingExecutor()
+    service = PersistedSnapshotService(
+        repo,
+        StubSandboxService(),
+        snapshot_runtime=runtime,
+        snapshot_executor=executor,
+        recover_unfinished_snapshots=False,
+    )
+
+    progressed = service._recover_unfinished_snapshot(record)
+
+    stored = repo.get(record.id)
+    assert progressed is False
+    assert stored is not None
+    assert stored.status.state == SnapshotState.CREATING
+    assert len(executor.submitted) == 1
 
 
 def test_snapshot_service_lists_and_deletes_records(tmp_path) -> None:

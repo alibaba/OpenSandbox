@@ -40,6 +40,7 @@ from opensandbox_server.api.schema import (
     SnapshotStatus,
 )
 from opensandbox_server.repositories.snapshots.factory import create_snapshot_repository
+from opensandbox_server.services.constants import SnapshotErrorCodes
 from opensandbox_server.services.snapshot_runtime import (
     NoopSnapshotRuntime,
     SnapshotRuntime,
@@ -114,7 +115,8 @@ class PersistedSnapshotService(SnapshotService):
             self.recover_unfinished_snapshots()
 
     def create_snapshot(self, sandbox_id: str, request: CreateSnapshotRequest) -> Snapshot:
-        self._sandbox_service.get_sandbox(sandbox_id)
+        sandbox = self._sandbox_service.get_sandbox(sandbox_id)
+        self._ensure_source_sandbox_running(sandbox)
 
         if not self._snapshot_runtime.supports_create_snapshot():
             raise HTTPException(
@@ -332,6 +334,13 @@ class PersistedSnapshotService(SnapshotService):
                 record.id,
                 image=record.restore_config.image,
             )
+            if runtime_status.state == SnapshotState.CREATING:
+                future = self._snapshot_executor.submit(
+                    self._create_snapshot_worker,
+                    record,
+                )
+                future.add_done_callback(self._log_worker_failure)
+                return False
             self._complete_snapshot(record, runtime_status)
             return True
 
@@ -427,6 +436,33 @@ class PersistedSnapshotService(SnapshotService):
                 exc,
                 exc_info=True,
             )
+
+    @staticmethod
+    def _ensure_source_sandbox_running(sandbox) -> None:
+        state = PersistedSnapshotService._sandbox_state(sandbox)
+        if state == "Running":
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": SnapshotErrorCodes.INVALID_SOURCE_STATE,
+                "message": "Snapshot can only be created from a Running sandbox.",
+            },
+        )
+
+    @staticmethod
+    def _sandbox_state(sandbox) -> str | None:
+        if isinstance(sandbox, dict):
+            status_value = sandbox.get("status")
+            if isinstance(status_value, dict):
+                return status_value.get("state")
+            return getattr(status_value, "state", None)
+
+        status_value = getattr(sandbox, "status", None)
+        if isinstance(status_value, dict):
+            return status_value.get("state")
+        return getattr(status_value, "state", None)
 
     @staticmethod
     def _to_snapshot_response(record: SnapshotRecord) -> Snapshot:

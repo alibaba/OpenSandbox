@@ -317,6 +317,7 @@ func TestSandboxSnapshotHandlePending_UsesSourcePodContainersWhenTemplateMissing
 			Name:       "test-bs",
 			Namespace:  "default",
 			Generation: 2,
+			UID:        types.UID("test-bs-uid"),
 		},
 		Spec: sandboxv1alpha1.BatchSandboxSpec{
 			PoolRef: "test-pool",
@@ -342,6 +343,16 @@ func TestSandboxSnapshotHandlePending_UsesSourcePodContainersWhenTemplateMissing
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "default",
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         "sandbox.opensandbox.io/v1alpha1",
+					Kind:               "BatchSandbox",
+					Name:               "test-bs",
+					UID:                types.UID("test-bs-uid"),
+					Controller:         ptrToBool(true),
+					BlockOwnerDeletion: ptrToBool(true),
+				},
+			},
 		},
 		Spec: sandboxv1alpha1.SandboxSnapshotSpec{
 			SandboxName: "test-bs",
@@ -369,6 +380,71 @@ func TestSandboxSnapshotHandlePending_UsesSourcePodContainersWhenTemplateMissing
 
 	job := &batchv1.Job{}
 	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: "test-snapshot-commit", Namespace: "default"}, job))
+}
+
+func TestSandboxSnapshotHandlePending_PublicSnapshotUsesSnapshotIDTag(t *testing.T) {
+	bs := &sandboxv1alpha1.BatchSandbox{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:       "test-bs",
+			Namespace:  "default",
+			Generation: 7,
+		},
+		Spec: sandboxv1alpha1.BatchSandboxSpec{
+			Template: &corev1.PodTemplateSpec{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{Name: "sandbox", Image: "python:3.11"},
+					},
+				},
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-bs-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				LabelBatchSandboxNameKey: "test-bs",
+			},
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node-a",
+			Containers: []corev1.Container{
+				{Name: "sandbox", Image: "python:3.11"},
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+	snapshot := &sandboxv1alpha1.SandboxSnapshot{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "osb-snap-11111111222243338444555555555555",
+			Namespace: "default",
+		},
+		Spec: sandboxv1alpha1.SandboxSnapshotSpec{
+			SandboxName: "test-bs",
+		},
+		Status: sandboxv1alpha1.SandboxSnapshotStatus{
+			Phase: sandboxv1alpha1.SandboxSnapshotPhasePending,
+		},
+	}
+
+	r := newTestSnapshotReconciler(bs, pod, snapshot)
+	r.SnapshotRegistry = "registry.default.svc.cluster.local:5000"
+
+	result, err := r.handlePending(context.Background(), snapshot)
+	require.NoError(t, err)
+	assert.Equal(t, time.Second, result.RequeueAfter)
+
+	updated := &sandboxv1alpha1.SandboxSnapshot{}
+	require.NoError(t, r.Get(context.Background(), types.NamespacedName{Name: snapshot.Name, Namespace: "default"}, updated))
+	require.Len(t, updated.Status.Containers, 1)
+	assert.Equal(
+		t,
+		"registry.default.svc.cluster.local:5000/test-bs-sandbox:snap-11111111222243338444555555555555",
+		updated.Status.Containers[0].ImageURI,
+	)
 }
 
 func TestBuildCommitJob_SetsBoundedBackoffLimit(t *testing.T) {
