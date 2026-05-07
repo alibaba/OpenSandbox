@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
+from redis import Redis
 from redis.asyncio import Redis as AsyncRedis
 from test_redis_pool_store import _FakeRedis
 
@@ -113,7 +114,7 @@ async def test_async_redis_store_wraps_client_failures() -> None:
 
 def test_async_redis_store_rejects_sync_client_shape() -> None:
     with pytest.raises(TypeError, match="redis.asyncio.Redis"):
-        AsyncRedisPoolStateStore(_FakeRedis())
+        AsyncRedisPoolStateStore(_FakeSyncRedis())
 
 
 class _BrokenAsyncRedis(AsyncRedis):
@@ -150,6 +151,11 @@ class _BrokenAsyncRedis(AsyncRedis):
 
     async def hgetall(self, key: str) -> dict[str, str]:
         raise RuntimeError("redis unavailable")
+
+
+class _FakeSyncRedis(Redis):
+    def __init__(self) -> None:
+        pass
 
 
 class _FakeAsyncRedis(AsyncRedis):

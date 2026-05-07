@@ -405,6 +405,22 @@ public class SandboxPoolRedisDistributedE2ETest extends BaseE2ETest {
     }
 
     @Test
+    @DisplayName("Redis expired idle is not removed by snapshot but take reaps it")
+    @Timeout(value = 1, unit = TimeUnit.MINUTES)
+    void testExpiredIdleIsNotRemovedBySnapshotButTakeReapsIt() throws Exception {
+        String poolName = "redis-expired-idle-" + UUID.randomUUID();
+        RedisPoolStateStore store = new RedisPoolStateStore(redis, keyPrefix);
+
+        store.setIdleEntryTtl(poolName, Duration.ofMillis(50));
+        store.putIdle(poolName, "expired-" + UUID.randomUUID());
+        Thread.sleep(100);
+
+        assertEquals(1, store.snapshotCounters(poolName).getIdleCount());
+        assertNull(store.tryTakeIdle(poolName));
+        assertEquals(0, store.snapshotCounters(poolName).getIdleCount());
+    }
+
+    @Test
     @DisplayName("Redis concurrent acquire and resize jitter stay bounded")
     @Timeout(value = 7, unit = TimeUnit.MINUTES)
     void testConcurrentAcquireAndResizeJitterStayBounded() throws Exception {

@@ -23,8 +23,10 @@ import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 from opensandbox import Sandbox, SandboxManager
+from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import (
     PoolAcquireFailedException,
     PoolEmptyException,
@@ -197,6 +199,126 @@ class TestSandboxPoolSingleNodeE2EAsync:
             result = await sandbox.commands.run(f"cat {marker_path}")
             assert result.error is None
             assert result.logs.stdout[0].text == "async-prepared"
+
+    @pytest.mark.timeout(300)
+    async def test_async_concurrent_shutdown_and_acquire_does_not_deadlock(self) -> None:
+        await _eventually(
+            "async pool has warm idle before shutdown race",
+            lambda: _snapshot_matches(self.pool, lambda snap: snap.idle_count >= 1),
+        )
+
+        start = asyncio.Event()
+        errors: list[BaseException] = []
+
+        async def acquire_during_shutdown() -> None:
+            try:
+                await start.wait()
+                sandbox = await self.pool.acquire(
+                    timedelta(minutes=5), AcquirePolicy.DIRECT_CREATE
+                )
+                self.borrowed.append(sandbox)
+            except PoolNotRunningException:
+                return
+            except BaseException as exc:
+                errors.append(exc)
+                raise
+
+        async def shutdown_during_acquire() -> None:
+            await start.wait()
+            await self.pool.shutdown(graceful=True)
+
+        tasks = [asyncio.create_task(acquire_during_shutdown()) for _ in range(4)]
+        tasks.append(asyncio.create_task(shutdown_during_acquire()))
+        start.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=180)
+
+        assert not errors
+
+    @pytest.mark.timeout(300)
+    async def test_async_warmup_concurrency_above_one_reaches_target_and_stays_bounded(self) -> None:
+        await _cleanup_pool(self.pool)
+        concurrent_tag = _tag("py-async-pool-warmup-concurrency")
+        concurrent_pool = _create_pool(
+            pool_name=f"concurrent-{self.pool_name}",
+            owner_id=f"concurrent-owner-{self.tag}",
+            state_store=InMemoryAsyncPoolStateStore(),
+            tag=concurrent_tag,
+            max_idle=3,
+            warmup_concurrency=2,
+        )
+        try:
+            await concurrent_pool.start()
+            await _eventually(
+                "async concurrent warmup fills configured idle target",
+                lambda: _snapshot_and_remote_count_match(
+                    concurrent_pool,
+                    self.manager,
+                    concurrent_tag,
+                    lambda snap, count: snap.idle_count >= 3 and count <= 3,
+                ),
+                timeout=timedelta(seconds=90),
+            )
+        finally:
+            await _cleanup_pool(concurrent_pool)
+            await _cleanup_tagged_sandboxes(self.manager, concurrent_tag)
+
+    @pytest.mark.timeout(240)
+    async def test_async_broken_connection_degrades_and_healthy_pool_still_works(self) -> None:
+        await _cleanup_pool(self.pool)
+        bad_tag = _tag("py-async-pool-bad")
+        bad_pool = _create_pool(
+            pool_name=f"bad-{self.pool_name}",
+            owner_id=f"bad-owner-{self.tag}",
+            state_store=InMemoryAsyncPoolStateStore(),
+            tag=bad_tag,
+            max_idle=1,
+            connection_config=_broken_connection_config(),
+            degraded_threshold=1,
+            warmup_ready_timeout=timedelta(seconds=1),
+            acquire_ready_timeout=timedelta(seconds=1),
+        )
+        try:
+            await bad_pool.start()
+            await _eventually(
+                "async bad pool enters degraded state",
+                lambda: _snapshot_matches(
+                    bad_pool, lambda snap: snap.state == PoolState.DEGRADED
+                ),
+                timeout=timedelta(seconds=60),
+            )
+            snapshot = await bad_pool.snapshot()
+            assert snapshot.last_error
+            assert snapshot.idle_count == 0
+            with pytest.raises(PoolEmptyException):
+                await bad_pool.acquire(timedelta(minutes=1), AcquirePolicy.FAIL_FAST)
+            with pytest.raises(Exception):
+                await bad_pool.acquire(timedelta(minutes=1), AcquirePolicy.DIRECT_CREATE)
+        finally:
+            await _cleanup_pool(bad_pool)
+            await _cleanup_tagged_sandboxes(self.manager, bad_tag)
+
+        healthy_tag = _tag("py-async-pool-good")
+        healthy_pool = _create_pool(
+            pool_name=f"healthy-{self.pool_name}",
+            owner_id=f"healthy-owner-{self.tag}",
+            state_store=InMemoryAsyncPoolStateStore(),
+            tag=healthy_tag,
+            max_idle=1,
+        )
+        try:
+            await healthy_pool.start()
+            await _eventually(
+                "async healthy pool still works after broken pool path",
+                lambda: _snapshot_matches(healthy_pool, lambda snap: snap.idle_count >= 1),
+            )
+            sandbox = await healthy_pool.acquire(
+                timedelta(minutes=5), AcquirePolicy.FAIL_FAST
+            )
+            self.borrowed.append(sandbox)
+            assert await sandbox.is_healthy()
+        finally:
+            await _cleanup_pool(healthy_pool)
+            await _cleanup_tagged_sandboxes(self.manager, healthy_tag)
 
 
 @pytest.mark.e2e
@@ -478,6 +600,19 @@ class TestSandboxPoolRedisDistributedE2EAsync:
         self.borrowed.append(sandbox)
         assert await sandbox.is_healthy()
 
+    @pytest.mark.timeout(60)
+    async def test_async_redis_expired_idle_is_not_removed_by_snapshot_but_take_reaps_it(self) -> None:
+        store = AsyncRedisPoolStateStore(self.redis, self.key_prefix)
+        pool_name = f"async-redis-expired-idle-{self.tag}"
+
+        await store.set_idle_entry_ttl(pool_name, timedelta(milliseconds=50))
+        await store.put_idle(pool_name, f"expired-{uuid.uuid4().hex}")
+        await asyncio.sleep(0.1)
+
+        assert (await store.snapshot_counters(pool_name)).idle_count == 1
+        assert await store.try_take_idle(pool_name) is None
+        assert (await store.snapshot_counters(pool_name)).idle_count == 0
+
     @pytest.mark.timeout(420)
     async def test_async_redis_lost_lock_window_discards_orphan_and_recovers(self) -> None:
         pool_name = f"async-redis-renew-window-{self.tag}"
@@ -522,14 +657,19 @@ def _create_pool(
     tag: str,
     max_idle: int,
     warmup_sandbox_preparer: Callable[[Sandbox], Awaitable[None]] | None = None,
+    connection_config: ConnectionConfig | None = None,
+    degraded_threshold: int = 3,
+    warmup_ready_timeout: timedelta = timedelta(seconds=30),
+    acquire_ready_timeout: timedelta = timedelta(seconds=30),
+    warmup_concurrency: int = 1,
 ) -> SandboxPoolAsync:
     return SandboxPoolAsync(
         pool_name=pool_name,
         owner_id=owner_id,
         max_idle=max_idle,
-        warmup_concurrency=1,
+        warmup_concurrency=warmup_concurrency,
         state_store=state_store,
-        connection_config=create_connection_config(),
+        connection_config=connection_config or create_connection_config(),
         creation_spec=PoolCreationSpec(
             image=get_sandbox_image(),
             entrypoint=["tail", "-f", "/dev/null"],
@@ -545,6 +685,20 @@ def _create_pool(
         primary_lock_ttl=PRIMARY_LOCK_TTL,
         drain_timeout=DRAIN_TIMEOUT,
         warmup_sandbox_preparer=warmup_sandbox_preparer,
+        degraded_threshold=degraded_threshold,
+        warmup_ready_timeout=warmup_ready_timeout,
+        acquire_ready_timeout=acquire_ready_timeout,
+    )
+
+
+def _broken_connection_config() -> ConnectionConfig:
+    return ConnectionConfig(
+        domain="127.0.0.1:9",
+        api_key="broken-e2e-test",
+        request_timeout=timedelta(seconds=1),
+        transport=httpx.AsyncHTTPTransport(
+            limits=httpx.Limits(max_connections=2, max_keepalive_connections=0)
+        ),
     )
 
 

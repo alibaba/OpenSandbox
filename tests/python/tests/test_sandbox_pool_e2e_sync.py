@@ -322,6 +322,30 @@ class TestSandboxPoolSingleNodeE2ESync:
             _cleanup_tagged_sandboxes(other_manager, other_tag)
             other_manager.close()
 
+    @pytest.mark.timeout(300)
+    def test_warmup_concurrency_above_one_reaches_target_and_stays_bounded(self) -> None:
+        _cleanup_pool(self.pool)
+        concurrent_tag = _tag("py-pool-warmup-concurrency")
+        concurrent_pool = _create_pool(
+            pool_name=f"concurrent-{self.pool_name}",
+            owner_id=f"concurrent-owner-{self.tag}",
+            state_store=InMemoryPoolStateStore(),
+            tag=concurrent_tag,
+            max_idle=3,
+            warmup_concurrency=2,
+        )
+        try:
+            concurrent_pool.start()
+            _eventually(
+                "concurrent warmup fills configured idle target",
+                lambda: concurrent_pool.snapshot().idle_count >= 3
+                and _count_tagged_sandboxes(self.manager, concurrent_tag) <= 3,
+                timeout=timedelta(seconds=90),
+            )
+        finally:
+            _cleanup_pool(concurrent_pool)
+            _cleanup_tagged_sandboxes(self.manager, concurrent_tag)
+
     @pytest.mark.timeout(240)
     def test_broken_connection_degrades_and_healthy_pool_still_works(self) -> None:
         _cleanup_pool(self.pool)
@@ -578,6 +602,19 @@ class TestSandboxPoolRedisDistributedE2ESync:
         assert len(taken) == 50
         assert store.snapshot_counters(contention_pool).idle_count == 0
 
+    @pytest.mark.timeout(60)
+    def test_redis_expired_idle_is_not_removed_by_snapshot_but_take_reaps_it(self) -> None:
+        store = RedisPoolStateStore(self.redis, self.key_prefix)
+        pool_name = f"redis-expired-idle-{self.tag}"
+
+        store.set_idle_entry_ttl(pool_name, timedelta(milliseconds=50))
+        store.put_idle(pool_name, f"expired-{uuid.uuid4().hex}")
+        time.sleep(0.1)
+
+        assert store.snapshot_counters(pool_name).idle_count == 1
+        assert store.try_take_idle(pool_name) is None
+        assert store.snapshot_counters(pool_name).idle_count == 0
+
     @pytest.mark.timeout(420)
     def test_redis_concurrent_acquire_and_resize_jitter_remain_bounded(self) -> None:
         pool_name = f"redis-acquire-resize-jitter-{self.tag}"
@@ -693,12 +730,13 @@ def _create_pool(
     acquire_ready_timeout: timedelta = timedelta(seconds=30),
     primary_lock_ttl: timedelta = PRIMARY_LOCK_TTL,
     reconcile_interval: timedelta = RECONCILE_INTERVAL,
+    warmup_concurrency: int = 1,
 ) -> SandboxPoolSync:
     return SandboxPoolSync(
         pool_name=pool_name,
         owner_id=owner_id,
         max_idle=max_idle,
-        warmup_concurrency=1,
+        warmup_concurrency=warmup_concurrency,
         state_store=state_store,
         connection_config=connection_config or create_connection_config_sync(),
         creation_spec=PoolCreationSpec(

@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 from redis import Redis
+from redis.asyncio import Redis as AsyncRedis
 
 from opensandbox.exceptions import PoolStateStoreUnavailableException
 from opensandbox.pool_redis import RedisPoolStateStore
@@ -101,8 +102,8 @@ def test_redis_store_wraps_client_failures() -> None:
 
 
 def test_redis_store_rejects_async_client_shape() -> None:
-    with pytest.raises(TypeError, match="synchronous Redis client"):
-        RedisPoolStateStore(_FakeAsyncRedisShape())
+    with pytest.raises(TypeError, match="redis.Redis"):
+        RedisPoolStateStore(_FakeAsyncRedis())
 
 
 class _BrokenRedis(Redis):
@@ -141,7 +142,7 @@ class _BrokenRedis(Redis):
         raise RuntimeError("redis unavailable")
 
 
-class _FakeAsyncRedisShape(Redis):
+class _FakeAsyncRedis(AsyncRedis):
     def __init__(self) -> None:
         pass
 

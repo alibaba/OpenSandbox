@@ -994,6 +994,75 @@ public class SandboxPoolSingleNodeE2ETest extends BaseE2ETest {
 
     @Test
     @Order(17)
+    @DisplayName("warmupConcurrency above one fills target and stays bounded")
+    @Timeout(value = 4, unit = TimeUnit.MINUTES)
+    void testWarmupConcurrencyAboveOneReachesTargetAndStaysBounded() throws InterruptedException {
+        pool.resize(0);
+        pool.releaseAllIdle();
+        pool.shutdown(false);
+
+        String concurrentTag =
+                "e2e-pool-warmup-concurrency-" + UUID.randomUUID().toString().substring(0, 8);
+        SandboxPool concurrentPool = null;
+        try {
+            concurrentPool =
+                    SandboxPool.builder()
+                            .poolName("pool-warmup-concurrency-" + concurrentTag)
+                            .ownerId("owner-warmup-concurrency-" + concurrentTag)
+                            .maxIdle(3)
+                            .warmupConcurrency(2)
+                            .stateStore(new InMemoryPoolStateStore())
+                            .connectionConfig(sharedConnectionConfig)
+                            .creationSpec(
+                                    PoolCreationSpec.builder()
+                                            .image(getSandboxImage())
+                                            .entrypoint(List.of("tail -f /dev/null"))
+                                            .metadata(
+                                                    Map.of(
+                                                            "tag",
+                                                            concurrentTag,
+                                                            "suite",
+                                                            "sandbox-pool-e2e"))
+                                            .env(
+                                                    Map.of(
+                                                            "E2E_TEST",
+                                                            "true",
+                                                            "EXECD_API_GRACE_SHUTDOWN",
+                                                            "3s",
+                                                            "EXECD_JUPYTER_IDLE_POLL_INTERVAL",
+                                                            "1s"))
+                                            .build())
+                            .reconcileInterval(Duration.ofSeconds(2))
+                            .drainTimeout(Duration.ofMillis(200))
+                            .build();
+            concurrentPool.start();
+
+            SandboxPool finalConcurrentPool = concurrentPool;
+            eventually(
+                    "concurrent warmup reaches configured idle target without overshoot",
+                    Duration.ofMinutes(2),
+                    Duration.ofSeconds(1),
+                    () ->
+                            finalConcurrentPool.snapshot().getIdleCount() >= 3
+                                    && countTaggedSandboxes(concurrentTag) <= 3);
+        } finally {
+            if (concurrentPool != null) {
+                try {
+                    concurrentPool.resize(0);
+                    concurrentPool.releaseAllIdle();
+                } catch (Exception ignored) {
+                }
+                try {
+                    concurrentPool.shutdown(false);
+                } catch (Exception ignored) {
+                }
+            }
+            cleanupTaggedSandboxes(concurrentTag);
+        }
+    }
+
+    @Test
+    @Order(18)
     @DisplayName("snapshot exposes lifecycle maxIdle and idle entry details")
     @Timeout(value = 4, unit = TimeUnit.MINUTES)
     void testSnapshotExposesLifecycleAndIdleEntries() throws InterruptedException {

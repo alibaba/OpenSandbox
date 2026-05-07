@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 import base64
-import inspect
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypeVar, cast
@@ -326,9 +325,4 @@ def _validate_async_redis_client(redis: Any) -> None:
         if not callable(method):
             raise TypeError(
                 f"AsyncRedisPoolStateStore requires a Redis client with callable {method_name}()"
-            )
-        if not inspect.iscoroutinefunction(method):
-            raise TypeError(
-                "AsyncRedisPoolStateStore requires an async Redis client; "
-                "use redis.asyncio.Redis, not redis.Redis"
             )
