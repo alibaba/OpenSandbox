@@ -58,7 +58,7 @@ Defines best-effort troubleshooting descriptors for sandbox diagnostic logs and 
 
 **Code Execution API Inside Sandbox**
 
-Defines interfaces for executing code, commands, and file operations within sandbox environments, providing complete code interpreter and filesystem management capabilities. All endpoints require the `X-EXECD-ACCESS-TOKEN` header.
+Defines interfaces for executing code, commands, and file operations within sandbox environments, providing complete code interpreter and filesystem management capabilities. All endpoints require an auth header (`OpenSandbox-Execd-Token`; the legacy `X-EXECD-ACCESS-TOKEN` is also accepted).
 
 **Core Features:**
 - **Code Execution**: Stateful code execution supporting Python, JavaScript, and other languages with context lifecycle management
@@ -66,7 +66,7 @@ Defines interfaces for executing code, commands, and file operations within sand
 - **File Operations**: Complete CRUD operations for files and directories
 - **Real-time Streaming**: Real-time output streaming via SSE (Server-Sent Events)
 - **System Monitoring**: Real-time monitoring of CPU and memory metrics
-- **Access Control**: Token-based API authentication via `X-EXECD-ACCESS-TOKEN`
+- **Access Control**: Token-based API authentication via `OpenSandbox-Execd-Token` (legacy `X-EXECD-ACCESS-TOKEN` accepted)
 
 **Main Endpoint Categories:**
 

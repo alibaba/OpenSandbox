@@ -33,7 +33,7 @@ type ExecdClient struct {
 }
 
 // execdAuthHeader is the authentication header used by the Execd API.
-const execdAuthHeader = "X-EXECD-ACCESS-TOKEN"
+const execdAuthHeader = "OpenSandbox-Execd-Token"
 
 // NewExecdClient creates a new ExecdClient for the given base URL and access token.
 func NewExecdClient(baseURL, accessToken string, opts ...Option) *ExecdClient {

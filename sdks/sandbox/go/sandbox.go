@@ -407,11 +407,15 @@ func (s *Sandbox) resolveExecd(ctx context.Context) error {
 	token := ""
 	var extraHeaders map[string]string
 	if endpoint.Headers != nil {
-		token = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
-		// Preserve all endpoint headers (e.g. routing headers) except the auth token
+		// Prefer the current header; fall back to legacy.
+		token = endpoint.Headers["OpenSandbox-Execd-Token"]
+		if token == "" {
+			token = endpoint.Headers["X-EXECD-ACCESS-TOKEN"]
+		}
+		// Preserve all endpoint headers (e.g. routing headers) except auth tokens
 		extraHeaders = make(map[string]string, len(endpoint.Headers))
 		for k, v := range endpoint.Headers {
-			if k != "X-EXECD-ACCESS-TOKEN" {
+			if k != "OpenSandbox-Execd-Token" && k != "X-EXECD-ACCESS-TOKEN" {
 				extraHeaders[k] = v
 			}
 		}

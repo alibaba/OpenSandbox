@@ -58,7 +58,7 @@
 
 **沙箱内代码执行 API**
 
-定义了在沙箱环境内执行代码、命令和文件操作的接口，提供完整的代码解释器和文件系统管理能力。所有端点需要 `X-EXECD-ACCESS-TOKEN` 认证头。
+定义了在沙箱环境内执行代码、命令和文件操作的接口，提供完整的代码解释器和文件系统管理能力。所有端点需要认证头（`OpenSandbox-Execd-Token`；旧版 `X-EXECD-ACCESS-TOKEN` 同样接受）。
 
 **核心功能：**
 - **代码执行**：支持 Python、JavaScript 等多语言的有状态代码执行，并提供上下文生命周期管理
@@ -66,7 +66,7 @@
 - **文件操作**：完整的文件和目录 CRUD 操作（创建、读取、更新、删除）
 - **实时流式输出**：基于 SSE (Server-Sent Events) 的实时输出流
 - **系统监控**：CPU 和内存指标的实时监控
-- **访问控制**：通过 `X-EXECD-ACCESS-TOKEN` 进行 Token 认证
+- **访问控制**：通过 `OpenSandbox-Execd-Token` 进行 Token 认证（旧版 `X-EXECD-ACCESS-TOKEN` 同样支持）
 
 **主要端点分类：**
 

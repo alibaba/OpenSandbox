@@ -125,10 +125,16 @@ func accessTokenMiddleware(token string) gin.HandlerFunc {
 			return
 		}
 
-		requestedToken := ctx.GetHeader(model.ApiAccessTokenHeader)
+		requestedToken := ""
+		for _, h := range model.AllAccessTokenHeaders() {
+			if v := ctx.GetHeader(h); v != "" {
+				requestedToken = v
+				break
+			}
+		}
 		if requestedToken == "" || requestedToken != token {
 			ctx.AbortWithStatusJSON(http.StatusUnauthorized, map[string]any{
-				"error": "Unauthorized: invalid or missing header " + model.ApiAccessTokenHeader,
+				"error": "Unauthorized: invalid or missing access token header",
 			})
 			return
 		}

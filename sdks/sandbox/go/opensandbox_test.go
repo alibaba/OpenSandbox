@@ -401,7 +401,7 @@ func TestSandbox_Resume(t *testing.T) {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/endpoints/"):
 			jsonResponse(w, http.StatusOK, Endpoint{
 				Endpoint: "http://execd.test:8080",
-				Headers:  map[string]string{"X-EXECD-ACCESS-TOKEN": "tok"},
+				Headers:  map[string]string{"OpenSandbox-Execd-Token": "tok"},
 			})
 		default:
 			w.WriteHeader(http.StatusNotFound)
@@ -906,9 +906,9 @@ func TestLifecycleAuthHeader(t *testing.T) {
 
 func TestExecdAuthHeader(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		got := r.Header.Get("X-EXECD-ACCESS-TOKEN")
+		got := r.Header.Get("OpenSandbox-Execd-Token")
 		if got != "my-execd-token" {
-			assert.Fail(t, fmt.Sprintf("X-EXECD-ACCESS-TOKEN = %q, want %q", got, "my-execd-token"))
+			assert.Fail(t, fmt.Sprintf("OpenSandbox-Execd-Token = %q, want %q", got, "my-execd-token"))
 		}
 		w.WriteHeader(http.StatusOK)
 	}))

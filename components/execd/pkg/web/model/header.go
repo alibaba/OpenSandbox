@@ -15,6 +15,13 @@
 package model
 
 const (
-	// ApiAccessTokenHeader carries the auth token.
+	// ApiAccessTokenHeader carries the auth token (legacy).
 	ApiAccessTokenHeader = "X-EXECD-ACCESS-TOKEN"
+	// ApiAccessTokenHeaderV2 carries the auth token (current).
+	ApiAccessTokenHeaderV2 = "OpenSandbox-Execd-Token"
 )
+
+// AllAccessTokenHeaders returns all recognised access-token header names.
+func AllAccessTokenHeaders() []string {
+	return []string{ApiAccessTokenHeaderV2, ApiAccessTokenHeader}
+}

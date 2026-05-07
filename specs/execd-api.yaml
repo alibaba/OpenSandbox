@@ -988,10 +988,12 @@ components:
     AccessToken:
       type: apiKey
       in: header
-      name: X-EXECD-ACCESS-TOKEN
+      name: OpenSandbox-Execd-Token
       description: |
         Access token for API authentication. All requests must include this header
         with a valid token. The token is configured during server initialization.
+        The legacy header X-EXECD-ACCESS-TOKEN is also accepted with the same
+        token value.
 
   schemas:
     CreateSessionRequest:
