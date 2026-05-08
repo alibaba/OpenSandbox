@@ -761,6 +761,66 @@ func TestUploadFile_WithReader(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestUploadFiles(t *testing.T) {
+	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/files/upload", r.URL.Path)
+		require.True(t, strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data"))
+
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		metadataParts := r.MultipartForm.File["metadata"]
+		fileParts := r.MultipartForm.File["file"]
+		require.Len(t, metadataParts, 2)
+		require.Len(t, fileParts, 2)
+
+		wantPaths := []string{"/sandbox/a.txt", "/sandbox/b.txt"}
+		wantFileNames := []string{"a.txt", "custom-b.txt"}
+		wantContents := []string{"alpha", "bravo"}
+
+		for i := range metadataParts {
+			metaFile, err := metadataParts[i].Open()
+			require.NoError(t, err)
+			require.Equal(t, "application/json", metadataParts[i].Header.Get("Content-Type"))
+			metaBytes, err := io.ReadAll(metaFile)
+			require.NoError(t, err)
+			require.NoError(t, metaFile.Close())
+
+			var meta FileMetadata
+			require.NoError(t, json.Unmarshal(metaBytes, &meta))
+			require.Equal(t, wantPaths[i], meta.Path)
+			require.Equal(t, 600+i, meta.Mode)
+
+			filePart, err := fileParts[i].Open()
+			require.NoError(t, err)
+			data, err := io.ReadAll(filePart)
+			require.NoError(t, err)
+			require.NoError(t, filePart.Close())
+			require.Equal(t, wantFileNames[i], fileParts[i].Filename)
+			require.Equal(t, wantContents[i], string(data))
+		}
+
+		w.WriteHeader(http.StatusOK)
+	})
+
+	err := client.UploadFiles(context.Background(), []UploadFileEntry{
+		{
+			File: strings.NewReader("alpha"),
+			Options: UploadFileOptions{
+				FileName: "a.txt",
+				Metadata: FileMetadata{Path: "/sandbox/a.txt", Mode: 600},
+			},
+		},
+		{
+			File: strings.NewReader("bravo"),
+			Options: UploadFileOptions{
+				FileName: "custom-b.txt",
+				Metadata: FileMetadata{Path: "/sandbox/b.txt", Mode: 601},
+			},
+		},
+	})
+	require.NoError(t, err)
+}
+
 func TestGetMetrics(t *testing.T) {
 	want := Metrics{
 		CPUCount:   4,
