@@ -227,9 +227,10 @@ func (s *Sandbox) Kill(ctx context.Context) error {
 }
 
 // Close releases local HTTP resources. Does NOT terminate the sandbox.
-func (s *Sandbox) Close() {
+func (s *Sandbox) Close() error {
 	// No-op for now — Go's http.Client doesn't need explicit close.
 	// Placeholder for future transport pooling.
+	return nil
 }
 
 // Pause pauses the sandbox while preserving its state.

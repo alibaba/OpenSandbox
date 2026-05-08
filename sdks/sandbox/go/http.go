@@ -166,12 +166,14 @@ func (c *Client) doRequestOnce(ctx context.Context, method, path string, body an
 
 	// No content (e.g. 204)
 	if resp.StatusCode == http.StatusNoContent || result == nil {
+		io.Copy(io.Discard, resp.Body)
 		return nil
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
 		return fmt.Errorf("opensandbox: decode response: %w", err)
 	}
+	io.Copy(io.Discard, resp.Body)
 	return nil
 }
 
