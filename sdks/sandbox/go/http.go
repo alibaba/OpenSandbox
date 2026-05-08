@@ -143,6 +143,7 @@ func (c *Client) doRequestOnce(ctx context.Context, method, path string, body an
 		return fmt.Errorf("opensandbox: create request: %w", err)
 	}
 
+	req.Header.Set("User-Agent", "OpenSandbox-Go-SDK/"+Version)
 	for k, v := range c.headers {
 		req.Header.Set(k, v)
 	}
@@ -197,6 +198,7 @@ func (c *Client) doStreamRequest(ctx context.Context, method, path string, body 
 			return fmt.Errorf("opensandbox: create request: %w", err)
 		}
 
+		req.Header.Set("User-Agent", "OpenSandbox-Go-SDK/"+Version)
 		for k, v := range c.headers {
 			req.Header.Set(k, v)
 		}
