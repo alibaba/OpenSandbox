@@ -67,6 +67,9 @@ type SandboxSnapshotReconciler struct {
 	// ImageCommitterImage is the image for image-committer (uses nerdctl to commit/push container images)
 	ImageCommitterImage string
 
+	// ContainerdSocketPath is containerd socket path for image-committer (nerdctl --address)
+	ContainerdSocketPath string
+
 	// CommitJobTimeout is the timeout for commit jobs (default: 10 minutes)
 	CommitJobTimeout time.Duration
 
