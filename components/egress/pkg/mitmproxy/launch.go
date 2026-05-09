@@ -34,6 +34,10 @@ const RunAsUser = "mitmproxy"
 // Loopback: transparent mode receives via REDIRECT; do not listen on 0.0.0.0 in the netns.
 const listenHostLoopback = "127.0.0.1"
 
+// Built-in mitmproxy addon scripts shipped with the egress image.
+const builtinMitmScriptDir = "/var/egress/mitmscripts"
+const builtinResolveBySNI = builtinMitmScriptDir + "/resolve_by_sni.py"
+
 // Config: mitmdump --mode transparent; UserName must match iptables ! --uid-owner, ConfDir is mitm state/CA.
 type Config struct {
 	ListenPort int
@@ -105,6 +109,12 @@ func Launch(cfg Config) (*Running, error) {
 	// Lazy connection strategy: defer upstream connection until the request is fully received,
 	// which avoids unnecessary connections for blocked/filtered requests.
 	args = append(args, "--set", "connection_strategy=lazy")
+
+	// Always load the built-in SNI resolver addon so upstream TLS verification works
+	// against hostnames instead of IPs in transparent mode.
+	if _, err := os.Stat(builtinResolveBySNI); err == nil {
+		args = append(args, "-s", builtinResolveBySNI)
+	}
 
 	homeEnv := home
 	if strings.TrimSpace(cfg.ConfDir) != "" {
