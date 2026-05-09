@@ -110,6 +110,10 @@ func Launch(cfg Config) (*Running, error) {
 	// which avoids unnecessary connections for blocked/filtered requests.
 	args = append(args, "--set", "connection_strategy=lazy")
 
+	// Prevent mitmproxy from eagerly connecting to the original destination IP to sniff
+	// the upstream cert before the resolve_by_sni addon can rewrite the server address.
+	args = append(args, "--set", "upstream_cert=false")
+
 	// Always load the built-in SNI resolver addon so upstream TLS verification works
 	// against hostnames instead of IPs in transparent mode.
 	if _, err := os.Stat(builtinResolveBySNI); err == nil {

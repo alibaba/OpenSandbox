@@ -7,11 +7,11 @@ Server certificates rarely include the IP in SAN, causing:
 
     Certificate verify failed: IP address mismatch
 
-This addon rewrites the server address to the SNI hostname (when present
-and not itself an IP), so mitmproxy:
-- resolves DNS for the hostname
-- connects to the resolved address
-- verifies the certificate against the hostname
+This addon hooks server_connect and rewrites the server address + SNI to
+the hostname from the TLS ClientHello SNI when it is a real hostname
+(not an IP literal).  This requires connection_strategy=lazy and
+upstream_cert=false so mitmproxy does not eagerly connect to the original
+IP before the addon runs.
 """
 
 import re
@@ -26,22 +26,45 @@ def _is_ip(host: str) -> bool:
 
 
 class ResolveBySNI:
+    def load(self, _loader):
+        ctx.log("[resolve_by_sni] addon loaded")
+
     def server_connect(self, data):
-        addr = data.server.address
+        server = data.server
+        addr = server.address
+        sni = server.sni
+
+        ctx.log(
+            "[resolve_by_sni] server_connect: address=%s sni=%s",
+            addr,
+            sni,
+        )
+
         if addr is None:
+            ctx.log("[resolve_by_sni] address is None, skip")
             return
 
         host = addr[0] if isinstance(addr, (tuple, list)) else str(addr)
-        if not _is_ip(host):
-            return
-
-        sni = getattr(data.server, "sni", None)
-        if not sni or _is_ip(sni):
-            return
-
         port = addr[1] if isinstance(addr, (tuple, list)) and len(addr) > 1 else 443
-        ctx.log(f"[resolve_by_sni] {host}:{port} -> {sni}:{port}")
+
+        if not _is_ip(host):
+            ctx.log("[resolve_by_sni] host %s is not IP, skip", host)
+            return
+
+        if not sni:
+            ctx.log("[resolve_by_sni] no SNI, skip (host=%s)", host)
+            return
+
+        if _is_ip(sni):
+            ctx.log(
+                "[resolve_by_sni] SNI is also IP (%s), cannot resolve; skip",
+                sni,
+            )
+            return
+
+        ctx.log("[resolve_by_sni] rewrite %s:%s -> %s:%s", host, port, sni, port)
         data.server.address = (sni, port)
+        data.server.sni = sni
 
 
 addons = [ResolveBySNI()]
