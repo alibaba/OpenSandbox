@@ -34,11 +34,7 @@ class ResolveBySNI:
         addr = server.address
         sni = server.sni
 
-        ctx.log(
-            "[resolve_by_sni] server_connect: address=%s sni=%s",
-            addr,
-            sni,
-        )
+        ctx.log(f"[resolve_by_sni] server_connect: address={addr} sni={sni}")
 
         if addr is None:
             ctx.log("[resolve_by_sni] address is None, skip")
@@ -48,21 +44,20 @@ class ResolveBySNI:
         port = addr[1] if isinstance(addr, (tuple, list)) and len(addr) > 1 else 443
 
         if not _is_ip(host):
-            ctx.log("[resolve_by_sni] host %s is not IP, skip", host)
+            ctx.log(f"[resolve_by_sni] host {host} is not IP, skip")
             return
 
         if not sni:
-            ctx.log("[resolve_by_sni] no SNI, skip (host=%s)", host)
+            ctx.log(f"[resolve_by_sni] no SNI, skip (host={host})")
             return
 
         if _is_ip(sni):
             ctx.log(
-                "[resolve_by_sni] SNI is also IP (%s), cannot resolve; skip",
-                sni,
+                f"[resolve_by_sni] SNI is also IP ({sni}), cannot resolve; skip"
             )
             return
 
-        ctx.log("[resolve_by_sni] rewrite %s:%s -> %s:%s", host, port, sni, port)
+        ctx.log(f"[resolve_by_sni] rewrite {host}:{port} -> {sni}:{port}")
         data.server.address = (sni, port)
         data.server.sni = sni
 
