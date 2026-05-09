@@ -373,6 +373,85 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    patch:
+      tags: [Sandboxes]
+      summary: Patch sandbox metadata
+      description: |
+        Update sandbox metadata using JSON Merge Patch semantics (RFC 7396).
+
+        The request body is a partial Sandbox representation. Only `metadata` is
+        mutable; other top-level fields are rejected with 400.
+
+        **Merge Patch rules for `metadata`:**
+        | Request body key/value | Behavior |
+        |---|---|
+        | `"key": "value"` | Add or replace the key |
+        | `"key": null` | Delete the key (silently ignored if key does not exist) |
+        | key absent | Keep current value (no change) |
+        | Empty `{}` or `{"metadata": {}}` | No-op, returns current metadata |
+
+        Metadata keys and values must comply with Kubernetes label rules:
+        - Keys must be valid DNS label names or prefixed DNS subdomains
+        - Keys with the `opensandbox.io/` prefix are reserved and rejected
+        - Values must be 63 characters or less, matching `[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?`
+
+        This operation does not restart or recreate the sandbox container/pod.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchSandboxRequest'
+            examples:
+              add-and-replace:
+                summary: Add new keys and replace existing values
+                value:
+                  metadata:
+                    team: "platform"
+                    version: "2.0"
+              delete-key:
+                summary: Delete a metadata key
+                value:
+                  metadata:
+                    deprecated-key: null
+              mixed-operations:
+                summary: Add, replace, and delete in a single request
+                value:
+                  metadata:
+                    project: "new-project"
+                    team: null
+                    environment: "production"
+              empty-body:
+                summary: No-op (returns current metadata)
+                value: {}
+              empty-metadata:
+                summary: No-op via empty metadata
+                value:
+                  metadata: {}
+      responses:
+        '200':
+          description: |
+            Metadata patched successfully. Returns the complete sandbox resource
+            with updated metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     delete:
       tags: [Sandboxes]
       summary: Delete a sandbox
@@ -1056,6 +1135,36 @@ components:
           description: Target CPU architecture (for example `amd64` or `arm64`).
           example: arm64
       additionalProperties: false
+    PatchSandboxRequest:
+      type: object
+      description: |
+        JSON Merge Patch (RFC 7396) request body for partially updating a sandbox.
+
+        Only the `metadata` field is mutable. The top-level object follows merge-patch
+        semantics: `metadata` present replaces the metadata sub-object (merge-patched),
+        `metadata` absent leaves it unchanged. Other top-level fields are rejected.
+
+        Within `metadata`, the same merge-patch rules apply:
+        - Present keys with non-null values add or replace
+        - Keys with `null` values are deleted
+        - Absent keys are left unchanged
+      properties:
+        metadata:
+          type: object
+          additionalProperties:
+            type:
+              - string
+              - 'null'
+          description: |
+            Metadata key-value pairs to merge into the sandbox's current metadata.
+            Set a key's value to `null` to delete it.
+            Keys with the `opensandbox.io/` prefix are reserved and rejected.
+          example:
+            project: "new-project"
+            team: null
+            environment: "production"
+      additionalProperties: false
+
     CreateSandboxRequest:
       type: object
       required: [resourceLimits]
