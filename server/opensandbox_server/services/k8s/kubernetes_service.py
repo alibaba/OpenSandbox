@@ -38,6 +38,7 @@ from opensandbox_server.api.schema import (
     Endpoint,
     ListSandboxesRequest,
     ListSandboxesResponse,
+    PatchSandboxMetadataRequest,
     RenewSandboxExpirationRequest,
     RenewSandboxExpirationResponse,
     Sandbox,
@@ -769,7 +770,41 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         except Exception as e:
             logger.error(f"Error renewing expiration for {sandbox_id}: {e}")
             raise _build_k8s_api_error("renew expiration", e) from e
-    
+
+    def patch_sandbox_metadata(self, sandbox_id: str, patch: PatchSandboxMetadataRequest) -> Sandbox:
+        """Patch sandbox metadata via JSON Merge Patch (RFC 7396). Does not restart the sandbox."""
+        workload = _get_workload_or_404(
+            self.workload_provider,
+            self.namespace,
+            sandbox_id,
+        )
+
+        if isinstance(workload, dict):
+            labels = dict(workload.get("metadata", {}).get("labels") or {})
+            name = workload["metadata"]["name"]
+        else:
+            labels = dict(getattr(workload.metadata, "labels", None) or {})
+            name = workload.metadata.name
+
+        new_labels = self._apply_metadata_patch(labels, patch)
+
+        try:
+            self.workload_provider.patch_labels(
+                name=name,
+                namespace=self.namespace,
+                labels=new_labels,
+            )
+        except Exception as e:
+            logger.error("Error patching labels for sandbox %s: %s", sandbox_id, e)
+            raise _build_k8s_api_error("patch sandbox labels", e) from e
+
+        updated = _get_workload_or_404(
+            self.workload_provider,
+            self.namespace,
+            sandbox_id,
+        )
+        return _build_sandbox_from_workload(updated, self.workload_provider)
+
     def get_endpoint(
         self,
         sandbox_id: str,

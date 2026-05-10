@@ -47,6 +47,7 @@ from opensandbox_server.api.schema import (
     ListSandboxesRequest,
     ListSandboxesResponse,
     PaginationInfo,
+    PatchSandboxMetadataRequest,
     RenewSandboxExpirationRequest,
     RenewSandboxExpirationResponse,
     Sandbox,
@@ -65,6 +66,7 @@ from opensandbox_server.services.docker.networking import (
     DockerNetworkingMixin,
 )
 from opensandbox_server.services.docker.container_ops import DockerContainerOpsMixin
+from opensandbox_server.services.docker.metadata import DockerMetadataStore
 from opensandbox_server.services.docker.port_allocator import (
     allocate_port_bindings,
     normalize_port_bindings,
@@ -89,8 +91,6 @@ from opensandbox_server.services.constants import (
     SANDBOX_MANAGED_VOLUMES_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SANDBOX_OSSFS_MOUNTS_LABEL,
-    SANDBOX_PLATFORM_ARCH_LABEL,
-    SANDBOX_PLATFORM_OS_LABEL,
     SANDBOX_SNAPSHOT_ID_LABEL,
     SandboxErrorCodes,
 )
@@ -156,6 +156,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         self._execd_archive_cache: Dict[str, bytes] = {}
         self._windows_profile_cache: Dict[str, bytes] = {}
         self._daemon_platform: Optional[PlatformSpec] = None
+        self._metadata_store = DockerMetadataStore()
         self._api_timeout = self._resolve_api_timeout()
         try:
             # Initialize Docker service from environment variables
@@ -402,6 +403,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         self._cleanup_egress_sidecar(sandbox_id)
         self._cleanup_windows_oem_volume(sandbox_id, labels)
         self._release_ossfs_mounts(mount_keys)
+        self._metadata_store.delete(sandbox_id)
 
     def _restore_existing_sandboxes(self) -> None:
         """On startup, rebuild expiration timers for containers already running."""
@@ -544,20 +546,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             reason = "CONTAINER_STATE_UNKNOWN"
             message = f"Sandbox container is in state '{status_value or 'unknown'}'."
 
-        metadata = {
-            key: value
-            for key, value in labels.items()
-            if key
-            not in {
-                SANDBOX_ID_LABEL,
-                SANDBOX_EXPIRES_AT_LABEL,
-                SANDBOX_MANUAL_CLEANUP_LABEL,
-                SANDBOX_PLATFORM_OS_LABEL,
-                SANDBOX_PLATFORM_ARCH_LABEL,
-                SANDBOX_SNAPSHOT_ID_LABEL,
-                ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY,
-            }
-        } or None
+        metadata = self._metadata_store.get(resolved_id, labels)
         entrypoint = container.attrs.get("Config", {}).get("Cmd") or []
         if isinstance(entrypoint, str):
             entrypoint = [entrypoint]
@@ -1052,6 +1041,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             self._cleanup_windows_oem_volume(sandbox_id, labels)
             self._release_ossfs_mounts(mount_keys)
             self._cleanup_managed_volumes(sandbox_id, managed_volumes)
+            self._metadata_store.delete(sandbox_id)
 
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
@@ -1184,3 +1174,31 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             logger.warning("Failed to refresh labels for sandbox %s: %s", sandbox_id, exc)
 
         return RenewSandboxExpirationResponse(expires_at=new_expiration)
+
+    # Patch sandbox metadata
+
+    def patch_sandbox_metadata(self, sandbox_id: str, patch: PatchSandboxMetadataRequest) -> Sandbox:
+        """Patch sandbox metadata via JSON Merge Patch (RFC 7396). Docker cannot update labels on running containers, so metadata is persisted to file."""
+        from opensandbox_server.services.validators import ensure_metadata_labels
+
+        container = self._get_container_by_sandbox_id(sandbox_id)
+        labels = dict(container.attrs.get("Config", {}).get("Labels") or {})
+
+        # Reject reserved keys
+        for key in patch:
+            if SandboxService._is_system_label(key):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "INVALID_METADATA_LABEL",
+                        "message": f"Metadata key '{key}' is reserved (opensandbox.io/ prefix).",
+                    },
+                )
+
+        # Validate only incoming patch values
+        patch_additions = {k: str(v) for k, v in patch.items() if v is not None}
+        if patch_additions:
+            ensure_metadata_labels(patch_additions)
+
+        self._metadata_store.patch(sandbox_id, labels, patch)
+        return self._container_to_sandbox(container, sandbox_id)

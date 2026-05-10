@@ -540,7 +540,10 @@ class Sandbox(BaseModel):
         populate_by_name = True
 
 
-# ============================================================================
+PatchSandboxMetadataRequest = Dict[str, Optional[str]]
+"""Metadata merge-patch body: non-null values add/replace, null values delete, absent keys unchanged."""
+
+
 # Snapshot Models
 # ============================================================================
 

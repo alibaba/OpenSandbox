@@ -30,6 +30,7 @@ from opensandbox_server.api.schema import (
     Endpoint,
     ListSandboxesRequest,
     ListSandboxesResponse,
+    PatchSandboxMetadataRequest,
     RenewSandboxExpirationRequest,
     RenewSandboxExpirationResponse,
     Sandbox,
@@ -206,7 +207,51 @@ class SandboxService(ABC):
         """
         pass
 
-    # ------------------------------------------------------------------
+    @abstractmethod
+    def patch_sandbox_metadata(self, sandbox_id: str, patch: PatchSandboxMetadataRequest) -> Sandbox:
+        """Patch sandbox metadata via JSON Merge Patch (RFC 7396). Non-null adds/replaces, null deletes, absent keeps."""
+        pass
+
+    @staticmethod
+    def _is_system_label(key: str) -> bool:
+        return key.startswith("opensandbox.io/")
+
+    @staticmethod
+    def _apply_metadata_patch(labels: dict, patch: dict) -> dict:
+        """Apply JSON Merge Patch to labels: separate user metadata, merge, validate, rebuild."""
+        from fastapi import HTTPException
+        from opensandbox_server.services.validators import ensure_metadata_labels
+
+        for key in patch:
+            if SandboxService._is_system_label(key):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "INVALID_METADATA_LABEL",
+                        "message": f"Metadata key '{key}' is reserved (opensandbox.io/ prefix).",
+                    },
+                )
+
+        # Validate only incoming patch values, not existing labels
+        patch_additions = {k: str(v) for k, v in patch.items() if v is not None}
+        if patch_additions:
+            ensure_metadata_labels(patch_additions)
+
+        current_metadata = {
+            k: v for k, v in labels.items() if not SandboxService._is_system_label(k)
+        }
+
+        for key, value in patch.items():
+            if value is None:
+                current_metadata.pop(key, None)
+            else:
+                current_metadata[key] = str(value)
+
+        new_labels = {k: v for k, v in labels.items() if SandboxService._is_system_label(k)}
+        for k, v in current_metadata.items():
+            new_labels[k] = str(v)
+        return new_labels
+
     # Diagnostics (DevOps)
     # ------------------------------------------------------------------
 
