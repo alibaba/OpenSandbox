@@ -109,6 +109,48 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    delete:
+      tags: [Policy]
+      summary: Delete egress rules
+      description: |
+        Remove specific egress rules from the currently enforced policy by target.
+
+        - Accepts a list of target strings (FQDNs or wildcard domains).
+        - Matching rules are removed; targets not found in the current policy
+          are silently ignored (idempotent).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              items:
+                type: string
+                description: FQDN or wildcard domain to remove from the policy.
+              example:
+                - bad.example.com
+                - "*.blocked.org"
+      responses:
+        '200':
+          description: Rules removed successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyStatusResponse'
+              examples:
+                removed:
+                  summary: Rules removed
+                  value:
+                    status: ok
+                    mode: deny_all
+                    enforcementMode: dns
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
   responses:
     BadRequest:

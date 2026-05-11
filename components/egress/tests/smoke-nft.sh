@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Copyright 2026 Alibaba Group Holding Ltd.
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -153,6 +153,47 @@ if run_in_app -I https://www.mozilla.org --max-time 8 >/dev/null 2>&1; then
   fail "www.mozilla.org should be blocked after patch"
 else
   pass "www.mozilla.org blocked after patch"
+fi
+
+info "DELETE: deny two hosts, then delete one rule"
+curl -sSf -XPOST "http://127.0.0.1:${POLICY_PORT}/policy" \
+  -d '{"defaultAction":"allow","egress":[{"action":"deny","target":"api.github.com"},{"action":"deny","target":"www.cloudflare.com"}]}'
+
+info "Test: both hosts should be blocked before delete"
+if run_in_app -I https://api.github.com --max-time 8 >/dev/null 2>&1; then
+  fail "api.github.com should be blocked before delete"
+fi
+if run_in_app -I https://www.cloudflare.com --max-time 8 >/dev/null 2>&1; then
+  fail "www.cloudflare.com should be blocked before delete"
+fi
+pass "both hosts blocked before delete"
+
+info "Deleting api.github.com rule"
+curl -sSf -XDELETE "http://127.0.0.1:${POLICY_PORT}/policy" \
+  -d '["api.github.com"]'
+
+info "Test: api.github.com allowed, www.cloudflare.com still blocked after delete"
+run_in_app -I https://api.github.com --max-time 20 >/dev/null 2>&1 || fail "api.github.com should be allowed after delete"
+pass "api.github.com allowed after delete"
+if run_in_app -I https://www.cloudflare.com --max-time 8 >/dev/null 2>&1; then
+  fail "www.cloudflare.com should remain blocked after delete"
+fi
+pass "www.cloudflare.com still blocked"
+
+info "Deleting non-existent target (idempotent)"
+resp="$(curl -sSf -XDELETE "http://127.0.0.1:${POLICY_PORT}/policy" -d '["nonexistent.com"]')"
+if echo "${resp}" | grep -q '"no matching targets found"'; then
+  pass "idempotent delete returns no matching targets found"
+else
+  fail "expected no matching targets found, got: ${resp}"
+fi
+
+info "Deleting with empty body (expect 400)"
+http_code="$(curl -s -o /dev/null -w '%{http_code}' -XDELETE "http://127.0.0.1:${POLICY_PORT}/policy" -d '')"
+if [ "${http_code}" = "400" ]; then
+  pass "empty body returns 400"
+else
+  fail "empty body should return 400, got ${http_code}"
 fi
 
 info "Always-rule dynamic check (single transition)"

@@ -83,6 +83,32 @@ func mergeEgressRules(base, additions []policy.EgressRule) []policy.EgressRule {
 	return out
 }
 
+// removeRulesByTarget returns a new slice with rules matching targets removed,
+// plus the removed rules. Domain targets are matched case-insensitively.
+// Targets not found are silently ignored.
+func removeRulesByTarget(rules []policy.EgressRule, targets []string) (kept, removed []policy.EgressRule) {
+	if len(targets) == 0 || len(rules) == 0 {
+		return rules, nil
+	}
+	removeSet := make(map[string]struct{}, len(targets))
+	for _, t := range targets {
+		key := strings.ToLower(strings.TrimSpace(t))
+		if key == "" {
+			continue
+		}
+		removeSet[key] = struct{}{}
+	}
+	kept = make([]policy.EgressRule, 0, len(rules))
+	for _, r := range rules {
+		if _, ok := removeSet[strings.ToLower(r.Target)]; ok {
+			removed = append(removed, r)
+		} else {
+			kept = append(kept, r)
+		}
+	}
+	return kept, removed
+}
+
 // mergeKey: domain targets lowercased for dedupe; IP/CIDR left as-is.
 func mergeKey(r policy.EgressRule) string {
 	if r.Target == "" {
