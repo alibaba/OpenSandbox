@@ -178,6 +178,10 @@ type ListSandboxesResponse struct {
 	Pagination PaginationInfo `json:"pagination"`
 }
 
+// MetadataPatch is the request body for patching sandbox metadata.
+// Non-nil values add or replace keys. Nil values delete keys.
+type MetadataPatch map[string]*string
+
 type ListSnapshotsResponse struct {
 	Items      []SnapshotInfo `json:"items"`
 	Pagination PaginationInfo `json:"pagination"`

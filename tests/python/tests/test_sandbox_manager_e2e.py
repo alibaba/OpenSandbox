@@ -288,3 +288,14 @@ class TestSandboxManagerE2E:
             info.id not in {TestSandboxManagerE2E.s1.id, TestSandboxManagerE2E.s2.id, TestSandboxManagerE2E.s3.id}
             for info in none_match.sandbox_infos
         )
+
+        patched = await manager.patch_sandbox_metadata(
+            TestSandboxManagerE2E.s2.id,
+            {"env": "stage", "team": None},
+        )
+        assert patched.metadata["env"] == "stage"
+        assert "team" not in patched.metadata
+
+        refreshed = await manager.get_sandbox_info(TestSandboxManagerE2E.s2.id)
+        assert refreshed.metadata["env"] == "stage"
+        assert "team" not in refreshed.metadata

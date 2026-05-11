@@ -246,6 +246,14 @@ class Sandbox:
         )
         return await self._sandbox_service.renew_sandbox_expiration(self.id, new_expiration)
 
+    async def patch_metadata(self, patch: dict[str, str | None]) -> SandboxInfo:
+        """
+        Patch sandbox metadata.
+
+        String values add or replace keys; None deletes keys.
+        """
+        return await self._sandbox_service.patch_sandbox_metadata(self.id, patch)
+
     async def create_snapshot(self, name: str | None = None) -> SnapshotInfo:
         """Create a persistent snapshot from this sandbox."""
         return await self._sandbox_service.create_snapshot(

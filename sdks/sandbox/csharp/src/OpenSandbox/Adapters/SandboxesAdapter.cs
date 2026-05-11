@@ -93,6 +93,18 @@ internal sealed class SandboxesAdapter : ISandboxes
         return ParseListSandboxesResponse(response);
     }
 
+    public async Task<SandboxInfo> PatchSandboxMetadataAsync(
+        string sandboxId,
+        IReadOnlyDictionary<string, string?> patch,
+        CancellationToken cancellationToken = default)
+    {
+        var response = await _client.PatchAsync<JsonElement>(
+            $"/sandboxes/{Uri.EscapeDataString(sandboxId)}/metadata",
+            patch,
+            cancellationToken).ConfigureAwait(false);
+        return ParseSandboxInfo(response);
+    }
+
     public async Task DeleteSandboxAsync(
         string sandboxId,
         CancellationToken cancellationToken = default)

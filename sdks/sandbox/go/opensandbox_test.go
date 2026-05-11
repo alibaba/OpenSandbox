@@ -138,6 +138,49 @@ func TestCreateSandbox_ImageAuth(t *testing.T) {
 	require.NoErrorf(t, err, "CreateSandbox with ImageAuth")
 }
 
+func TestPatchSandboxMetadata(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	value := "platform"
+
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			assert.Fail(t, fmt.Sprintf("expected PATCH, got %s", r.Method))
+		}
+		if r.URL.Path != "/sandboxes/sbx-123/metadata" {
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-123/metadata, got %s", r.URL.Path))
+		}
+
+		var body map[string]*string
+		require.NoErrorf(t, json.NewDecoder(r.Body).Decode(&body), "decode metadata patch")
+		require.NotNil(t, body["team"])
+		if *body["team"] != "platform" {
+			assert.Fail(t, fmt.Sprintf("team = %q, want platform", *body["team"]))
+		}
+		_, hasOld := body["old"]
+		require.True(t, hasOld, "old metadata key should be present")
+		if body["old"] != nil {
+			assert.Fail(t, "old metadata key should be null")
+		}
+
+		jsonResponse(w, http.StatusOK, SandboxInfo{
+			ID:         "sbx-123",
+			Status:     SandboxStatus{State: StateRunning},
+			Metadata:   map[string]string{"team": "platform"},
+			Entrypoint: []string{"/bin/sh"},
+			CreatedAt:  now,
+		})
+	})
+
+	got, err := client.PatchSandboxMetadata(context.Background(), "sbx-123", MetadataPatch{
+		"team": &value,
+		"old":  nil,
+	})
+	require.NoErrorf(t, err, "PatchSandboxMetadata")
+	if got.Metadata["team"] != "platform" {
+		assert.Fail(t, fmt.Sprintf("team = %q, want platform", got.Metadata["team"]))
+	}
+}
+
 func TestCreateSandbox_SecureAccess(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var req CreateSandboxRequest

@@ -30,6 +30,8 @@ dependencies {
 }
 
 fun GenerateTask.configureCommonOptions() {
+    outputs.doNotCacheIf("OpenAPI generation must reflect the current spec files") { true }
+
     generatorName.set("kotlin")
     library.set("jvm-okhttp4")
 

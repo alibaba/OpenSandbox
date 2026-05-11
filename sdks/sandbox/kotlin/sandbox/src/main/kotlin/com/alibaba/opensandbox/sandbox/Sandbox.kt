@@ -461,6 +461,15 @@ class Sandbox internal constructor(
         return sandboxService.renewSandboxExpiration(id, OffsetDateTime.now().plus(timeout))
     }
 
+    /**
+     * Patches sandbox metadata.
+     *
+     * Non-null values add or replace keys. Null values delete keys.
+     */
+    fun patchMetadata(patch: Map<String, String?>): SandboxInfo {
+        return sandboxService.patchSandboxMetadata(id, patch)
+    }
+
     fun createSnapshot(name: String? = null): SnapshotInfo = sandboxService.createSnapshot(id, name)
 
     /**

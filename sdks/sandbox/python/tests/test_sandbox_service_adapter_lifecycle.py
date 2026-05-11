@@ -96,6 +96,22 @@ def _api_snapshot(snapshot_id: str):
     )
 
 
+def _api_sandbox(sandbox_id: str):
+    from opensandbox.api.lifecycle.models.sandbox import Sandbox
+    from opensandbox.api.lifecycle.models.sandbox_metadata import SandboxMetadata
+    from opensandbox.api.lifecycle.models.sandbox_status import SandboxStatus
+
+    metadata = SandboxMetadata.from_dict({"team": "platform"})
+    return Sandbox(
+        id=sandbox_id,
+        status=SandboxStatus(state="Running"),
+        metadata=metadata,
+        entrypoint=["/bin/sh"],
+        expires_at=datetime(2025, 1, 2, tzinfo=timezone.utc),
+        created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+    )
+
+
 @pytest.mark.asyncio
 async def test_create_sandbox_success(monkeypatch: pytest.MonkeyPatch) -> None:
     called = {}
@@ -372,6 +388,34 @@ async def test_pause_resume_kill_call_openapi(monkeypatch: pytest.MonkeyPatch) -
     await adapter.kill_sandbox(sbx_id)
 
     assert calls == [("pause", sbx_id), ("resume", sbx_id), ("kill", sbx_id)]
+
+
+@pytest.mark.asyncio
+async def test_patch_sandbox_metadata_sends_metadata_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    sbx_id = str(uuid4())
+    captured = {}
+
+    async def _patch_metadata(*, client, sandbox_id, body):
+        captured["sandbox_id"] = sandbox_id
+        captured["body"] = body.to_dict()
+        return _Resp(status_code=200, parsed=_api_sandbox(sbx_id))
+
+    monkeypatch.setattr(
+        "opensandbox.api.lifecycle.api.sandboxes.patch_sandboxes_sandbox_id_metadata.asyncio_detailed",
+        _patch_metadata,
+    )
+
+    adapter = SandboxesAdapter(ConnectionConfig())
+    result = await adapter.patch_sandbox_metadata(
+        sbx_id,
+        {"team": "platform", "old": None},
+    )
+
+    assert captured == {
+        "sandbox_id": sbx_id,
+        "body": {"team": "platform", "old": None},
+    }
+    assert result.metadata == {"team": "platform"}
 
 
 @pytest.mark.asyncio

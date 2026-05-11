@@ -23,6 +23,7 @@ import type {
   ListSnapshotsResponse,
   SandboxId,
   SandboxInfo,
+  SandboxMetadataPatch,
   SnapshotInfo,
 } from "./models/sandboxes.js";
 import type { Sandboxes } from "./services/sandboxes.js";
@@ -102,6 +103,13 @@ export class SandboxManager {
 
   getSandboxInfo(sandboxId: SandboxId): Promise<SandboxInfo> {
     return this.sandboxes.getSandbox(sandboxId);
+  }
+
+  patchSandboxMetadata(
+    sandboxId: SandboxId,
+    patch: SandboxMetadataPatch,
+  ): Promise<SandboxInfo> {
+    return this.sandboxes.patchSandboxMetadata(sandboxId, patch);
   }
 
   killSandbox(sandboxId: SandboxId): Promise<void> {

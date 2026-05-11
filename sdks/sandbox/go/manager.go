@@ -42,6 +42,11 @@ func (m *SandboxManager) GetSandboxInfo(ctx context.Context, sandboxID string) (
 	return m.lifecycle.GetSandbox(ctx, sandboxID)
 }
 
+// PatchSandboxMetadata patches metadata for a sandbox by ID.
+func (m *SandboxManager) PatchSandboxMetadata(ctx context.Context, sandboxID string, patch MetadataPatch) (*SandboxInfo, error) {
+	return m.lifecycle.PatchSandboxMetadata(ctx, sandboxID, patch)
+}
+
 // KillSandbox terminates a sandbox by ID.
 func (m *SandboxManager) KillSandbox(ctx context.Context, sandboxID string) error {
 	return m.lifecycle.DeleteSandbox(ctx, sandboxID)

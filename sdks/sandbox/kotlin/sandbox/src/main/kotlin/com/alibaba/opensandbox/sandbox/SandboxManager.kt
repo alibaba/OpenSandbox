@@ -113,6 +113,22 @@ class SandboxManager internal constructor(
     }
 
     /**
+     * Patches metadata for a single sandbox.
+     *
+     * @param sandboxId Sandbox ID to patch
+     * @param patch Metadata merge patch. Non-null values add or replace keys; null values delete keys
+     * @return SandboxInfo for the patched sandbox
+     * @throws SandboxException if the operation fails
+     */
+    fun patchSandboxMetadata(
+        sandboxId: String,
+        patch: Map<String, String?>,
+    ): SandboxInfo {
+        logger.info("Patching metadata for sandbox: {}", sandboxId)
+        return sandboxService.patchSandboxMetadata(sandboxId, patch)
+    }
+
+    /**
      * Terminates a single sandbox.
      *
      * @param sandboxId Sandbox ID to terminate

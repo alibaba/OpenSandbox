@@ -23,7 +23,7 @@ import httpx
 from ... import errors
 from ...client import AuthenticatedClient, Client
 from ...models.error_response import ErrorResponse
-from ...models.patch_sandbox_request import PatchSandboxRequest
+from ...models.patch_sandbox_metadata_request import PatchSandboxMetadataRequest
 from ...models.sandbox import Sandbox
 from ...types import Response
 
@@ -31,13 +31,13 @@ from ...types import Response
 def _get_kwargs(
     sandbox_id: str,
     *,
-    body: PatchSandboxRequest,
+    body: PatchSandboxMetadataRequest,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
 
     _kwargs: dict[str, Any] = {
         "method": "patch",
-        "url": "/sandboxes/{sandbox_id}".format(
+        "url": "/sandboxes/{sandbox_id}/metadata".format(
             sandbox_id=quote(str(sandbox_id), safe=""),
         ),
     }
@@ -109,22 +109,19 @@ def sync_detailed(
     sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: PatchSandboxRequest,
+    body: PatchSandboxMetadataRequest,
 ) -> Response[ErrorResponse | Sandbox]:
     r"""Patch sandbox metadata
 
      Update sandbox metadata using JSON Merge Patch semantics (RFC 7396).
 
-    The request body is a partial Sandbox representation. Only `metadata` is
-    mutable; other top-level fields are rejected with 400.
-
-    **Merge Patch rules for `metadata`:**
+    **Merge Patch rules:**
     | Request body key/value | Behavior |
     |---|---|
     | `\"key\": \"value\"` | Add or replace the key |
     | `\"key\": null` | Delete the key (silently ignored if key does not exist) |
     | key absent | Keep current value (no change) |
-    | Empty `{}` or `{\"metadata\": {}}` | No-op, returns current metadata |
+    | Empty `{}` | No-op, returns current metadata |
 
     Metadata keys and values must comply with Kubernetes label rules:
     - Keys must be valid DNS label names or prefixed DNS subdomains
@@ -133,19 +130,23 @@ def sync_detailed(
 
     This operation does not restart or recreate the sandbox container/pod.
 
+    **Concurrency:** This endpoint uses read-modify-write without optimistic
+    locking (no `resourceVersion` check). Concurrent PATCH requests may
+    interleave and silently drop updates. Use a single writer or coordinate
+    out-of-band when concurrent modifications to the same key are expected.
+
     Args:
         sandbox_id (str):
-        body (PatchSandboxRequest): JSON Merge Patch (RFC 7396) request body for partially
-            updating a sandbox.
+        body (PatchSandboxMetadataRequest): JSON Merge Patch (RFC 7396) request body for updating
+            sandbox metadata.
 
-            Only the `metadata` field is mutable. The top-level object follows merge-patch
-            semantics: `metadata` present replaces the metadata sub-object (merge-patched),
-            `metadata` absent leaves it unchanged. Other top-level fields are rejected.
-
-            Within `metadata`, the same merge-patch rules apply:
+            The request body is the metadata object itself:
             - Present keys with non-null values add or replace
             - Keys with `null` values are deleted
             - Absent keys are left unchanged
+
+            Keys with the `opensandbox.io/` prefix are reserved and rejected.
+             Example: {'project': 'new-project', 'team': None, 'environment': 'production'}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -171,22 +172,19 @@ def sync(
     sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: PatchSandboxRequest,
+    body: PatchSandboxMetadataRequest,
 ) -> ErrorResponse | Sandbox | None:
     r"""Patch sandbox metadata
 
      Update sandbox metadata using JSON Merge Patch semantics (RFC 7396).
 
-    The request body is a partial Sandbox representation. Only `metadata` is
-    mutable; other top-level fields are rejected with 400.
-
-    **Merge Patch rules for `metadata`:**
+    **Merge Patch rules:**
     | Request body key/value | Behavior |
     |---|---|
     | `\"key\": \"value\"` | Add or replace the key |
     | `\"key\": null` | Delete the key (silently ignored if key does not exist) |
     | key absent | Keep current value (no change) |
-    | Empty `{}` or `{\"metadata\": {}}` | No-op, returns current metadata |
+    | Empty `{}` | No-op, returns current metadata |
 
     Metadata keys and values must comply with Kubernetes label rules:
     - Keys must be valid DNS label names or prefixed DNS subdomains
@@ -195,19 +193,23 @@ def sync(
 
     This operation does not restart or recreate the sandbox container/pod.
 
+    **Concurrency:** This endpoint uses read-modify-write without optimistic
+    locking (no `resourceVersion` check). Concurrent PATCH requests may
+    interleave and silently drop updates. Use a single writer or coordinate
+    out-of-band when concurrent modifications to the same key are expected.
+
     Args:
         sandbox_id (str):
-        body (PatchSandboxRequest): JSON Merge Patch (RFC 7396) request body for partially
-            updating a sandbox.
+        body (PatchSandboxMetadataRequest): JSON Merge Patch (RFC 7396) request body for updating
+            sandbox metadata.
 
-            Only the `metadata` field is mutable. The top-level object follows merge-patch
-            semantics: `metadata` present replaces the metadata sub-object (merge-patched),
-            `metadata` absent leaves it unchanged. Other top-level fields are rejected.
-
-            Within `metadata`, the same merge-patch rules apply:
+            The request body is the metadata object itself:
             - Present keys with non-null values add or replace
             - Keys with `null` values are deleted
             - Absent keys are left unchanged
+
+            Keys with the `opensandbox.io/` prefix are reserved and rejected.
+             Example: {'project': 'new-project', 'team': None, 'environment': 'production'}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -228,22 +230,19 @@ async def asyncio_detailed(
     sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: PatchSandboxRequest,
+    body: PatchSandboxMetadataRequest,
 ) -> Response[ErrorResponse | Sandbox]:
     r"""Patch sandbox metadata
 
      Update sandbox metadata using JSON Merge Patch semantics (RFC 7396).
 
-    The request body is a partial Sandbox representation. Only `metadata` is
-    mutable; other top-level fields are rejected with 400.
-
-    **Merge Patch rules for `metadata`:**
+    **Merge Patch rules:**
     | Request body key/value | Behavior |
     |---|---|
     | `\"key\": \"value\"` | Add or replace the key |
     | `\"key\": null` | Delete the key (silently ignored if key does not exist) |
     | key absent | Keep current value (no change) |
-    | Empty `{}` or `{\"metadata\": {}}` | No-op, returns current metadata |
+    | Empty `{}` | No-op, returns current metadata |
 
     Metadata keys and values must comply with Kubernetes label rules:
     - Keys must be valid DNS label names or prefixed DNS subdomains
@@ -252,19 +251,23 @@ async def asyncio_detailed(
 
     This operation does not restart or recreate the sandbox container/pod.
 
+    **Concurrency:** This endpoint uses read-modify-write without optimistic
+    locking (no `resourceVersion` check). Concurrent PATCH requests may
+    interleave and silently drop updates. Use a single writer or coordinate
+    out-of-band when concurrent modifications to the same key are expected.
+
     Args:
         sandbox_id (str):
-        body (PatchSandboxRequest): JSON Merge Patch (RFC 7396) request body for partially
-            updating a sandbox.
+        body (PatchSandboxMetadataRequest): JSON Merge Patch (RFC 7396) request body for updating
+            sandbox metadata.
 
-            Only the `metadata` field is mutable. The top-level object follows merge-patch
-            semantics: `metadata` present replaces the metadata sub-object (merge-patched),
-            `metadata` absent leaves it unchanged. Other top-level fields are rejected.
-
-            Within `metadata`, the same merge-patch rules apply:
+            The request body is the metadata object itself:
             - Present keys with non-null values add or replace
             - Keys with `null` values are deleted
             - Absent keys are left unchanged
+
+            Keys with the `opensandbox.io/` prefix are reserved and rejected.
+             Example: {'project': 'new-project', 'team': None, 'environment': 'production'}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -288,22 +291,19 @@ async def asyncio(
     sandbox_id: str,
     *,
     client: AuthenticatedClient | Client,
-    body: PatchSandboxRequest,
+    body: PatchSandboxMetadataRequest,
 ) -> ErrorResponse | Sandbox | None:
     r"""Patch sandbox metadata
 
      Update sandbox metadata using JSON Merge Patch semantics (RFC 7396).
 
-    The request body is a partial Sandbox representation. Only `metadata` is
-    mutable; other top-level fields are rejected with 400.
-
-    **Merge Patch rules for `metadata`:**
+    **Merge Patch rules:**
     | Request body key/value | Behavior |
     |---|---|
     | `\"key\": \"value\"` | Add or replace the key |
     | `\"key\": null` | Delete the key (silently ignored if key does not exist) |
     | key absent | Keep current value (no change) |
-    | Empty `{}` or `{\"metadata\": {}}` | No-op, returns current metadata |
+    | Empty `{}` | No-op, returns current metadata |
 
     Metadata keys and values must comply with Kubernetes label rules:
     - Keys must be valid DNS label names or prefixed DNS subdomains
@@ -312,19 +312,23 @@ async def asyncio(
 
     This operation does not restart or recreate the sandbox container/pod.
 
+    **Concurrency:** This endpoint uses read-modify-write without optimistic
+    locking (no `resourceVersion` check). Concurrent PATCH requests may
+    interleave and silently drop updates. Use a single writer or coordinate
+    out-of-band when concurrent modifications to the same key are expected.
+
     Args:
         sandbox_id (str):
-        body (PatchSandboxRequest): JSON Merge Patch (RFC 7396) request body for partially
-            updating a sandbox.
+        body (PatchSandboxMetadataRequest): JSON Merge Patch (RFC 7396) request body for updating
+            sandbox metadata.
 
-            Only the `metadata` field is mutable. The top-level object follows merge-patch
-            semantics: `metadata` present replaces the metadata sub-object (merge-patched),
-            `metadata` absent leaves it unchanged. Other top-level fields are rejected.
-
-            Within `metadata`, the same merge-patch rules apply:
+            The request body is the metadata object itself:
             - Present keys with non-null values add or replace
             - Keys with `null` values are deleted
             - Absent keys are left unchanged
+
+            Keys with the `opensandbox.io/` prefix are reserved and rejected.
+             Example: {'project': 'new-project', 'team': None, 'environment': 'production'}.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.

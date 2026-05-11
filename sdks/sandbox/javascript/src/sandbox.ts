@@ -40,6 +40,7 @@ import type {
   RenewSandboxExpirationResponse,
   SandboxId,
   SandboxInfo,
+  SandboxMetadataPatch,
   Volume,
 } from "./models/sandboxes.js";
 import { SandboxReadyTimeoutException } from "./core/exceptions.js";
@@ -555,6 +556,10 @@ export class Sandbox {
       Date.now() + timeoutSeconds * 1000
     ).toISOString();
     return await this.sandboxes.renewSandboxExpiration(this.id, { expiresAt });
+  }
+
+  async patchMetadata(patch: SandboxMetadataPatch): Promise<SandboxInfo> {
+    return await this.sandboxes.patchSandboxMetadata(this.id, patch);
   }
 
   async getEgressPolicy(): Promise<NetworkPolicy> {

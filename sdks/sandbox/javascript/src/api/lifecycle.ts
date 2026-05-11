@@ -368,20 +368,36 @@ export interface paths {
         };
         options?: never;
         head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sandboxes/{sandboxId}/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Unique sandbox identifier */
+                sandboxId: components["parameters"]["SandboxId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
         /**
          * Patch sandbox metadata
          * @description Update sandbox metadata using JSON Merge Patch semantics (RFC 7396).
          *
-         *     The request body is a partial Sandbox representation. Only `metadata` is
-         *     mutable; other top-level fields are rejected with 400.
-         *
-         *     **Merge Patch rules for `metadata`:**
+         *     **Merge Patch rules:**
          *     | Request body key/value | Behavior |
          *     |---|---|
          *     | `"key": "value"` | Add or replace the key |
          *     | `"key": null` | Delete the key (silently ignored if key does not exist) |
          *     | key absent | Keep current value (no change) |
-         *     | Empty `{}` or `{"metadata": {}}` | No-op, returns current metadata |
+         *     | Empty `{}` | No-op, returns current metadata |
          *
          *     Metadata keys and values must comply with Kubernetes label rules:
          *     - Keys must be valid DNS label names or prefixed DNS subdomains
@@ -389,6 +405,11 @@ export interface paths {
          *     - Values must be 63 characters or less, matching `[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?`
          *
          *     This operation does not restart or recreate the sandbox container/pod.
+         *
+         *     **Concurrency:** This endpoint uses read-modify-write without optimistic
+         *     locking (no `resourceVersion` check). Concurrent PATCH requests may
+         *     interleave and silently drop updates. Use a single writer or coordinate
+         *     out-of-band when concurrent modifications to the same key are expected.
          */
         patch: {
             parameters: {
@@ -402,7 +423,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["PatchSandboxRequest"];
+                    "application/json": components["schemas"]["PatchSandboxMetadataRequest"];
                 };
             };
             responses: {
@@ -969,31 +990,22 @@ export interface components {
             arch: "amd64" | "arm64";
         };
         /**
-         * @description JSON Merge Patch (RFC 7396) request body for partially updating a sandbox.
+         * @description JSON Merge Patch (RFC 7396) request body for updating sandbox metadata.
          *
-         *     Only the `metadata` field is mutable. The top-level object follows merge-patch
-         *     semantics: `metadata` present replaces the metadata sub-object (merge-patched),
-         *     `metadata` absent leaves it unchanged. Other top-level fields are rejected.
-         *
-         *     Within `metadata`, the same merge-patch rules apply:
+         *     The request body is the metadata object itself:
          *     - Present keys with non-null values add or replace
          *     - Keys with `null` values are deleted
          *     - Absent keys are left unchanged
+         *
+         *     Keys with the `opensandbox.io/` prefix are reserved and rejected.
+         * @example {
+         *       "project": "new-project",
+         *       "team": null,
+         *       "environment": "production"
+         *     }
          */
-        PatchSandboxRequest: {
-            /**
-             * @description Metadata key-value pairs to merge into the sandbox's current metadata.
-             *     Set a key's value to `null` to delete it.
-             *     Keys with the `opensandbox.io/` prefix are reserved and rejected.
-             * @example {
-             *       "project": "new-project",
-             *       "team": null,
-             *       "environment": "production"
-             *     }
-             */
-            metadata?: {
-                [key: string]: string | null;
-            };
+        PatchSandboxMetadataRequest: {
+            [key: string]: string | null;
         };
         /**
          * @description Request to create a new sandbox from either a container image or a snapshot.

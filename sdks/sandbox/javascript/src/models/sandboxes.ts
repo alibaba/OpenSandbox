@@ -325,6 +325,8 @@ export interface ListSandboxesResponse extends Record<string, unknown> {
   pagination?: PaginationInfo;
 }
 
+export type SandboxMetadataPatch = Record<string, string | null>;
+
 export interface RenewSandboxExpirationRequest {
   expiresAt: string;
 }

@@ -183,6 +183,17 @@ test("02 metadata filter uses AND semantics", async () => {
   expect(noneMatchIds.has(s1.id)).toBe(false);
   expect(noneMatchIds.has(s2.id)).toBe(false);
   expect(noneMatchIds.has(s3.id)).toBe(false);
+
+  const patched = await manager.patchSandboxMetadata(s2.id, {
+    env: "stage",
+    team: null,
+  });
+  expect(patched.metadata?.env).toBe("stage");
+  expect(patched.metadata?.team).toBeUndefined();
+
+  const refreshed = await manager.getSandboxInfo(s2.id);
+  expect(refreshed.metadata?.env).toBe("stage");
+  expect(refreshed.metadata?.team).toBeUndefined();
 }, 2 * 60_000);
 
 test("03 invalid operations reject", async () => {

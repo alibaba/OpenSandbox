@@ -19,6 +19,10 @@ package com.alibaba.opensandbox.sandbox.infrastructure.adapters.service
 import com.alibaba.opensandbox.sandbox.HttpClientProvider
 import com.alibaba.opensandbox.sandbox.api.SandboxesApi
 import com.alibaba.opensandbox.sandbox.api.SnapshotsApi
+import com.alibaba.opensandbox.sandbox.api.infrastructure.Serializer
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxError
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxError.Companion.UNEXPECTED_RESPONSE
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSnapshotInfos
@@ -42,10 +46,18 @@ import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.Sandbox
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSandboxInfo
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSandboxRenewResponse
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toSnapshotInfo
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.parseSandboxError
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.toSandboxException
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.slf4j.LoggerFactory
 import java.time.Duration
 import java.time.OffsetDateTime
+import com.alibaba.opensandbox.sandbox.api.models.Sandbox as ApiSandbox
 
 /**
  * Implementation of [Sandboxes] that adapts OpenAPI-generated [SandboxesApi].
@@ -122,6 +134,54 @@ internal class SandboxesAdapter(
             api.sandboxesGet(filter.states, metadataQuery, filter.page, filter.pageSize).toPagedSandboxInfos()
         } catch (e: Exception) {
             throw e.toSandboxException()
+        }
+    }
+
+    override fun patchSandboxMetadata(
+        sandboxId: String,
+        patch: Map<String, String?>,
+    ): SandboxInfo {
+        return try {
+            patchSandboxMetadataRaw(sandboxId, patch).toSandboxInfo()
+        } catch (e: Exception) {
+            throw e.toSandboxException()
+        }
+    }
+
+    private fun patchSandboxMetadataRaw(
+        sandboxId: String,
+        patch: Map<String, String?>,
+    ): ApiSandbox {
+        // The generated Kotlin client currently maps the merge-patch body to
+        // Map<String, String>, which drops the null value used to delete keys.
+        val url =
+            provider.config.getBaseUrl().toHttpUrl().newBuilder()
+                .addPathSegment("sandboxes")
+                .addPathSegment(sandboxId)
+                .addPathSegment("metadata")
+                .build()
+        val body =
+            Serializer.kotlinxSerializationJson
+                .encodeToString<Map<String, String?>>(patch)
+                .toRequestBody("application/json".toMediaType())
+        val request =
+            Request.Builder()
+                .url(url)
+                .patch(body)
+                .header("Accept", "application/json")
+                .build()
+
+        provider.authenticatedClient.newCall(request).execute().use { response ->
+            val responseBody = response.body?.string().orEmpty()
+            if (response.isSuccessful) {
+                return Serializer.kotlinxSerializationJson.decodeFromString<ApiSandbox>(responseBody)
+            }
+            throw SandboxApiException(
+                message = "Failed to patch sandbox metadata. Status code: ${response.code}, Body: $responseBody",
+                statusCode = response.code,
+                error = parseSandboxError(responseBody) ?: SandboxError(UNEXPECTED_RESPONSE),
+                requestId = response.header("X-Request-ID"),
+            )
         }
     }
 

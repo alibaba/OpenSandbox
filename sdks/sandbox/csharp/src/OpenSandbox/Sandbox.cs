@@ -444,6 +444,20 @@ public sealed class Sandbox : IAsyncDisposable
     }
 
     /// <summary>
+    /// Patches metadata for this sandbox.
+    /// </summary>
+    /// <param name="patch">Metadata merge patch. Non-null values add or replace keys; null values delete keys.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The current sandbox information after applying the patch.</returns>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
+    public Task<SandboxInfo> PatchMetadataAsync(
+        IReadOnlyDictionary<string, string?> patch,
+        CancellationToken cancellationToken = default)
+    {
+        return _sandboxes.PatchSandboxMetadataAsync(Id, patch, cancellationToken);
+    }
+
+    /// <summary>
     /// Checks if the sandbox is healthy.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>

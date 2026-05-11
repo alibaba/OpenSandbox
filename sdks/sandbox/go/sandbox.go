@@ -242,6 +242,12 @@ func (s *Sandbox) GetInfo(ctx context.Context) (*SandboxInfo, error) {
 	return s.lifecycle.GetSandbox(ctx, s.id)
 }
 
+// PatchMetadata patches this sandbox's metadata. Non-nil values add or replace
+// keys. Nil values delete keys.
+func (s *Sandbox) PatchMetadata(ctx context.Context, patch MetadataPatch) (*SandboxInfo, error) {
+	return s.lifecycle.PatchSandboxMetadata(ctx, s.id, patch)
+}
+
 // IsHealthy checks whether the sandbox's execd service is responsive.
 func (s *Sandbox) IsHealthy(ctx context.Context) bool {
 	if s.execd == nil {

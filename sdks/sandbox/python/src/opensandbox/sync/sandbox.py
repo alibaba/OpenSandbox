@@ -254,6 +254,14 @@ class SandboxSync:
         )
         return self._sandbox_service.renew_sandbox_expiration(self.id, new_expiration)
 
+    def patch_metadata(self, patch: dict[str, str | None]) -> SandboxInfo:
+        """
+        Patch sandbox metadata.
+
+        String values add or replace keys; None deletes keys.
+        """
+        return self._sandbox_service.patch_sandbox_metadata(self.id, patch)
+
     def create_snapshot(self, name: str | None = None) -> SnapshotInfo:
         """Create a persistent snapshot from this sandbox (blocking)."""
         return self._sandbox_service.create_snapshot(

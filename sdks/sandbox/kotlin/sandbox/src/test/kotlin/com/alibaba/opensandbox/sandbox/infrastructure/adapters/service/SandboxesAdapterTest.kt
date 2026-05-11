@@ -591,6 +591,42 @@ class SandboxesAdapterTest {
     }
 
     @Test
+    fun `patchSandboxMetadata should preserve null values for delete semantics`() {
+        val sandboxId = "sandbox-id"
+        val responseBody =
+            """
+            {
+                "id": "$sandboxId",
+                "status": { "state": "Running" },
+                "entrypoint": ["/bin/bash"],
+                "expiresAt": null,
+                "createdAt": "2023-01-01T10:00:00Z",
+                "metadata": {
+                    "env": "production"
+                }
+            }
+            """.trimIndent()
+
+        mockWebServer.enqueue(MockResponse().setBody(responseBody).setResponseCode(200))
+
+        val result =
+            sandboxesAdapter.patchSandboxMetadata(
+                sandboxId,
+                mapOf("team" to null, "env" to "production"),
+            )
+
+        assertEquals(sandboxId, result.id)
+        assertEquals("production", result.metadata?.get("env"))
+
+        val request = mockWebServer.takeRequest()
+        assertEquals("PATCH", request.method)
+        assertEquals("/v1/sandboxes/$sandboxId/metadata", request.path)
+        val payload = Json.parseToJsonElement(request.body.readUtf8()).jsonObject
+        assertEquals(JsonNull, payload["team"])
+        assertEquals("production", payload["env"]!!.jsonPrimitive.content)
+    }
+
+    @Test
     fun `listSandboxes should construct query params correctly`() {
         val responseBody =
             """

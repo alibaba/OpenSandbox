@@ -22,13 +22,18 @@ from typing import Any, TypeVar, cast
 from attrs import define as _attrs_define
 from attrs import field as _attrs_field
 
-T = TypeVar("T", bound="PatchSandboxRequestMetadata")
+T = TypeVar("T", bound="PatchSandboxMetadataRequest")
 
 
 @_attrs_define
-class PatchSandboxRequestMetadata:
-    """Metadata key-value pairs to merge into the sandbox's current metadata.
-    Set a key's value to `null` to delete it.
+class PatchSandboxMetadataRequest:
+    """JSON Merge Patch (RFC 7396) request body for updating sandbox metadata.
+
+    The request body is the metadata object itself:
+    - Present keys with non-null values add or replace
+    - Keys with `null` values are deleted
+    - Absent keys are left unchanged
+
     Keys with the `opensandbox.io/` prefix are reserved and rejected.
 
         Example:
@@ -48,7 +53,7 @@ class PatchSandboxRequestMetadata:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         d = dict(src_dict)
-        patch_sandbox_request_metadata = cls()
+        patch_sandbox_metadata_request = cls()
 
         additional_properties = {}
         for prop_name, prop_dict in d.items():
@@ -62,8 +67,8 @@ class PatchSandboxRequestMetadata:
 
             additional_properties[prop_name] = additional_property
 
-        patch_sandbox_request_metadata.additional_properties = additional_properties
-        return patch_sandbox_request_metadata
+        patch_sandbox_metadata_request.additional_properties = additional_properties
+        return patch_sandbox_metadata_request
 
     @property
     def additional_keys(self) -> list[str]:

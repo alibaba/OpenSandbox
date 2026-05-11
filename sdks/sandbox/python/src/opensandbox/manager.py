@@ -152,6 +152,17 @@ class SandboxManager:
         logger.debug(f"Getting info for sandbox: {sandbox_id}")
         return await self._sandbox_service.get_sandbox_info(sandbox_id)
 
+    async def patch_sandbox_metadata(
+        self, sandbox_id: str, patch: dict[str, str | None]
+    ) -> SandboxInfo:
+        """
+        Patch metadata for a sandbox.
+
+        String values add or replace keys; None deletes keys.
+        """
+        logger.info("Patching metadata for sandbox: %s", sandbox_id)
+        return await self._sandbox_service.patch_sandbox_metadata(sandbox_id, patch)
+
     async def kill_sandbox(self, sandbox_id: str) -> None:
         """
         Terminate a single sandbox.
