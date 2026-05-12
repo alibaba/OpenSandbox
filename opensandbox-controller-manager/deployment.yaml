@@ -1,0 +1,14 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensandbox-controller-manager
+spec:
+  containers:
+  - name: opensandbox-controller-manager
+    image: opensandbox-controller-manager:v0.1.13
+    args: [
+      # Removed -kube-client-qps flag
+      #-kube-client-qps
+      #-enable-file-log
+      #-enable-http2
+    ]
