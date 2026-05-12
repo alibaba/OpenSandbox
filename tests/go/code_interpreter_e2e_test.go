@@ -16,6 +16,7 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -25,7 +26,9 @@ import (
 
 func createCodeInterpreter(t *testing.T) (context.Context, *opensandbox.CodeInterpreter) {
 	t.Helper()
-	t.Skip("skip code interpreter e2e tests")
+	if os.Getenv("RUN_CODE_INTERPRETER_E2E") != "true" {
+		t.Skip("Set RUN_CODE_INTERPRETER_E2E=true to run code interpreter e2e tests")
+	}
 	config := connectionConfigForStreaming(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	t.Cleanup(cancel)
@@ -104,6 +107,10 @@ func TestCodeInterpreter_ContextManagement(t *testing.T) {
 }
 
 func TestCodeInterpreter_ContextIsolation(t *testing.T) {
+	if os.Getenv("RUN_CODE_INTERPRETER_E2E") != "true" {
+		t.Skip("Set RUN_CODE_INTERPRETER_E2E=true to run code interpreter e2e tests")
+	}
+
 	config := connectionConfigForStreaming(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
