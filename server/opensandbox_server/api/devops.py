@@ -15,14 +15,17 @@
 """
 API routes for OpenSandbox DevOps diagnostics.
 
-All endpoints return plain text for easy consumption by humans and AI agents.
+Requests that include `scope` target the stable Diagnostics API. The open-source
+server has not implemented that API yet, so these requests return a uniform
+not-implemented error. Requests without `scope` preserve the deprecated DevOps
+plain-text behavior for legacy humans, agents, and CLI clients.
 """
 
 import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from opensandbox_server.api.lifecycle import sandbox_service
 
@@ -30,29 +33,70 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["DevOps"])
 
 
+def _diagnostics_not_implemented_response() -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        content={
+            "code": "DIAGNOSTICS_NOT_IMPLEMENTED",
+            "message": "The stable Diagnostics API is not implemented by this OpenSandbox server.",
+        },
+    )
+
+
+def _deprecated_plain_text_response(content: str) -> PlainTextResponse:
+    return PlainTextResponse(
+        content=content,
+        headers={"Deprecation": "true"},
+    )
+
+
 @router.get(
     "/sandboxes/{sandbox_id}/diagnostics/logs",
-    response_class=PlainTextResponse,
+    response_model=None,
     status_code=status.HTTP_200_OK,
     responses={
-        200: {"description": "Container logs as plain text", "content": {"text/plain": {}}},
+        200: {
+            "description": "Deprecated plain-text logs when scope is omitted",
+            "content": {"text/plain": {}},
+        },
+        501: {
+            "description": "Stable Diagnostics API is not implemented by this server",
+            "content": {"application/json": {}},
+        },
         404: {"description": "Sandbox not found"},
     },
 )
 def get_sandbox_logs(
     sandbox_id: str,
-    tail: int = Query(100, ge=1, le=10000, description="Number of trailing log lines"),
-    since: Optional[str] = Query(None, description="Only return logs newer than this duration (e.g. 10m, 1h)"),
-) -> PlainTextResponse:
-    """Retrieve container logs for a sandbox."""
+    scope: Optional[str] = Query(
+        None,
+        description="Required for stable Diagnostics JSON responses. Omit only for deprecated plain-text logs.",
+    ),
+    tail: int = Query(
+        100,
+        ge=1,
+        le=10000,
+        deprecated=True,
+        description="Deprecated plain-text logs only. Number of trailing log lines.",
+    ),
+    since: Optional[str] = Query(
+        None,
+        deprecated=True,
+        description="Deprecated plain-text logs only. Only return logs newer than this duration (e.g. 10m, 1h).",
+    ),
+) -> JSONResponse | PlainTextResponse:
+    """Retrieve diagnostic logs for a sandbox."""
+    if scope is not None:
+        return _diagnostics_not_implemented_response()
     text = sandbox_service.get_sandbox_logs(sandbox_id, tail=tail, since=since)
-    return PlainTextResponse(content=text)
+    return _deprecated_plain_text_response(text)
 
 
 @router.get(
     "/sandboxes/{sandbox_id}/diagnostics/inspect",
     response_class=PlainTextResponse,
     status_code=status.HTTP_200_OK,
+    deprecated=True,
     responses={
         200: {"description": "Container inspection as plain text", "content": {"text/plain": {}}},
         404: {"description": "Sandbox not found"},
@@ -66,26 +110,46 @@ def get_sandbox_inspect(sandbox_id: str) -> PlainTextResponse:
 
 @router.get(
     "/sandboxes/{sandbox_id}/diagnostics/events",
-    response_class=PlainTextResponse,
+    response_model=None,
     status_code=status.HTTP_200_OK,
     responses={
-        200: {"description": "Sandbox events as plain text", "content": {"text/plain": {}}},
+        200: {
+            "description": "Deprecated plain-text events when scope is omitted",
+            "content": {"text/plain": {}},
+        },
+        501: {
+            "description": "Stable Diagnostics API is not implemented by this server",
+            "content": {"application/json": {}},
+        },
         404: {"description": "Sandbox not found"},
     },
 )
 def get_sandbox_events(
     sandbox_id: str,
-    limit: int = Query(50, ge=1, le=500, description="Maximum number of events to return"),
-) -> PlainTextResponse:
-    """Retrieve events related to a sandbox."""
+    scope: Optional[str] = Query(
+        None,
+        description="Required for stable Diagnostics JSON responses. Omit only for deprecated plain-text events.",
+    ),
+    limit: int = Query(
+        50,
+        ge=1,
+        le=500,
+        deprecated=True,
+        description="Deprecated plain-text events only. Maximum number of events to return.",
+    ),
+) -> JSONResponse | PlainTextResponse:
+    """Retrieve diagnostic events for a sandbox."""
+    if scope is not None:
+        return _diagnostics_not_implemented_response()
     text = sandbox_service.get_sandbox_events(sandbox_id, limit=limit)
-    return PlainTextResponse(content=text)
+    return _deprecated_plain_text_response(text)
 
 
 @router.get(
     "/sandboxes/{sandbox_id}/diagnostics/summary",
     response_class=PlainTextResponse,
     status_code=status.HTTP_200_OK,
+    deprecated=True,
     responses={
         200: {"description": "Combined diagnostics summary as plain text", "content": {"text/plain": {}}},
         404: {"description": "Sandbox not found"},

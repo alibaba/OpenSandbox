@@ -21,6 +21,7 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.InvalidArgumentExceptio
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxInternalException
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxReadyTimeoutException
+import com.alibaba.opensandbox.sandbox.domain.models.diagnostics.DiagnosticContent
 import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EGRESS_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EXECD_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
@@ -34,6 +35,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewRespo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SnapshotInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
 import com.alibaba.opensandbox.sandbox.domain.services.Commands
+import com.alibaba.opensandbox.sandbox.domain.services.Diagnostics
 import com.alibaba.opensandbox.sandbox.domain.services.Egress
 import com.alibaba.opensandbox.sandbox.domain.services.Filesystem
 import com.alibaba.opensandbox.sandbox.domain.services.Health
@@ -91,6 +93,7 @@ class Sandbox internal constructor(
     private val egressService: Egress,
     private val customHealthCheck: ((sandbox: Sandbox) -> Boolean)? = null,
     private val httpClientProvider: HttpClientProvider,
+    private val diagnosticsService: Diagnostics,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(Sandbox::class.java)
 
@@ -120,6 +123,13 @@ class Sandbox internal constructor(
      * @return Service for metrics retrieval
      */
     fun metrics() = metricsService
+
+    /**
+     * Provides access to sandbox diagnostic log and event descriptors.
+     *
+     * @return Service for sandbox diagnostics retrieval
+     */
+    fun diagnostics() = diagnosticsService
 
     /**
      * Provides access to shared httpclient provider
@@ -213,6 +223,7 @@ class Sandbox internal constructor(
                         connectionConfig.useServerProxy,
                     )
                 val egressService = factory.createEgress(egressEndpoint)
+                val diagnosticsService = factory.createDiagnostics()
 
                 val sandbox =
                     Sandbox(
@@ -225,6 +236,7 @@ class Sandbox internal constructor(
                         egressService = egressService,
                         customHealthCheck = healthCheck,
                         httpClientProvider = httpClientProvider,
+                        diagnosticsService = diagnosticsService,
                     )
 
                 if (!skipHealthCheck) {
@@ -446,6 +458,28 @@ class Sandbox internal constructor(
      */
     fun getMetrics(): SandboxMetrics {
         return metricsService.getMetrics(id)
+    }
+
+    /**
+     * Gets diagnostic log content for this sandbox.
+     *
+     * @param scope Required diagnostic scope such as "container", "lifecycle", or "all"
+     * @return Diagnostic log content descriptor
+     * @throws SandboxException if the operation fails
+     */
+    fun getDiagnosticLogs(scope: String): DiagnosticContent {
+        return diagnosticsService.getLogs(id, scope)
+    }
+
+    /**
+     * Gets diagnostic event content for this sandbox.
+     *
+     * @param scope Required diagnostic scope such as "runtime", "lifecycle", or "all"
+     * @return Diagnostic event content descriptor
+     * @throws SandboxException if the operation fails
+     */
+    fun getDiagnosticEvents(scope: String): DiagnosticContent {
+        return diagnosticsService.getEvents(id, scope)
     }
 
     /**

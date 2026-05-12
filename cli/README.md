@@ -223,14 +223,31 @@ osb command run <sandbox-id> -o raw -- curl -I https://pypi.org
 
 ### Collect diagnostics
 
-These commands are experimental and return plain text.
+Use the stable diagnostics commands for API-backed log and event descriptors.
 
 ```bash
-osb devops summary <sandbox-id> -o raw
+osb diagnostics events <sandbox-id> --scope lifecycle -o raw
+osb diagnostics events <sandbox-id> --scope runtime -o raw
+osb diagnostics logs <sandbox-id> --scope container -o raw
+osb diagnostics logs <sandbox-id> --scope lifecycle -o json
+osb diagnostics events <sandbox-id> --scope runtime -o json
+osb diagnostics logs <sandbox-id> --scope container -o yaml
+```
+
+`--scope` is required for stable diagnostics. Common scopes are `lifecycle` and
+`container` for logs, and `lifecycle` and `runtime` for events. Raw output
+prints inline diagnostic text, or the content URL when diagnostics are
+delivered as a temporary URL. Structured CLI output follows the SDK/Python field
+style, for example `content_url`, `content_length`, and `expires_at`.
+Some server builds may return `DIAGNOSTICS_NOT_IMPLEMENTED` for scoped
+diagnostics until the stable backend implementation is enabled.
+
+Legacy DevOps diagnostics remain experimental. Prefer `osb diagnostics logs/events`
+for stable API-backed log and event collection.
+
+```bash
 osb devops inspect <sandbox-id> -o raw
-osb devops events <sandbox-id> --limit 100 -o raw
-osb devops logs <sandbox-id> --tail 500 -o raw
-osb devops logs <sandbox-id> --since 30m -o raw
+osb devops summary <sandbox-id> -o raw
 ```
 
 ## Output Formats
@@ -260,7 +277,8 @@ The main command groups are:
 - `osb command`: command execution and persistent sessions
 - `osb file`: file and directory operations
 - `osb egress`: runtime egress policy
-- `osb devops`: experimental diagnostics
+- `osb diagnostics`: stable diagnostics logs and events
+- `osb devops`: experimental legacy diagnostics
 - `osb config`: local CLI configuration
 - `osb skills`: bundled skills for AI tools
 

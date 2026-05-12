@@ -60,6 +60,7 @@ async def test_sandbox_close_does_not_close_user_transport() -> None:
         health_service=_NoopService(),
         metrics_service=_NoopService(),
         egress_service=_NoopEgressService(),
+        diagnostics_service=_NoopService(),
         connection_config=cfg,
         custom_health_check=None,
     )

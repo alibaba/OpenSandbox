@@ -25,6 +25,7 @@ to ensure consistent pooling/proxy/retry behavior across services.
 """
 
 from opensandbox.adapters.command_adapter import CommandsAdapter
+from opensandbox.adapters.diagnostics_adapter import DiagnosticsAdapter
 from opensandbox.adapters.egress_adapter import EgressAdapter
 from opensandbox.adapters.filesystem_adapter import FilesystemAdapter
 from opensandbox.adapters.health_adapter import HealthAdapter
@@ -33,6 +34,7 @@ from opensandbox.adapters.sandboxes_adapter import SandboxesAdapter
 from opensandbox.config import ConnectionConfig
 from opensandbox.models.sandboxes import SandboxEndpoint
 from opensandbox.services.command import Commands
+from opensandbox.services.diagnostics import Diagnostics
 from opensandbox.services.egress import Egress
 from opensandbox.services.filesystem import Filesystem
 from opensandbox.services.health import Health
@@ -69,6 +71,10 @@ class AdapterFactory:
             Service for creating, managing, and monitoring sandbox instances
         """
         return SandboxesAdapter(self.connection_config)
+
+    def create_diagnostics_service(self) -> Diagnostics:
+        """Create a diagnostics service for sandbox troubleshooting operations."""
+        return DiagnosticsAdapter(self.connection_config)
 
     def create_filesystem_service(self, endpoint: SandboxEndpoint) -> Filesystem:
         """Create a filesystem service for file and directory operations.

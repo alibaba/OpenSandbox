@@ -57,7 +57,8 @@ def devops_logs(
     since: str | None,
     output_format: str | None,
 ) -> None:
-    """Retrieve container logs for a sandbox."""
+    """Deprecated: use `osb diagnostics logs` instead."""
+    click.echo("Warning: `osb devops logs` is deprecated. Use `osb diagnostics logs`.", err=True)
     prepare_output(obj, output_format, allowed=("raw",), fallback="raw")
     params: dict = {"tail": tail}
     if since:
@@ -93,7 +94,8 @@ def devops_inspect(
 def devops_events(
     obj: ClientContext, sandbox_id: str, limit: int, output_format: str | None
 ) -> None:
-    """Retrieve events related to a sandbox."""
+    """Deprecated: use `osb diagnostics events` instead."""
+    click.echo("Warning: `osb devops events` is deprecated. Use `osb diagnostics events`.", err=True)
     prepare_output(obj, output_format, allowed=("raw",), fallback="raw")
     params: dict = {"limit": limit}
     text = _fetch_plain_text(obj, sandbox_id, "events", params=params)

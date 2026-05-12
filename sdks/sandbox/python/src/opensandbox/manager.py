@@ -25,6 +25,7 @@ from datetime import datetime, timedelta, timezone
 
 from opensandbox.adapters.factory import AdapterFactory
 from opensandbox.config import ConnectionConfig
+from opensandbox.models.diagnostics import DiagnosticContent
 from opensandbox.models.sandboxes import (
     CreateSnapshotRequest,
     PagedSandboxInfos,
@@ -35,6 +36,7 @@ from opensandbox.models.sandboxes import (
     SnapshotFilter,
     SnapshotInfo,
 )
+from opensandbox.services.diagnostics import Diagnostics
 from opensandbox.services.sandbox import Sandboxes
 
 logger = logging.getLogger(__name__)
@@ -84,6 +86,7 @@ class SandboxManager:
         self,
         sandbox_service: Sandboxes,
         connection_config: ConnectionConfig,
+        diagnostics_service: Diagnostics | None = None,
     ) -> None:
         """
         Internal constructor for SandboxManager.
@@ -93,9 +96,13 @@ class SandboxManager:
         Args:
             sandbox_service: Service for sandbox operations
             connection_config: Connection configuration (shared transport, headers, timeouts)
+            diagnostics_service: Optional service for sandbox diagnostics
         """
         self._sandbox_service = sandbox_service
         self._connection_config = connection_config
+        self._diagnostics_service = diagnostics_service or AdapterFactory(
+            connection_config
+        ).create_diagnostics_service()
 
     @property
     def connection_config(self) -> ConnectionConfig:
@@ -119,7 +126,8 @@ class SandboxManager:
         config = (connection_config or ConnectionConfig()).with_transport_if_missing()
         factory = AdapterFactory(config)
         sandbox_service = factory.create_sandbox_service()
-        return cls(sandbox_service, config)
+        diagnostics_service = factory.create_diagnostics_service()
+        return cls(sandbox_service, config, diagnostics_service)
 
     async def list_sandbox_infos(self, filter: SandboxFilter) -> PagedSandboxInfos:
         """
@@ -151,6 +159,34 @@ class SandboxManager:
         """
         logger.debug(f"Getting info for sandbox: {sandbox_id}")
         return await self._sandbox_service.get_sandbox_info(sandbox_id)
+
+    async def get_diagnostic_logs(
+        self,
+        sandbox_id: str,
+        scope: str,
+    ) -> DiagnosticContent:
+        """
+        Get diagnostic log content for a sandbox by ID.
+
+        Args:
+            sandbox_id: Sandbox ID to retrieve diagnostics for
+            scope: Required diagnostic scope such as "container", "lifecycle", or "all".
+        """
+        return await self._diagnostics_service.get_logs(sandbox_id, scope)
+
+    async def get_diagnostic_events(
+        self,
+        sandbox_id: str,
+        scope: str,
+    ) -> DiagnosticContent:
+        """
+        Get diagnostic event content for a sandbox by ID.
+
+        Args:
+            sandbox_id: Sandbox ID to retrieve diagnostics for
+            scope: Required diagnostic scope such as "runtime", "lifecycle", or "all".
+        """
+        return await self._diagnostics_service.get_events(sandbox_id, scope)
 
     async def patch_sandbox_metadata(
         self, sandbox_id: str, patch: dict[str, str | None]

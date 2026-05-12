@@ -25,8 +25,8 @@ BUILTIN_SKILLS: dict[str, SkillSpec] = {
         package_file="opensandbox-sandbox-troubleshooting.md",
         title="OpenSandbox Sandbox Troubleshooting",
         summary=(
-            "Triage failed or unhealthy sandboxes with state, health, summary, "
-            "inspect, events, logs, and concrete remediation steps."
+            "Triage failed or unhealthy sandboxes with state, health, stable "
+            "diagnostic logs/events, and concrete remediation steps."
         ),
         trigger_hint=(
             "Use when the user reports sandbox startup failures, crashes, OOM, "

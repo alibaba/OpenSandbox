@@ -23,6 +23,7 @@ import pytest
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.constants import DEFAULT_EGRESS_PORT, DEFAULT_EXECD_PORT
 from opensandbox.exceptions import SandboxReadyTimeoutException
+from opensandbox.models.diagnostics import DiagnosticContent
 from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule, SandboxEndpoint
 from opensandbox.sync.sandbox import SandboxSync
 
@@ -54,6 +55,35 @@ class _EgressServiceStub:
         self.patch_calls.append(rules)
 
 
+class _DiagnosticsServiceStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object, str | None]] = []
+
+    def get_logs(self, sandbox_id: str, scope: str) -> DiagnosticContent:
+        self.calls.append(("logs", sandbox_id, scope))
+        return DiagnosticContent(
+            sandboxId=sandbox_id,
+            kind="logs",
+            scope=scope or "container",
+            delivery="inline",
+            contentType="text/plain; charset=utf-8",
+            content="log line",
+            truncated=False,
+        )
+
+    def get_events(self, sandbox_id: str, scope: str) -> DiagnosticContent:
+        self.calls.append(("events", sandbox_id, scope))
+        return DiagnosticContent(
+            sandboxId=sandbox_id,
+            kind="events",
+            scope=scope or "runtime",
+            delivery="inline",
+            contentType="text/plain; charset=utf-8",
+            content="event line",
+            truncated=False,
+        )
+
+
 def test_sync_check_ready_timeout_message_includes_troubleshooting_hints() -> None:
     def _always_false(_: SandboxSync) -> bool:
         return False
@@ -66,6 +96,7 @@ def test_sync_check_ready_timeout_message_includes_troubleshooting_hints() -> No
         health_service=_Noop(),
         metrics_service=_Noop(),
         egress_service=_EgressServiceStub(),
+        diagnostics_service=_DiagnosticsServiceStub(),
         connection_config=ConnectionConfigSync(
             domain="10.0.0.2:8080",
             use_server_proxy=False,
@@ -90,6 +121,7 @@ def test_sync_get_egress_policy_uses_injected_egress_service() -> None:
         health_service=_Noop(),
         metrics_service=_Noop(),
         egress_service=_EgressServiceStub(),
+        diagnostics_service=_DiagnosticsServiceStub(),
         connection_config=ConnectionConfigSync(use_server_proxy=True),
     )
 
@@ -112,6 +144,7 @@ def test_sync_patch_egress_rules_uses_injected_egress_service() -> None:
         health_service=_Noop(),
         metrics_service=_Noop(),
         egress_service=egress_service,
+        diagnostics_service=_DiagnosticsServiceStub(),
         connection_config=ConnectionConfigSync(use_server_proxy=False),
     )
     rules = [NetworkRule(action="allow", target="www.github.com")]
@@ -120,6 +153,31 @@ def test_sync_patch_egress_rules_uses_injected_egress_service() -> None:
 
     assert svc.endpoint_calls == []
     assert egress_service.patch_calls == [rules]
+
+
+def test_sync_get_diagnostics_uses_injected_diagnostics_service() -> None:
+    diagnostics_service = _DiagnosticsServiceStub()
+    sbx = SandboxSync(
+        sandbox_id=str(uuid4()),
+        sandbox_service=_SandboxServiceStub(),
+        filesystem_service=_Noop(),
+        command_service=_Noop(),
+        health_service=_Noop(),
+        metrics_service=_Noop(),
+        egress_service=_EgressServiceStub(),
+        diagnostics_service=diagnostics_service,
+        connection_config=ConnectionConfigSync(use_server_proxy=True),
+    )
+
+    logs = sbx.get_diagnostic_logs(scope="container")
+    events = sbx.diagnostics.get_events(sbx.id, scope="runtime")
+
+    assert logs.kind == "logs"
+    assert events.kind == "events"
+    assert diagnostics_service.calls == [
+        ("logs", sbx.id, "container"),
+        ("events", sbx.id, "runtime"),
+    ]
 
 
 def test_sync_create_resolves_egress_endpoint_and_builds_service(
@@ -167,6 +225,9 @@ def test_sync_create_resolves_egress_endpoint_and_builds_service(
         def create_egress_service(self, endpoint: SandboxEndpoint) -> _EgressServiceStub:
             factory_calls.append(endpoint)
             return egress_service
+
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
 
     sandbox_service = _SandboxServiceCreateStub()
     monkeypatch.setattr("opensandbox.sync.sandbox.AdapterFactorySync", _FactoryStub)
@@ -254,6 +315,9 @@ def test_sync_create_passes_new_signature_keywords_even_when_unused(
         def create_egress_service(self, _endpoint):
             return _EgressServiceStub()
 
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
+
     monkeypatch.setattr("opensandbox.sync.sandbox.AdapterFactorySync", _FactoryStub)
     SandboxSync.create(
         "python:3.11",
@@ -308,6 +372,9 @@ def test_sync_create_preserves_manual_cleanup_timeout(
 
         def create_egress_service(self, _endpoint: SandboxEndpoint):
             return _EgressServiceStub()
+
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
 
     sandbox_service = _SandboxServiceCreateStub()
     monkeypatch.setattr("opensandbox.sync.sandbox.AdapterFactorySync", _FactoryStub)
@@ -390,6 +457,9 @@ def test_sync_create_restore_from_snapshot_passes_snapshot_id(
         def create_egress_service(self, _endpoint):
             return _EgressServiceStub()
 
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
+
     monkeypatch.setattr("opensandbox.sync.sandbox.AdapterFactorySync", _FactoryStub)
     SandboxSync.create(snapshot_id="snap-123", skip_health_check=True)
 
@@ -457,6 +527,9 @@ def test_sync_create_restore_from_snapshot_preserves_custom_entrypoint(
 
         def create_egress_service(self, _endpoint):
             return _EgressServiceStub()
+
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
 
     monkeypatch.setattr("opensandbox.sync.sandbox.AdapterFactorySync", _FactoryStub)
     SandboxSync.create(

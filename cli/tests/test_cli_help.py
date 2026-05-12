@@ -47,7 +47,7 @@ class TestRootCLI:
 
     def test_root_lists_commands(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["--help"])
-        for cmd in ("sandbox", "command", "file", "egress", "config", "devops", "skills"):
+        for cmd in ("sandbox", "command", "file", "egress", "config", "diagnostics", "devops", "skills"):
             assert cmd in result.output
 
 
@@ -160,6 +160,38 @@ class TestDevopsHelp:
         assert result.exit_code == 0
         for subcmd in ("logs", "inspect", "events", "summary"):
             assert subcmd in result.output
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics sub-commands
+# ---------------------------------------------------------------------------
+
+
+class TestDiagnosticsHelp:
+    def test_diagnostics_help(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["diagnostics", "--help"])
+        assert result.exit_code == 0
+        for subcmd in ("logs", "events"):
+            assert subcmd in result.output
+
+    @pytest.mark.parametrize("subcmd", ["logs", "events"])
+    def test_diagnostics_subcommand_help(self, runner: CliRunner, subcmd: str) -> None:
+        result = runner.invoke(cli, ["diagnostics", subcmd, "--help"])
+        assert result.exit_code == 0
+        assert "--scope" in result.output
+        assert "content URL" in result.output
+
+    def test_diagnostics_logs_help_describes_common_scopes(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["diagnostics", "logs", "--help"])
+        assert result.exit_code == 0
+        assert "lifecycle" in result.output
+        assert "container" in result.output
+
+    def test_diagnostics_events_help_describes_common_scopes(self, runner: CliRunner) -> None:
+        result = runner.invoke(cli, ["diagnostics", "events", "--help"])
+        assert result.exit_code == 0
+        assert "lifecycle" in result.output
+        assert "runtime" in result.output
 
 
 # ---------------------------------------------------------------------------
