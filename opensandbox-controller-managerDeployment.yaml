@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensandbox-controller-manager
+spec:
+  selector:
+    matchLabels:
+      app: opensandbox-controller-manager
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: opensandbox-controller-manager
+    spec:
+      containers:
+      - name: opensandbox-controller-manager
+        image: opensandbox/opensandbox-controller-manager:v0.1.13
+        args: [] # Remove -kube-client-qps flag
