@@ -51,11 +51,12 @@ from opensandbox_server.services.snapshot_service import create_snapshot_service
 from opensandbox_server.api.lifecycle_helpers import (
     apply_reserved_metadata_for_create,
     authorize_mutating_action,
+    authorize_snapshot_scope,
     get_principal,
     log_mutation_audit,
     merge_list_scope_from_request,
 )
-from opensandbox_server.middleware.authorization import LifecycleAction, authorize_action
+from opensandbox_server.middleware.authorization import LifecycleAction, authorize_action, is_user_scoped
 
 # Initialize router
 router = APIRouter(tags=["Sandboxes"])
@@ -116,6 +117,15 @@ async def create_sandbox(
     )
     body = apply_reserved_metadata_for_create(body, principal, cfg)
     validate_extensions(body.extensions)
+    if body.snapshot_id and is_user_scoped(principal):
+        snap = snapshot_service.get_snapshot(body.snapshot_id)
+        authorize_snapshot_scope(
+            principal,
+            snap,
+            owner_key=cfg.authz.owner_metadata_key,
+            team_key=cfg.authz.team_metadata_key,
+            sandbox_service=sandbox_service,
+        )
     try:
         res = await sandbox_service.create_sandbox(body)
         log_mutation_audit(
@@ -738,11 +748,15 @@ async def create_snapshot(
         sandbox=box,
     )
     create_request = request or CreateSnapshotRequest()
+    snap_access_owner = principal.canonical_owner if is_user_scoped(principal) else None
+    snap_access_team = principal.canonical_team if is_user_scoped(principal) else None
     try:
         snapshot = await asyncio.to_thread(
             snapshot_service.create_snapshot,
             sandbox_id,
             create_request,
+            access_owner=snap_access_owner,
+            access_team=snap_access_team,
         )
         log_mutation_audit(
             http_request, action=LifecycleAction.CREATE_SNAPSHOT, sandbox_id=sandbox_id, outcome="success"
@@ -801,11 +815,32 @@ async def list_snapshots(
         owner_key=cfg.authz.owner_metadata_key,
         team_key=cfg.authz.team_metadata_key,
     )
+
+    snap_access_owner: Optional[str] = None
+    snap_access_team: Optional[str] = None
+    if is_user_scoped(principal):
+        if sandbox_id:
+            box = sandbox_service.get_sandbox(sandbox_id)
+            authorize_action(
+                principal,
+                LifecycleAction.LIST_SNAPSHOTS,
+                owner_key=cfg.authz.owner_metadata_key,
+                team_key=cfg.authz.team_metadata_key,
+                sandbox=box,
+            )
+        else:
+            snap_access_owner = principal.canonical_owner
+            snap_access_team = principal.canonical_team
+
     request = ListSnapshotsRequest(
         filter=SnapshotFilter(sandboxId=sandbox_id, state=state),
         pagination=PaginationRequest(page=page, pageSize=page_size),
     )
-    return snapshot_service.list_snapshots(request)
+    return snapshot_service.list_snapshots(
+        request,
+        access_owner=snap_access_owner,
+        access_team=snap_access_team,
+    )
 
 
 @router.get(
@@ -838,7 +873,15 @@ async def get_snapshot(
         owner_key=cfg.authz.owner_metadata_key,
         team_key=cfg.authz.team_metadata_key,
     )
-    return snapshot_service.get_snapshot(snapshot_id)
+    snap = snapshot_service.get_snapshot(snapshot_id)
+    authorize_snapshot_scope(
+        principal,
+        snap,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_service=sandbox_service,
+    )
+    return snap
 
 
 @router.delete(
@@ -873,6 +916,34 @@ async def delete_snapshot(
         team_key=cfg.authz.team_metadata_key,
         sandbox_id=None,
     )
+    if is_user_scoped(principal):
+        try:
+            snap = snapshot_service.get_snapshot(snapshot_id)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                log_mutation_audit(
+                    http_request,
+                    action=LifecycleAction.DELETE_SNAPSHOT,
+                    sandbox_id=None,
+                    outcome="not_found",
+                )
+            raise
+        try:
+            authorize_snapshot_scope(
+                principal,
+                snap,
+                owner_key=cfg.authz.owner_metadata_key,
+                team_key=cfg.authz.team_metadata_key,
+                sandbox_service=sandbox_service,
+            )
+        except HTTPException:
+            log_mutation_audit(
+                http_request,
+                action=LifecycleAction.DELETE_SNAPSHOT,
+                sandbox_id=None,
+                outcome="forbidden",
+            )
+            raise
     try:
         snapshot_service.delete_snapshot(snapshot_id)
         log_mutation_audit(

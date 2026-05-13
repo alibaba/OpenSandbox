@@ -60,7 +60,7 @@ def test_create_snapshot_returns_202_and_location_header(
 
     class StubService:
         @staticmethod
-        def create_snapshot(sandbox_id: str, request) -> Snapshot:
+        def create_snapshot(sandbox_id: str, request, *, access_owner=None, access_team=None) -> Snapshot:
             calls.append((sandbox_id, request))
             return _sample_snapshot(now)
 
@@ -89,7 +89,7 @@ def test_create_snapshot_accepts_empty_body(
 
     class StubService:
         @staticmethod
-        def create_snapshot(sandbox_id: str, request) -> Snapshot:
+        def create_snapshot(sandbox_id: str, request, *, access_owner=None, access_team=None) -> Snapshot:
             assert sandbox_id == "sbx-001"
             assert request.name is None
             return _sample_snapshot(now)
@@ -112,7 +112,7 @@ def test_list_snapshots_parses_filters_and_pagination(
 
     class StubService:
         @staticmethod
-        def list_snapshots(request) -> ListSnapshotsResponse:
+        def list_snapshots(request, *, access_owner=None, access_team=None) -> ListSnapshotsResponse:
             captured_requests.append(request)
             return ListSnapshotsResponse(
                 items=[_sample_snapshot(now)],

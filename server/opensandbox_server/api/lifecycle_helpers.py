@@ -10,14 +10,13 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import Request
-
+from fastapi import Request, status
 from fastapi.exceptions import HTTPException
 
 from opensandbox_server.api.schema import CreateSandboxRequest, ListSandboxesRequest, SandboxFilter
 from opensandbox_server.config import AppConfig
 from opensandbox_server.middleware.request_id import get_request_id
-from opensandbox_server.middleware.authorization import authorize_action, is_user_scoped
+from opensandbox_server.middleware.authorization import authorize_action, is_user_scoped, sandbox_in_scope
 from opensandbox_server.middleware.principal import Principal
 
 logger = logging.getLogger(__name__)
@@ -66,6 +65,43 @@ def apply_reserved_metadata_for_create(
     if principal.canonical_team is not None:
         meta[config.authz.team_metadata_key] = principal.canonical_team
     return req.model_copy(update={"metadata": meta})
+
+
+def authorize_snapshot_scope(
+    principal: Optional[Principal],
+    snapshot,
+    *,
+    owner_key: str,
+    team_key: str,
+    sandbox_service,
+) -> None:
+    """Enforce owner/team scope for a snapshot by resolving its source sandbox.
+
+    Raises HTTP 403 OUT_OF_SCOPE when the principal is user-scoped and the source
+    sandbox either does not exist or falls outside the principal's owner/team scope.
+    Service admins and API-key-only principals always pass through.
+    """
+    if not is_user_scoped(principal):
+        return
+    source_sandbox_id = snapshot.sandbox_id
+    try:
+        box = sandbox_service.get_sandbox(source_sandbox_id)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "OUT_OF_SCOPE",
+                "message": "The snapshot is outside the authenticated user owner/team scope.",
+            },
+        )
+    if not sandbox_in_scope(principal, box, owner_key, team_key):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "OUT_OF_SCOPE",
+                "message": "The snapshot is outside the authenticated user owner/team scope.",
+            },
+        )
 
 
 def authorize_mutating_action(

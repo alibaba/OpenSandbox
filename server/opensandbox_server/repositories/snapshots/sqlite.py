@@ -65,8 +65,10 @@ class SQLiteSnapshotRepository:
                     message,
                     last_transition_at,
                     created_at,
-                    updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    updated_at,
+                    access_owner,
+                    access_team
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._to_db_tuple(record),
             )
@@ -102,6 +104,14 @@ class SQLiteSnapshotRepository:
         if query.source_sandbox_id:
             clauses.append("source_sandbox_id = ?")
             params.append(query.source_sandbox_id)
+
+        if query.access_owner is not None:
+            clauses.append("access_owner = ?")
+            params.append(query.access_owner)
+
+        if query.access_team is not None:
+            clauses.append("access_team = ?")
+            params.append(query.access_team)
 
         if query.states:
             clauses.append(
@@ -161,7 +171,9 @@ class SQLiteSnapshotRepository:
                     message = ?,
                     last_transition_at = ?,
                     created_at = ?,
-                    updated_at = ?
+                    updated_at = ?,
+                    access_owner = ?,
+                    access_team = ?
                 WHERE id = ?
                 """,
                 (
@@ -175,6 +187,8 @@ class SQLiteSnapshotRepository:
                     self._datetime_to_str(record.status.last_transition_at),
                     self._datetime_to_str(record.created_at),
                     self._datetime_to_str(record.updated_at),
+                    record.access_owner,
+                    record.access_team,
                     record.id,
                 ),
             )
@@ -199,7 +213,9 @@ class SQLiteSnapshotRepository:
                     message = ?,
                     last_transition_at = ?,
                     created_at = ?,
-                    updated_at = ?
+                    updated_at = ?,
+                    access_owner = ?,
+                    access_team = ?
                 WHERE id = ? AND state = ?
                 """,
                 (
@@ -213,6 +229,8 @@ class SQLiteSnapshotRepository:
                     self._datetime_to_str(record.status.last_transition_at),
                     self._datetime_to_str(record.created_at),
                     self._datetime_to_str(record.updated_at),
+                    record.access_owner,
+                    record.access_team,
                     record.id,
                     expected_state.value,
                 ),
@@ -238,7 +256,9 @@ class SQLiteSnapshotRepository:
                     message TEXT,
                     last_transition_at TEXT,
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
+                    updated_at TEXT NOT NULL,
+                    access_owner TEXT,
+                    access_team TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_snapshots_source_sandbox_id
@@ -251,6 +271,15 @@ class SQLiteSnapshotRepository:
                     ON snapshots(created_at DESC);
                 """
             )
+        self._migrate_add_scope_columns()
+
+    def _migrate_add_scope_columns(self) -> None:
+        for col_def in ("access_owner TEXT", "access_team TEXT"):
+            try:
+                with self._connect() as conn:
+                    conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col_def}")
+            except Exception:
+                pass  # column already exists
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -272,6 +301,8 @@ class SQLiteSnapshotRepository:
             self._datetime_to_str(record.status.last_transition_at),
             self._datetime_to_str(record.created_at),
             self._datetime_to_str(record.updated_at),
+            record.access_owner,
+            record.access_team,
         )
 
     @staticmethod
@@ -287,6 +318,7 @@ class SQLiteSnapshotRepository:
     @staticmethod
     def _row_to_record(row: sqlite3.Row) -> SnapshotRecord:
         restore_config = json.loads(row["restore_config"])
+        row_keys = row.keys()
         return SnapshotRecord(
             id=row["id"],
             source_sandbox_id=row["source_sandbox_id"],
@@ -303,6 +335,8 @@ class SQLiteSnapshotRepository:
             ),
             created_at=SQLiteSnapshotRepository._str_to_datetime(row["created_at"]),
             updated_at=SQLiteSnapshotRepository._str_to_datetime(row["updated_at"]),
+            access_owner=row["access_owner"] if "access_owner" in row_keys else None,
+            access_team=row["access_team"] if "access_team" in row_keys else None,
         )
 
     @staticmethod
