@@ -162,7 +162,6 @@ class PersistedSnapshotService(SnapshotService):
                 states=request.filter.state or [],
                 access_owner=access_owner,
                 access_team=access_team,
-                include_unscoped_owner=access_owner is not None,
             )
         )
 
