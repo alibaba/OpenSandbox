@@ -52,6 +52,7 @@ export type {
   SnapshotStatus,
   SandboxId,
   SandboxInfo,
+  SandboxMetadataPatch,
   Volume,
 } from "./models/sandboxes.js";
 

@@ -171,7 +171,9 @@ func TestScenario_SimpleAgentLoop(t *testing.T) {
 }
 
 func TestScenario_CodeInterpreterAgent(t *testing.T) {
-	t.Skip("skip code interpreter e2e tests")
+	if os.Getenv("RUN_CODE_INTERPRETER_E2E") != "true" {
+		t.Skip("Set RUN_CODE_INTERPRETER_E2E=true to run code interpreter e2e tests")
+	}
 
 	llmEndpoint := getLLMEndpoint()
 	if llmEndpoint == "" {

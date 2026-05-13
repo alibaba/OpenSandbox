@@ -10,6 +10,10 @@ function createSandboxesStub() {
       calls.push({ method: "listSandboxes", args: [filter] });
       return { items: [{ id: "sbx-1" }] };
     },
+    async patchSandboxMetadata(sandboxId, patch) {
+      calls.push({ method: "patchSandboxMetadata", args: [sandboxId, patch] });
+      return { id: sandboxId, metadata: { team: "platform" } };
+    },
     async getSandbox(sandboxId) {
       calls.push({ method: "getSandbox", args: [sandboxId] });
       return { id: sandboxId };
@@ -74,6 +78,12 @@ test("SandboxManager delegates lifecycle operations and closes its transport", a
   const info = await manager.getSandboxInfo("sbx-42");
   assert.equal(info.id, "sbx-42");
 
+  const patched = await manager.patchSandboxMetadata("sbx-42", {
+    team: "platform",
+    old: null,
+  });
+  assert.equal(patched.metadata.team, "platform");
+
   await manager.pauseSandbox("sbx-42");
   await manager.resumeSandbox("sbx-42");
   await manager.killSandbox("sbx-42");
@@ -92,6 +102,7 @@ test("SandboxManager delegates lifecycle operations and closes its transport", a
     [
       "listSandboxes",
       "getSandbox",
+      "patchSandboxMetadata",
       "pauseSandbox",
       "resumeSandbox",
       "deleteSandbox",
@@ -108,12 +119,13 @@ test("SandboxManager delegates lifecycle operations and closes its transport", a
     page: 2,
     pageSize: 5,
   });
-  assert.equal(calls[5].args[0], "sbx-42");
-  assert.ok(typeof calls[5].args[1].expiresAt === "string");
-  assert.ok(Number.isFinite(Date.parse(calls[5].args[1].expiresAt)));
-  assert.deepEqual(calls[6].args, ["sbx-42", { name: "before-upgrade" }]);
-  assert.deepEqual(calls[7].args[0], { sandboxId: "sbx-42", states: ["Ready"] });
-  assert.equal(calls[8].args[0], "snap-1");
+  assert.deepEqual(calls[2].args, ["sbx-42", { team: "platform", old: null }]);
+  assert.equal(calls[6].args[0], "sbx-42");
+  assert.ok(typeof calls[6].args[1].expiresAt === "string");
+  assert.ok(Number.isFinite(Date.parse(calls[6].args[1].expiresAt)));
+  assert.deepEqual(calls[7].args, ["sbx-42", { name: "before-upgrade" }]);
+  assert.deepEqual(calls[8].args[0], { sandboxId: "sbx-42", states: ["Ready"] });
   assert.equal(calls[9].args[0], "snap-1");
+  assert.equal(calls[10].args[0], "snap-1");
   assert.equal(closeCalls, 1);
 });

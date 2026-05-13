@@ -46,6 +46,9 @@ func waitForShutdown(ctx context.Context, proxy *dnsproxy.Proxy, policySrv *http
 			log.Errorf("policy server shutdown error: %v", err)
 		}
 	}
+
+	proxy.SetOnResolved(nil)
+
 	if err := proxy.Shutdown(); err != nil {
 		log.Errorf("dns proxy shutdown error: %v", err)
 	}
@@ -54,8 +57,6 @@ func waitForShutdown(ctx context.Context, proxy *dnsproxy.Proxy, policySrv *http
 		iptables.RemoveTransparentHTTP(mitm.port, mitm.uid)
 		mitmproxy.GracefulShutdown(mitm.getRunning(), defaultMitmShutdownTimeout)
 	}
-
-	proxy.SetOnResolved(nil)
 	iptables.RemoveRedirect(15353, exemptDst)
 
 	if applier != nil {

@@ -22,7 +22,7 @@ All business logic is delegated to the service layer that backs each operation.
 import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response
 
 from opensandbox_server.extensions import validate_extensions
@@ -38,6 +38,7 @@ from opensandbox_server.api.schema import (
     ListSandboxesRequest,
     ListSandboxesResponse,
     PaginationRequest,
+    PatchSandboxMetadataRequest,
     RenewSandboxExpirationRequest,
     RenewSandboxExpirationResponse,
     Sandbox,
@@ -273,6 +274,33 @@ async def get_sandbox(
         sandbox=box,
     )
     return box
+
+
+@router.patch(
+    "/sandboxes/{sandbox_id}/metadata",
+    response_model=Sandbox,
+    response_model_exclude_none=True,
+    responses={
+        200: {"description": "Metadata patched successfully. Returns the complete sandbox with updated metadata."},
+        400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
+        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
+        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
+        404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
+        409: {"model": ErrorResponse, "description": "The operation conflicts with the current state"},
+        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+    },
+)
+async def patch_sandbox_metadata(
+    sandbox_id: str,
+    patch: PatchSandboxMetadataRequest = Body(...),
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+) -> Sandbox:
+    """
+    Patch sandbox metadata via JSON Merge Patch (RFC 7396).
+    Non-null adds/replaces, null deletes, absent keeps.
+    Read-modify-write without optimistic locking — concurrent PATCH may drop updates.
+    """
+    return sandbox_service.patch_sandbox_metadata(sandbox_id, patch)
 
 
 @router.delete(

@@ -280,7 +280,9 @@ func (s *policyServer) commitPolicy(ctx context.Context, w http.ResponseWriter, 
 	alwaysDeny, alwaysAllow := s.currentAlwaysRules()
 	merged := policy.MergeAlwaysOverlay(pol, alwaysDeny, alwaysAllow)
 	if s.nft != nil {
-		if err := s.nft.ApplyStatic(ctx, merged.WithExtraAllowIPs(s.nameserverIPs)); err != nil {
+		nftCtx, nftCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer nftCancel()
+		if err := s.nft.ApplyStatic(nftCtx, merged.WithExtraAllowIPs(s.nameserverIPs)); err != nil {
 			logEgressUpdateFailedError(fmt.Sprintf("nftables apply (%s): %v", op, err))
 			log.Errorf("policy API: nftables apply failed (%s): %v", op, err)
 			http.Error(w, fmt.Sprintf("failed to apply nftables policy: %v", err), http.StatusInternalServerError)

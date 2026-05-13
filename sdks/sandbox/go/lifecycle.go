@@ -148,6 +148,16 @@ func (c *LifecycleClient) GetSandbox(ctx context.Context, id string) (*SandboxIn
 	return &resp, nil
 }
 
+// PatchSandboxMetadata patches metadata for a sandbox. Non-nil values add or
+// replace keys. Nil values delete keys.
+func (c *LifecycleClient) PatchSandboxMetadata(ctx context.Context, id string, patch MetadataPatch) (*SandboxInfo, error) {
+	var resp SandboxInfo
+	if err := c.doRequest(ctx, "PATCH", "/sandboxes/"+url.PathEscape(id)+"/metadata", patch, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 // DeleteSandbox deletes a sandbox, scheduling it for termination.
 func (c *LifecycleClient) DeleteSandbox(ctx context.Context, id string) error {
 	return c.doRequest(ctx, "DELETE", "/sandboxes/"+url.PathEscape(id), nil, nil)

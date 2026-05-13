@@ -87,13 +87,18 @@ async def _run_primary_replenish_once(
         return_exceptions=True,
     )
     created_ids: list[str] = []
+    failure_count = 0
+    last_error: str | None = None
     for result in results:
         if isinstance(result, BaseException):
-            reconcile_state.record_failure(str(result))
+            failure_count += 1
+            last_error = str(result)
         elif result is not None:
             created_ids.append(result)
         else:
-            reconcile_state.record_failure(None)
+            failure_count += 1
+            last_error = None
+    reconcile_state.record_failures(failure_count, last_error)
 
     created = 0
     for index, sandbox_id in enumerate(created_ids):

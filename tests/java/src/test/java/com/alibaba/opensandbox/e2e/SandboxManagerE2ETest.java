@@ -242,6 +242,17 @@ public class SandboxManagerE2ETest extends BaseE2ETest {
         for (SandboxInfo info : noneMatch.getSandboxInfos()) {
             assertFalse(Set.of(s1.getId(), s2.getId(), s3.getId()).contains(info.getId()));
         }
+
+        Map<String, String> patch = new HashMap<>();
+        patch.put("env", "stage");
+        patch.put("team", null);
+        SandboxInfo patched = sandboxManager.patchSandboxMetadata(s2.getId(), patch);
+        assertEquals("stage", patched.getMetadata().get("env"));
+        assertFalse(patched.getMetadata().containsKey("team"));
+
+        SandboxInfo refreshed = sandboxManager.getSandboxInfo(s2.getId());
+        assertEquals("stage", refreshed.getMetadata().get("env"));
+        assertFalse(refreshed.getMetadata().containsKey("team"));
     }
 
     @Test

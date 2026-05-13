@@ -60,11 +60,20 @@ func (s *Sandbox) SetPermissions(ctx context.Context, req PermissionsRequest) er
 	return s.execd.SetPermissions(ctx, req)
 }
 
+// UploadFile uploads a single file to the sandbox.
 func (s *Sandbox) UploadFile(ctx context.Context, file io.Reader, opts UploadFileOptions) error {
 	if s.execd == nil {
 		return fmt.Errorf("opensandbox: execd client not initialized")
 	}
 	return s.execd.UploadFile(ctx, file, opts)
+}
+
+// UploadFiles uploads one or more files to the sandbox in a single multipart request.
+func (s *Sandbox) UploadFiles(ctx context.Context, entries []UploadFileEntry) error {
+	if s.execd == nil {
+		return fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.UploadFiles(ctx, entries)
 }
 
 // DownloadFile downloads a file from the sandbox.

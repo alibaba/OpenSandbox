@@ -122,13 +122,17 @@ internal object PoolReconciler {
             }
 
         val createdSandboxIds = mutableListOf<String>()
+        var failureCount = 0
+        var lastError: String? = null
         for ((newId, errorMessage) in results) {
             if (newId != null) {
                 createdSandboxIds += newId
             } else {
-                reconcileState.recordFailure(errorMessage)
+                failureCount++
+                lastError = errorMessage
             }
         }
+        reconcileState.recordFailures(failureCount, lastError)
 
         var created = 0
         for (index in createdSandboxIds.indices) {

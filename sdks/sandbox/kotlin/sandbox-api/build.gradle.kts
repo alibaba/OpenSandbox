@@ -30,6 +30,8 @@ dependencies {
 }
 
 fun GenerateTask.configureCommonOptions() {
+    outputs.doNotCacheIf("OpenAPI generation must reflect the current spec files") { true }
+
     generatorName.set("kotlin")
     library.set("jvm-okhttp4")
 
@@ -107,11 +109,23 @@ val generateEgressApi =
         modelPackage.set("com.alibaba.opensandbox.sandbox.api.models.egress")
     }
 
+val generateDiagnosticApi =
+    tasks.register<GenerateTask>("generateDiagnosticApi") {
+        configureCommonOptions()
+
+        inputSpec.set(rootProject.projectDir.parentFile.parentFile.parentFile.resolve("specs/diagnostic-api.yml").absolutePath)
+        outputDir.set(layout.buildDirectory.dir("generated/api/diagnostic").get().asFile.absolutePath)
+        packageName.set("com.alibaba.opensandbox.sandbox.api.diagnostic")
+        apiPackage.set("com.alibaba.opensandbox.sandbox.api.diagnostic")
+        modelPackage.set("com.alibaba.opensandbox.sandbox.api.models.diagnostic")
+    }
+
 val lifecycleSrc = generateSandboxLifecycleApi.map { file(it.outputDir).resolve("src/main/kotlin") }
 val execdSrc = generateExecdApi.map { file(it.outputDir).resolve("src/main/kotlin") }
 val egressSrc = generateEgressApi.map { file(it.outputDir).resolve("src/main/kotlin") }
+val diagnosticSrc = generateDiagnosticApi.map { file(it.outputDir).resolve("src/main/kotlin") }
 sourceSets {
     main {
-        java.srcDirs(lifecycleSrc, execdSrc, egressSrc)
+        java.srcDirs(lifecycleSrc, execdSrc, egressSrc, diagnosticSrc)
     }
 }

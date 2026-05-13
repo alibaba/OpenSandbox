@@ -780,5 +780,7 @@ internal fun PoolCreationSpec.applyToBuilder(builder: Sandbox.Builder): Sandbox.
             .volumes(volumes ?: emptyList())
             .secureAccess(secureAccess)
 
-    return networkPolicy?.let { configuredBuilder.networkPolicy(it) } ?: configuredBuilder
+    networkPolicy?.let { configuredBuilder.networkPolicy(it) }
+    platform?.let { configuredBuilder.platform(it) }
+    return configuredBuilder
 }

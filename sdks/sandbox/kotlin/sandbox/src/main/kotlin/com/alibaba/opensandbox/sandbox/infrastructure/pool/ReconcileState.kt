@@ -27,8 +27,8 @@ import java.time.Instant
  */
 internal class ReconcileState(
     private val degradedThreshold: Int,
-    private val backoffBase: Duration = Duration.ofSeconds(1),
-    private val backoffMax: Duration = Duration.ofSeconds(60),
+    private val backoffBase: Duration = Duration.ofSeconds(30),
+    private val backoffMax: Duration = Duration.ofDays(1),
 ) {
     @Volatile
     var failureCount: Int = 0
@@ -58,12 +58,21 @@ internal class ReconcileState(
 
     @Synchronized
     fun recordFailure(errorMessage: String?) {
-        failureCount++
+        recordFailures(1, errorMessage)
+    }
+
+    @Synchronized
+    fun recordFailures(
+        count: Int,
+        errorMessage: String?,
+    ) {
+        if (count <= 0) return
+        failureCount += count
         lastError = errorMessage
         if (failureCount >= degradedThreshold) {
             state = PoolState.DEGRADED
             backoffAttempts++
-            val exponent = backoffAttempts.coerceAtMost(10)
+            val exponent = (backoffAttempts - 1).coerceAtMost(30)
             val delaySeconds = backoffBase.seconds * (1L shl exponent)
             val delayMs =
                 minOf(

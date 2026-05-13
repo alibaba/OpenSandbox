@@ -18,6 +18,7 @@ package com.alibaba.opensandbox.sandbox
 
 import com.alibaba.opensandbox.sandbox.config.ConnectionConfig
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxReadyTimeoutException
+import com.alibaba.opensandbox.sandbox.domain.models.diagnostics.DiagnosticContent
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
@@ -25,6 +26,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxMetrics
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxRenewResponse
 import com.alibaba.opensandbox.sandbox.domain.services.Commands
+import com.alibaba.opensandbox.sandbox.domain.services.Diagnostics
 import com.alibaba.opensandbox.sandbox.domain.services.Egress
 import com.alibaba.opensandbox.sandbox.domain.services.Filesystem
 import com.alibaba.opensandbox.sandbox.domain.services.Health
@@ -68,6 +70,9 @@ class SandboxTest {
     lateinit var egressService: Egress
 
     @MockK
+    lateinit var diagnosticsService: Diagnostics
+
+    @MockK
     lateinit var httpClientProvider: HttpClientProvider
 
     private lateinit var sandbox: Sandbox
@@ -94,6 +99,7 @@ class SandboxTest {
                 egressService = egressService,
                 customHealthCheck = null,
                 httpClientProvider = httpClientProvider,
+                diagnosticsService = diagnosticsService,
             )
     }
 
@@ -110,6 +116,11 @@ class SandboxTest {
     @Test
     fun `metrics should return metrics service`() {
         assertSame(metricsService, sandbox.metrics())
+    }
+
+    @Test
+    fun `diagnostics should return diagnostics service`() {
+        assertSame(diagnosticsService, sandbox.diagnostics())
     }
 
     @Test
@@ -151,6 +162,28 @@ class SandboxTest {
 
         assertSame(expectedMetrics, result)
         verify { metricsService.getMetrics(sandboxId) }
+    }
+
+    @Test
+    fun `getDiagnosticLogs should delegate to diagnosticsService`() {
+        val expected = mockk<DiagnosticContent>()
+        every { diagnosticsService.getLogs(sandboxId, "container") } returns expected
+
+        val result = sandbox.getDiagnosticLogs("container")
+
+        assertSame(expected, result)
+        verify { diagnosticsService.getLogs(sandboxId, "container") }
+    }
+
+    @Test
+    fun `getDiagnosticEvents should delegate to diagnosticsService`() {
+        val expected = mockk<DiagnosticContent>()
+        every { diagnosticsService.getEvents(sandboxId, "runtime") } returns expected
+
+        val result = sandbox.getDiagnosticEvents("runtime")
+
+        assertSame(expected, result)
+        verify { diagnosticsService.getEvents(sandboxId, "runtime") }
     }
 
     @Test

@@ -31,8 +31,8 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ReconcileState:
     degraded_threshold: int
-    backoff_base: timedelta = timedelta(seconds=1)
-    backoff_max: timedelta = timedelta(seconds=60)
+    backoff_base: timedelta = timedelta(seconds=30)
+    backoff_max: timedelta = timedelta(days=1)
     failure_count: int = 0
     state: PoolState = PoolState.HEALTHY
     last_error: str | None = None
@@ -48,12 +48,17 @@ class ReconcileState:
         self.last_error = None
 
     def record_failure(self, error_message: str | None) -> None:
-        self.failure_count += 1
+        self.record_failures(1, error_message)
+
+    def record_failures(self, count: int, error_message: str | None) -> None:
+        if count <= 0:
+            return
+        self.failure_count += count
         self.last_error = error_message
         if self.failure_count >= self.degraded_threshold:
             self.state = PoolState.DEGRADED
             self.backoff_attempts += 1
-            exponent = min(self.backoff_attempts, 10)
+            exponent = min(self.backoff_attempts - 1, 30)
             delay = min(
                 self.backoff_base.total_seconds() * (1 << exponent),
                 self.backoff_max.total_seconds(),
@@ -127,15 +132,20 @@ def _run_primary_replenish_once(
     futures = [warmup_executor.submit(create_one) for _ in range(to_create)]
     wait(futures)
     created_ids: list[str] = []
+    failure_count = 0
+    last_error: str | None = None
     for future in futures:
         try:
             sandbox_id = future.result()
             if sandbox_id is not None:
                 created_ids.append(sandbox_id)
             else:
-                reconcile_state.record_failure(None)
+                failure_count += 1
+                last_error = None
         except Exception as exc:
-            reconcile_state.record_failure(str(exc))
+            failure_count += 1
+            last_error = str(exc)
+    reconcile_state.record_failures(failure_count, last_error)
 
     created = 0
     for index, sandbox_id in enumerate(created_ids):

@@ -27,6 +27,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
+from opensandbox.models.diagnostics import DiagnosticContent
 from opensandbox.models.sandboxes import SandboxImageSpec
 
 from opensandbox_cli.main import cli
@@ -1049,27 +1050,139 @@ class TestCommandSession:
 
 
 class TestDevopsCommands:
-    def test_logs_fetches_plain_text(self, runner: CliRunner) -> None:
-        mock_client = MagicMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.text = "sandbox logs"
-        mock_client.get.return_value = mock_response
+    def test_logs_preserves_legacy_plain_text_filters_with_warning(self, runner: CliRunner) -> None:
         mock_ctx = _build_mock_client_context()
-        mock_ctx.get_devops_client.return_value = mock_client
+        response = MagicMock()
+        response.status_code = 200
+        response.text = "sandbox logs"
+        response.raise_for_status = MagicMock()
+        devops_client = MagicMock()
+        devops_client.get.return_value = response
+        mock_ctx.get_devops_client.return_value = devops_client
 
         with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
              patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx):
             mock_resolve.return_value = mock_ctx.resolved_config
-            mock_ctx.output = OutputFormatter("table", color=False)
-            result = runner.invoke(cli, ["devops", "logs", "sb-1"], catch_exceptions=False)
+            result = runner.invoke(
+                cli,
+                ["devops", "logs", "sb-1", "--tail", "100", "--since", "30m"],
+                catch_exceptions=False,
+            )
 
         assert result.exit_code == 0
+        assert "deprecated" in result.output
         assert "sandbox logs" in result.output
-        mock_client.get.assert_called_once()
-        assert mock_client.get.call_args.args[0] == "sandboxes/sb-1/diagnostics/logs"
+        devops_client.get.assert_called_once_with(
+            "sandboxes/sb-1/diagnostics/logs",
+            params={"tail": 100, "since": "30m"},
+        )
 
-    def test_logs_reject_json_output(self, runner: CliRunner) -> None:
-        result = _invoke(runner, ["devops", "logs", "sb-1", "-o", "json"])
+    def test_events_preserves_legacy_limit_with_warning(self, runner: CliRunner) -> None:
+        mock_ctx = _build_mock_client_context()
+        response = MagicMock()
+        response.status_code = 200
+        response.text = "sandbox events"
+        response.raise_for_status = MagicMock()
+        devops_client = MagicMock()
+        devops_client.get.return_value = response
+        mock_ctx.get_devops_client.return_value = devops_client
+
+        with patch("opensandbox_cli.main.resolve_config") as mock_resolve, \
+             patch("opensandbox_cli.main.ClientContext", return_value=mock_ctx):
+            mock_resolve.return_value = mock_ctx.resolved_config
+            result = runner.invoke(
+                cli,
+                ["devops", "events", "sb-1", "--limit", "25"],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0
+        assert "deprecated" in result.output
+        assert "sandbox events" in result.output
+        devops_client.get.assert_called_once_with(
+            "sandboxes/sb-1/diagnostics/events",
+            params={"limit": 25},
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stable diagnostics
+# ---------------------------------------------------------------------------
+
+
+class TestDiagnosticsCommands:
+    def test_logs_requires_scope(self, runner: CliRunner) -> None:
+        result = _invoke(runner, ["diagnostics", "logs", "sb-1", "-o", "raw"])
         assert result.exit_code != 0
-        assert "Invalid value for '-o' / '--output'" in result.output
+        assert "Missing option '--scope'" in result.output
+
+    def test_logs_raw_prints_inline_content(self, runner: CliRunner) -> None:
+        manager = MagicMock()
+        manager.get_diagnostic_logs.return_value = DiagnosticContent(
+            sandboxId="sb-1",
+            kind="logs",
+            scope="container",
+            delivery="inline",
+            contentType="text/plain; charset=utf-8",
+            content="line 1\nline 2",
+            truncated=False,
+        )
+
+        result = _invoke(
+            runner,
+            ["diagnostics", "logs", "sb-1", "--scope", "container", "-o", "raw"],
+            manager=manager,
+        )
+
+        assert result.exit_code == 0
+        assert "line 1\nline 2" in result.output
+        manager.get_diagnostic_logs.assert_called_once_with("sb-1", scope="container")
+
+    def test_events_json_prints_descriptor(self, runner: CliRunner) -> None:
+        manager = MagicMock()
+        manager.get_diagnostic_events.return_value = DiagnosticContent(
+            sandboxId="sb-1",
+            kind="events",
+            scope="runtime",
+            delivery="url",
+            contentType="text/plain; charset=utf-8",
+            contentUrl="https://example.com/events.txt",
+            contentLength=12,
+            truncated=False,
+        )
+
+        result = _invoke(
+            runner,
+            ["diagnostics", "events", "sb-1", "--scope", "runtime", "-o", "json"],
+            manager=manager,
+        )
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["kind"] == "events"
+        assert data["scope"] == "runtime"
+        assert data["delivery"] == "url"
+        assert data["content_url"] == "https://example.com/events.txt"
+        assert data["content_length"] == 12
+        manager.get_diagnostic_events.assert_called_once_with("sb-1", scope="runtime")
+
+    def test_raw_url_delivery_prints_content_url(self, runner: CliRunner) -> None:
+        manager = MagicMock()
+        manager.get_diagnostic_logs.return_value = DiagnosticContent(
+            sandboxId="sb-1",
+            kind="logs",
+            scope="container",
+            delivery="url",
+            contentType="text/plain; charset=utf-8",
+            contentUrl="https://example.com/logs.txt",
+            truncated=False,
+        )
+
+        result = _invoke(
+            runner,
+            ["diagnostics", "logs", "sb-1", "--scope", "container", "-o", "raw"],
+            manager=manager,
+        )
+
+        assert result.exit_code == 0
+        assert result.output.strip() == "https://example.com/logs.txt"

@@ -108,6 +108,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
   /sandboxes/{sandboxId}/diagnostics/events:
     get:
       tags: [Diagnostics]
@@ -175,6 +177,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 components:
   securitySchemes:
     apiKeyAuth:
@@ -196,12 +200,15 @@ components:
     DiagnosticScope:
       name: scope
       in: query
-      required: false
+      required: true
       description: |
-        Optional diagnostic scope selector. Known scopes may include `container`,
+        Required diagnostic scope selector. Known scopes may include `container`,
         `lifecycle`, `runtime`, `network`, `process`, and `all`. Supported scopes
-        and defaults are implementation-defined; servers may add new scopes over
-        time.
+        are implementation-defined; servers may add new scopes over time.
+
+        On deployments that still expose the legacy DevOps plain-text behavior on
+        this path, requests without `scope` are treated as deprecated legacy
+        requests and may return `text/plain` instead of this JSON descriptor.
       schema:
         type: string
       examples:
@@ -259,6 +266,15 @@ components:
           $ref: '#/components/headers/XRequestId'
     InternalServerError:
       description: An unexpected server error occurred
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+      headers:
+        X-Request-ID:
+          $ref: '#/components/headers/XRequestId'
+    NotImplemented:
+      description: The stable Diagnostics API is not implemented by this server
       content:
         application/json:
           schema:

@@ -118,6 +118,24 @@ class SandboxesSync(Protocol):
         """
         ...
 
+    def patch_sandbox_metadata(
+        self, sandbox_id: str, patch: dict[str, str | None]
+    ) -> SandboxInfo:
+        """
+        Patch sandbox metadata.
+
+        Args:
+            sandbox_id: Unique identifier of the sandbox.
+            patch: Metadata merge patch. String values add or replace keys; None deletes keys.
+
+        Returns:
+            Current sandbox information after applying the patch.
+
+        Raises:
+            SandboxException: If the operation fails.
+        """
+        ...
+
     def get_sandbox_endpoint(
         self, sandbox_id: str, port: int, use_server_proxy: bool = False
     ) -> SandboxEndpoint:

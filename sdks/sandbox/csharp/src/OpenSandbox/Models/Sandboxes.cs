@@ -363,6 +363,20 @@ public class SandboxInfo
 }
 
 /// <summary>
+/// Metadata merge patch for a sandbox. Non-null values add or replace keys; null values delete keys.
+/// </summary>
+public class SandboxMetadataPatch : Dictionary<string, string?>
+{
+    public SandboxMetadataPatch()
+    {
+    }
+
+    public SandboxMetadataPatch(IDictionary<string, string?> dictionary) : base(dictionary)
+    {
+    }
+}
+
+/// <summary>
 /// Request to create a new sandbox.
 /// </summary>
 public class CreateSandboxRequest

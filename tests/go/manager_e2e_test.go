@@ -77,9 +77,11 @@ func TestManager_GetAndKill(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
+	team := "t1"
 	sb, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreateOptions{
-		Image: getSandboxImage(),
-		Env:   map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms"},
+		Image:    getSandboxImage(),
+		Env:      map[string]string{"EXECD_API_GRACE_SHUTDOWN": "3s", "EXECD_JUPYTER_IDLE_POLL_INTERVAL": "200ms"},
+		Metadata: map[string]string{"team": team, "env": "prod"},
 	})
 	require.NoError(t, err)
 
@@ -90,6 +92,20 @@ func TestManager_GetAndKill(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, sb.ID(), info.ID)
 	t.Logf("Got sandbox %s via manager (state=%s)", info.ID, info.Status.State)
+
+	stage := "stage"
+	patched, err := mgr.PatchSandboxMetadata(ctx, sb.ID(), opensandbox.MetadataPatch{
+		"env":  &stage,
+		"team": nil,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "stage", patched.Metadata["env"])
+	require.NotContains(t, patched.Metadata, "team")
+
+	refreshed, err := mgr.GetSandboxInfo(ctx, sb.ID())
+	require.NoError(t, err)
+	require.Equal(t, "stage", refreshed.Metadata["env"])
+	require.NotContains(t, refreshed.Metadata, "team")
 
 	require.NoError(t, mgr.KillSandbox(ctx, sb.ID()))
 	t.Log("Killed sandbox via manager")

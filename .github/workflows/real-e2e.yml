@@ -4,6 +4,13 @@ permissions:
   contents: read
 
 on:
+  workflow_dispatch:
+    inputs:
+      run_code_interpreter_e2e:
+        description: 'Run code-interpreter E2E tests'
+        required: false
+        type: boolean
+        default: false
   pull_request:
     branches: [ main ]
     paths:
@@ -25,6 +32,7 @@ jobs:
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
+      RUN_CODE_INTERPRETER_E2E: ${{ github.event_name == 'workflow_dispatch' && inputs.run_code_interpreter_e2e == true && 'true' || 'false' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -116,6 +124,7 @@ jobs:
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
+      RUN_CODE_INTERPRETER_E2E: ${{ github.event_name == 'workflow_dispatch' && inputs.run_code_interpreter_e2e == true && 'true' || 'false' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -228,6 +237,7 @@ jobs:
     env:
       UV_BIN: /home/admin/.local/bin
       NODE_VERSION: "20.19.0"
+      RUN_CODE_INTERPRETER_E2E: ${{ github.event_name == 'workflow_dispatch' && inputs.run_code_interpreter_e2e == true && 'true' || 'false' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -321,6 +331,7 @@ jobs:
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
+      RUN_CODE_INTERPRETER_E2E: ${{ github.event_name == 'workflow_dispatch' && inputs.run_code_interpreter_e2e == true && 'true' || 'false' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -407,6 +418,7 @@ jobs:
       HOME: /home/admin/actions-runner
       GOCACHE: /home/admin/actions-runner/_temp/go-build
       GOMODCACHE: /home/admin/actions-runner/_temp/go-mod-cache
+      RUN_CODE_INTERPRETER_E2E: ${{ github.event_name == 'workflow_dispatch' && inputs.run_code_interpreter_e2e == true && 'true' || 'false' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

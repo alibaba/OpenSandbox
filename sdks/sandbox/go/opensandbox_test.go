@@ -138,6 +138,49 @@ func TestCreateSandbox_ImageAuth(t *testing.T) {
 	require.NoErrorf(t, err, "CreateSandbox with ImageAuth")
 }
 
+func TestPatchSandboxMetadata(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	value := "platform"
+
+	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			assert.Fail(t, fmt.Sprintf("expected PATCH, got %s", r.Method))
+		}
+		if r.URL.Path != "/sandboxes/sbx-123/metadata" {
+			assert.Fail(t, fmt.Sprintf("expected /sandboxes/sbx-123/metadata, got %s", r.URL.Path))
+		}
+
+		var body map[string]*string
+		require.NoErrorf(t, json.NewDecoder(r.Body).Decode(&body), "decode metadata patch")
+		require.NotNil(t, body["team"])
+		if *body["team"] != "platform" {
+			assert.Fail(t, fmt.Sprintf("team = %q, want platform", *body["team"]))
+		}
+		_, hasOld := body["old"]
+		require.True(t, hasOld, "old metadata key should be present")
+		if body["old"] != nil {
+			assert.Fail(t, "old metadata key should be null")
+		}
+
+		jsonResponse(w, http.StatusOK, SandboxInfo{
+			ID:         "sbx-123",
+			Status:     SandboxStatus{State: StateRunning},
+			Metadata:   map[string]string{"team": "platform"},
+			Entrypoint: []string{"/bin/sh"},
+			CreatedAt:  now,
+		})
+	})
+
+	got, err := client.PatchSandboxMetadata(context.Background(), "sbx-123", MetadataPatch{
+		"team": &value,
+		"old":  nil,
+	})
+	require.NoErrorf(t, err, "PatchSandboxMetadata")
+	if got.Metadata["team"] != "platform" {
+		assert.Fail(t, fmt.Sprintf("team = %q, want platform", got.Metadata["team"]))
+	}
+}
+
 func TestCreateSandbox_SecureAccess(t *testing.T) {
 	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
 		var req CreateSandboxRequest
@@ -757,6 +800,66 @@ func TestUploadFile_WithReader(t *testing.T) {
 	err := client.UploadFile(context.Background(), strings.NewReader("reader-content"), UploadFileOptions{
 		FileName: "reader.txt",
 		Metadata: FileMetadata{Path: "/sandbox/reader.txt"},
+	})
+	require.NoError(t, err)
+}
+
+func TestUploadFiles(t *testing.T) {
+	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPost, r.Method)
+		require.Equal(t, "/files/upload", r.URL.Path)
+		require.True(t, strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data"))
+
+		require.NoError(t, r.ParseMultipartForm(1<<20))
+		metadataParts := r.MultipartForm.File["metadata"]
+		fileParts := r.MultipartForm.File["file"]
+		require.Len(t, metadataParts, 2)
+		require.Len(t, fileParts, 2)
+
+		wantPaths := []string{"/sandbox/a.txt", "/sandbox/b.txt"}
+		wantFileNames := []string{"a.txt", "custom-b.txt"}
+		wantContents := []string{"alpha", "bravo"}
+
+		for i := range metadataParts {
+			metaFile, err := metadataParts[i].Open()
+			require.NoError(t, err)
+			require.Equal(t, "application/json", metadataParts[i].Header.Get("Content-Type"))
+			metaBytes, err := io.ReadAll(metaFile)
+			require.NoError(t, err)
+			require.NoError(t, metaFile.Close())
+
+			var meta FileMetadata
+			require.NoError(t, json.Unmarshal(metaBytes, &meta))
+			require.Equal(t, wantPaths[i], meta.Path)
+			require.Equal(t, 600+i, meta.Mode)
+
+			filePart, err := fileParts[i].Open()
+			require.NoError(t, err)
+			data, err := io.ReadAll(filePart)
+			require.NoError(t, err)
+			require.NoError(t, filePart.Close())
+			require.Equal(t, wantFileNames[i], fileParts[i].Filename)
+			require.Equal(t, wantContents[i], string(data))
+		}
+
+		w.WriteHeader(http.StatusOK)
+	})
+
+	err := client.UploadFiles(context.Background(), []UploadFileEntry{
+		{
+			File: strings.NewReader("alpha"),
+			Options: UploadFileOptions{
+				FileName: "a.txt",
+				Metadata: FileMetadata{Path: "/sandbox/a.txt", Mode: 600},
+			},
+		},
+		{
+			File: strings.NewReader("bravo"),
+			Options: UploadFileOptions{
+				FileName: "custom-b.txt",
+				Metadata: FileMetadata{Path: "/sandbox/b.txt", Mode: 601},
+			},
+		},
 	})
 	require.NoError(t, err)
 }

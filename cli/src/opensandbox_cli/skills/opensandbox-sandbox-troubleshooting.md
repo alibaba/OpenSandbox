@@ -1,11 +1,11 @@
 ---
 name: sandbox-troubleshooting
-description: Use OpenSandbox CLI state, health, summary, inspect, events, and logs to investigate failed, unhealthy, or unreachable sandboxes. Trigger when users report startup failures, crashes, OOM, image pull problems, pending sandboxes, network issues, or an unresponsive sandbox and want root cause plus next actions.
+description: Use OpenSandbox CLI state, health, and stable diagnostics logs/events to investigate failed, unhealthy, or unreachable sandboxes. Trigger when users report startup failures, crashes, OOM, image pull problems, pending sandboxes, network issues, or an unresponsive sandbox and want root cause plus next actions.
 ---
 
 # OpenSandbox Sandbox Troubleshooting
 
-Investigate the reported sandbox before proposing a fix. Prefer evidence from OpenSandbox state, health checks, summary output, and diagnostics streams over speculation.
+Investigate the reported sandbox before proposing a fix. Prefer evidence from OpenSandbox state, health checks, and stable diagnostics streams over speculation.
 
 ## Inputs To Collect
 
@@ -52,7 +52,7 @@ Use raw HTTP only after domain, protocol, and API key expectations are explicit.
 
 ## Operating Rules
 
-- start with the highest-signal commands first: sandbox state, sandbox health, then diagnostics summary
+- start with the highest-signal commands first: sandbox state, sandbox health, then stable diagnostics events/logs
 - use CLI commands when `osb` is available because they are shorter and usually already authenticated
 - use HTTP only when the CLI is unavailable or the user is clearly working from raw API access
 - distinguish observed facts from inference and quote the field, event, or log line that supports the diagnosis
@@ -67,32 +67,57 @@ Use this order by default:
 ```bash
 osb sandbox get <sandbox-id> -o json
 osb sandbox health <sandbox-id> -o json
-osb devops summary <sandbox-id> -o raw
+osb diagnostics events <sandbox-id> --scope lifecycle -o raw
+osb diagnostics events <sandbox-id> --scope runtime -o raw
+osb diagnostics logs <sandbox-id> --scope container -o raw
 ```
 
-Then drill down only where the summary points:
+Then drill down only where the stable diagnostics point:
 
 ```bash
-osb devops inspect <sandbox-id> -o raw
-osb devops events <sandbox-id> --limit 100 -o raw
-osb devops logs <sandbox-id> --tail 500 -o raw
-osb devops logs <sandbox-id> --since 30m -o raw
+osb diagnostics logs <sandbox-id> --scope lifecycle -o raw
+osb diagnostics events <sandbox-id> --scope all -o raw
+osb diagnostics logs <sandbox-id> --scope all -o raw
 ```
 
 ## Diagnostics Streams
 
 Important properties of the diagnostics commands:
 
-- `summary` is the broadest starting point because it combines inspect output, event history, and recent logs
-- `inspect`, `events`, and `logs` are detailed streams used after the broad summary
-- diagnostics commands return plain-text output, not structured SDK model objects
+- `diagnostics events` and `diagnostics logs` are stable API-backed commands
+- `--scope` is required for stable diagnostics; requests without scope use deprecated plain-text DevOps behavior
+- if the server returns `DIAGNOSTICS_NOT_IMPLEMENTED`, state that stable diagnostics are unavailable on this server and stop diagnostics collection
+- use known supported scopes first: `events:lifecycle`, `events:runtime`, `logs:lifecycle`, and `logs:container`
+- `--scope all` is useful when the server supports aggregate diagnostics; if it is empty, retry concrete supported scopes
+- other scopes such as `network` or `process` are server-defined and may be empty on some deployments
+- `-o raw` prints inline diagnostic text directly, or a content URL when the server returns URL delivery
+- `-o json` / `-o yaml` prints the CLI descriptor including `delivery`, `content_url`, `expires_at`, `truncated`, and `warnings`
 - quote concrete lines from diagnostics output instead of summarizing vaguely
 
 Use:
 
-- `inspect` for container state, exit code, restart count, resources, ports, and runtime metadata
-- `events` for scheduling failures, image pull issues, restarts, OOM kills, and probe transitions
-- `logs` for application errors, missing binaries, bad entrypoints, startup hangs, and health-check failures
+- `osb diagnostics events <sandbox-id> --scope lifecycle -o raw` for sandbox actions such as `CREATE`, `RENEW`, `DELETE`, `PAUSE`, `RESUME`, and `FORK`
+- `osb diagnostics events <sandbox-id> --scope runtime -o raw` for scheduler and container events such as `Scheduled`, `Pulling`, `Pulled`, `Created`, `Started`, and `ContainerDied`
+- `osb diagnostics logs <sandbox-id> --scope lifecycle -o raw` for manager server logs related to create, renew, delete, callbacks, request IDs, and server-side failures
+- `osb diagnostics logs <sandbox-id> --scope container -o raw` for sandbox main-process stdout, including application errors, missing binaries, bad entrypoints, startup hangs, and health-check failures
+
+## Evidence Semantics
+
+- `sandbox get` shows control-plane state; it does not prove the workload is healthy
+- `sandbox health` shows readiness or endpoint health; it can fail even when the sandbox is running
+- lifecycle diagnostics explain OpenSandbox manager behavior; container logs explain the user workload
+- runtime events are platform facts and usually outrank application logs for scheduling, image pull, restart, and kill reasons
+- empty diagnostics do not prove there is no issue; the scope may be unsupported, expired, or outside retention
+- `truncated: true` means the evidence is incomplete; lower confidence and mention the truncation
+- always read `warnings`; they may explain missing, partial, unsupported, or expired diagnostic content
+
+## URL Delivery
+
+- with `delivery: inline`, use `content` as the diagnostic text
+- with `delivery: url`, `-o raw` prints the diagnostic content URL; fetch it only if you need the diagnostic body
+- `content_url` in structured CLI output is a diagnostic artifact URL, not a sandbox service endpoint
+- check `expires_at`; container log URLs may expire quickly, so request diagnostics again if the URL is stale
+- do not forward diagnostic URLs or lifecycle logs to unrelated people because they may contain sensitive troubleshooting data
 
 ## Symptom To Command Mapping
 
@@ -100,11 +125,11 @@ Use the first command that best matches the reported symptom:
 
 | Symptom | First command | What to confirm next |
 | --- | --- | --- |
-| pending forever or stuck creating | `osb devops events <sandbox-id> --limit 100 -o raw` | image pull errors, scheduling failures, admission errors |
-| image pull failure | `osb devops events <sandbox-id> --limit 100 -o raw` | image name, tag, registry auth |
-| crash loop or repeated restarts | `osb devops logs <sandbox-id> --tail 200 -o raw` | `osb devops inspect <sandbox-id> -o raw` for exit code and restart count |
-| suspected OOM or exit code issue | `osb devops inspect <sandbox-id> -o raw` | `OOMKilled`, exit code, resource limits |
-| endpoint unreachable or connection refused | `osb sandbox health <sandbox-id> -o json` | `osb sandbox endpoint <sandbox-id> --port <port> -o json` and then `osb devops logs <sandbox-id> --tail 200 -o raw` |
+| pending forever or stuck creating | `osb diagnostics events <sandbox-id> --scope runtime -o raw` | image pull errors, scheduling failures, admission errors, then lifecycle logs |
+| image pull failure | `osb diagnostics events <sandbox-id> --scope runtime -o raw` | image name, tag, registry auth |
+| crash loop or repeated restarts | `osb diagnostics logs <sandbox-id> --scope container -o raw` | `osb diagnostics events <sandbox-id> --scope runtime -o raw` for restarts or kill signals |
+| suspected OOM or exit code issue | `osb diagnostics events <sandbox-id> --scope runtime -o raw` | kill signals, restart events, resource pressure messages |
+| endpoint unreachable or connection refused | `osb sandbox health <sandbox-id> -o json` | `osb sandbox endpoint <sandbox-id> --port <port> -o json` and then `osb diagnostics logs <sandbox-id> --scope container -o raw` |
 | outbound network access failure | `osb sandbox health <sandbox-id> -o json` | check service behavior, then switch to `network-egress` if the issue is egress policy related |
 
 ## Diagnosis Playbooks
@@ -118,15 +143,15 @@ Use the first command that best matches the reported symptom:
 
 ### OOM Kill
 
-- first evidence: `inspect` shows `OOMKilled: True` or exit code `137`
-- confirming evidence: events mention container killed due to out-of-memory
+- first evidence: runtime events mention container killed due to out-of-memory or resource pressure
+- confirming evidence: sandbox becomes unhealthy, restarts, or exits after memory-intensive work
 - likely cause: memory limit too low for the workload
 - next actions: increase memory, rerun the workload, compare peak workload memory with the configured limit
 
 ### Crash Loop Or Bad Entrypoint
 
 - first evidence: `logs` show startup exceptions, missing binaries, or permission errors
-- confirming evidence: `inspect` shows repeated restarts, exit code `126`, or exit code `127`
+- confirming evidence: runtime events show repeated restarts, failed starts, or container exit reasons
 - likely cause: bad entrypoint, missing executable, or application crash on boot
 - next actions: fix the command or image contents, correct file permissions, redeploy or recreate
 
@@ -144,16 +169,16 @@ CLI-first troubleshooting:
 ```bash
 osb sandbox get <sandbox-id> -o json
 osb sandbox health <sandbox-id> -o json
-osb devops summary <sandbox-id> -o raw
-osb devops events <sandbox-id> --limit 100 -o raw
+osb diagnostics events <sandbox-id> --scope lifecycle -o raw
+osb diagnostics events <sandbox-id> --scope runtime -o raw
+osb diagnostics logs <sandbox-id> --scope container -o raw
 ```
 
 Crash-focused investigation:
 
 ```bash
-osb devops summary <sandbox-id> -o raw
-osb devops logs <sandbox-id> --tail 500 -o raw
-osb devops inspect <sandbox-id> -o raw
+osb diagnostics logs <sandbox-id> --scope container -o raw
+osb diagnostics events <sandbox-id> --scope runtime -o raw
 ```
 
 Endpoint troubleshooting:
@@ -162,7 +187,7 @@ Endpoint troubleshooting:
 osb sandbox get <sandbox-id> -o json
 osb sandbox health <sandbox-id> -o json
 osb sandbox endpoint <sandbox-id> --port <port> -o json
-osb devops logs <sandbox-id> --tail 200 -o raw
+osb diagnostics logs <sandbox-id> --scope container -o raw
 ```
 
 ## Response Format

@@ -18,6 +18,7 @@ package com.alibaba.opensandbox.sandbox.domain.pool
 
 import com.alibaba.opensandbox.sandbox.Sandbox
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxImageSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
 
@@ -34,6 +35,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
  * @property metadata User-defined metadata.
  * @property extensions Optional extension parameters for server-side customized behaviors.
  * @property networkPolicy Optional outbound network policy.
+ * @property platform Optional runtime platform constraint.
  * @property secureAccess Whether to enable secured access for sandbox endpoints.
  * @property volumes Optional volume mounts.
  */
@@ -45,6 +47,7 @@ class PoolCreationSpec private constructor(
     val metadata: Map<String, String> = emptyMap(),
     val extensions: Map<String, String> = emptyMap(),
     val networkPolicy: NetworkPolicy? = null,
+    val platform: PlatformSpec? = null,
     val secureAccess: Boolean = false,
     val volumes: List<Volume>? = null,
 ) {
@@ -71,6 +74,7 @@ class PoolCreationSpec private constructor(
         private var metadata: Map<String, String> = emptyMap()
         private var extensions: Map<String, String> = emptyMap()
         private var networkPolicy: NetworkPolicy? = null
+        private var platform: PlatformSpec? = null
         private var secureAccess: Boolean = false
         private var volumes: List<Volume>? = null
 
@@ -181,6 +185,18 @@ class PoolCreationSpec private constructor(
             return this
         }
 
+        fun platform(platform: PlatformSpec?): Builder {
+            this.platform = platform
+            return this
+        }
+
+        fun platform(configure: PlatformSpec.Builder.() -> Unit): Builder {
+            val builder = PlatformSpec.builder()
+            builder.configure()
+            this.platform = builder.build()
+            return this
+        }
+
         @JvmOverloads
         fun secureAccess(enabled: Boolean = true): Builder {
             this.secureAccess = enabled
@@ -213,6 +229,7 @@ class PoolCreationSpec private constructor(
                 metadata = metadata,
                 extensions = extensions,
                 networkPolicy = networkPolicy,
+                platform = platform,
                 secureAccess = secureAccess,
                 volumes = volumes,
             )

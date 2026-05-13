@@ -418,6 +418,83 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /sandboxes/{sandboxId}/metadata:
+    parameters:
+      - $ref: '#/components/parameters/SandboxId'
+    patch:
+      tags: [Sandboxes]
+      summary: Patch sandbox metadata
+      description: |
+        Update sandbox metadata using JSON Merge Patch semantics (RFC 7396).
+
+        **Merge Patch rules:**
+        | Request body key/value | Behavior |
+        |---|---|
+        | `"key": "value"` | Add or replace the key |
+        | `"key": null` | Delete the key (silently ignored if key does not exist) |
+        | key absent | Keep current value (no change) |
+        | Empty `{}` | No-op, returns current metadata |
+
+        Metadata keys and values must comply with Kubernetes label rules:
+        - Keys must be valid DNS label names or prefixed DNS subdomains
+        - Keys with the `opensandbox.io/` prefix are reserved and rejected
+        - Values must be 63 characters or less, matching `[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?`
+
+        This operation does not restart or recreate the sandbox container/pod.
+
+        **Concurrency:** This endpoint uses read-modify-write without optimistic
+        locking (no `resourceVersion` check). Concurrent PATCH requests may
+        interleave and silently drop updates. Use a single writer or coordinate
+        out-of-band when concurrent modifications to the same key are expected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchSandboxMetadataRequest'
+            examples:
+              add-and-replace:
+                summary: Add new keys and replace existing values
+                value:
+                  team: "platform"
+                  version: "2.0"
+              delete-key:
+                summary: Delete a metadata key
+                value:
+                  deprecated-key: null
+              mixed-operations:
+                summary: Add, replace, and delete in a single request
+                value:
+                  project: "new-project"
+                  team: null
+                  environment: "production"
+              empty-body:
+                summary: No-op (returns current metadata)
+                value: {}
+      responses:
+        '200':
+          description: |
+            Metadata patched successfully. Returns the complete sandbox resource
+            with updated metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+          headers:
+            X-Request-ID:
+              $ref: '#/components/headers/XRequestId'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /sandboxes/{sandboxId}/snapshots:
     post:
       tags: [Snapshots]
@@ -1078,6 +1155,26 @@ components:
           description: Target CPU architecture (for example `amd64` or `arm64`).
           example: arm64
       additionalProperties: false
+    PatchSandboxMetadataRequest:
+      type: object
+      description: |
+        JSON Merge Patch (RFC 7396) request body for updating sandbox metadata.
+
+        The request body is the metadata object itself:
+        - Present keys with non-null values add or replace
+        - Keys with `null` values are deleted
+        - Absent keys are left unchanged
+
+        Keys with the `opensandbox.io/` prefix are reserved and rejected.
+      additionalProperties:
+        type:
+          - string
+          - 'null'
+      example:
+        project: "new-project"
+        team: null
+        environment: "production"
+
     CreateSandboxRequest:
       type: object
       required: [resourceLimits]

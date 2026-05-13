@@ -87,6 +87,18 @@ interface Sandboxes {
      */
     fun listSandboxes(filter: SandboxFilter): PagedSandboxInfos
 
+    /**
+     * Patches sandbox metadata.
+     *
+     * @param sandboxId Unique identifier of the sandbox
+     * @param patch Metadata merge patch. Non-null values add or replace keys; null values delete keys
+     * @return Current sandbox information after applying the patch
+     */
+    fun patchSandboxMetadata(
+        sandboxId: String,
+        patch: Map<String, String?>,
+    ): SandboxInfo
+
     fun createSnapshot(
         sandboxId: String,
         name: String? = null,

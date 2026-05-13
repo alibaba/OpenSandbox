@@ -58,6 +58,20 @@ public interface ISandboxes
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Patches sandbox metadata.
+    /// </summary>
+    /// <param name="sandboxId">The sandbox ID.</param>
+    /// <param name="patch">Metadata merge patch. Non-null values add or replace keys; null values delete keys.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The current sandbox information after applying the patch.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxException">Thrown when the sandbox service request fails.</exception>
+    Task<SandboxInfo> PatchSandboxMetadataAsync(
+        string sandboxId,
+        IReadOnlyDictionary<string, string?> patch,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes a sandbox.
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>

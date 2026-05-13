@@ -182,6 +182,7 @@ spec:
                       enum:
                       - Ready
                       - Progressing
+                      - Paused
                       - PauseFailed
                       - ResumeFailed
                       - PodFailed

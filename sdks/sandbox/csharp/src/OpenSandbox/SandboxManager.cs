@@ -122,6 +122,24 @@ public sealed class SandboxManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Patches metadata for a sandbox.
+    /// </summary>
+    /// <param name="sandboxId">The sandbox ID.</param>
+    /// <param name="patch">Metadata merge patch. Non-null values add or replace keys; null values delete keys.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The current sandbox information after applying the patch.</returns>
+    /// <exception cref="InvalidArgumentException">Thrown when <paramref name="sandboxId"/> is null or empty.</exception>
+    /// <exception cref="SandboxApiException">Thrown when the sandbox API returns an error.</exception>
+    public Task<SandboxInfo> PatchSandboxMetadataAsync(
+        string sandboxId,
+        IReadOnlyDictionary<string, string?> patch,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Patching sandbox metadata: {SandboxId}", sandboxId);
+        return _sandboxes.PatchSandboxMetadataAsync(sandboxId, patch, cancellationToken);
+    }
+
+    /// <summary>
     /// Terminates a sandbox.
     /// </summary>
     /// <param name="sandboxId">The sandbox ID.</param>

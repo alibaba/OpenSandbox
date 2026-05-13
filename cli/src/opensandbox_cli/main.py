@@ -26,6 +26,7 @@ from opensandbox_cli.client import ClientContext
 from opensandbox_cli.commands.command import command_group
 from opensandbox_cli.commands.config_cmd import config_group
 from opensandbox_cli.commands.devops import devops_group
+from opensandbox_cli.commands.diagnostics import diagnostics_group
 from opensandbox_cli.commands.egress import egress_group
 from opensandbox_cli.commands.file import file_group
 from opensandbox_cli.commands.sandbox import sandbox_group
@@ -134,5 +135,6 @@ cli.add_command(command_group)
 cli.add_command(file_group)
 cli.add_command(egress_group)
 cli.add_command(config_group)
+cli.add_command(diagnostics_group)
 cli.add_command(devops_group)
 cli.add_command(skills_group)

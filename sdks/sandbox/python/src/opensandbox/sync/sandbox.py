@@ -31,6 +31,7 @@ from opensandbox.exceptions import (
     SandboxInternalException,
     SandboxReadyTimeoutException,
 )
+from opensandbox.models.diagnostics import DiagnosticContent
 from opensandbox.models.sandboxes import (
     CreateSnapshotRequest,
     NetworkPolicy,
@@ -47,6 +48,7 @@ from opensandbox.models.sandboxes import (
 from opensandbox.sync.adapters.factory import AdapterFactorySync
 from opensandbox.sync.services import (
     CommandsSync,
+    DiagnosticsSync,
     EgressSync,
     FilesystemSync,
     HealthSync,
@@ -124,6 +126,7 @@ class SandboxSync:
         metrics_service: MetricsSync,
         egress_service: EgressSync,
         connection_config: ConnectionConfigSync,
+        diagnostics_service: DiagnosticsSync | None = None,
         custom_health_check: Callable[["SandboxSync"], bool] | None = None,
     ) -> None:
         """
@@ -137,6 +140,9 @@ class SandboxSync:
         self._metrics_service = metrics_service
         self._egress_service = egress_service
         self._connection_config = connection_config
+        self._diagnostics_service = diagnostics_service or AdapterFactorySync(
+            connection_config
+        ).create_diagnostics_service()
         self._custom_health_check = custom_health_check
 
     @property
@@ -165,6 +171,13 @@ class SandboxSync:
         Allows retrieving resource usage statistics (CPU, memory) and other performance metrics.
         """
         return self._metrics_service
+
+    @property
+    def diagnostics(self) -> DiagnosticsSync:
+        """
+        Provides access to sandbox diagnostic log and event descriptors.
+        """
+        return self._diagnostics_service
 
     @property
     def connection_config(self) -> ConnectionConfigSync:
@@ -230,6 +243,24 @@ class SandboxSync:
         """
         return self._metrics_service.get_metrics(self.id)
 
+    def get_diagnostic_logs(self, scope: str) -> DiagnosticContent:
+        """
+        Get diagnostic log content for this sandbox.
+
+        Args:
+            scope: Required diagnostic scope such as "container", "lifecycle", or "all".
+        """
+        return self._diagnostics_service.get_logs(self.id, scope)
+
+    def get_diagnostic_events(self, scope: str) -> DiagnosticContent:
+        """
+        Get diagnostic event content for this sandbox.
+
+        Args:
+            scope: Required diagnostic scope such as "runtime", "lifecycle", or "all".
+        """
+        return self._diagnostics_service.get_events(self.id, scope)
+
     def renew(self, timeout: timedelta) -> SandboxRenewResponse:
         """
         Renew the sandbox expiration time to delay automatic termination.
@@ -253,6 +284,14 @@ class SandboxSync:
             new_expiration,
         )
         return self._sandbox_service.renew_sandbox_expiration(self.id, new_expiration)
+
+    def patch_metadata(self, patch: dict[str, str | None]) -> SandboxInfo:
+        """
+        Patch sandbox metadata.
+
+        String values add or replace keys; None deletes keys.
+        """
+        return self._sandbox_service.patch_sandbox_metadata(self.id, patch)
 
     def create_snapshot(self, name: str | None = None) -> SnapshotInfo:
         """Create a persistent snapshot from this sandbox (blocking)."""
@@ -513,6 +552,7 @@ class SandboxSync:
                 health_service=factory.create_health_service(execd_endpoint),
                 metrics_service=factory.create_metrics_service(execd_endpoint),
                 egress_service=factory.create_egress_service(egress_endpoint),
+                diagnostics_service=factory.create_diagnostics_service(),
                 connection_config=config,
                 custom_health_check=health_check,
             )
@@ -596,6 +636,7 @@ class SandboxSync:
                 health_service=factory.create_health_service(execd_endpoint),
                 metrics_service=factory.create_metrics_service(execd_endpoint),
                 egress_service=factory.create_egress_service(egress_endpoint),
+                diagnostics_service=factory.create_diagnostics_service(),
                 connection_config=config,
                 custom_health_check=health_check,
             )
@@ -671,6 +712,7 @@ class SandboxSync:
                 health_service=factory.create_health_service(execd_endpoint),
                 metrics_service=factory.create_metrics_service(execd_endpoint),
                 egress_service=factory.create_egress_service(egress_endpoint),
+                diagnostics_service=factory.create_diagnostics_service(),
                 connection_config=config,
                 custom_health_check=health_check,
             )

@@ -118,6 +118,7 @@ if is_truthy "${OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT:-}"; then
 	if [ -f "$MITM_CA" ] && [ -s "$MITM_CA" ]; then
 		trust_mitm_ca_nss "$MITM_CA" || true
 		export NODE_EXTRA_CA_CERTS="$MITM_CA"
+		export REQUESTS_CA_BUNDLE="$MITM_CA"
 	fi
 fi
 

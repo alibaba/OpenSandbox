@@ -194,6 +194,32 @@ class SandboxesAdapterSync(SandboxesSync):
             logger.error("Failed to list sandboxes", exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
+    def patch_sandbox_metadata(
+        self, sandbox_id: str, patch: dict[str, str | None]
+    ) -> SandboxInfo:
+        try:
+            from opensandbox.api.lifecycle.api.sandboxes import (
+                patch_sandboxes_sandbox_id_metadata,
+            )
+            from opensandbox.api.lifecycle.models import PatchSandboxMetadataRequest
+            from opensandbox.api.lifecycle.models import Sandbox as ApiSandbox
+
+            response_obj = patch_sandboxes_sandbox_id_metadata.sync_detailed(
+                client=self._get_client(),
+                sandbox_id=sandbox_id,
+                body=PatchSandboxMetadataRequest.from_dict(patch),
+            )
+            handle_api_error(response_obj, f"Patch sandbox {sandbox_id} metadata")
+            parsed = require_parsed(
+                response_obj,
+                ApiSandbox,
+                f"Patch sandbox {sandbox_id} metadata",
+            )
+            return SandboxModelConverter.to_sandbox_info(parsed)
+        except Exception as e:
+            logger.error("Failed to patch sandbox %s metadata", sandbox_id, exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
     def get_sandbox_endpoint(
         self, sandbox_id: str, port: int, use_server_proxy: bool = False
     ) -> SandboxEndpoint:

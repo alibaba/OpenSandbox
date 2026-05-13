@@ -449,6 +449,19 @@ This automatically triggers the workflow to:
 4. Create a GitHub Release
 5. Publish the .tgz package to the Release
 
+Important versioning note:
+
+- The Helm chart `version` is the chart package version and is released through
+  `helm/{component}/{version}` tags.
+- The chart `appVersion` is the default image/application version used by that
+  chart release.
+- The `publish-helm-chart.yml` workflow updates `appVersion` for the published
+  release, but intentionally does not auto-bump the chart `version` inside
+  `Chart.yaml` on server release branches.
+- If you need a specific server image release, set the image tag explicitly
+  (for example `--set server.image.tag=v0.1.13`) or publish a new Helm chart
+  package version for the chart itself.
+
 #### Option 2: Manual Trigger
 
 1. Visit the GitHub Actions page

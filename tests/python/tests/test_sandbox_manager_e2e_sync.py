@@ -237,6 +237,14 @@ class TestSandboxManagerE2ESync:
                 SandboxFilter(metadata={"tag": tag, "team": "t2"}, page_size=50)
             )
             assert all(info.id not in {s1.id, s2.id, s3.id} for info in none_match.sandbox_infos)
+
+            patched = manager.patch_sandbox_metadata(s2.id, {"env": "stage", "team": None})
+            assert patched.metadata["env"] == "stage"
+            assert "team" not in patched.metadata
+
+            refreshed = manager.get_sandbox_info(s2.id)
+            assert refreshed.metadata["env"] == "stage"
+            assert "team" not in refreshed.metadata
         finally:
             for s in [s1, s2, s3]:
                 if s is None:

@@ -24,6 +24,7 @@ import pytest
 from opensandbox.config import ConnectionConfig
 from opensandbox.constants import DEFAULT_EGRESS_PORT, DEFAULT_EXECD_PORT
 from opensandbox.exceptions import SandboxReadyTimeoutException
+from opensandbox.models.diagnostics import DiagnosticContent
 from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule, SandboxEndpoint
 from opensandbox.sandbox import Sandbox
 
@@ -71,10 +72,40 @@ class _EgressServiceStub:
         self.patch_calls.append(rules)
 
 
+class _DiagnosticsServiceStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object, str | None]] = []
+
+    async def get_logs(self, sandbox_id: str, scope: str) -> DiagnosticContent:
+        self.calls.append(("logs", sandbox_id, scope))
+        return DiagnosticContent(
+            sandboxId=sandbox_id,
+            kind="logs",
+            scope=scope or "container",
+            delivery="inline",
+            contentType="text/plain; charset=utf-8",
+            content="log line",
+            truncated=False,
+        )
+
+    async def get_events(self, sandbox_id: str, scope: str) -> DiagnosticContent:
+        self.calls.append(("events", sandbox_id, scope))
+        return DiagnosticContent(
+            sandboxId=sandbox_id,
+            kind="events",
+            scope=scope or "runtime",
+            delivery="inline",
+            contentType="text/plain; charset=utf-8",
+            content="event line",
+            truncated=False,
+        )
+
+
 def _make_sandbox(
     *,
     health_service,
     sandbox_service,
+    diagnostics_service=None,
     custom_health_check=None,
     connection_config: ConnectionConfig | None = None,
 ) -> Sandbox:
@@ -86,6 +117,7 @@ def _make_sandbox(
         health_service=health_service,
         metrics_service=_Noop(),
         egress_service=_EgressServiceStub(),
+        diagnostics_service=diagnostics_service or _DiagnosticsServiceStub(),
         connection_config=connection_config or ConnectionConfig(),
         custom_health_check=custom_health_check,
     )
@@ -207,6 +239,7 @@ async def test_patch_egress_rules_uses_injected_egress_service(
         health_service=_HealthServiceStub(),
         metrics_service=_Noop(),
         egress_service=egress_service,
+        diagnostics_service=_DiagnosticsServiceStub(),
         connection_config=ConnectionConfig(use_server_proxy=False),
     )
     rules = [NetworkRule(action="allow", target="www.github.com")]
@@ -215,6 +248,26 @@ async def test_patch_egress_rules_uses_injected_egress_service(
 
     assert svc.endpoint_calls == []
     assert egress_service.patch_calls == [rules]
+
+
+@pytest.mark.asyncio
+async def test_get_diagnostics_uses_injected_diagnostics_service() -> None:
+    diagnostics_service = _DiagnosticsServiceStub()
+    sbx = _make_sandbox(
+        health_service=_HealthServiceStub(),
+        sandbox_service=_SandboxServiceStub(),
+        diagnostics_service=diagnostics_service,
+    )
+
+    logs = await sbx.get_diagnostic_logs(scope="container")
+    events = await sbx.diagnostics.get_events(sbx.id, scope="runtime")
+
+    assert logs.kind == "logs"
+    assert events.kind == "events"
+    assert diagnostics_service.calls == [
+        ("logs", sbx.id, "container"),
+        ("events", sbx.id, "runtime"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -263,6 +316,9 @@ async def test_create_resolves_egress_endpoint_and_builds_service(
         def create_egress_service(self, endpoint: SandboxEndpoint) -> _EgressServiceStub:
             factory_calls.append(endpoint)
             return egress_service
+
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
 
     sandbox_service = _SandboxServiceCreateStub()
     monkeypatch.setattr("opensandbox.sandbox.AdapterFactory", _FactoryStub)
@@ -385,6 +441,9 @@ async def test_create_preserves_manual_cleanup_timeout(
         def create_egress_service(self, _endpoint: SandboxEndpoint):
             return _EgressServiceStub()
 
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
+
     sandbox_service = _SandboxServiceCreateStub()
     monkeypatch.setattr("opensandbox.sandbox.AdapterFactory", _FactoryStub)
 
@@ -467,6 +526,9 @@ async def test_create_passes_new_signature_keywords_even_when_unused(
         def create_egress_service(self, _endpoint):
             return _EgressServiceStub()
 
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
+
     monkeypatch.setattr("opensandbox.sandbox.AdapterFactory", _FactoryStub)
     await Sandbox.create(
         "python:3.11",
@@ -547,6 +609,9 @@ async def test_create_restore_from_snapshot_passes_snapshot_id(
         def create_egress_service(self, _endpoint):
             return _EgressServiceStub()
 
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
+
     monkeypatch.setattr("opensandbox.sandbox.AdapterFactory", _FactoryStub)
     await Sandbox.create(snapshot_id="snap-123", skip_health_check=True)
 
@@ -615,6 +680,9 @@ async def test_create_restore_from_snapshot_preserves_custom_entrypoint(
 
         def create_egress_service(self, _endpoint):
             return _EgressServiceStub()
+
+        def create_diagnostics_service(self):
+            return _DiagnosticsServiceStub()
 
     monkeypatch.setattr("opensandbox.sandbox.AdapterFactory", _FactoryStub)
     await Sandbox.create(

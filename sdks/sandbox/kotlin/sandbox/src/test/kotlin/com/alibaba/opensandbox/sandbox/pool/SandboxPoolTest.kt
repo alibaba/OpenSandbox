@@ -25,6 +25,7 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolNotRunningException
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Host
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
 import com.alibaba.opensandbox.sandbox.domain.pool.AcquirePolicy
 import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry
@@ -382,6 +383,26 @@ class SandboxPoolTest {
         val extensions = extensionsField.get(builder) as MutableMap<String, String>
         assertEquals("abc123", extensions["storage.id"])
         assertEquals("true", extensions["debug"])
+    }
+
+    @Test
+    fun `applyToBuilder propagates pool creation spec platform to sandbox builder`() {
+        val platform =
+            PlatformSpec.builder()
+                .os("linux")
+                .arch("arm64")
+                .build()
+        val spec =
+            PoolCreationSpec.builder()
+                .image("ubuntu:22.04")
+                .platform(platform)
+                .build()
+
+        val builder = spec.applyToBuilder(Sandbox.builder())
+
+        val platformField = builder.javaClass.getDeclaredField("platform")
+        platformField.isAccessible = true
+        assertSame(platform, platformField.get(builder))
     }
 
     @Test

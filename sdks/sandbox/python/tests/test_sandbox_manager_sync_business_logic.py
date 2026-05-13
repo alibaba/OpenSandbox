@@ -21,6 +21,7 @@ from uuid import uuid4
 import httpx
 
 from opensandbox.config.connection_sync import ConnectionConfigSync
+from opensandbox.models.diagnostics import DiagnosticContent
 from opensandbox.sync.manager import SandboxManagerSync
 
 
@@ -61,6 +62,35 @@ class _SandboxServiceStub:
 
     def delete_snapshot(self, snapshot_id):
         self.snapshot_calls.append(("delete", snapshot_id))
+
+
+class _DiagnosticsServiceStub:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object, str | None]] = []
+
+    def get_logs(self, sandbox_id, scope) -> DiagnosticContent:
+        self.calls.append(("logs", sandbox_id, scope))
+        return DiagnosticContent(
+            sandboxId=sandbox_id,
+            kind="logs",
+            scope=scope or "container",
+            delivery="inline",
+            contentType="text/plain; charset=utf-8",
+            content="log line",
+            truncated=False,
+        )
+
+    def get_events(self, sandbox_id, scope) -> DiagnosticContent:
+        self.calls.append(("events", sandbox_id, scope))
+        return DiagnosticContent(
+            sandboxId=sandbox_id,
+            kind="events",
+            scope=scope or "runtime",
+            delivery="inline",
+            contentType="text/plain; charset=utf-8",
+            content="event line",
+            truncated=False,
+        )
 
 
 def test_sync_manager_renew_uses_utc_datetime() -> None:
@@ -109,3 +139,22 @@ def test_sync_manager_snapshot_methods_delegate() -> None:
     assert svc.snapshot_calls[0] == ("create", ("sbx-1", "before-upgrade"))
     assert svc.snapshot_calls[1] == ("get", "snap-1")
     assert svc.snapshot_calls[3] == ("delete", "snap-1")
+
+
+def test_sync_manager_diagnostic_methods_delegate_by_sandbox_id() -> None:
+    diagnostics_service = _DiagnosticsServiceStub()
+    mgr = SandboxManagerSync(
+        _SandboxServiceStub(),
+        ConnectionConfigSync(),
+        diagnostics_service=diagnostics_service,
+    )
+
+    logs = mgr.get_diagnostic_logs("sbx-1", scope="container")
+    events = mgr.get_diagnostic_events("sbx-1", scope="runtime")
+
+    assert logs.kind == "logs"
+    assert events.kind == "events"
+    assert diagnostics_service.calls == [
+        ("logs", "sbx-1", "container"),
+        ("events", "sbx-1", "runtime"),
+    ]

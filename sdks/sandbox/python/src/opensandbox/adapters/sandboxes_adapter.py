@@ -233,6 +233,35 @@ class SandboxesAdapter(Sandboxes):
             logger.error("Failed to list sandboxes", exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
+    async def patch_sandbox_metadata(
+        self, sandbox_id: str, patch: dict[str, str | None]
+    ) -> SandboxInfo:
+        """Patch metadata for a sandbox using the metadata-specific lifecycle endpoint."""
+        try:
+            from opensandbox.api.lifecycle.api.sandboxes import (
+                patch_sandboxes_sandbox_id_metadata,
+            )
+            from opensandbox.api.lifecycle.models import PatchSandboxMetadataRequest
+            from opensandbox.api.lifecycle.models import Sandbox as ApiSandbox
+
+            client = await self._get_client()
+            response_obj = await patch_sandboxes_sandbox_id_metadata.asyncio_detailed(
+                client=client,
+                sandbox_id=sandbox_id,
+                body=PatchSandboxMetadataRequest.from_dict(patch),
+            )
+
+            handle_api_error(response_obj, f"Patch sandbox {sandbox_id} metadata")
+            parsed = require_parsed(
+                response_obj,
+                ApiSandbox,
+                f"Patch sandbox {sandbox_id} metadata",
+            )
+            return SandboxModelConverter.to_sandbox_info(parsed)
+        except Exception as e:
+            logger.error("Failed to patch sandbox %s metadata", sandbox_id, exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e
+
     async def create_snapshot(
         self, sandbox_id: str, request: CreateSnapshotRequest | None = None
     ) -> SnapshotInfo:

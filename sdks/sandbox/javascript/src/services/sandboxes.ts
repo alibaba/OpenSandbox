@@ -26,12 +26,17 @@ import type {
   SnapshotInfo,
   SandboxId,
   SandboxInfo,
+  SandboxMetadataPatch,
 } from "../models/sandboxes.js";
 
 export interface Sandboxes {
   createSandbox(req: CreateSandboxRequest): Promise<CreateSandboxResponse>;
   getSandbox(sandboxId: SandboxId): Promise<SandboxInfo>;
   listSandboxes(params?: ListSandboxesParams): Promise<ListSandboxesResponse>;
+  patchSandboxMetadata(
+    sandboxId: SandboxId,
+    patch: SandboxMetadataPatch,
+  ): Promise<SandboxInfo>;
   deleteSandbox(sandboxId: SandboxId): Promise<void>;
 
   pauseSandbox(sandboxId: SandboxId): Promise<void>;

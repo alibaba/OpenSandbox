@@ -58,6 +58,9 @@ dependencies {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    if (project.findProperty("skipCodeInterpreterE2E") == "true") {
+        exclude("**/CodeInterpreterE2ETest.class")
+    }
 }
 
 tasks.register<Test>("e2eTest") {

@@ -102,6 +102,18 @@ func Launch(cfg Config) (*Running, error) {
 	// Stream large bodies instead of buffering them in memory (OOM prevention).
 	args = append(args, "--set", "stream_large_bodies=1m")
 
+	// Lazy connection strategy: defer upstream connection until the request is fully received,
+	// which avoids unnecessary connections for blocked/filtered requests.
+	args = append(args, "--set", "connection_strategy=lazy")
+
+	// Transparent mode redirects TCP to IP addresses. Clients connecting to IPs
+	// do not send SNI, so upstream TLS cert hostname verification fails with
+	// "IP address mismatch". Set OPENSANDBOX_EGRESS_MITMPROXY_SSL_INSECURE=true
+	// to skip upstream verification when clients connect by IP.
+	if constants.IsTruthy(os.Getenv(constants.EnvMitmproxySslInsecure)) {
+		args = append(args, "--set", "ssl_insecure=true")
+	}
+
 	homeEnv := home
 	if strings.TrimSpace(cfg.ConfDir) != "" {
 		cd := strings.TrimSpace(cfg.ConfDir)

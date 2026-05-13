@@ -240,6 +240,9 @@ public class SandboxEgressLifecycleTests
         public Task<ListSandboxesResponse> ListSandboxesAsync(ListSandboxesParams? @params = null, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
+        public Task<SandboxInfo> PatchSandboxMetadataAsync(string sandboxId, IReadOnlyDictionary<string, string?> patch, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
         public Task DeleteSandboxAsync(string sandboxId, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 

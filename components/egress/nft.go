@@ -19,6 +19,7 @@ import (
 	"net/netip"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/dnsproxy"
@@ -51,7 +52,9 @@ func setupNft(ctx context.Context, nftMgr nftApplier, initialPolicy *policy.Netw
 	}
 	log.Infof("nftables static policy applied (table inet opensandbox); DNS-resolved IPs will be added to dynamic allow sets")
 	proxy.SetOnResolved(func(domain string, ips []nftables.ResolvedIP) {
-		if err := nftMgr.AddResolvedIPs(ctx, ips); err != nil {
+		addCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := nftMgr.AddResolvedIPs(addCtx, ips); err != nil {
 			log.Warnf("[dns] add resolved IPs to nft failed for domain %q: %v", domain, err)
 		}
 	})
