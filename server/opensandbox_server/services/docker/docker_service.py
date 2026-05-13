@@ -761,7 +761,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         requested_windows_profile = is_windows_platform(request.platform)
 
         if requested_windows_profile:
-            validate_windows_resource_limits(request.resource_limits.root or {})
+            validate_windows_resource_limits((request.resource_limits.root if request.resource_limits else None) or {})
             validate_windows_runtime_prerequisites()
 
         # Prepare OSSFS mounts first so binds can reference mounted host paths.
@@ -855,7 +855,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                 )
                 environment = inject_windows_resource_limits_env(
                     environment,
-                    request.resource_limits.root or {},
+                    (request.resource_limits.root if request.resource_limits else None) or {},
                 )
                 environment = inject_windows_user_ports(environment, exposed_ports)
 

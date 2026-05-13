@@ -403,10 +403,10 @@ class CreateSandboxRequest(BaseModel):
             "null timeout when the workload provider does not support non-expiring sandboxes."
         ),
     )
-    resource_limits: ResourceLimits = Field(
-        ...,
+    resource_limits: Optional[ResourceLimits] = Field(
+        None,
         alias="resourceLimits",
-        description="Runtime resource constraints for the sandbox instance",
+        description="Runtime resource constraints for the sandbox instance. Optional when poolRef is provided.",
     )
     env: Optional[Dict[str, Optional[str]]] = Field(
         None,
@@ -457,6 +457,12 @@ class CreateSandboxRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_source_and_entrypoint(self) -> "CreateSandboxRequest":
+        # When poolRef is set, image/snapshotId/entrypoint/resourceLimits are
+        # all defined in the Pool CRD and not required from the caller.
+        has_pool_ref = bool((self.extensions or {}).get("poolRef", "").strip())
+        if has_pool_ref:
+            return self
+
         has_image = self.image is not None and bool(self.image.uri.strip())
         has_snapshot = bool((self.snapshot_id or "").strip())
 
@@ -471,6 +477,9 @@ class CreateSandboxRequest(BaseModel):
 
         if self.snapshot_id is not None and not has_snapshot:
             self.snapshot_id = None
+
+        if self.resource_limits is None:
+            raise ValueError("resourceLimits is required when poolRef is not provided.")
 
         return self
 
