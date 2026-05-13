@@ -39,11 +39,28 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return False
         return bool(AuthMiddleware._PROXY_PATH_RE.match(path))
 
+    # API route prefixes that must never be bypassed by the console auth skip.
+    _PROTECTED_API_PREFIXES = (
+        "/v1",
+        "/auth",
+        "/sandboxes",
+        "/snapshots",
+        "/pools",
+        "/devops",
+    )
+
     @staticmethod
     def _is_console_path(path: str, mount: str) -> bool:
         if ".." in path:
             return False
         base = mount.rstrip("/") or "/console"
+        # Reject any mount that collides with known API route prefixes so a
+        # misconfigured mount_path (e.g. "/auth") cannot bypass authentication.
+        if any(
+            base == p or base.startswith(p + "/")
+            for p in AuthMiddleware._PROTECTED_API_PREFIXES
+        ):
+            return False
         return path == base or path.startswith(base + "/")
 
     def __init__(self, app, config: Optional[AppConfig] = None):
@@ -83,7 +100,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if self._is_proxy_path(request.url.path):
             return await call_next(request)
 
-        if self._is_console_path(request.url.path, self.config.console.mount_path):
+        if self.config.console.enabled and self._is_console_path(request.url.path, self.config.console.mount_path):
             return await call_next(request)
 
         mode = self.config.auth.mode

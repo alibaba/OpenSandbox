@@ -813,8 +813,16 @@ async def create_snapshot(
         sandbox=box,
     )
     create_request = request or CreateSnapshotRequest()
-    snap_access_owner = principal.canonical_owner if is_user_scoped(principal) else None
-    snap_access_team = principal.canonical_team if is_user_scoped(principal) else None
+    # Derive snapshot scope from the source sandbox's metadata so every snapshot
+    # carries ownership data regardless of whether the creator is a user principal
+    # or a service-admin API key.
+    box_meta: dict = {}
+    if isinstance(box, dict):
+        box_meta = box.get("metadata") or {}
+    else:
+        box_meta = box.metadata or {}
+    snap_access_owner = box_meta.get(cfg.authz.owner_metadata_key) or None
+    snap_access_team = box_meta.get(cfg.authz.team_metadata_key) or None
     try:
         snapshot = await asyncio.to_thread(
             snapshot_service.create_snapshot,

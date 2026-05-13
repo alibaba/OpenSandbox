@@ -106,7 +106,12 @@ class SQLiteSnapshotRepository:
             params.append(query.source_sandbox_id)
 
         if query.access_owner is not None:
-            clauses.append("access_owner = ?")
+            if query.include_unscoped_owner:
+                # Include legacy snapshots (NULL access_owner) alongside owned ones
+                # so records created before scope metadata was introduced remain visible.
+                clauses.append("(access_owner = ? OR access_owner IS NULL)")
+            else:
+                clauses.append("access_owner = ?")
             params.append(query.access_owner)
 
         if query.access_team is not None:

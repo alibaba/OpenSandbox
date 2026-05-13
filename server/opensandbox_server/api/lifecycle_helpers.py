@@ -112,9 +112,11 @@ def authorize_snapshot_scope(
     # Legacy snapshot without stored scope metadata: resolve via source sandbox.
     try:
         box = sandbox_service.get_sandbox(snapshot.sandbox_id)
-    except HTTPException:
-        # Source sandbox gone and no stored scope — cannot prove mismatch; allow.
-        return
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            # Source sandbox deleted and no stored scope — cannot prove a mismatch; allow.
+            return
+        raise  # 500 / 503 / etc. — fail closed rather than exposing data
     if not sandbox_in_scope(principal, box, owner_key, team_key):
         raise _OUT_OF_SCOPE
 
