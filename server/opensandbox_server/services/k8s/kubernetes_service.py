@@ -264,7 +264,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
 
         Raises HTTP 400 if the provider does not support per-request image auth.
         """
-        if request.image.auth is None:
+        if request.image is None or request.image.auth is None:
             return
         if self.workload_provider.supports_image_auth():
             return
