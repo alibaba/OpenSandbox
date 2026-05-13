@@ -49,6 +49,8 @@ spec:
           name: opensandbox-win-kvm
         - mountPath: /dev/net/tun
           name: opensandbox-win-tun
+        - mountPath: /storage
+          name: opensandbox-win-storage
       initContainers:
       - args:
         - cp ./install.bat /oem/install.bat && cp ./execd.exe /oem/execd.exe && chmod
@@ -65,7 +67,7 @@ spec:
           name: opensandbox-win-oem
       nodeSelector:
         kubernetes.io/arch: amd64
-      restartPolicy: Never
+      restartPolicy: Always
       tolerations:
       - operator: Exists
       volumes:
@@ -81,6 +83,8 @@ spec:
           path: /dev/net/tun
           type: CharDevice
         name: opensandbox-win-tun
+      - emptyDir: {}
+        name: opensandbox-win-storage
   capacitySpec:
     bufferMax: 3
     bufferMin: 1

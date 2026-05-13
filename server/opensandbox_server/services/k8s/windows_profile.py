@@ -29,6 +29,7 @@ from opensandbox_server.services.windows_common import (
 WINDOWS_OEM_VOLUME_NAME = "opensandbox-win-oem"
 WINDOWS_KVM_VOLUME_NAME = "opensandbox-win-kvm"
 WINDOWS_TUN_VOLUME_NAME = "opensandbox-win-tun"
+WINDOWS_STORAGE_VOLUME_NAME = "opensandbox-win-storage"
 WINDOWS_PROFILE_DEFAULT_USER_PORTS = ["44772", "8080", "3389/tcp", "3389/udp", "8006/tcp"]
 # Extra memory overhead (in Gi) reserved for QEMU process on top of guest RAM.
 WINDOWS_QEMU_MEMORY_OVERHEAD_GI = 2
@@ -48,10 +49,6 @@ def build_windows_profile_env(
     resource_limits: dict[str, str],
 ) -> list[dict[str, str]]:
     env_items = [f"{key}={value}" for key, value in env.items()]
-    # Disable KVM acceleration by default; host /dev/kvm is often unwritable
-    # inside K8s pods. Users can override by passing KVM=Y in env.
-    if "KVM" not in env:
-        env_items.append("KVM=N")
     env_items = inject_windows_resource_limits_env(env_items, resource_limits or {})
     env_items = inject_windows_user_ports(env_items, WINDOWS_PROFILE_DEFAULT_USER_PORTS)
 
@@ -129,6 +126,7 @@ def apply_windows_profile_overrides(
     else:
         main_container.pop("resources", None)
     security_context = main_container.setdefault("securityContext", {})
+    security_context["privileged"] = True
     capabilities = security_context.setdefault("capabilities", {})
     drop = capabilities.get("drop")
     if isinstance(drop, list):
@@ -145,6 +143,7 @@ def apply_windows_profile_overrides(
             {"name": WINDOWS_OEM_VOLUME_NAME, "mountPath": "/oem"},
             {"name": WINDOWS_KVM_VOLUME_NAME, "mountPath": "/dev/kvm"},
             {"name": WINDOWS_TUN_VOLUME_NAME, "mountPath": "/dev/net/tun"},
+            {"name": WINDOWS_STORAGE_VOLUME_NAME, "mountPath": "/storage"},
         ],
     )
 
@@ -160,8 +159,13 @@ def apply_windows_profile_overrides(
                 "name": WINDOWS_TUN_VOLUME_NAME,
                 "hostPath": {"path": "/dev/net/tun", "type": "CharDevice"},
             },
+            {"name": WINDOWS_STORAGE_VOLUME_NAME, "emptyDir": {}},
         ],
     )
+
+    # dockur/windows relies on container restart to complete multi-phase
+    # installation (first boot installs from ISO, second boot runs from disk).
+    pod_spec["restartPolicy"] = "Always"
 
 
 def apply_windows_profile_arch_selector(

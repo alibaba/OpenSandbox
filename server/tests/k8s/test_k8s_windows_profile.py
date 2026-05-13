@@ -75,21 +75,21 @@ class TestMemoryWithQemuOverhead:
 class TestBuildWindowsProfileEnv:
     """Tests for build_windows_profile_env."""
 
-    def test_injects_kvm_n_when_not_present(self):
+    def test_does_not_inject_kvm_n_by_default(self):
         result = build_windows_profile_env(
             env={"VERSION": "11"},
             resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
         )
         env_dict = {item["name"]: item["value"] for item in result}
-        assert env_dict["KVM"] == "N"
+        assert "KVM" not in env_dict
 
     def test_preserves_user_kvm_override(self):
         result = build_windows_profile_env(
-            env={"VERSION": "11", "KVM": "Y"},
+            env={"VERSION": "11", "KVM": "N"},
             resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
         )
         env_dict = {item["name"]: item["value"] for item in result}
-        assert env_dict["KVM"] == "Y"
+        assert env_dict["KVM"] == "N"
 
     def test_includes_user_env_and_resource_derived_env(self):
         result = build_windows_profile_env(
@@ -206,3 +206,44 @@ class TestApplyWindowsProfileOverrides:
         )
         main = pod_spec["containers"][0]
         assert "resources" not in main
+
+    def test_sets_privileged_true(self):
+        pod_spec = self._make_pod_spec()
+        apply_windows_profile_overrides(
+            pod_spec=pod_spec,
+            entrypoint=["tail", "-f", "/dev/null"],
+            env={},
+            resource_limits={"cpu": "4", "memory": "8G"},
+        )
+        main = pod_spec["containers"][0]
+        assert main["securityContext"]["privileged"] is True
+
+    def test_sets_restart_policy_always(self):
+        pod_spec = self._make_pod_spec()
+        pod_spec["restartPolicy"] = "Never"
+        apply_windows_profile_overrides(
+            pod_spec=pod_spec,
+            entrypoint=["tail", "-f", "/dev/null"],
+            env={},
+            resource_limits={"cpu": "4", "memory": "8G"},
+        )
+        assert pod_spec["restartPolicy"] == "Always"
+
+    def test_adds_storage_volume_and_mount(self):
+        pod_spec = self._make_pod_spec()
+        apply_windows_profile_overrides(
+            pod_spec=pod_spec,
+            entrypoint=["tail", "-f", "/dev/null"],
+            env={},
+            resource_limits={"cpu": "4", "memory": "8G"},
+        )
+        volume_names = [v["name"] for v in pod_spec["volumes"]]
+        assert "opensandbox-win-storage" in volume_names
+        storage_vol = next(v for v in pod_spec["volumes"] if v["name"] == "opensandbox-win-storage")
+        assert storage_vol == {"name": "opensandbox-win-storage", "emptyDir": {}}
+
+        main = pod_spec["containers"][0]
+        mount_names = [m["name"] for m in main["volumeMounts"]]
+        assert "opensandbox-win-storage" in mount_names
+        storage_mount = next(m for m in main["volumeMounts"] if m["name"] == "opensandbox-win-storage")
+        assert storage_mount["mountPath"] == "/storage"
