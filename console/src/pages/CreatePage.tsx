@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, createSandbox } from "../api/client";
-import { canMutate, parseRoleFromEnv } from "../api/role";
+import { canMutate, useRole } from "../api/role";
 import { AuthHint, ErrorBanner } from "../components/AuthHint";
 
 export function CreatePage() {
@@ -13,7 +13,7 @@ export function CreatePage() {
   const [entrypoint, setEntrypoint] = useState("python3, -c, print(1)");
   const [err, setErr] = useState<unknown>(null);
   const [submitting, setSubmitting] = useState(false);
-  const role = parseRoleFromEnv();
+  const role = useRole();
   const mutate = canMutate(role);
 
   async function onSubmit(e: FormEvent) {

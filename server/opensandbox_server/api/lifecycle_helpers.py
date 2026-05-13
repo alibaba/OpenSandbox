@@ -122,6 +122,23 @@ def authorize_mutating_action(
         raise
 
 
+def strip_reserved_metadata_from_patch(
+    patch: dict,
+    principal: Optional[Principal],
+    *,
+    owner_key: str,
+    team_key: str,
+) -> dict:
+    """Remove reserved scope keys from a metadata patch for non-service-admin principals.
+
+    Prevents user principals from altering access.owner / access.team through
+    the PATCH endpoint, which would let them escape their own scope boundary.
+    """
+    if principal is None or principal.is_service_admin:
+        return patch
+    return {k: v for k, v in patch.items() if k not in (owner_key, team_key)}
+
+
 def log_mutation_audit(
     request: Request,
     *,

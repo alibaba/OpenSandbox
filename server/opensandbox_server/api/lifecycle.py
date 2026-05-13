@@ -55,6 +55,7 @@ from opensandbox_server.api.lifecycle_helpers import (
     get_principal,
     log_mutation_audit,
     merge_list_scope_from_request,
+    strip_reserved_metadata_from_patch,
 )
 from opensandbox_server.middleware.authorization import LifecycleAction, authorize_action, is_user_scoped
 
@@ -301,6 +302,7 @@ async def get_sandbox(
     },
 )
 async def patch_sandbox_metadata(
+    http_request: Request,
     sandbox_id: str,
     patch: PatchSandboxMetadataRequest = Body(...),
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
@@ -310,7 +312,70 @@ async def patch_sandbox_metadata(
     Non-null adds/replaces, null deletes, absent keeps.
     Read-modify-write without optimistic locking — concurrent PATCH may drop updates.
     """
-    return sandbox_service.patch_sandbox_metadata(sandbox_id, patch)
+    cfg = get_config()
+    principal = get_principal(http_request)
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.PATCH_METADATA,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+    )
+    try:
+        box = sandbox_service.get_sandbox(sandbox_id)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            log_mutation_audit(
+                http_request,
+                action=LifecycleAction.PATCH_METADATA,
+                sandbox_id=sandbox_id,
+                outcome="not_found",
+            )
+        raise
+    authorize_mutating_action(
+        http_request,
+        principal,
+        LifecycleAction.PATCH_METADATA,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+        sandbox_id=sandbox_id,
+        sandbox=box,
+    )
+    safe_patch = strip_reserved_metadata_from_patch(
+        patch,
+        principal,
+        owner_key=cfg.authz.owner_metadata_key,
+        team_key=cfg.authz.team_metadata_key,
+    )
+    try:
+        result = sandbox_service.patch_sandbox_metadata(sandbox_id, safe_patch)
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.PATCH_METADATA,
+            sandbox_id=sandbox_id,
+            outcome="success",
+        )
+        return result
+    except HTTPException as exc:
+        err = exc.detail
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.PATCH_METADATA,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code=err.get("code") if isinstance(err, dict) else None,
+        )
+        raise
+    except Exception:
+        log_mutation_audit(
+            http_request,
+            action=LifecycleAction.PATCH_METADATA,
+            sandbox_id=sandbox_id,
+            outcome="error",
+            error_code="UNEXPECTED",
+        )
+        raise
 
 
 @router.delete(

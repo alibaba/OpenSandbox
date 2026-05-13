@@ -39,6 +39,7 @@ class LifecycleAction:
     GET_SNAPSHOT = "get_snapshot"
     CREATE_SNAPSHOT = "create_snapshot"
     DELETE_SNAPSHOT = "delete_snapshot"
+    PATCH_METADATA = "patch_metadata"
 
 
 _READ_ONLY = {
@@ -56,6 +57,7 @@ _OPERATOR = _READ_ONLY | {
     LifecycleAction.RESUME,
     LifecycleAction.CREATE_SNAPSHOT,
     LifecycleAction.DELETE_SNAPSHOT,
+    LifecycleAction.PATCH_METADATA,
 }
 
 

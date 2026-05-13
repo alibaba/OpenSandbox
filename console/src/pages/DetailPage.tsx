@@ -10,7 +10,7 @@ import {
   resumeSandbox,
   type SandboxListItem,
 } from "../api/client";
-import { canMutate, parseRoleFromEnv } from "../api/role";
+import { canMutate, useRole } from "../api/role";
 import { AuthHint, ErrorBanner, K8sPauseNote } from "../components/AuthHint";
 
 export function DetailPage() {
@@ -23,7 +23,7 @@ export function DetailPage() {
   const [port, setPort] = useState("8080");
   const [renewAt, setRenewAt] = useState("");
   const [busy, setBusy] = useState(false);
-  const role = parseRoleFromEnv();
+  const role = useRole();
   const mutate = canMutate(role);
 
   const load = useCallback(async () => {

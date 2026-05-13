@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ApiError, listSandboxes, type ListResponse } from "../api/client";
 import { AuthHint, ErrorBanner } from "../components/AuthHint";
-import { parseRoleFromEnv } from "../api/role";
+import { useRole } from "../api/role";
 
 const STATES = ["", "Running", "Pending", "Paused", "Stopping", "Terminated", "Failed"];
 
@@ -13,7 +13,7 @@ export function ListPage() {
   const [metaQuery, setMetaQuery] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const role = parseRoleFromEnv();
+  const role = useRole();
 
   const load = useCallback(async () => {
     setLoading(true);

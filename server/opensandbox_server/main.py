@@ -39,6 +39,7 @@ from opensandbox_server.startup_guard import api_key_confirm
 app_config = load_config()
 _log_config = configure_logging(app_config.log)
 
+from opensandbox_server.api.auth import router as auth_router  # noqa: E402
 from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402
 from opensandbox_server.api.lifecycle import router, sandbox_service, snapshot_service  # noqa: E402
@@ -145,10 +146,12 @@ app.add_middleware(RequestIdMiddleware)
 # IMPORTANT: devops_router and pool_router MUST be registered before proxy_router
 # because proxy_router contains catch-all routes that would swallow diagnostics paths.
 app.include_router(router)
+app.include_router(auth_router)
 app.include_router(devops_router)
 app.include_router(pool_router)
 app.include_router(proxy_router)
 app.include_router(router, prefix="/v1")
+app.include_router(auth_router, prefix="/v1")
 app.include_router(devops_router, prefix="/v1")
 app.include_router(pool_router, prefix="/v1")
 app.include_router(proxy_router, prefix="/v1")
