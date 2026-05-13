@@ -607,6 +607,14 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         Raises:
             HTTPException: If sandbox creation fails
         """
+        if (request.extensions or {}).get("poolRef", "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "SANDBOX::UNSUPPORTED_POOL_REF",
+                    "message": "poolRef is not supported by the Docker provider. Use Kubernetes BatchSandbox provider instead.",
+                },
+            )
         request = resolve_sandbox_image_from_request(request)
         ensure_entrypoint(request.entrypoint or [])
         ensure_metadata_labels(request.metadata)

@@ -461,6 +461,9 @@ class CreateSandboxRequest(BaseModel):
         # all defined in the Pool CRD and not required from the caller.
         has_pool_ref = bool((self.extensions or {}).get("poolRef", "").strip())
         if has_pool_ref:
+            # Reject conflicting fields that would be ignored in pool mode
+            if bool((self.snapshot_id or "").strip()):
+                raise ValueError("snapshotId cannot be used together with poolRef.")
             return self
 
         has_image = self.image is not None and bool(self.image.uri.strip())
