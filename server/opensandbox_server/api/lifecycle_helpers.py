@@ -75,33 +75,48 @@ def authorize_snapshot_scope(
     team_key: str,
     sandbox_service,
 ) -> None:
-    """Enforce owner/team scope for a snapshot by resolving its source sandbox.
+    """Enforce owner/team scope for a snapshot.
 
-    Raises HTTP 403 OUT_OF_SCOPE when the principal is user-scoped and the source
-    sandbox either does not exist or falls outside the principal's owner/team scope.
+    Scope is checked using the snapshot's persisted access_owner/access_team
+    fields (populated at snapshot-create time) so that the check remains valid
+    even after the source sandbox has been deleted.
+
+    For snapshots that pre-date scope metadata (access_owner is None), the check
+    falls back to resolving the source sandbox.  If the source sandbox no longer
+    exists we allow access: we cannot prove a mismatch and snapshots must remain
+    reachable after sandbox teardown.
+
     Service admins and API-key-only principals always pass through.
     """
     if not is_user_scoped(principal):
         return
-    source_sandbox_id = snapshot.sandbox_id
+
+    _OUT_OF_SCOPE = HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "OUT_OF_SCOPE",
+            "message": "The snapshot is outside the authenticated user owner/team scope.",
+        },
+    )
+
+    if snapshot.access_owner is not None:
+        # Snapshot has stored scope metadata — compare directly without a live
+        # sandbox lookup, so deleted source sandboxes never block access.
+        if snapshot.access_owner.strip() != principal.canonical_owner:
+            raise _OUT_OF_SCOPE
+        if principal.canonical_team is not None:
+            if (snapshot.access_team or "").strip() != principal.canonical_team:
+                raise _OUT_OF_SCOPE
+        return
+
+    # Legacy snapshot without stored scope metadata: resolve via source sandbox.
     try:
-        box = sandbox_service.get_sandbox(source_sandbox_id)
+        box = sandbox_service.get_sandbox(snapshot.sandbox_id)
     except HTTPException:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "OUT_OF_SCOPE",
-                "message": "The snapshot is outside the authenticated user owner/team scope.",
-            },
-        )
+        # Source sandbox gone and no stored scope — cannot prove mismatch; allow.
+        return
     if not sandbox_in_scope(principal, box, owner_key, team_key):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "OUT_OF_SCOPE",
-                "message": "The snapshot is outside the authenticated user owner/team scope.",
-            },
-        )
+        raise _OUT_OF_SCOPE
 
 
 def authorize_mutating_action(

@@ -526,6 +526,8 @@ class PersistedSnapshotService(SnapshotService):
                 lastTransitionAt=record.status.last_transition_at,
             ),
             createdAt=record.created_at,
+            access_owner=record.access_owner,
+            access_team=record.access_team,
         )
 
 

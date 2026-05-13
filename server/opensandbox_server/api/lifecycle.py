@@ -884,18 +884,11 @@ async def list_snapshots(
     snap_access_owner: Optional[str] = None
     snap_access_team: Optional[str] = None
     if is_user_scoped(principal):
-        if sandbox_id:
-            box = sandbox_service.get_sandbox(sandbox_id)
-            authorize_action(
-                principal,
-                LifecycleAction.LIST_SNAPSHOTS,
-                owner_key=cfg.authz.owner_metadata_key,
-                team_key=cfg.authz.team_metadata_key,
-                sandbox=box,
-            )
-        else:
-            snap_access_owner = principal.canonical_owner
-            snap_access_team = principal.canonical_team
+        # Scope to the caller's own snapshots via stored ownership metadata.
+        # A live sandbox lookup is intentionally avoided: snapshots outlive their
+        # source sandbox and must remain listable after it is deleted.
+        snap_access_owner = principal.canonical_owner
+        snap_access_team = principal.canonical_team
 
     request = ListSnapshotsRequest(
         filter=SnapshotFilter(sandboxId=sandbox_id, state=state),
