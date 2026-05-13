@@ -198,7 +198,9 @@ class TestBatchSandboxProvider:
 
         main_container = pod_spec["containers"][0]
         assert main_container["command"] == ["cmd", "/c", "echo hello"]
-        assert "resources" not in main_container
+        # Resources include QEMU memory overhead (8G + 2Gi overhead = 10Gi)
+        assert main_container["resources"]["limits"]["cpu"] == "4"
+        assert main_container["resources"]["limits"]["memory"] == "10Gi"
 
         env_dict = {item["name"]: item["value"] for item in main_container.get("env", [])}
         assert env_dict["VERSION"] == "11"
@@ -211,6 +213,33 @@ class TestBatchSandboxProvider:
         assert "opensandbox-win-oem" in volume_names
         assert "opensandbox-win-kvm" in volume_names
         assert "opensandbox-win-tun" in volume_names
+
+    def test_create_workload_windows_profile_default_entrypoint_uses_image_entrypoint(self, mock_k8s_client):
+        """When entrypoint is the SDK default, command is removed so image ENTRYPOINT runs."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["tail", "-f", "/dev/null"],
+            env={"VERSION": "11"},
+            resource_limits={"cpu": "4", "memory": "8G", "disk": "64G"},
+            labels={"opensandbox.io/id": "test-id"},
+            expires_at=None,
+            execd_image="execd:latest",
+            platform=PlatformSpec(os="windows", arch="amd64"),
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        pod_spec = body["spec"]["template"]["spec"]
+        main_container = pod_spec["containers"][0]
+        # No command set - image default ENTRYPOINT will be used
+        assert "command" not in main_container
+        assert "args" not in main_container
 
     def test_create_workload_windows_profile_merges_user_ports(self, mock_k8s_client):
         provider = BatchSandboxProvider(mock_k8s_client)
@@ -1513,6 +1542,57 @@ spec:
         
         # Verify no template field (pool-based doesn't use template)
         assert "template" not in body["spec"]
+
+    def test_create_workload_poolref_default_entrypoint_no_env_omits_task_template(self, mock_k8s_client):
+        """When entrypoint is SDK default and env is empty, taskTemplate is omitted."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["tail", "-f", "/dev/null"],
+            env={},
+            resource_limits={},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            extensions={"poolRef": "my-pool"},
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        assert body["spec"]["poolRef"] == "my-pool"
+        assert "taskTemplate" not in body["spec"]
+
+    def test_create_workload_poolref_default_entrypoint_with_env_includes_task_template(self, mock_k8s_client):
+        """When entrypoint is SDK default but env is non-empty, taskTemplate is generated."""
+        provider = BatchSandboxProvider(mock_k8s_client)
+        mock_k8s_client.create_custom_object.return_value = {
+            "metadata": {"name": "test-id", "uid": "test-uid"}
+        }
+
+        provider.create_workload(
+            sandbox_id="test-id",
+            namespace="test-ns",
+            image_spec=ImageSpec(uri="dockurr/windows:latest"),
+            entrypoint=["tail", "-f", "/dev/null"],
+            env={"VERSION": "11"},
+            resource_limits={},
+            labels={},
+            expires_at=None,
+            execd_image="execd:latest",
+            extensions={"poolRef": "my-pool"},
+        )
+
+        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
+        assert body["spec"]["poolRef"] == "my-pool"
+        assert "taskTemplate" in body["spec"]
+        task_template = body["spec"]["taskTemplate"]
+        assert task_template["spec"]["process"]["env"] == [{"name": "VERSION", "value": "11"}]
+
 
 class TestBatchSandboxProviderEgress:
     """BatchSandboxProvider egress sidecar tests"""
