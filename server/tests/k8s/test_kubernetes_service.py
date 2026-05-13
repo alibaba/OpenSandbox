@@ -23,6 +23,8 @@ from opensandbox_server.services.constants import (
     OPEN_SANDBOX_SECURE_ACCESS_HEADER,
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_SECURE_ACCESS_TOKEN_METADATA_KEY,
+    SANDBOX_ID_LABEL,
+    SANDBOX_MANAGED_VOLUMES_LABEL,
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SandboxErrorCodes,
 )
@@ -846,8 +848,379 @@ class TestDeleteSandbox:
 
         with pytest.raises(HTTPException) as exc_info:
             k8s_service.delete_sandbox("nonexistent-id")
-        
+
         assert exc_info.value.status_code == 404
+
+    def test_delete_sandbox_removes_managed_pvcs(self, k8s_service, mock_workload):
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.delete_workload.return_value = None
+
+        pvc = MagicMock()
+        pvc.metadata = MagicMock(name="metadata")
+        pvc.metadata.name = "auto-data"
+        k8s_service.k8s_client.list_pvcs.return_value = [pvc]
+
+        k8s_service.delete_sandbox("test-sandbox-id")
+
+        selector = (
+            f"{SANDBOX_MANAGED_VOLUMES_LABEL}=server,"
+            f"{SANDBOX_ID_LABEL}=test-sandbox-id"
+        )
+        k8s_service.k8s_client.list_pvcs.assert_called_once_with(
+            k8s_service.namespace,
+            label_selector=selector,
+        )
+        k8s_service.k8s_client.delete_pvc.assert_called_once_with(
+            k8s_service.namespace,
+            "auto-data",
+        )
+
+    def test_delete_sandbox_skips_pvc_cleanup_on_transient_error(self, k8s_service):
+        # A non-404 delete failure must NOT trigger PVC deletion: the workload
+        # is still using them.
+        k8s_service.workload_provider.delete_workload.side_effect = Exception(
+            "kubernetes api server unavailable"
+        )
+
+        with pytest.raises(HTTPException):
+            k8s_service.delete_sandbox("flaky-id")
+
+        k8s_service.k8s_client.list_pvcs.assert_not_called()
+        k8s_service.k8s_client.delete_pvc.assert_not_called()
+
+    def test_delete_sandbox_sweeps_orphaned_pvcs_on_404(self, k8s_service):
+        # If the workload is already gone, we still sweep orphaned managed PVCs
+        # so a retry after a partial cleanup heals state.
+        k8s_service.workload_provider.delete_workload.side_effect = Exception(
+            "Sandbox not found"
+        )
+
+        pvc = MagicMock()
+        pvc.metadata = MagicMock(name="metadata")
+        pvc.metadata.name = "orphan-pvc"
+        k8s_service.k8s_client.list_pvcs.return_value = [pvc]
+
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service.delete_sandbox("ghost-id")
+        assert exc_info.value.status_code == 404
+
+        k8s_service.k8s_client.delete_pvc.assert_called_once_with(
+            k8s_service.namespace,
+            "orphan-pvc",
+        )
+
+    def test_delete_sandbox_pvc_cleanup_is_best_effort(self, k8s_service, mock_workload):
+        # list_pvcs failure (e.g. 403) must not break sandbox deletion.
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.delete_workload.return_value = None
+        k8s_service.k8s_client.list_pvcs.side_effect = Exception("forbidden")
+
+        # Should not raise — workload deletion already succeeded.
+        k8s_service.delete_sandbox("test-sandbox-id")
+        k8s_service.k8s_client.delete_pvc.assert_not_called()
+
+
+class TestEnsurePvcVolumes:
+    """_ensure_pvc_volumes labels auto-created PVCs for later cleanup."""
+
+    def _make_volume(
+        self,
+        claim_name: str,
+        *,
+        create_if_not_exists: bool = True,
+        delete_on_sandbox_termination: bool = True,
+    ):
+        vol = MagicMock()
+        vol.pvc = MagicMock()
+        vol.pvc.claim_name = claim_name
+        vol.pvc.create_if_not_exists = create_if_not_exists
+        vol.pvc.delete_on_sandbox_termination = delete_on_sandbox_termination
+        vol.pvc.storage = None
+        vol.pvc.access_modes = None
+        vol.pvc.storage_class = None
+        return vol
+
+    def test_opt_in_pvc_carries_managed_and_id_labels(self, k8s_service):
+        # deleteOnSandboxTermination=true: PVC is labeled so cleanup will sweep it.
+        k8s_service.k8s_client.get_pvc.return_value = None  # doesn't exist
+        k8s_service.k8s_client.create_pvc.return_value = None
+
+        k8s_service._ensure_pvc_volumes(
+            [self._make_volume("data-claim", delete_on_sandbox_termination=True)],
+            sandbox_id="sandbox-xyz",
+        )
+
+        k8s_service.k8s_client.create_pvc.assert_called_once()
+        _ns, body = k8s_service.k8s_client.create_pvc.call_args.args
+        labels = body.metadata.labels or {}
+        assert labels.get(SANDBOX_MANAGED_VOLUMES_LABEL) == "server"
+        assert labels.get(SANDBOX_ID_LABEL) == "sandbox-xyz"
+
+    def test_opt_out_pvc_is_not_labeled_for_cleanup(self, k8s_service):
+        # deleteOnSandboxTermination=false (default): PVC is created but not
+        # labeled, so _cleanup_managed_pvcs will leave it alone.
+        k8s_service.k8s_client.get_pvc.return_value = None
+        k8s_service.k8s_client.create_pvc.return_value = None
+
+        k8s_service._ensure_pvc_volumes(
+            [self._make_volume("durable-claim", delete_on_sandbox_termination=False)],
+            sandbox_id="sandbox-xyz",
+        )
+
+        k8s_service.k8s_client.create_pvc.assert_called_once()
+        _ns, body = k8s_service.k8s_client.create_pvc.call_args.args
+        labels = body.metadata.labels or {}
+        assert SANDBOX_MANAGED_VOLUMES_LABEL not in labels
+        assert SANDBOX_ID_LABEL not in labels
+
+    def test_existing_pvc_is_not_labeled_or_modified(self, k8s_service):
+        # Pre-existing PVC: get returns non-None, create must not be called.
+        k8s_service.k8s_client.get_pvc.return_value = MagicMock()
+
+        k8s_service._ensure_pvc_volumes(
+            [self._make_volume("existing-claim")],
+            sandbox_id="sandbox-xyz",
+        )
+
+        k8s_service.k8s_client.create_pvc.assert_not_called()
+
+    def test_conflicting_delete_flag_is_rejected_400(self, k8s_service):
+        # Same claim mounted twice with different delete flags must fail
+        # 400 before any side effects: otherwise the first occurrence wins
+        # and either leaks (opt-in then opt-out) or unexpectedly deletes
+        # (opt-out then opt-in).
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service._ensure_pvc_volumes(
+                [
+                    self._make_volume("shared", delete_on_sandbox_termination=True),
+                    self._make_volume("shared", delete_on_sandbox_termination=False),
+                ],
+                sandbox_id="sandbox-xyz",
+            )
+
+        assert exc_info.value.status_code == 400
+        k8s_service.k8s_client.create_pvc.assert_not_called()
+
+    def test_conflicting_create_flag_is_rejected_400(self, k8s_service):
+        with pytest.raises(HTTPException) as exc_info:
+            k8s_service._ensure_pvc_volumes(
+                [
+                    self._make_volume("shared", create_if_not_exists=True),
+                    self._make_volume("shared", create_if_not_exists=False),
+                ],
+                sandbox_id="sandbox-xyz",
+            )
+
+        assert exc_info.value.status_code == 400
+        k8s_service.k8s_client.create_pvc.assert_not_called()
+
+    def test_duplicate_claim_with_matching_flags_is_allowed(self, k8s_service):
+        # Mounting the same claim at multiple paths is legitimate as long as
+        # the provisioning flags agree.
+        k8s_service.k8s_client.get_pvc.return_value = None
+        k8s_service.k8s_client.create_pvc.return_value = None
+
+        k8s_service._ensure_pvc_volumes(
+            [
+                self._make_volume("shared", delete_on_sandbox_termination=True),
+                self._make_volume("shared", delete_on_sandbox_termination=True),
+            ],
+            sandbox_id="sandbox-xyz",
+        )
+
+        # Only one PVC is created despite two mounts (dedup by claim).
+        k8s_service.k8s_client.create_pvc.assert_called_once()
+
+
+class TestCreateSandboxPvcFailureCleanup:
+    """Auto-created PVCs are swept when sandbox creation fails before returning."""
+
+    def _request_with_pvc(self):
+        from opensandbox_server.api.schema import (
+            CreateSandboxRequest,
+            ImageSpec,
+            PVC,
+            ResourceLimits,
+            Volume,
+        )
+
+        return CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            entrypoint=["/bin/bash", "-c", "sleep 3600"],
+            timeout=3600,
+            resourceLimits=ResourceLimits(root={"cpu": "1", "memory": "1Gi"}),
+            volumes=[
+                Volume(
+                    name="data",
+                    mountPath="/data",
+                    pvc=PVC(
+                        claimName="auto-data",
+                        createIfNotExists=True,
+                        deleteOnSandboxTermination=True,
+                    ),
+                ),
+            ],
+        )
+
+    @pytest.mark.asyncio
+    async def test_pvc_cleanup_runs_when_wait_for_ready_fails(
+        self, k8s_service, mock_workload
+    ):
+        # PVC creation succeeds, workload is created, but the pod never
+        # becomes ready and _wait_for_sandbox_ready raises. The create API
+        # returns no id, so the caller cannot trigger delete_sandbox — the
+        # server must sweep the labeled PVC itself.
+        k8s_service.k8s_client.get_pvc.return_value = None
+        k8s_service.k8s_client.create_pvc.return_value = None
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-id",
+            "uid": "abc",
+        }
+
+        async def _raise_ready(*args, **kwargs):
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "X", "message": "pod never ready"},
+            )
+
+        with patch.object(k8s_service, "_wait_for_sandbox_ready", _raise_ready):
+            with patch.object(k8s_service, "_cleanup_managed_pvcs") as mock_cleanup:
+                with pytest.raises(HTTPException):
+                    await k8s_service.create_sandbox(self._request_with_pvc())
+
+        mock_cleanup.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_pvc_cleanup_skipped_when_rollback_delete_workload_fails(
+        self, k8s_service, mock_workload
+    ):
+        # _wait_for_sandbox_ready raises after create_workload succeeded, then
+        # the rollback delete_workload also raises (e.g. transient API error).
+        # The CR is still alive in the cluster — sweeping its PVCs would leave
+        # a live workload referencing missing storage. ownerReference GC will
+        # reclaim them once the CR is eventually deleted.
+        k8s_service.k8s_client.get_pvc.return_value = None
+        k8s_service.k8s_client.create_pvc.return_value = None
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-id",
+            "uid": "abc",
+            "apiVersion": "sandbox.opensandbox.io/v1alpha1",
+            "kind": "BatchSandbox",
+        }
+        k8s_service.workload_provider.delete_workload.side_effect = Exception(
+            "transient api error"
+        )
+
+        async def _raise_ready(*args, **kwargs):
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "X", "message": "pod never ready"},
+            )
+
+        with patch.object(k8s_service, "_wait_for_sandbox_ready", _raise_ready):
+            with patch.object(k8s_service, "_cleanup_managed_pvcs") as mock_cleanup:
+                with pytest.raises(HTTPException):
+                    await k8s_service.create_sandbox(self._request_with_pvc())
+
+        mock_cleanup.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_pvc_cleanup_runs_when_create_workload_fails(
+        self, k8s_service
+    ):
+        # PVC creation succeeded, but the workload CR call itself fails.
+        # finally must still sweep the labeled PVC.
+        k8s_service.k8s_client.get_pvc.return_value = None
+        k8s_service.k8s_client.create_pvc.return_value = None
+        k8s_service.workload_provider.create_workload.side_effect = Exception(
+            "workload api 500"
+        )
+
+        with patch.object(k8s_service, "_cleanup_managed_pvcs") as mock_cleanup:
+            with pytest.raises(HTTPException):
+                await k8s_service.create_sandbox(self._request_with_pvc())
+
+        mock_cleanup.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_pvc_cleanup_does_not_run_on_success(
+        self, k8s_service, mock_workload
+    ):
+        # On the success path the caller owns the sandbox and any auto-created
+        # PVCs; the server must not double-sweep them.
+        k8s_service.k8s_client.get_pvc.return_value = None
+        k8s_service.k8s_client.create_pvc.return_value = None
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-id",
+            "uid": "abc",
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_endpoint_info.return_value = "10.0.0.1:8080"
+        k8s_service.workload_provider.get_expiration.return_value = (
+            datetime.now(timezone.utc) + timedelta(hours=1)
+        )
+
+        with patch.object(k8s_service, "_cleanup_managed_pvcs") as mock_cleanup:
+            await k8s_service.create_sandbox(self._request_with_pvc())
+
+        mock_cleanup.assert_not_called()
+
+
+class TestAttachPvcOwnerReferences:
+    """OwnerReferences let K8s GC sweep PVCs on controller-driven CR deletion (TTL)."""
+
+    def test_patches_each_managed_pvc_with_owner_ref(self, k8s_service):
+        k8s_service._attach_pvc_owner_references(
+            ["pvc-a", "pvc-b"],
+            {
+                "name": "sandbox-1",
+                "uid": "owner-uid",
+                "apiVersion": "sandbox.opensandbox.io/v1alpha1",
+                "kind": "BatchSandbox",
+            },
+        )
+
+        assert k8s_service.k8s_client.patch_pvc.call_count == 2
+        for call in k8s_service.k8s_client.patch_pvc.call_args_list:
+            ns, name, body = call.args
+            assert ns == k8s_service.namespace
+            owner_ref = body["metadata"]["ownerReferences"][0]
+            assert owner_ref["uid"] == "owner-uid"
+            assert owner_ref["name"] == "sandbox-1"
+            assert owner_ref["kind"] == "BatchSandbox"
+            assert owner_ref["apiVersion"] == "sandbox.opensandbox.io/v1alpha1"
+            # blockOwnerDeletion=False so PVC delete failures don't stall CR delete.
+            assert owner_ref["blockOwnerDeletion"] is False
+
+    def test_no_patch_when_no_managed_pvcs(self, k8s_service):
+        k8s_service._attach_pvc_owner_references([], {"name": "s", "uid": "u", "apiVersion": "g/v", "kind": "K"})
+        k8s_service.k8s_client.patch_pvc.assert_not_called()
+
+    def test_patch_failure_is_best_effort(self, k8s_service):
+        # Patch failure must not propagate — the sandbox is already created.
+        k8s_service.k8s_client.patch_pvc.side_effect = Exception("forbidden")
+
+        # No exception expected
+        k8s_service._attach_pvc_owner_references(
+            ["pvc-a"],
+            {"name": "s", "uid": "u", "apiVersion": "g/v", "kind": "K"},
+        )
+
+    def test_skips_when_owner_info_incomplete(self, k8s_service):
+        # If the workload provider didn't return full owner info, we must not
+        # produce a malformed ownerReference. Label-based cleanup remains.
+        k8s_service._attach_pvc_owner_references(
+            ["pvc-a"],
+            {"name": "s", "uid": "u"},  # missing apiVersion/kind
+        )
+        k8s_service.k8s_client.patch_pvc.assert_not_called()
+
 
 class TestListSandboxes:
     """list_sandboxes method tests"""
