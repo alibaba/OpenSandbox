@@ -46,3 +46,24 @@ test("HealthAdapter.ping throws on non-200 error response", async () => {
   const adapter = new HealthAdapter(client);
   await assert.rejects(() => adapter.ping(), /execd unreachable/);
 });
+
+test("HealthAdapter.ping throws on non-200 with empty body (proxy/ingress case)", async () => {
+  // openapi-fetch sets error to the parsed text body ("") when parseAs:"text" and status is non-2xx.
+  // Empty string is falsy; throwOnOpenApiFetchError must not skip it when response is also non-2xx.
+  const client = {
+    GET: async (_path, _opts) => ({
+      error: "",
+      response: new Response("", { status: 502 }),
+    }),
+  };
+  const adapter = new HealthAdapter(client);
+  await assert.rejects(
+    () => adapter.ping(),
+    (err) => {
+      assert.equal(err.name, "SandboxApiException");
+      assert.match(err.message, /Execd ping failed/);
+      assert.equal(err.statusCode, 502);
+      return true;
+    },
+  );
+});
