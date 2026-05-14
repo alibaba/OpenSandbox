@@ -525,6 +525,67 @@ class TestKubernetesSandboxServiceCreate:
         assert "configured maximum of 3600s" in exc_info.value.detail["message"]
         k8s_service.workload_provider.create_workload.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_create_sandbox_pool_mode_skips_image_and_entrypoint_validation(
+        self, k8s_service, mock_workload
+    ):
+        """Pool mode: poolRef only, no image/entrypoint/resourceLimits — should succeed."""
+        from opensandbox_server.api.schema import CreateSandboxRequest
+
+        pool_request = CreateSandboxRequest(
+            extensions={"poolRef": "my-pool"},
+        )
+
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-sandbox-pool",
+            "uid": "pool-123",
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Pod is running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_endpoint_info.return_value = "10.244.0.5:8080"
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        response = await k8s_service.create_sandbox(pool_request)
+
+        assert response.id is not None
+        assert response.status.state == "Running"
+        k8s_service.workload_provider.create_workload.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_sandbox_pool_mode_image_auth_guard_no_error(
+        self, k8s_service, mock_workload
+    ):
+        """Pool mode with image=None should not raise AttributeError in _ensure_image_auth_support."""
+        from opensandbox_server.api.schema import CreateSandboxRequest
+
+        pool_request = CreateSandboxRequest(
+            extensions={"poolRef": "my-pool"},
+        )
+        assert pool_request.image is None
+
+        k8s_service.workload_provider.create_workload.return_value = {
+            "name": "test-sandbox-pool2",
+            "uid": "pool-456",
+        }
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": "",
+            "message": "Pod is running",
+            "last_transition_at": datetime.now(timezone.utc),
+        }
+        k8s_service.workload_provider.get_endpoint_info.return_value = "10.244.0.6:8080"
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        # Should not raise AttributeError on None.auth
+        response = await k8s_service.create_sandbox(pool_request)
+        assert response.id is not None
+
 class TestWaitForSandboxReady:
     """_wait_for_sandbox_ready method tests"""
     
