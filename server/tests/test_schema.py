@@ -643,6 +643,14 @@ class TestCreateSandboxRequestPoolMode:
                 entrypoint=["python"],
             )
 
+    def test_pool_mode_normalizes_blank_snapshot_id(self):
+        """Blank snapshotId (e.g. whitespace) should be normalized to None in pool mode."""
+        req = CreateSandboxRequest(
+            extensions={"poolRef": "my-pool"},
+            snapshotId="   ",
+        )
+        assert req.snapshot_id is None
+
     def test_pool_mode_ignores_blank_pool_ref(self):
         """Blank poolRef should not trigger pool mode."""
         with pytest.raises(ValidationError):

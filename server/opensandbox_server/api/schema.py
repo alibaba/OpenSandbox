@@ -464,6 +464,10 @@ class CreateSandboxRequest(BaseModel):
             # Reject conflicting fields that would be ignored in pool mode
             if bool((self.snapshot_id or "").strip()):
                 raise ValueError("snapshotId cannot be used together with poolRef.")
+            # Normalize blank snapshotId so downstream code won't see
+            # a truthy whitespace string (e.g. "   ") as a real value.
+            if self.snapshot_id is not None and not self.snapshot_id.strip():
+                self.snapshot_id = None
             return self
 
         has_image = self.image is not None and bool(self.image.uri.strip())
