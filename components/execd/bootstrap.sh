@@ -42,56 +42,54 @@ _sudo() {
 	fi
 }
 
-# Install mitm CA into the system trust store and set OPENSANDBOX_MERGED_CA
-# to a PEM bundle containing system roots + mitm CA (for env vars like
-# REQUESTS_CA_BUNDLE that replace rather than append to the default roots).
+# Install mitm CA into the system trust store (for non-Python programs)
+# and set OPENSANDBOX_MERGED_CA to a PEM bundle containing a full root
+# set + mitm CA (for env vars like REQUESTS_CA_BUNDLE that *replace*
+# rather than append to the default roots).
 OPENSANDBOX_MERGED_CA=""
 trust_mitm_ca() {
 	cert="$1"
 	merged="/opt/opensandbox/merged-ca-certificates.pem"
-	installed=false
 
+	# 1) Try to install into the system trust store (best-effort).
 	if command -v update-ca-certificates >/dev/null 2>&1; then
-		if _sudo mkdir -p /usr/local/share/ca-certificates \
+		_sudo mkdir -p /usr/local/share/ca-certificates \
 			&& _sudo cp "$cert" /usr/local/share/ca-certificates/opensandbox-mitmproxy-ca.crt \
-			&& _sudo update-ca-certificates; then
-			installed=true
-			if [ -f /etc/ssl/certs/ca-certificates.crt ] && [ -s /etc/ssl/certs/ca-certificates.crt ]; then
-				OPENSANDBOX_MERGED_CA="/etc/ssl/certs/ca-certificates.crt"
-				return 0
-			fi
-		fi
+			&& _sudo update-ca-certificates \
+			|| echo "warning: update-ca-certificates failed; system trust store may not include mitm CA" >&2
 	elif command -v update-ca-trust >/dev/null 2>&1; then
-		if _sudo mkdir -p /etc/pki/ca-trust/source/anchors \
+		_sudo mkdir -p /etc/pki/ca-trust/source/anchors \
 			&& _sudo cp "$cert" /etc/pki/ca-trust/source/anchors/opensandbox-mitmproxy-ca.pem \
-			&& { _sudo update-ca-trust extract || _sudo update-ca-trust; }; then
-			installed=true
-			if [ -f /etc/pki/tls/certs/ca-bundle.crt ] && [ -s /etc/pki/tls/certs/ca-bundle.crt ]; then
-				OPENSANDBOX_MERGED_CA="/etc/pki/tls/certs/ca-bundle.crt"
-				return 0
-			fi
-		fi
+			&& { _sudo update-ca-trust extract || _sudo update-ca-trust; } \
+			|| echo "warning: update-ca-trust failed; system trust store may not include mitm CA" >&2
+	else
+		echo "warning: no system trust-store tooling found (need update-ca-certificates or update-ca-trust)" >&2
 	fi
 
-	# System trust-store update unavailable or failed — build merged bundle manually.
-	if [ "$installed" = false ]; then
-		echo "warning: cannot install mitm CA into system trust store; building merged bundle manually" >&2
-	else
-		echo "warning: system trust-store updated but consolidated bundle not found; building merged bundle manually" >&2
+	# 2) Build a merged bundle (complete root set + mitm CA).
+	#    Prefer certifi (full Mozilla root set) over system bundles which
+	#    may be incomplete in minimal Docker images.
+	certifi_ca=""
+	if command -v python3 >/dev/null 2>&1; then
+		certifi_ca="$(python3 -c 'import certifi; print(certifi.where())' 2>/dev/null)" || certifi_ca=""
+	elif command -v python >/dev/null 2>&1; then
+		certifi_ca="$(python -c 'import certifi; print(certifi.where())' 2>/dev/null)" || certifi_ca=""
 	fi
+
 	for candidate in \
+		"$certifi_ca" \
 		/etc/ssl/certs/ca-certificates.crt \
 		/etc/pki/tls/certs/ca-bundle.crt \
 		/etc/ssl/cert.pem \
 		/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem; do
-		if [ -f "$candidate" ] && [ -s "$candidate" ]; then
+		if [ -n "$candidate" ] && [ -f "$candidate" ] && [ -s "$candidate" ]; then
 			cat "$candidate" "$cert" > "$merged"
 			OPENSANDBOX_MERGED_CA="$merged"
 			return 0
 		fi
 	done
 
-	echo "warning: could not locate system CA bundle to merge with mitm CA" >&2
+	echo "warning: could not locate any CA bundle to merge with mitm CA" >&2
 	return 0
 }
 
@@ -149,7 +147,7 @@ if is_truthy "${OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT:-}"; then
 		export NODE_EXTRA_CA_CERTS="$MITM_CA"  # additive — Node appends to built-in roots
 
 		# REQUESTS_CA_BUNDLE and SSL_CERT_FILE replace the default bundle,
-		# so use merged roots (system CA + mitm CA).
+		# so use merged roots (certifi/system CA + mitm CA).
 		if [ -n "$OPENSANDBOX_MERGED_CA" ] && [ -f "$OPENSANDBOX_MERGED_CA" ]; then
 			export REQUESTS_CA_BUNDLE="$OPENSANDBOX_MERGED_CA"
 			export SSL_CERT_FILE="$OPENSANDBOX_MERGED_CA"
