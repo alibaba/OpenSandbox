@@ -122,6 +122,7 @@ the sandbox endpoint for the egress port and then calling the sidecar endpoint d
 **Main Endpoints:**
 - `GET /policy` - Get the current egress policy
 - `PATCH /policy` - Merge new egress rules into the current policy
+- `DELETE /policy` - Remove specific egress rules from the current policy by target
 
 ## Technical Features
 

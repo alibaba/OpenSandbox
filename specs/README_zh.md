@@ -121,6 +121,7 @@
 **主要端点：**
 - `GET /policy` - 获取当前 egress 策略
 - `PATCH /policy` - 将新的 egress 规则合并到当前策略
+- `DELETE /policy` - 按 target 删除当前策略中的指定 egress 规则
 
 ## 技术特性
 

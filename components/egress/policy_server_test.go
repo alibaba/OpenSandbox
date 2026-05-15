@@ -245,6 +245,150 @@ func TestHandlePatch_RejectsWhenOverMaxEgressRules(t *testing.T) {
 	require.Len(t, proxy.updated.Egress, 2, "policy should be unchanged")
 }
 
+func TestHandleDelete_RemovesMatchingTargets(t *testing.T) {
+	initial := &policy.NetworkPolicy{
+		DefaultAction: policy.ActionDeny,
+		Egress: []policy.EgressRule{
+			{Action: policy.ActionAllow, Target: "example.com"},
+			{Action: policy.ActionDeny, Target: "blocked.com"},
+			{Action: policy.ActionAllow, Target: "keep.com"},
+		},
+	}
+	proxy := &stubProxy{updated: initial}
+	nft := &stubNft{}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+
+	body := `["blocked.com","nonexistent.com"]`
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "expected 200 OK")
+	require.Equal(t, 1, nft.calls, "expected nft ApplyStatic called once")
+	require.NotNil(t, proxy.updated, "expected proxy policy updated")
+	require.Equal(t, policy.ActionDeny, proxy.updated.DefaultAction, "defaultAction should be preserved")
+	require.Len(t, proxy.updated.Egress, 2, "expected 2 rules remaining after delete")
+	require.Equal(t, policy.ActionAllow, proxy.updated.Egress[0].Action)
+	require.Equal(t, "example.com", proxy.updated.Egress[0].Target)
+	require.Equal(t, policy.ActionAllow, proxy.updated.Egress[1].Action)
+	require.Equal(t, "keep.com", proxy.updated.Egress[1].Target)
+}
+
+func TestHandleDelete_CaseInsensitiveMatch(t *testing.T) {
+	initial := &policy.NetworkPolicy{
+		DefaultAction: policy.ActionDeny,
+		Egress: []policy.EgressRule{
+			{Action: policy.ActionAllow, Target: "Example.COM"},
+			{Action: policy.ActionDeny, Target: "Blocked.COM"},
+		},
+	}
+	proxy := &stubProxy{updated: initial}
+	nft := &stubNft{}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+
+	body := `["example.com"]`
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "expected 200 OK")
+	require.NotNil(t, proxy.updated)
+	require.Len(t, proxy.updated.Egress, 1, "expected 1 rule remaining")
+	require.Equal(t, "Blocked.COM", proxy.updated.Egress[0].Target, "unmatched rule should remain")
+}
+
+func TestHandleDelete_NoMatchReturns200(t *testing.T) {
+	initial := &policy.NetworkPolicy{
+		DefaultAction: policy.ActionDeny,
+		Egress: []policy.EgressRule{
+			{Action: policy.ActionAllow, Target: "keep.com"},
+		},
+	}
+	proxy := &stubProxy{updated: initial}
+	nft := &stubNft{}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+
+	body := `["nonexistent.com"]`
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "expected 200 OK even when no targets match")
+	require.Equal(t, 0, nft.calls, "nft should not be called when nothing changes")
+	require.Len(t, proxy.updated.Egress, 1, "policy should be unchanged")
+}
+
+func TestHandleDelete_EmptyBodyReturns400(t *testing.T) {
+	proxy := &stubProxy{updated: policy.DefaultDenyPolicy()}
+	srv := &policyServer{proxy: proxy, nft: nil, enforcementMode: "dns"}
+
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(""))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "expected 400 for empty body")
+}
+
+func TestHandleDelete_EmptyArrayReturns400(t *testing.T) {
+	proxy := &stubProxy{updated: policy.DefaultDenyPolicy()}
+	srv := &policyServer{proxy: proxy, nft: nil, enforcementMode: "dns"}
+
+	body := `[]`
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "expected 400 for empty array")
+}
+
+func TestHandleDelete_InvalidJSONReturns400(t *testing.T) {
+	proxy := &stubProxy{updated: policy.DefaultDenyPolicy()}
+	srv := &policyServer{proxy: proxy, nft: nil, enforcementMode: "dns"}
+
+	body := `not-json`
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode, "expected 400 for invalid JSON")
+}
+
+func TestHandleDelete_NftFailureReturns500(t *testing.T) {
+	initial := &policy.NetworkPolicy{
+		DefaultAction: policy.ActionDeny,
+		Egress: []policy.EgressRule{
+			{Action: policy.ActionAllow, Target: "example.com"},
+		},
+	}
+	proxy := &stubProxy{updated: initial}
+	nft := &stubNft{err: errors.New("nft apply failed")}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+
+	body := `["example.com"]`
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode, "expected 500 on nft failure")
+	require.Equal(t, 1, nft.calls, "expected nft ApplyStatic called once")
+	require.Len(t, proxy.updated.Egress, 1, "proxy should not be updated on nft failure")
+	require.Equal(t, "example.com", proxy.updated.Egress[0].Target, "original rule should remain")
+}
+
 func TestHandlePost_RejectsWhenOverMaxEgressRules(t *testing.T) {
 	proxy := &stubProxy{}
 	nft := &stubNft{}
