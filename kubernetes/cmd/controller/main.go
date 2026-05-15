@@ -198,6 +198,9 @@ func main() {
 	var imageCommitterImage string
 	flag.StringVar(&imageCommitterImage, "image-committer-image", "image-committer:dev", "The image used for commit operations (contains nerdctl tool).")
 
+	var containerdSocketPath string
+	flag.StringVar(&containerdSocketPath, "containerd-socket-path", controller.ContainerdSocketPath, "Containerd socket path")
+
 	// Commit job timeout
 	var commitJobTimeout time.Duration
 	flag.DurationVar(&commitJobTimeout, "commit-job-timeout", 10*time.Minute, "The timeout duration for commit jobs.")
@@ -443,6 +446,7 @@ func main() {
 		Scheme:                   mgr.GetScheme(),
 		Recorder:                 mgr.GetEventRecorderFor("sandboxsnapshot-controller"),
 		ImageCommitterImage:      imageCommitterImage,
+		ContainerdSocketPath:     containerdSocketPath,
 		CommitJobTimeout:         commitJobTimeout,
 		SnapshotRegistry:         snapshotRegistry,
 		SnapshotRegistryInsecure: snapshotRegistryInsecure,
