@@ -264,7 +264,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
 
         Raises HTTP 400 if the provider does not support per-request image auth.
         """
-        if request.image.auth is None:
+        if request.image is None or request.image.auth is None:
             return
         if self.workload_provider.supports_image_auth():
             return
@@ -404,8 +404,11 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         Raises:
             HTTPException: If creation fails, timeout, or invalid parameters
         """
-        request = resolve_sandbox_image_from_request(request)
-        ensure_entrypoint(request.entrypoint or [])
+        has_pool_ref = bool((request.extensions or {}).get("poolRef", "").strip())
+
+        if not has_pool_ref:
+            request = resolve_sandbox_image_from_request(request)
+            ensure_entrypoint(request.entrypoint or [])
         ensure_metadata_labels(request.metadata)
         ensure_platform_valid(request.platform)
         ensure_timeout_within_limit(
