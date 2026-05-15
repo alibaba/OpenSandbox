@@ -18,7 +18,7 @@ export function throwOnOpenApiFetchError(
   result: { error?: unknown; response: Response },
   fallbackMessage: string,
 ): void {
-  if (!result.error) return;
+  if (!result.error && result.response.ok) return;
 
   const requestId = result.response.headers.get("x-request-id") ?? undefined;
   const status = (result.response as any).status ?? 0;
