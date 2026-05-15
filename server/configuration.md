@@ -25,15 +25,16 @@ Example files in this repository:
 4. [`[runtime]`](#runtime--required)
 5. [`[docker]`](#docker--only-when-runtime--docker)
 6. [`[kubernetes]`](#kubernetes--only-when-runtime--kubernetes)
-7. [`[agent_sandbox]`](#agent_sandbox--only-with-kubernetes--agent-sandbox)
-8. [`[ingress]`](#ingress)
-9. [`[egress]`](#egress)
-10. [`[storage]`](#storage)
-11. [`[store]`](#store)
-12. [`[secure_runtime]`](#secure_runtime)
-13. [`[renew_intent]`](#renew_intent--experimental)
-14. [Environment variables (outside TOML)](#environment-variables-outside-toml)
-15. [Cross-field validation rules](#cross-field-validation-rules)
+7. [Multi-Tenancy (`tenants.toml`)](#multi-tenancy-tenantstoml)
+8. [`[agent_sandbox]`](#agent_sandbox--only-with-kubernetes--agent-sandbox)
+9. [`[ingress]`](#ingress)
+10. [`[egress]`](#egress)
+11. [`[storage]`](#storage)
+12. [`[store]`](#store)
+13. [`[secure_runtime]`](#secure_runtime)
+14. [`[renew_intent]`](#renew_intent--experimental)
+15. [Environment variables (outside TOML)](#environment-variables-outside-toml)
+16. [Cross-field validation rules](#cross-field-validation-rules)
 
 ---
 
@@ -149,6 +150,50 @@ Kubernetes workloads are created by a **workload provider**. There is **no** `[b
 |-----|------|-------------|
 | `limits` | map string → string | e.g. `{ cpu = "100m", memory = "128Mi" }` |
 | `requests` | map string → string | e.g. `{ cpu = "50m", memory = "64Mi" }` |
+
+---
+
+## Multi-Tenancy (`tenants.toml`)
+
+Multi-tenancy maps API keys to isolated Kubernetes namespaces. It activates when `tenants.toml` exists at the default path or at a path set via environment variable.
+
+**Requirements:**
+- `runtime.type` must be `"kubernetes"`. Docker runtime does not support multi-tenancy.
+- `server.api_key` must be empty (omitted or `""`). The server refuses to start if both `tenants.toml` and `server.api_key` are configured.
+
+**File path:**
+- Default: `~/.opensandbox/tenants.toml`
+- Override: `SANDBOX_TENANTS_CONFIG_PATH` (environment variable)
+
+**File format:**
+
+```toml
+[[tenants]]
+name = "tenant-a"
+namespace = "sandbox-tenant-a"
+api_keys = ["key-aaaa", "key-aaaa2"]
+
+[[tenants]]
+name = "tenant-b"
+namespace = "sandbox-tenant-b"
+api_keys = ["key-bbbb"]
+```
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `name` | string | Human-readable tenant identifier. |
+| `namespace` | string | Kubernetes namespace for this tenant's sandbox workloads. |
+| `api_keys` | list of strings | One or more API keys that authenticate to this tenant. Keys must be unique across all tenants — duplicate keys are rejected at load time. |
+
+**Runtime behavior:**
+- The `AuthMiddleware` delegates API key lookup to the tenant registry instead of checking `server.api_key`.
+- On successful auth, the tenant's namespace is injected into request context and used by `KubernetesSandboxService` for all resource operations (pods, PVCs, CRs, etc.).
+- The label `opensandbox.io/tenant` is set on all sandbox resources.
+- Changes to `tenants.toml` are picked up via **fsnotify hot reload** — no restart required. If the file becomes invalid the current entries are retained and an error is logged.
+
+**Cross-field validation:**
+- `tenants.toml` + `runtime.type = "docker"` → **startup error**.
+- `tenants.toml` + `server.api_key` set → **startup error**.
 
 ---
 
@@ -299,6 +344,7 @@ These are read by the server or runtime code in addition to the TOML file:
 | `OPENSANDBOX_SERVER_API_KEY` | `config.py` | Overrides the API key from the TOML file. |
 | `DOCKER_HOST` | Docker service | Standard Docker daemon address (e.g. `unix:///var/run/docker.sock`). |
 | `PENDING_FAILURE_TTL` | Docker service | Seconds to retain **failed Pending** sandboxes before cleanup; default **`3600`**. |
+| `SANDBOX_TENANTS_CONFIG_PATH` | `tenants/__init__.py` | Path to the multi-tenancy TOML file. Overrides the default `~/.opensandbox/tenants.toml` when set. |
 
 ---
 
@@ -320,6 +366,11 @@ Rules enforced when the full `AppConfig` is parsed (see `AppConfig.validate_runt
 
 4. **`secure_runtime`**  
    - See [Secure runtime](#secure_runtime) above.
+
+5. **Multi-tenancy** (enforced in `main.py` at startup)  
+   - `tenants.toml` + `runtime.type = "docker"` → **fatal startup error** (`SystemExit`).  
+   - `tenants.toml` + `server.api_key` set → **fatal startup error** (must migrate keys into `tenants.toml`).  
+   - Duplicate `api_keys` across tenants in `tenants.toml` → **fatal startup error** with details.
 
 ---
 

@@ -71,6 +71,10 @@ server:
       # key_id must be exactly one character in [0-9a-z].
       keys: []
 
+# -- Multi-tenancy config (TOML). When set, mounted at /etc/opensandbox/tenants.toml
+# and SANDBOX_TENANTS_CONFIG_PATH is set. server.api_key must be empty when this is set.
+tenantsToml: ""
+
 # -- Server config (TOML). Mounted at /etc/opensandbox/config.toml.
 configToml: |
   [server]

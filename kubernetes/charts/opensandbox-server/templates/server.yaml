@@ -21,6 +21,9 @@ metadata:
     {{- include "opensandbox-server.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
     resources: ["pods", "pods/status", "events", "services", "configmaps"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
   - apiGroups: [""]
@@ -28,7 +31,7 @@ rules:
     verbs: ["create", "delete", "get"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["create", "get"]
+    verbs: ["create", "get", "delete"]
   - apiGroups: ["node.k8s.io"]
     resources: ["runtimeclasses"]
     verbs: ["get", "list"]
@@ -68,6 +71,19 @@ data:
   config.toml: |
 {{ .Values.configToml | indent 4 }}
 {{ include "opensandbox-server.ingressConfigToml" . | indent 4 }}
+{{- if .Values.tenantsToml }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "opensandbox-server.fullname" . }}-tenants
+  namespace: {{ include "opensandbox-server.namespace" . }}
+  labels:
+    {{- include "opensandbox-server.labels" . | nindent 4 }}
+data:
+  tenants.toml: |
+{{ .Values.tenantsToml | indent 4 }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -106,6 +122,10 @@ spec:
           env:
             - name: SANDBOX_CONFIG_PATH
               value: "/etc/opensandbox/config.toml"
+{{- if .Values.tenantsToml }}
+            - name: SANDBOX_TENANTS_CONFIG_PATH
+              value: "/etc/opensandbox/tenants.toml"
+{{- end }}
             {{- with .Values.server.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -114,6 +134,12 @@ spec:
               mountPath: /etc/opensandbox/config.toml
               subPath: config.toml
               readOnly: true
+{{- if .Values.tenantsToml }}
+            - name: tenants-config
+              mountPath: /etc/opensandbox/tenants.toml
+              subPath: tenants.toml
+              readOnly: true
+{{- end }}
           livenessProbe:
             httpGet:
               path: /health
@@ -134,6 +160,11 @@ spec:
         - name: config
           configMap:
             name: {{ include "opensandbox-server.fullname" . }}-config
+{{- if .Values.tenantsToml }}
+        - name: tenants-config
+          configMap:
+            name: {{ include "opensandbox-server.fullname" . }}-tenants
+{{- end }}
       {{- with .Values.server.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

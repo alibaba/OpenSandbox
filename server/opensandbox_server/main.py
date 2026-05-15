@@ -53,10 +53,33 @@ from opensandbox_server.services.runtime_resolver import (  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+# Multi-tenancy: initialize tenant loader if tenants.toml exists.
+from opensandbox_server.tenants import _resolve_path as _resolve_tenants_path  # noqa: E402
+from opensandbox_server.tenants.loader import TenantLoader  # noqa: E402
+
+_tenants_path = _resolve_tenants_path()
+_tenant_loader = None
+if _tenants_path.exists():
+    _tenant_loader = TenantLoader(_tenants_path)
+    logger.info(f"Multi-tenant mode enabled — {_tenant_loader.tenant_count} tenant(s) loaded.")
+
+    _k8s_ns = (app_config.kubernetes.namespace
+               if app_config.runtime.type == "kubernetes" and app_config.kubernetes
+               else None)
+    if _k8s_ns:
+        _overlap = {ns for ns in _tenant_loader.namespaces if ns == _k8s_ns}
+        if _overlap:
+            raise SystemExit(
+                f"Tenant namespace(s) {_overlap} conflict with the default "
+                f"kubernetes.namespace '{_k8s_ns}'. Each tenant must use a "
+                f"namespace distinct from the server's own namespace."
+            )
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
-        api_key_confirm(configured_api_key=app_config.server.api_key)
+        if _tenant_loader is None:
+            api_key_confirm(configured_api_key=app_config.server.api_key)
     except Exception as exc:
         logger.error("API key startup confirmation failed: %s", exc)
         os._exit(1)
@@ -129,7 +152,7 @@ app.state.config = app_config
 
 # Middleware run in reverse order of addition: last added = first to run (outermost).
 # Add auth and CORS first so they run after RequestIdMiddleware.
-app.add_middleware(AuthMiddleware, config=app_config)
+app.add_middleware(AuthMiddleware, config=app_config, tenant_loader=_tenant_loader)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

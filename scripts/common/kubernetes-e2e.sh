@@ -180,7 +180,6 @@ configToml: |
   [server]
   host = "0.0.0.0"
   port = 80
-  api_key = "kubernetes-e2e"
 
   [log]
   level = "INFO"
@@ -193,7 +192,7 @@ configToml: |
   image = "${EGRESS_IMG}"
 
   [kubernetes]
-  namespace = "${E2E_NAMESPACE}"
+  namespace = "not-used"
   workload_provider = "batchsandbox"
   sandbox_create_timeout_seconds = 180
   sandbox_create_poll_interval_seconds = 1.0
@@ -203,6 +202,13 @@ configToml: |
   allowed_host_paths = []
 EOF
   } > "${SERVER_VALUES_FILE}"
+  cat <<EOF >> "${SERVER_VALUES_FILE}"
+tenantsToml: |
+  [[tenants]]
+  name = "e2e-tenant"
+  namespace = "${E2E_NAMESPACE}"
+  api_keys = ["${E2E_TENANT_API_KEY:-key-tenant-e2e}"]
+EOF
 }
 
 k8s_e2e_validate_rendered_config_toml() {
