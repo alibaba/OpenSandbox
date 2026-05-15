@@ -161,6 +161,7 @@ func (e *ExecdClient) GetCommandLogs(ctx context.Context, commandID string, curs
 		if err != nil {
 			return fmt.Errorf("opensandbox: create request: %w", err)
 		}
+		req.Header.Set("User-Agent", "OpenSandbox-Go-SDK/"+Version)
 		for k, v := range e.client.headers {
 			req.Header.Set(k, v)
 		}
@@ -274,6 +275,7 @@ func (e *ExecdClient) UploadFiles(ctx context.Context, entries []UploadFileEntry
 	}
 	defer bodyCloser.Close()
 
+	req.Header.Set("User-Agent", "OpenSandbox-Go-SDK/"+Version)
 	for k, v := range e.client.headers {
 		req.Header.Set(k, v)
 	}
@@ -371,6 +373,7 @@ func (e *ExecdClient) DownloadFile(ctx context.Context, remotePath string, range
 		if err != nil {
 			return fmt.Errorf("opensandbox: create request: %w", err)
 		}
+		req.Header.Set("User-Agent", "OpenSandbox-Go-SDK/"+Version)
 		for k, v := range e.client.headers {
 			req.Header.Set(k, v)
 		}
