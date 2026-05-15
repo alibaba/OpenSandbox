@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 	"github.com/alibaba/opensandbox/execd/pkg/util/pathutil"
@@ -175,11 +176,31 @@ func (c *FilesystemController) UploadFile() {
 		}
 		file.Close()
 
-		if err := ChmodFile(resolvedPath, meta.Permission); err != nil {
+		// fsync parent directory so the new dirent is durable and visible on
+		// weakly-coherent filesystems (virtio-fs, 9pfs, etc.). Best-effort:
+		// some filesystems return ENOTSUP for directory fsync.
+		if d, err := os.Open(targetDir); err == nil {
+			if err := d.Sync(); err != nil {
+				log.Warning("failed to sync parent dir %s: %v", targetDir, err)
+			}
+			_ = d.Close()
+		}
+
+		// Apply permissions with one retry to absorb metadata-propagation
+		// delay on weakly-coherent filesystems (virtio-fs, 9pfs). ChmodFile
+		// always invokes chown under the hood, so a freshly-created dirent
+		// that has not yet propagated will surface as ENOENT here even
+		// though the file is fully written and synced.
+		chmodErr := ChmodFile(resolvedPath, meta.Permission)
+		if chmodErr != nil {
+			time.Sleep(20 * time.Millisecond)
+			chmodErr = ChmodFile(resolvedPath, meta.Permission)
+		}
+		if chmodErr != nil {
 			c.RespondError(
 				http.StatusInternalServerError,
 				model.ErrorCodeRuntimeError,
-				fmt.Sprintf("error chmoding file %s. %v", resolvedPath, err),
+				fmt.Sprintf("error chmoding file %s. %v", resolvedPath, chmodErr),
 			)
 			return
 		}
