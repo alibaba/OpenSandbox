@@ -164,6 +164,55 @@ def test_server_config_defaults_include_max_sandbox_timeout():
     assert server_cfg.max_sandbox_timeout_seconds is None
 
 
+def test_server_config_uvicorn_tuning_defaults():
+    """ServerConfig exposes uvicorn worker/concurrency knobs with sensible defaults."""
+    server_cfg = ServerConfig()
+    assert server_cfg.workers == 1
+    assert server_cfg.limit_concurrency == 1024
+    assert server_cfg.backlog == 2048
+    assert server_cfg.loop == "auto"
+    assert server_cfg.http == "auto"
+
+
+def test_server_config_uvicorn_tuning_overrides():
+    server_cfg = ServerConfig(
+        workers=8,
+        limit_concurrency=256,
+        backlog=4096,
+        loop="uvloop",
+        http="httptools",
+    )
+    assert server_cfg.workers == 8
+    assert server_cfg.limit_concurrency == 256
+    assert server_cfg.backlog == 4096
+    assert server_cfg.loop == "uvloop"
+    assert server_cfg.http == "httptools"
+
+
+def test_server_config_workers_must_be_positive():
+    with pytest.raises(ValidationError):
+        ServerConfig(workers=0)
+
+
+def test_server_config_limit_concurrency_must_be_positive_when_set():
+    with pytest.raises(ValidationError):
+        ServerConfig(limit_concurrency=0)
+    cfg = ServerConfig(limit_concurrency=None)
+    assert cfg.limit_concurrency is None
+
+
+def test_server_config_backlog_must_be_positive():
+    with pytest.raises(ValidationError):
+        ServerConfig(backlog=0)
+
+
+def test_server_config_loop_and_http_reject_unknown_values():
+    with pytest.raises(ValidationError):
+        ServerConfig(loop="trio")  # type: ignore[arg-type]
+    with pytest.raises(ValidationError):
+        ServerConfig(http="hyper")  # type: ignore[arg-type]
+
+
 def test_store_defaults_to_sqlite():
     cfg = StoreConfig()
     assert cfg.type == "sqlite"

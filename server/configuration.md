@@ -66,6 +66,11 @@ Example files in this repository:
 | `eip` | string \| omitted | `null` | Public IP or hostname used as the **host part** when the server returns sandbox endpoint URLs (notably Docker runtime). |
 | `max_sandbox_timeout_seconds` | integer \| omitted | `null` | Upper bound on sandbox TTL in seconds for **create** requests that specify `timeout`. Must be ≥ **60** if set. Omit to disable the server-side cap. |
 | `timeout_keep_alive` | integer | `30` | Idle keep-alive timeout (seconds) passed to uvicorn. |
+| `workers` | integer | `1` | Number of uvicorn worker processes. Each worker is a separate Python process with its own event loop and (under the Kubernetes runtime) its own informer watch streams to the apiserver. Default `1` keeps apiserver pressure predictable; bump to 2–8 based on CPU quota and apiserver capacity. Ignored when `--reload` is set. |
+| `limit_concurrency` | integer \| omitted | `1024` | Maximum concurrent connections per worker before returning 503. Provides backpressure protection under burst load. Omit to disable. |
+| `backlog` | integer | `2048` | Socket listen backlog passed to uvicorn. |
+| `loop` | `"auto"` \| `"uvloop"` \| `"asyncio"` | `"auto"` | Event loop implementation. `auto` prefers uvloop and falls back to asyncio. |
+| `http` | `"auto"` \| `"httptools"` \| `"h11"` | `"auto"` | HTTP protocol parser. `auto` prefers httptools and falls back to h11. |
 
 ---
 

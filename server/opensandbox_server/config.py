@@ -453,6 +453,45 @@ class ServerConfig(BaseModel):
             "Connections idle longer than this may be closed by the server."
         ),
     )
+    workers: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Number of uvicorn worker processes. Each worker is a separate "
+            "Python process with its own event loop and (under the Kubernetes "
+            "runtime) its own informer watch streams to the apiserver. "
+            "Default 1 to keep apiserver pressure predictable; bump to 2-8 "
+            "based on CPU quota and apiserver capacity. Ignored when "
+            "--reload is set."
+        ),
+    )
+    limit_concurrency: Optional[int] = Field(
+        default=1024,
+        ge=1,
+        description=(
+            "Maximum concurrent connections per worker before returning 503. "
+            "Set null to disable. Provides backpressure protection under burst load."
+        ),
+    )
+    backlog: int = Field(
+        default=2048,
+        ge=1,
+        description="Socket listen backlog passed to uvicorn.",
+    )
+    loop: Literal["auto", "uvloop", "asyncio"] = Field(
+        default="auto",
+        description=(
+            "Event loop implementation. 'auto' uses uvloop when available and "
+            "falls back to asyncio. 'asyncio' forces the stdlib loop."
+        ),
+    )
+    http: Literal["auto", "httptools", "h11"] = Field(
+        default="auto",
+        description=(
+            "HTTP protocol parser. 'auto' uses httptools when available and "
+            "falls back to h11."
+        ),
+    )
     api_key: Optional[str] = Field(
         default=None,
         description="Global API key for authenticating incoming lifecycle API calls.",

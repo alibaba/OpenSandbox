@@ -204,4 +204,6 @@ if __name__ == "__main__":
         reload=True,
         log_config=_log_config,
         timeout_keep_alive=app_config.server.timeout_keep_alive,
+        loop=app_config.server.loop,
+        http=app_config.server.http,
     )

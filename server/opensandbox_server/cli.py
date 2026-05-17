@@ -286,13 +286,25 @@ def main() -> None:
 
     from opensandbox_server import main as server_main  # local import after env is set
 
+    server_cfg = server_main.app_config.server
+    workers = 1 if args.reload else server_cfg.workers
+    if args.reload and server_cfg.workers > 1:
+        print(
+            f"--reload set; ignoring workers={server_cfg.workers}, using 1\n"
+        )
+
     uvicorn.run(
         "opensandbox_server.main:app",
-        host=server_main.app_config.server.host,
-        port=server_main.app_config.server.port,
+        host=server_cfg.host,
+        port=server_cfg.port,
         reload=args.reload,
         log_config=server_main._log_config,
-        timeout_keep_alive=server_main.app_config.server.timeout_keep_alive,
+        timeout_keep_alive=server_cfg.timeout_keep_alive,
+        workers=workers,
+        limit_concurrency=server_cfg.limit_concurrency,
+        backlog=server_cfg.backlog,
+        loop=server_cfg.loop,
+        http=server_cfg.http,
     )
 
 
