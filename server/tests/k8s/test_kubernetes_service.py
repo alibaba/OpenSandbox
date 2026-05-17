@@ -1236,3 +1236,62 @@ class TestSignedEndpoint:
         ep2 = k8s_service.get_endpoint("sbx-001", 8080, expires=2000000500)
 
         assert ep1.endpoint != ep2.endpoint
+
+
+class TestPatchSandboxMetadata:
+    """Verify patch_sandbox_metadata builds the JSON merge-patch body correctly
+    and uses the API server's PATCH response (not a cache-prone re-fetch)."""
+
+    @staticmethod
+    def _workload(labels: dict) -> dict:
+        return {
+            "metadata": {
+                "name": "sandbox-sbx-001",
+                "labels": dict(labels),
+                "creationTimestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+            "spec": {},
+            "status": {"conditions": []},
+        }
+
+    @staticmethod
+    def _stub_provider_status(k8s_service) -> None:
+        k8s_service.workload_provider.get_status.return_value = {
+            "state": "Running",
+            "reason": None,
+            "message": None,
+            "last_transition_at": None,
+        }
+        k8s_service.workload_provider.get_expiration.return_value = None
+
+    def test_patch_body_sends_null_for_deleted_keys(self, k8s_service):
+        initial = {"opensandbox.io/id": "sbx-001", "team": "infra", "env": "dev"}
+        patched = {"opensandbox.io/id": "sbx-001", "env": "stage"}
+
+        k8s_service.workload_provider.get_workload.return_value = self._workload(initial)
+        k8s_service.workload_provider.patch_labels.return_value = self._workload(patched)
+        self._stub_provider_status(k8s_service)
+
+        k8s_service.patch_sandbox_metadata("sbx-001", {"env": "stage", "team": None})
+
+        k8s_service.workload_provider.patch_labels.assert_called_once()
+        body_labels = k8s_service.workload_provider.patch_labels.call_args.kwargs["labels"]
+        assert body_labels["env"] == "stage"
+        assert body_labels["team"] is None
+        assert body_labels["opensandbox.io/id"] == "sbx-001"
+
+    def test_returns_sandbox_from_patch_response(self, k8s_service):
+        """The PATCH response is authoritative; re-reading via get_workload
+        could hit a stale informer cache."""
+        initial = {"opensandbox.io/id": "sbx-001", "env": "dev"}
+        patched = {"opensandbox.io/id": "sbx-001", "env": "stage"}
+
+        k8s_service.workload_provider.get_workload.return_value = self._workload(initial)
+        k8s_service.workload_provider.patch_labels.return_value = self._workload(patched)
+        self._stub_provider_status(k8s_service)
+
+        sandbox = k8s_service.patch_sandbox_metadata("sbx-001", {"env": "stage"})
+
+        assert sandbox.metadata == {"env": "stage"}
+        # Pre-patch read only; no second get_workload after patch_labels.
+        assert k8s_service.workload_provider.get_workload.call_count == 1
