@@ -107,6 +107,22 @@ func TestReadFromPos_FlushesTrailingLine(t *testing.T) {
 	assert.Equal(t, []string{"line1", "lastline-without-newline"}, lines)
 }
 
+func TestReadFromPos_PreservesBlankLines(t *testing.T) {
+	tmp := t.TempDir()
+	logFile := filepath.Join(tmp, "stdout.log")
+
+	// Mix of single newlines, consecutive blank lines, leading blank, and CRLF.
+	initial := "a\n\nb\n\n\nc\n\r\nd\n"
+	require.NoError(t, os.WriteFile(logFile, []byte(initial), 0o644))
+
+	var got []string
+	c := &Controller{}
+	c.readFromPos(&sync.Mutex{}, logFile, 0, func(s string) { got = append(got, s) }, false)
+
+	want := []string{"a", "\n", "b", "\n", "\n", "c", "\n", "d"}
+	require.Equal(t, want, got)
+}
+
 func TestRunCommand_Echo(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("bash not available on windows")

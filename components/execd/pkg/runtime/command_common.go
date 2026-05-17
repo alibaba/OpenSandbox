@@ -121,6 +121,7 @@ func (c *Controller) readFromPos(mutex *sync.Mutex, filepath string, startPos in
 	reader := bufio.NewReader(file)
 	var buffer bytes.Buffer
 	var currentPos int64 = startPos
+	var lastWasCR bool
 
 	for {
 		b, err := reader.ReadByte()
@@ -138,15 +139,22 @@ func (c *Controller) readFromPos(mutex *sync.Mutex, filepath string, startPos in
 
 		// Check if it's a line terminator (\n or \r)
 		if b == '\n' || b == '\r' {
-			// If buffer has content, output this line
-			if buffer.Len() > 0 {
+			switch {
+			case buffer.Len() > 0:
+				// Flush the line content without the terminator
 				onExecute(buffer.String())
 				buffer.Reset()
+			case b == '\n' && lastWasCR:
+				// Second half of a \r\n pair; already emitted on \r
+			default:
+				// Standalone blank line; surface it so callers see the gap
+				onExecute("\n")
 			}
-			// Skip line terminator
+			lastWasCR = (b == '\r')
 			continue
 		}
 
+		lastWasCR = false
 		buffer.WriteByte(b)
 	}
 
