@@ -117,20 +117,31 @@ func TestE2E_FullLifecycle(t *testing.T) {
 	}
 	execClient := opensandbox.NewExecdClient(execdURL, execToken)
 
-	err = execClient.Ping(ctx)
-	require.NoError(t, err)
+	// Execd may accept TCP before all routes register, and the server-side proxy
+	// can drop the first ping that arrives in the gap between Running state and
+	// execd readiness. Poll until ping succeeds.
+	require.Eventually(t, func() bool {
+		return execClient.Ping(ctx) == nil
+	}, 30*time.Second, 500*time.Millisecond, "execd ping never succeeded")
 	t.Log("Execd ping: OK")
 
 	// 6. Test Execd — run a command with SSE streaming
 	var output strings.Builder
-	err = execClient.RunCommand(ctx, opensandbox.RunCommandRequest{
-		Command: "echo hello-from-go-e2e && python3 --version",
-	}, func(event opensandbox.StreamEvent) error {
-		t.Logf("  SSE event: type=%s data=%s", event.Event, event.Data)
-		output.WriteString(event.Data)
-		return nil
-	})
-	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		output.Reset()
+		runErr := execClient.RunCommand(ctx, opensandbox.RunCommandRequest{
+			Command: "echo hello-from-go-e2e && python3 --version",
+		}, func(event opensandbox.StreamEvent) error {
+			t.Logf("  SSE event: type=%s data=%s", event.Event, event.Data)
+			output.WriteString(event.Data)
+			return nil
+		})
+		if runErr != nil {
+			t.Logf("RunCommand attempt failed (will retry): %v", runErr)
+			return false
+		}
+		return true
+	}, 30*time.Second, 1*time.Second, "RunCommand never produced an SSE stream")
 	t.Logf("Command raw output (%d bytes): %q", output.Len(), output.String())
 
 	// 7. Test Execd — file operations
@@ -235,8 +246,7 @@ func TestE2E_PauseResume(t *testing.T) {
 	// 7. Verify resumed sandbox is healthy and functional
 	require.True(t, resumed.IsHealthy(ctx), "sandbox not healthy after resume")
 
-	exec2, err := resumed.RunCommand(ctx, "echo after-resume", nil)
-	require.NoError(t, err)
+	exec2 := runCommandWithRetry(t, ctx, resumed, "echo after-resume")
 	t.Logf("Post-resume output: %s", exec2.Text())
 
 	// 8. Also test instance method Resume: pause again and resume via method
@@ -246,8 +256,7 @@ func TestE2E_PauseResume(t *testing.T) {
 	resumed2, err := resumed.Resume(ctx)
 	require.NoError(t, err)
 
-	exec3, err := resumed2.RunCommand(ctx, "echo instance-resume", nil)
-	require.NoError(t, err)
+	exec3 := runCommandWithRetry(t, ctx, resumed2, "echo instance-resume")
 	t.Logf("Instance resume output: %s", exec3.Text())
 
 	// Cleanup

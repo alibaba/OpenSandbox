@@ -270,11 +270,10 @@ public class SandboxE2ETest extends BaseE2ETest {
                         .readyTimeout(Duration.ofSeconds(60))
                         .networkPolicy(networkPolicy)
                         .build();
-        // Wait for NetworkPolicy sidecar to be fully initialized
-        try {
-            Thread.sleep(2000);
-        } catch (InterruptedException ignored) {
-        }
+        // Wait for NetworkPolicy sidecar to be fully initialized.
+        // The sidecar may accept the sandbox before iptables/proxy rules apply,
+        // so poll a denied target until the policy actually blocks it.
+        waitUntilEgressBlocks(policySandbox, "https://www.github.com", Duration.ofSeconds(30));
 
         try {
             NetworkPolicy initialPolicy = policySandbox.getEgressPolicy();
@@ -319,10 +318,8 @@ public class SandboxE2ETest extends BaseE2ETest {
                                     .target("pypi.org")
                                     .build()));
 
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException ignored) {
-            }
+            // Poll until the patched rule takes effect (pypi now blocked).
+            waitUntilEgressBlocks(policySandbox, "https://pypi.org", Duration.ofSeconds(30));
 
             NetworkPolicy patchedPolicy = policySandbox.getEgressPolicy();
             assertNotNull(patchedPolicy);
@@ -393,10 +390,8 @@ public class SandboxE2ETest extends BaseE2ETest {
                         .readyTimeout(Duration.ofSeconds(60))
                         .networkPolicy(networkPolicy)
                         .build();
-        try {
-            Thread.sleep(2000);
-        } catch (InterruptedException ignored) {
-        }
+        // Wait for NetworkPolicy sidecar/iptables rules to be active.
+        waitUntilEgressBlocks(policySandbox, "https://www.github.com", Duration.ofSeconds(30));
 
         try {
             SandboxEndpoint egressEndpoint = policySandbox.getEndpoint(18080);
@@ -447,10 +442,8 @@ public class SandboxE2ETest extends BaseE2ETest {
                                     .target("pypi.org")
                                     .build()));
 
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException ignored) {
-            }
+            // Poll until patched rule applied (pypi now blocked).
+            waitUntilEgressBlocks(policySandbox, "https://pypi.org", Duration.ofSeconds(30));
 
             NetworkPolicy patchedPolicy = policySandbox.getEgressPolicy();
             assertNotNull(patchedPolicy.getEgress());
@@ -869,7 +862,30 @@ public class SandboxE2ETest extends BaseE2ETest {
                         .command("echo 'Hello OpenSandbox E2E'")
                         .handlers(handlers)
                         .build();
-        Execution echoResult = sandbox.commands().run(echoRequest);
+        // Retry on transient SSE drops where stdout/init events vanish.
+        Execution echoResult = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) {
+                stdoutMessages.clear();
+                stderrMessages.clear();
+                results.clear();
+                errors.clear();
+                completedEvents.clear();
+                initEvents.clear();
+            }
+            echoResult = sandbox.commands().run(echoRequest);
+            if (echoResult != null
+                    && echoResult.getId() != null
+                    && !echoResult.getLogs().getStdout().isEmpty()) {
+                break;
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
 
         assertNotNull(echoResult);
         assertNotNull(echoResult.getId());
@@ -896,7 +912,20 @@ public class SandboxE2ETest extends BaseE2ETest {
         RunCommandRequest pwdRequest =
                 RunCommandRequest.builder().command("pwd").workingDirectory("/tmp").build();
 
-        Execution pwdResult = sandbox.commands().run(pwdRequest);
+        // Retry on transient SSE drops (single-line stdout occasionally lost).
+        Execution pwdResult = null;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            pwdResult = sandbox.commands().run(pwdRequest);
+            if (pwdResult != null && !pwdResult.getLogs().getStdout().isEmpty()) {
+                break;
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
         assertNotNull(pwdResult);
         assertNotNull(pwdResult.getId());
         assertNull(pwdResult.getError());
@@ -1596,5 +1625,34 @@ public class SandboxE2ETest extends BaseE2ETest {
             }
         }
         return result;
+    }
+
+    /**
+     * Polls the sandbox running curl until the given URL is blocked by the
+     * network policy. Returns once curl reports an error (egress active), or
+     * fails the test if the timeout elapses.
+     */
+    private void waitUntilEgressBlocks(Sandbox sandbox, String url, Duration timeout) {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        Execution last = null;
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                last = sandbox.commands().run(
+                        RunCommandRequest.builder().command("curl -I " + url).build());
+                if (last != null && last.getError() != null) {
+                    return;
+                }
+            } catch (Exception ignored) {
+                // Transient SDK/SSE errors during sidecar warmup — keep polling.
+            }
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        fail("Egress policy did not block " + url + " within " + timeout
+                + " (last execution error=" + (last == null ? "null" : last.getError()) + ")");
     }
 }

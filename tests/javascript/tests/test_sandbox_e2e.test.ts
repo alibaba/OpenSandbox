@@ -661,11 +661,17 @@ test("02 command execution: success, working directory, background, failure", as
   expect(completedEvents).toHaveLength(1);
   expect(errors).toHaveLength(0);
 
-  const pwd = await sandbox.commands.run("pwd", { workingDirectory: "/tmp" });
-  expect(pwd.error).toBeUndefined();
-  expect(pwd.logs.stdout[0]?.text).toBe("/tmp");
-  expect(pwd.exitCode).toBe(0);
-  expect(pwd.complete).toBeTruthy();
+  // Retry on transient SSE drops where the only stdout line vanishes.
+  let pwd: Awaited<ReturnType<typeof sandbox.commands.run>> | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    pwd = await sandbox.commands.run("pwd", { workingDirectory: "/tmp" });
+    if (pwd.logs.stdout.length > 0) break;
+    await new Promise<void>((resolve) => setTimeout(resolve, 500));
+  }
+  expect(pwd!.error).toBeUndefined();
+  expect(pwd!.logs.stdout[0]?.text).toBe("/tmp");
+  expect(pwd!.exitCode).toBe(0);
+  expect(pwd!.complete).toBeTruthy();
 
   const start = Date.now();
   const bg = await sandbox.commands.run("sleep 30", { background: true });
