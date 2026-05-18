@@ -151,15 +151,17 @@ func TestFilesystem_UploadAndDownloadFile(t *testing.T) {
 func TestFilesystem_SetPermissions(t *testing.T) {
 	ctx, sb := createTestSandbox(t)
 
-	_ = runCommandWithRetry(t, ctx, sb, `echo "perm-test" > /tmp/perm-e2e.txt`)
+	_, err := sb.RunCommand(ctx, `echo "perm-test" > /tmp/perm-e2e.txt`, nil)
+	require.NoError(t, err)
 	t.Cleanup(func() { _ = sb.DeleteFiles(context.Background(), []string{"/tmp/perm-e2e.txt"}) })
 
-	err := sb.SetPermissions(ctx, opensandbox.PermissionsRequest{
+	err = sb.SetPermissions(ctx, opensandbox.PermissionsRequest{
 		"/tmp/perm-e2e.txt": {Mode: 644},
 	})
 	require.NoError(t, err)
 
-	exec := runCommandWithRetry(t, ctx, sb, `stat -c "%a" /tmp/perm-e2e.txt || stat -f "%Lp" /tmp/perm-e2e.txt`)
+	exec, err := sb.RunCommand(ctx, `stat -c "%a" /tmp/perm-e2e.txt || stat -f "%Lp" /tmp/perm-e2e.txt`, nil)
+	require.NoError(t, err)
 	require.Contains(t, exec.Text(), "644")
 }
 

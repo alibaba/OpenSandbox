@@ -88,34 +88,6 @@ func createTestSandbox(t *testing.T) (context.Context, *opensandbox.Sandbox) {
 	return ctx, sb
 }
 
-// runCommandWithRetry retries sb.RunCommand on transient SSE errors
-// (`empty sse stream`, connection resets) that show up in a narrow window
-// after sandbox state flips to Running or after Resume — execd accepts TCP
-// before its command/code routes register.
-func runCommandWithRetry(t *testing.T, ctx context.Context, sb *opensandbox.Sandbox, cmd string) *opensandbox.Execution {
-	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	var lastErr error
-	for {
-		exec, err := sb.RunCommand(ctx, cmd, nil)
-		if err == nil {
-			return exec
-		}
-		lastErr = err
-		msg := err.Error()
-		transient := strings.Contains(msg, "empty sse stream") ||
-			strings.Contains(msg, "connection reset by peer") ||
-			strings.Contains(msg, "EOF")
-		if !transient || time.Now().After(deadline) {
-			break
-		}
-		t.Logf("RunCommand %q transient failure (will retry): %v", cmd, err)
-		time.Sleep(500 * time.Millisecond)
-	}
-	require.NoError(t, lastErr)
-	return nil
-}
-
 func newExecdClientForSandbox(t *testing.T, ctx context.Context, sb *opensandbox.Sandbox) *opensandbox.ExecdClient {
 	t.Helper()
 

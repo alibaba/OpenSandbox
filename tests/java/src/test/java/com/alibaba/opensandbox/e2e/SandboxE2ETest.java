@@ -862,30 +862,7 @@ public class SandboxE2ETest extends BaseE2ETest {
                         .command("echo 'Hello OpenSandbox E2E'")
                         .handlers(handlers)
                         .build();
-        // Retry on transient SSE drops where stdout/init events vanish.
-        Execution echoResult = null;
-        for (int attempt = 0; attempt < 3; attempt++) {
-            if (attempt > 0) {
-                stdoutMessages.clear();
-                stderrMessages.clear();
-                results.clear();
-                errors.clear();
-                completedEvents.clear();
-                initEvents.clear();
-            }
-            echoResult = sandbox.commands().run(echoRequest);
-            if (echoResult != null
-                    && echoResult.getId() != null
-                    && !echoResult.getLogs().getStdout().isEmpty()) {
-                break;
-            }
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
+        Execution echoResult = sandbox.commands().run(echoRequest);
 
         assertNotNull(echoResult);
         assertNotNull(echoResult.getId());
@@ -912,20 +889,7 @@ public class SandboxE2ETest extends BaseE2ETest {
         RunCommandRequest pwdRequest =
                 RunCommandRequest.builder().command("pwd").workingDirectory("/tmp").build();
 
-        // Retry on transient SSE drops (single-line stdout occasionally lost).
-        Execution pwdResult = null;
-        for (int attempt = 0; attempt < 3; attempt++) {
-            pwdResult = sandbox.commands().run(pwdRequest);
-            if (pwdResult != null && !pwdResult.getLogs().getStdout().isEmpty()) {
-                break;
-            }
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                break;
-            }
-        }
+        Execution pwdResult = sandbox.commands().run(pwdRequest);
         assertNotNull(pwdResult);
         assertNotNull(pwdResult.getId());
         assertNull(pwdResult.getError());

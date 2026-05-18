@@ -694,7 +694,7 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
         var probeCommand =
             $"sh -c 'if [ -z \"${{{envKey}:-}}\" ]; then echo \"__EMPTY__\"; else echo \"${{{envKey}}}\"; fi'";
 
-        var baseline = await RunWithRetryAsync(sandbox, probeCommand);
+        var baseline = await sandbox.Commands.RunAsync(probeCommand);
         Assert.Null(baseline.Error);
         var baselineOutput = string.Join("\n", baseline.Logs.Stdout.Select(m => m.Text)).Trim();
         Assert.Equal("__EMPTY__", baselineOutput);
