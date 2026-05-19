@@ -54,6 +54,13 @@ internal sealed class EgressAdapter : IEgress
         await _client.PatchAsync("/policy", normalizedRules, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task DeleteRulesAsync(
+        IReadOnlyList<string> targets,
+        CancellationToken cancellationToken = default)
+    {
+        await _client.DeleteAsync("/policy", targets.ToList(), cancellationToken).ConfigureAwait(false);
+    }
+
     private static NetworkPolicy ParseNetworkPolicy(JsonElement element)
     {
         var policy = new NetworkPolicy();

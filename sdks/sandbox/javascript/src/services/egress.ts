@@ -24,4 +24,12 @@ export interface Egress {
    * the first rule for a target wins. The current defaultAction is preserved.
    */
   patchRules(rules: NetworkRule[]): Promise<void>;
+  /**
+   * Delete egress rules by target.
+   *
+   * Each entry is a FQDN or wildcard domain. Matching rules are removed from
+   * the currently enforced policy. Targets not present in the policy are
+   * silently ignored (idempotent). The current defaultAction is preserved.
+   */
+  deleteRules(targets: string[]): Promise<void>;
 }

@@ -219,6 +219,16 @@ class SandboxTest {
     }
 
     @Test
+    fun `deleteEgressRules should delegate to egressService`() {
+        val targets = listOf("bad.example.com", "*.blocked.org")
+        every { egressService.deleteRules(targets) } just Runs
+
+        sandbox.deleteEgressRules(targets)
+
+        verify { egressService.deleteRules(targets) }
+    }
+
+    @Test
     fun `builder manualCleanup should clear timeout`() {
         val builder =
             Sandbox.builder()

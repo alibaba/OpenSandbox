@@ -50,3 +50,17 @@ class Egress(Protocol):
             SandboxException: if the operation fails
         """
         ...
+
+    async def delete_rules(self, targets: list[str]) -> None:
+        """
+        Delete egress rules by target via the sidecar policy API.
+
+        Each entry is a FQDN or wildcard domain. Matching rules are removed
+        from the currently enforced policy. Targets not present in the policy
+        are silently ignored (idempotent). The current defaultAction is
+        preserved.
+
+        Raises:
+            SandboxException: if the operation fails
+        """
+        ...

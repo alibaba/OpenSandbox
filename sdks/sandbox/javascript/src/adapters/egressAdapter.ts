@@ -22,6 +22,8 @@ type ApiGetPolicyOk =
   EgressPaths["/policy"]["get"]["responses"][200]["content"]["application/json"];
 type ApiPatchRulesRequest =
   EgressPaths["/policy"]["patch"]["requestBody"]["content"]["application/json"];
+type ApiDeleteRulesRequest =
+  EgressPaths["/policy"]["delete"]["requestBody"]["content"]["application/json"];
 
 export class EgressAdapter implements Egress {
   constructor(private readonly client: EgressClient) {}
@@ -42,5 +44,13 @@ export class EgressAdapter implements Egress {
       body,
     });
     throwOnOpenApiFetchError({ error, response }, "Patch sandbox egress rules failed");
+  }
+
+  async deleteRules(targets: string[]): Promise<void> {
+    const body: ApiDeleteRulesRequest = targets;
+    const { error, response } = await this.client.DELETE("/policy", {
+      body,
+    });
+    throwOnOpenApiFetchError({ error, response }, "Delete sandbox egress rules failed");
   }
 }

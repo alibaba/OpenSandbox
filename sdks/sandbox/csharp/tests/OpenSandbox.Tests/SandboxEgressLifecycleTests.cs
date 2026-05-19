@@ -55,12 +55,15 @@ public class SandboxEgressLifecycleTests
             Action = NetworkRuleAction.Allow,
             Target = "www.github.com"
         }]);
+        await sandbox.DeleteEgressRulesAsync(["www.github.com", "*.blocked.org"]);
 
         sandboxes.EndpointCalls.Should().Equal(Constants.DefaultExecdPort, Constants.DefaultEgressPort);
         adapterFactory.EgressStackCallCount.Should().Be(1);
         adapterFactory.LastEgressBaseUrl.Should().Be($"http://127.0.0.1:{Constants.DefaultEgressPort}");
         egress.GetPolicyCallCount.Should().Be(1);
         egress.PatchRulesCallCount.Should().Be(1);
+        egress.DeleteRulesCallCount.Should().Be(1);
+        egress.LastDeleteTargets.Should().Equal("www.github.com", "*.blocked.org");
     }
 
     [Fact]
@@ -300,6 +303,10 @@ public class SandboxEgressLifecycleTests
 
         public int PatchRulesCallCount { get; private set; }
 
+        public int DeleteRulesCallCount { get; private set; }
+
+        public IReadOnlyList<string> LastDeleteTargets { get; private set; } = [];
+
         public Task<NetworkPolicy> GetPolicyAsync(CancellationToken cancellationToken = default)
         {
             GetPolicyCallCount++;
@@ -317,6 +324,13 @@ public class SandboxEgressLifecycleTests
         public Task PatchRulesAsync(IReadOnlyList<NetworkRule> rules, CancellationToken cancellationToken = default)
         {
             PatchRulesCallCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteRulesAsync(IReadOnlyList<string> targets, CancellationToken cancellationToken = default)
+        {
+            DeleteRulesCallCount++;
+            LastDeleteTargets = targets.ToList();
             return Task.CompletedTask;
         }
     }

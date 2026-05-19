@@ -26,4 +26,8 @@ public interface IEgress
     Task PatchRulesAsync(
         IReadOnlyList<NetworkRule> rules,
         CancellationToken cancellationToken = default);
+
+    Task DeleteRulesAsync(
+        IReadOnlyList<string> targets,
+        CancellationToken cancellationToken = default);
 }

@@ -310,6 +310,17 @@ class Sandbox:
         """
         await self._egress_service.patch_rules(rules)
 
+    async def delete_egress_rules(self, targets: list[str]) -> None:
+        """
+        Delete egress rules for this sandbox by target.
+
+        Each entry is a FQDN or wildcard domain. Matching rules are removed
+        from the currently enforced policy. Targets not present in the policy
+        are silently ignored (idempotent). The current defaultAction is
+        preserved.
+        """
+        await self._egress_service.delete_rules(targets)
+
     async def pause(self) -> None:
         """
         Pause the sandbox while preserving its state.

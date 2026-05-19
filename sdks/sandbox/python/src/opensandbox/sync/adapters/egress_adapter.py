@@ -110,3 +110,16 @@ class EgressAdapterSync(EgressSync):
         except Exception as e:
             logger.error("Failed to patch egress policy via endpoint %s", self.endpoint.endpoint, exc_info=e)
             raise ExceptionConverter.to_sandbox_exception(e) from e
+
+    def delete_rules(self, targets: list[str]) -> None:
+        try:
+            from opensandbox.api.egress.api.policy import delete_policy
+
+            response_obj = delete_policy.sync_detailed(
+                client=self._client,
+                body=list(targets),
+            )
+            handle_api_error(response_obj, "Delete egress rules")
+        except Exception as e:
+            logger.error("Failed to delete egress rules via endpoint %s", self.endpoint.endpoint, exc_info=e)
+            raise ExceptionConverter.to_sandbox_exception(e) from e

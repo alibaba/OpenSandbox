@@ -189,6 +189,23 @@ internal sealed class HttpClientWrapper
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task DeleteAsync(
+        string path,
+        object body,
+        CancellationToken cancellationToken)
+    {
+        var url = BuildUrl(path);
+        _logger.LogDebug("HTTP DELETE {Url}", url);
+        using var request = new HttpRequestMessage(HttpMethod.Delete, url);
+        ApplyDefaultHeaders(request);
+
+        var json = JsonSerializer.Serialize(body, JsonOptions);
+        request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken = default)

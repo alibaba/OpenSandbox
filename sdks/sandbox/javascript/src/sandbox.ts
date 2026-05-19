@@ -570,6 +570,10 @@ export class Sandbox {
     await Sandbox._priv.get(this)!.egress.patchRules(rules);
   }
 
+  async deleteEgressRules(targets: string[]): Promise<void> {
+    await Sandbox._priv.get(this)!.egress.deleteRules(targets);
+  }
+
   /**
    * Get sandbox endpoint for a port (STRICT: no scheme), e.g. "localhost:44772" or "domain/route/.../44772".
    */

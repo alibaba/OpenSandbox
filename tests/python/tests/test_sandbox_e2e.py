@@ -462,6 +462,82 @@ class TestSandboxE2E:
                 pass
             await sandbox.close()
 
+    @pytest.mark.timeout(180)
+    @pytest.mark.order(1)
+    async def test_01ac_network_policy_delete(self):
+        if is_kubernetes_runtime():
+            pytest.skip("Network policy is not covered in the Kubernetes runtime suite")
+
+        logger.info("=" * 80)
+        logger.info("TEST 1ac: networkPolicy delete (async)")
+        logger.info("=" * 80)
+
+        cfg = create_connection_config()
+        sandbox = await Sandbox.create(
+            image=SandboxImageSpec(get_sandbox_image()),
+            resource=get_e2e_sandbox_resource(),
+            connection_config=cfg,
+            timeout=timedelta(minutes=5),
+            ready_timeout=timedelta(seconds=30),
+            network_policy=NetworkPolicy(
+                defaultAction="deny",
+                egress=[
+                    NetworkRule(action="allow", target="pypi.org"),
+                    NetworkRule(action="allow", target="www.github.com"),
+                ],
+            ),
+        )
+        try:
+            await asyncio.sleep(5)
+
+            # Baseline: both targets reachable under deny-default policy.
+            initial_policy = await sandbox.get_egress_policy()
+            assert initial_policy.egress is not None
+            assert any(r.target == "pypi.org" and r.action == "allow" for r in initial_policy.egress)
+            assert any(
+                r.target == "www.github.com" and r.action == "allow" for r in initial_policy.egress
+            )
+            pypi_ok = await sandbox.commands.run("curl -I https://pypi.org")
+            assert pypi_ok.error is None
+            github_ok = await sandbox.commands.run("curl -I https://www.github.com")
+            assert github_ok.error is None
+
+            # Delete the github allow-rule. Include a non-existent target to
+            # confirm DELETE is idempotent (no error, silently ignored).
+            await sandbox.delete_egress_rules(["www.github.com", "nonexistent.example.com"])
+            await asyncio.sleep(2)
+
+            deleted_policy = await sandbox.get_egress_policy()
+            assert deleted_policy.egress is not None
+            assert not any(
+                r.target == "www.github.com" for r in deleted_policy.egress
+            ), "www.github.com rule should be removed"
+            assert any(
+                r.target == "pypi.org" and r.action == "allow" for r in deleted_policy.egress
+            ), "pypi.org rule should remain (other targets untouched)"
+            assert deleted_policy.default_action == "deny", "defaultAction must be preserved"
+
+            # github now falls under default-deny; pypi still allowed.
+            github_blocked = await sandbox.commands.run("curl -I https://www.github.com")
+            assert github_blocked.error is not None
+            pypi_still_ok = await sandbox.commands.run("curl -I https://pypi.org")
+            assert pypi_still_ok.error is None
+
+            # Second delete of the same target is a no-op.
+            await sandbox.delete_egress_rules(["www.github.com"])
+            await asyncio.sleep(1)
+            unchanged_policy = await sandbox.get_egress_policy()
+            assert unchanged_policy.egress is not None
+            assert {r.target for r in unchanged_policy.egress} == {
+                r.target for r in deleted_policy.egress
+            }
+        finally:
+            try:
+                await sandbox.kill()
+            except Exception:
+                pass
+            await sandbox.close()
+
     @pytest.mark.timeout(240)
     @pytest.mark.order(1)
     async def test_01ab_network_policy_get_and_patch_with_server_proxy(self):

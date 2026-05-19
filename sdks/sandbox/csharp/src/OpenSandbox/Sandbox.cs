@@ -594,6 +594,23 @@ public sealed class Sandbox : IAsyncDisposable
     }
 
     /// <summary>
+    /// Deletes egress rules for this sandbox by target.
+    ///
+    /// Each entry is a FQDN or wildcard domain. Matching rules are removed
+    /// from the currently enforced policy. Targets not present in the policy
+    /// are silently ignored (idempotent). The current defaultAction is
+    /// preserved.
+    /// </summary>
+    /// <param name="targets">Target FQDNs or wildcard domains to remove.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task DeleteEgressRulesAsync(
+        IReadOnlyList<string> targets,
+        CancellationToken cancellationToken = default)
+    {
+        await _egress.DeleteRulesAsync(targets, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Gets the endpoint for a port.
     /// </summary>
     /// <param name="port">The port number.</param>

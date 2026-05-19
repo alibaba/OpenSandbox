@@ -23,4 +23,6 @@ interface Egress {
     fun getPolicy(): NetworkPolicy
 
     fun patchRules(rules: List<NetworkRule>)
+
+    fun deleteRules(targets: List<String>)
 }

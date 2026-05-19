@@ -54,7 +54,41 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete egress rules
+         * @description Remove specific egress rules from the currently enforced policy by target.
+         *
+         *     - Accepts a list of target strings (FQDNs or wildcard domains).
+         *     - Matching rules are removed; targets not found in the current policy
+         *       are silently ignored (idempotent).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": string[];
+                };
+            };
+            responses: {
+                /** @description Rules removed successfully. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PolicyStatusResponse"];
+                    };
+                };
+                400: components["responses"]["BadRequest"];
+                401: components["responses"]["Unauthorized"];
+                500: components["responses"]["InternalServerError"];
+            };
+        };
         options?: never;
         head?: never;
         /**

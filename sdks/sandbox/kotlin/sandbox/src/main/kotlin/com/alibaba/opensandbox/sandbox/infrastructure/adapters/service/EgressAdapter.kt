@@ -66,4 +66,13 @@ internal class EgressAdapter(
             throw e.toSandboxException()
         }
     }
+
+    override fun deleteRules(targets: List<String>) {
+        try {
+            api.policyDelete(targets)
+        } catch (e: Exception) {
+            logger.error("Failed to delete egress rules via endpoint {}", egressEndpoint.endpoint, e)
+            throw e.toSandboxException()
+        }
+    }
 }

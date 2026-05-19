@@ -55,3 +55,15 @@ func (c *EgressClient) PatchPolicy(ctx context.Context, rules []NetworkRule) (*P
 	}
 	return &resp, nil
 }
+
+// DeletePolicy removes egress rules matching the given targets from the current
+// policy. Each target is a FQDN or wildcard domain. Targets not present in the
+// policy are silently ignored (idempotent). The current defaultAction is
+// preserved.
+func (c *EgressClient) DeletePolicy(ctx context.Context, targets []string) (*PolicyStatusResponse, error) {
+	var resp PolicyStatusResponse
+	if err := c.doRequest(ctx, "DELETE", "/policy", targets, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

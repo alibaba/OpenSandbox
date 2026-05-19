@@ -31,3 +31,12 @@ func (s *Sandbox) PatchEgressRules(ctx context.Context, rules []NetworkRule) (*P
 	}
 	return s.egress.PatchPolicy(ctx, rules)
 }
+
+// DeleteEgressRules removes egress rules matching the given targets from the
+// current egress policy. Targets not present in the policy are silently ignored.
+func (s *Sandbox) DeleteEgressRules(ctx context.Context, targets []string) (*PolicyStatusResponse, error) {
+	if err := s.resolveEgress(ctx); err != nil {
+		return nil, err
+	}
+	return s.egress.DeletePolicy(ctx, targets)
+}

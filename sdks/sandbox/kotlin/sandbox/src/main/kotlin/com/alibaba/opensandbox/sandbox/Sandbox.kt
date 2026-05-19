@@ -529,6 +529,19 @@ class Sandbox internal constructor(
     }
 
     /**
+     * Deletes egress rules for this sandbox by target.
+     *
+     * Each entry is a FQDN or wildcard domain. Matching rules are removed from
+     * the currently enforced policy. Targets not present in the policy are
+     * silently ignored (idempotent). The current defaultAction is preserved.
+     *
+     * @throws SandboxException if operation fails
+     */
+    fun deleteEgressRules(targets: List<String>) {
+        egressService.deleteRules(targets)
+    }
+
+    /**
      * Pauses the sandbox while preserving its state.
      *
      * The sandbox will transition to PAUSED state and can be resumed later.

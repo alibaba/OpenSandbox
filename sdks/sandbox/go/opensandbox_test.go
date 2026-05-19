@@ -578,6 +578,47 @@ func TestPatchPolicy(t *testing.T) {
 	require.Len(t, got.Policy.Egress, 2)
 }
 
+func TestDeletePolicy(t *testing.T) {
+	want := PolicyStatusResponse{
+		Status: "ok",
+		Mode:   "deny_all",
+		Policy: &NetworkPolicy{
+			DefaultAction: "deny",
+			Egress: []NetworkRule{
+				{Action: "allow", Target: "api.example.com"},
+			},
+		},
+	}
+
+	_, client := newEgressServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
+		}
+
+		var targets []string
+		if err := json.NewDecoder(r.Body).Decode(&targets); err != nil {
+			assert.Fail(t, fmt.Sprintf("decode body: %v", err))
+		}
+		if len(targets) != 2 {
+			assert.Fail(t, fmt.Sprintf("expected 2 targets in request, got %d", len(targets)))
+		}
+		if targets[0] != "bad.example.com" || targets[1] != "*.blocked.org" {
+			assert.Fail(t, fmt.Sprintf("unexpected targets: %v", targets))
+		}
+
+		jsonResponse(w, http.StatusOK, want)
+	})
+
+	got, err := client.DeletePolicy(context.Background(), []string{
+		"bad.example.com",
+		"*.blocked.org",
+	})
+	require.NoErrorf(t, err, "DeletePolicy")
+	require.NotNil(t, got.Policy)
+	require.Len(t, got.Policy.Egress, 1)
+	require.Equal(t, "api.example.com", got.Policy.Egress[0].Target)
+}
+
 func TestPing(t *testing.T) {
 	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
