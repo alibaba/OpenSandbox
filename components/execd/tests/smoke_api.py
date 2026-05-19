@@ -98,14 +98,19 @@ def run_command_blank_lines():
     readFromPos fix that preserves empty lines (a\n\nb -> ["a", "\n", "b"]).
     """
     url = f"{BASE_URL}/command"
-    # Use Python so the smoke runs identically under POSIX shells and Windows
-    # cmd /C, where single-quote quoting and POSIX printf are not portable.
-    py_script = (
-        "import sys; "
-        "sys.stdout.write('a\\n\\nb\\n\\n\\nc\\n')"
-    )
+    # Pick a shell-native command per platform so the regression covers both
+    # POSIX (LF-only) and Windows cmd (CRLF) byte streams without depending on
+    # Git for Windows / MSYS argv mangling. The execd reader collapses CRLF to
+    # LF, so both produce ["a", "\n", "b", "\n", "\n", "c"].
+    if os.name == "nt":
+        # cmd /C echo chain: each segment writes "<text>\r\n"; "echo." writes
+        # a bare "\r\n". Order is deterministic because "&" is sequential.
+        command = "echo a&echo.&echo b&echo.&echo.&echo c"
+    else:
+        # printf emits exact bytes: a\n\nb\n\n\nc\n
+        command = "printf 'a\\n\\nb\\n\\n\\nc\\n'"
     payload = {
-        "command": f'python -c "{py_script}"',
+        "command": command,
         "background": False,
     }
 
