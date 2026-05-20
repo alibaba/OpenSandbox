@@ -170,10 +170,29 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 	safego.Go(func() {
 		for {
 			select {
+			case <-done:
+				// cmd.Wait() has returned (or start failed). The pid is
+				// about to be — or already has been — reaped, so we
+				// must not signal it. Execute()'s defer cancel() fires
+				// after every foreground command, including successful
+				// ones, so without this gate the SIGKILL below would
+				// run on a recycled pid/pgid and could kill an
+				// unrelated process group.
+				return
 			case <-ctx.Done():
-				// Kill the whole process group so children don't outlive the
-				// cancelled context. exec.CommandContext only signals the
-				// group leader, which would leave grandchildren orphaned.
+				// Re-check `done` to avoid a race with cmd.Wait()
+				// returning concurrently. If cmd.Wait() has just
+				// finished, the leader pid may be reaped and recycled
+				// at any moment; signaling -pid would then target a
+				// foreign process group.
+				select {
+				case <-done:
+					return
+				default:
+				}
+				// Genuine cancellation (timeout, client disconnect,
+				// Interrupt). Kill the whole process group so children
+				// don't outlive the cancelled context.
 				if cmd.Process != nil {
 					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 				}
