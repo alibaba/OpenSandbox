@@ -171,6 +171,12 @@ func (c *Controller) runCommand(ctx context.Context, request *ExecuteCodeRequest
 		for {
 			select {
 			case <-ctx.Done():
+				// Kill the whole process group so children don't outlive the
+				// cancelled context. exec.CommandContext only signals the
+				// group leader, which would leave grandchildren orphaned.
+				if cmd.Process != nil {
+					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				}
 				return
 			case sig := <-signals:
 				if sig == nil {

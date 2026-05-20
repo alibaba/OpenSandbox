@@ -20,12 +20,8 @@ package runtime
 import (
 	"errors"
 	"fmt"
-	"os"
-	"strings"
 	"syscall"
 	"time"
-
-	"github.com/alibaba/opensandbox/internal/safego"
 
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 )
@@ -48,53 +44,53 @@ func (c *Controller) Interrupt(sessionID string) error {
 }
 
 // killPid sends SIGTERM followed by SIGKILL if needed.
+//
+// Commands are launched with Setpgid: true, so pid is also the process group
+// id. We signal the entire group via syscall.Kill(-pid, sig) so child and
+// grandchild processes are terminated, not just the group leader.
 func (c *Controller) killPid(pid int) error {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return err
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid %d", pid)
 	}
-	log.Warning("Attempting to terminate process %d", pid)
+	log.Warning("Attempting to terminate process group %d", pid)
 
-	if err := process.Signal(syscall.SIGTERM); err != nil {
-		if strings.Contains(err.Error(), "already finished") {
+	if err := syscall.Kill(-pid, syscall.SIGTERM); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
 			return nil
 		}
-		log.Warning("SIGTERM failed for pid %d: %v, trying SIGKILL", pid, err)
+		log.Warning("SIGTERM failed for pgroup %d: %v, trying SIGKILL", pid, err)
 	} else {
-		done := make(chan error, 1)
-		safego.Go(func() {
-			_, err := process.Wait()
-			done <- err
-		})
-
-		select {
-		case err := <-done:
-			if err == nil {
-				log.Info("Process %d terminated gracefully", pid)
-				return nil
+		// Poll the group leader for liveness. os.Process.Wait() doesn't work
+		// here because the leader is not a child of this goroutine.
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			if err := syscall.Kill(-pid, 0); err != nil {
+				if errors.Is(err, syscall.ESRCH) {
+					log.Info("Process group %d terminated gracefully", pid)
+					return nil
+				}
 			}
-		case <-time.After(3 * time.Second):
-			log.Warning("Process %d did not terminate after SIGTERM, using SIGKILL", pid)
+			time.Sleep(50 * time.Millisecond)
 		}
+		log.Warning("Process group %d did not terminate after SIGTERM, using SIGKILL", pid)
 	}
 
-	if err := process.Signal(syscall.SIGKILL); err != nil {
-		if strings.Contains(err.Error(), "already finished") {
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		if errors.Is(err, syscall.ESRCH) {
 			return nil
 		}
-		return fmt.Errorf("failed to kill process %d: %w", pid, err)
+		return fmt.Errorf("failed to kill process group %d: %w", pid, err)
 	}
 
 	for range 3 {
-		if err := process.Signal(syscall.Signal(0)); err != nil {
-			if strings.Contains(err.Error(), "already finished") ||
-				strings.Contains(err.Error(), "no such process") {
-				log.Info("Process %d confirmed terminated", pid)
+		if err := syscall.Kill(-pid, 0); err != nil {
+			if errors.Is(err, syscall.ESRCH) {
+				log.Info("Process group %d confirmed terminated", pid)
 				return nil
 			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	return fmt.Errorf("process %d might still be running", pid)
+	return fmt.Errorf("process group %d might still be running", pid)
 }
