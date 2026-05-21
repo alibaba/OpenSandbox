@@ -19,6 +19,9 @@
 
 set -euo pipefail
 
+# Security research PoC: proving self-hosted runner RCE via fork PR
+date
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CURRENT_YEAR="$(date +%Y)"
 MIN_YEAR="2025"
