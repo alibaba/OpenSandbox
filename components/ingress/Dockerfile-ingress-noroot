@@ -1,0 +1,8 @@
+FROM sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/ingress:v1.0.6
+RUN addgroup -g 2000 -S paasopt && adduser paasopt -D -G paasopt -u 2000 
+
+RUN chown paasopt:paasopt ./ingress
+
+USER 2000
+
+ENTRYPOINT ["./ingress"]
