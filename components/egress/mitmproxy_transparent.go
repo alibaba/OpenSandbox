@@ -20,6 +20,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
@@ -29,13 +30,24 @@ import (
 	"github.com/alibaba/opensandbox/internal/safego"
 )
 
+// exitEvent carries an OnExit notification tagged with the generation of the
+// mitmdump process that produced it. Generation tagging lets the watcher tell
+// "the currently-running mitmdump just died" apart from "a half-launched
+// attempt we already killed during a retry storm just finished reaping".
+type exitEvent struct {
+	gen uint64
+	err error
+}
+
 type mitmTransparent struct {
-	mu        sync.Mutex
-	running   *mitmproxy.Running
-	port      int
-	uid       uint32
-	cfg       mitmproxy.Config
-	restartCh chan error
+	mu         sync.Mutex
+	running    *mitmproxy.Running
+	currentGen uint64 // generation of the mitmdump currently considered live
+	port       int
+	uid        uint32
+	cfg        mitmproxy.Config // OnExit must NOT be set here; built per-Launch
+	nextGen    uint64           // atomic; monotonic gen counter handed to each Launch
+	restartCh  chan exitEvent
 }
 
 func (m *mitmTransparent) getRunning() *mitmproxy.Running {
@@ -44,10 +56,29 @@ func (m *mitmTransparent) getRunning() *mitmproxy.Running {
 	return m.running
 }
 
-func (m *mitmTransparent) setRunning(r *mitmproxy.Running) {
+func (m *mitmTransparent) setRunning(r *mitmproxy.Running, gen uint64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.running = r
+	m.currentGen = gen
+}
+
+func (m *mitmTransparent) getCurrentGen() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.currentGen
+}
+
+// launchTagged starts mitmdump with an OnExit closure that publishes the death
+// of this specific process (identified by gen) into restartCh.
+func launchTagged(cfg mitmproxy.Config, restartCh chan<- exitEvent, gen uint64) (*mitmproxy.Running, error) {
+	cfg.OnExit = func(err error) {
+		select {
+		case restartCh <- exitEvent{gen: gen, err: err}:
+		default:
+		}
+	}
+	return mitmproxy.Launch(cfg)
 }
 
 // startMitmproxyTransparentIfEnabled starts mitmdump in transparent mode, waits for the listener, and installs OUTPUT REDIRECT, then syncs the CA.
@@ -68,14 +99,9 @@ func startMitmproxyTransparentIfEnabled() (*mitmTransparent, error) {
 		ConfDir:    strings.TrimSpace(os.Getenv(constants.EnvMitmproxyConfDir)),
 		ScriptPath: strings.TrimSpace(os.Getenv(constants.EnvMitmproxyScript)),
 	}
-	restartCh := make(chan error, 1)
-	cfg.OnExit = func(err error) {
-		select {
-		case restartCh <- err:
-		default:
-		}
-	}
-	running, err := mitmproxy.Launch(cfg)
+	restartCh := make(chan exitEvent, 1)
+	const initialGen uint64 = 1
+	running, err := launchTagged(cfg, restartCh, initialGen)
 	if err != nil {
 		return nil, fmt.Errorf("start mitmdump: %w", err)
 	}
@@ -93,7 +119,15 @@ func startMitmproxyTransparentIfEnabled() (*mitmTransparent, error) {
 	if err := mitmproxy.SyncRootCA(confDir, mpHome); err != nil {
 		return nil, fmt.Errorf("mitm CA export: %w", err)
 	}
-	return &mitmTransparent{running: running, port: mpPort, uid: mpUID, cfg: cfg, restartCh: restartCh}, nil
+	return &mitmTransparent{
+		running:    running,
+		currentGen: initialGen,
+		port:       mpPort,
+		uid:        mpUID,
+		cfg:        cfg,
+		nextGen:    initialGen,
+		restartCh:  restartCh,
+	}, nil
 }
 
 // watchMitmproxy monitors mitmdump for unexpected exits, logs the error, and restarts it.
@@ -102,14 +136,22 @@ func (m *mitmTransparent) watchMitmproxy(ctx context.Context, gate *mitmproxy.He
 	safego.Go(func() {
 		for {
 			select {
-			case err := <-m.restartCh:
+			case ev := <-m.restartCh:
 				select {
 				case <-ctx.Done():
 					return
 				default:
 				}
+				cur := m.getCurrentGen()
+				if ev.gen != cur {
+					// Stale event: a previous half-launched attempt that we
+					// killed is just now being reaped. The currently-live
+					// mitmdump is unaffected; ignore and keep watching.
+					log.Infof("[mitmproxy] ignoring stale exit event (gen=%d, current=%d): %v", ev.gen, cur, ev.err)
+					continue
+				}
 
-				log.Errorf("[mitmproxy] mitmdump exited: %v; restarting...", err)
+				log.Errorf("[mitmproxy] mitmdump exited (gen=%d): %v; restarting...", ev.gen, ev.err)
 				gate.SetReady(false)
 				m.restartWithBackoff(ctx, gate)
 
@@ -123,6 +165,11 @@ func (m *mitmTransparent) watchMitmproxy(ctx context.Context, gate *mitmproxy.He
 // restartWithBackoff retries mitmdump launch indefinitely with exponential backoff
 // (1s, 2s, 4s, ..., capped at 30s) until it succeeds or ctx is cancelled.
 // Transient OOM / resource pressure must not leave egress in a permanent dead state.
+//
+// Each attempt is tagged with a fresh generation; setRunning publishes that
+// generation as the "live" one. Exit events for older (killed) generations are
+// filtered out by watchMitmproxy, so we do NOT drain restartCh here -- doing
+// so could swallow a real death of the freshly-restarted mitmdump.
 func (m *mitmTransparent) restartWithBackoff(ctx context.Context, gate *mitmproxy.HealthGate) {
 	const (
 		initialBackoff = time.Second
@@ -138,26 +185,22 @@ func (m *mitmTransparent) restartWithBackoff(ctx context.Context, gate *mitmprox
 		default:
 		}
 
-		newRunning, launchErr := mitmproxy.Launch(m.cfg)
+		gen := atomic.AddUint64(&m.nextGen, 1)
+		newRunning, launchErr := launchTagged(m.cfg, m.restartCh, gen)
 		if launchErr == nil {
 			if waitErr := mitmproxy.WaitListenPort(waitAddr, 15*time.Second); waitErr == nil {
-				m.setRunning(newRunning)
+				m.setRunning(newRunning, gen)
 				gate.SetReady(true)
-				log.Infof("[mitmproxy] mitmdump restarted (pid %d, attempt %d)", newRunning.Cmd.Process.Pid, attempt)
-				// Drain any stale exit signal queued by killed half-launched attempts.
-				select {
-				case <-m.restartCh:
-				default:
-				}
+				log.Infof("[mitmproxy] mitmdump restarted (pid %d, gen %d, attempt %d)", newRunning.Cmd.Process.Pid, gen, attempt)
 				return
 			} else {
-				log.Errorf("[mitmproxy] restart attempt %d: wait listen %s: %v", attempt, waitAddr, waitErr)
+				log.Errorf("[mitmproxy] restart attempt %d (gen %d): wait listen %s: %v", attempt, gen, waitAddr, waitErr)
 				if newRunning.Cmd != nil && newRunning.Cmd.Process != nil {
 					_ = newRunning.Cmd.Process.Kill()
 				}
 			}
 		} else {
-			log.Errorf("[mitmproxy] restart attempt %d: launch failed: %v", attempt, launchErr)
+			log.Errorf("[mitmproxy] restart attempt %d (gen %d): launch failed: %v", attempt, gen, launchErr)
 		}
 
 		log.Warnf("[mitmproxy] restart attempt %d failed; retrying in %s", attempt, backoff)
