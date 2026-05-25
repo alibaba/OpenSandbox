@@ -276,3 +276,5 @@ bin/
 obj/
 kubernetes/server
 kubernetes/task-executor
+
+.qoder/
