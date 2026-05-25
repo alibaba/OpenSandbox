@@ -111,26 +111,66 @@ func (m *mitmTransparent) watchMitmproxy(ctx context.Context, gate *mitmproxy.He
 
 				log.Errorf("[mitmproxy] mitmdump exited: %v; restarting...", err)
 				gate.SetReady(false)
-
-				newRunning, launchErr := mitmproxy.Launch(m.cfg)
-				if launchErr != nil {
-					log.Errorf("[mitmproxy] failed to restart mitmdump: %v; giving up", launchErr)
-					return
-				}
-
-				waitAddr := fmt.Sprintf("127.0.0.1:%d", m.cfg.ListenPort)
-				if waitErr := mitmproxy.WaitListenPort(waitAddr, 15*time.Second); waitErr != nil {
-					log.Errorf("[mitmproxy] restart: wait listen %s: %v; giving up", waitAddr, waitErr)
-					return
-				}
-
-				m.setRunning(newRunning)
-				gate.SetReady(true)
-				log.Infof("[mitmproxy] mitmdump restarted (pid %d)", newRunning.Cmd.Process.Pid)
+				m.restartWithBackoff(ctx, gate)
 
 			case <-ctx.Done():
 				return
 			}
 		}
 	})
+}
+
+// restartWithBackoff retries mitmdump launch indefinitely with exponential backoff
+// (1s, 2s, 4s, ..., capped at 30s) until it succeeds or ctx is cancelled.
+// Transient OOM / resource pressure must not leave egress in a permanent dead state.
+func (m *mitmTransparent) restartWithBackoff(ctx context.Context, gate *mitmproxy.HealthGate) {
+	const (
+		initialBackoff = time.Second
+		maxBackoff     = 30 * time.Second
+	)
+	backoff := initialBackoff
+	waitAddr := fmt.Sprintf("127.0.0.1:%d", m.cfg.ListenPort)
+
+	for attempt := 1; ; attempt++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		newRunning, launchErr := mitmproxy.Launch(m.cfg)
+		if launchErr == nil {
+			if waitErr := mitmproxy.WaitListenPort(waitAddr, 15*time.Second); waitErr == nil {
+				m.setRunning(newRunning)
+				gate.SetReady(true)
+				log.Infof("[mitmproxy] mitmdump restarted (pid %d, attempt %d)", newRunning.Cmd.Process.Pid, attempt)
+				// Drain any stale exit signal queued by killed half-launched attempts.
+				select {
+				case <-m.restartCh:
+				default:
+				}
+				return
+			} else {
+				log.Errorf("[mitmproxy] restart attempt %d: wait listen %s: %v", attempt, waitAddr, waitErr)
+				if newRunning.Cmd != nil && newRunning.Cmd.Process != nil {
+					_ = newRunning.Cmd.Process.Kill()
+				}
+			}
+		} else {
+			log.Errorf("[mitmproxy] restart attempt %d: launch failed: %v", attempt, launchErr)
+		}
+
+		log.Warnf("[mitmproxy] restart attempt %d failed; retrying in %s", attempt, backoff)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+		if backoff < maxBackoff {
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
 }
