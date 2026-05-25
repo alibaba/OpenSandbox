@@ -20,6 +20,8 @@ Synchronous service factory for creating sync adapter instances.
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.models.sandboxes import SandboxEndpoint
 from opensandbox.sync.adapters.command_adapter import CommandsAdapterSync
+from opensandbox.sync.adapters.diagnostics_adapter import DiagnosticsAdapterSync
+from opensandbox.sync.adapters.egress_adapter import EgressAdapterSync
 from opensandbox.sync.adapters.filesystem_adapter import FilesystemAdapterSync
 from opensandbox.sync.adapters.health_adapter import HealthAdapterSync
 from opensandbox.sync.adapters.metrics_adapter import MetricsAdapterSync
@@ -27,6 +29,8 @@ from opensandbox.sync.adapters.pools_adapter import PoolsAdapterSync
 from opensandbox.sync.adapters.sandboxes_adapter import SandboxesAdapterSync
 from opensandbox.sync.services import (
     CommandsSync,
+    DiagnosticsSync,
+    EgressSync,
     FilesystemSync,
     HealthSync,
     MetricsSync,
@@ -44,12 +48,18 @@ class AdapterFactorySync:
 
     def create_pool_service(self) -> PoolsSync:
         return PoolsAdapterSync(self.connection_config)
+      
+    def create_diagnostics_service(self) -> DiagnosticsSync:
+        return DiagnosticsAdapterSync(self.connection_config)
 
     def create_filesystem_service(self, endpoint: SandboxEndpoint) -> FilesystemSync:
         return FilesystemAdapterSync(self.connection_config, endpoint)
 
     def create_command_service(self, endpoint: SandboxEndpoint) -> CommandsSync:
         return CommandsAdapterSync(self.connection_config, endpoint)
+
+    def create_egress_service(self, endpoint: SandboxEndpoint) -> EgressSync:
+        return EgressAdapterSync(self.connection_config, endpoint)
 
     def create_health_service(self, endpoint: SandboxEndpoint) -> HealthSync:
         return HealthAdapterSync(self.connection_config, endpoint)
