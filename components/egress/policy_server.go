@@ -315,7 +315,6 @@ func (s *policyServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 			Mode:            mode,
 			EnforcementMode: s.enforcementMode,
 			Reason:          "no matching targets found",
-			Policy:          base,
 		})
 		return
 	}
@@ -325,14 +324,14 @@ func (s *policyServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 		Egress:        newEgress,
 	})
 	if err != nil {
-		logEgressUpdateFailedWarn(fmt.Sprintf("failed to marshal updated policy: %v", err))
+		logEgressUpdateFailedError(fmt.Sprintf("failed to marshal updated policy: %v", err))
 		http.Error(w, fmt.Sprintf("internal error: %v", err), http.StatusInternalServerError)
 		return
 	}
 	newPolicy, err := policy.ParsePolicy(string(rawMerged))
 	if err != nil {
-		logEgressUpdateFailedWarn(fmt.Sprintf("invalid policy after delete: %v", err))
-		http.Error(w, fmt.Sprintf("invalid policy after delete: %v", err), http.StatusBadRequest)
+		logEgressUpdateFailedError(fmt.Sprintf("invalid policy after delete: %v", err))
+		http.Error(w, fmt.Sprintf("internal error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
