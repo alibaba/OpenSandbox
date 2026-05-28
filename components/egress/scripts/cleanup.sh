@@ -31,24 +31,23 @@ log() { printf '[egress-cleanup] %s\n' "$*" >&2; }
 # stderr so it shows up in container logs without polluting the event log.
 try() { "$@" 2>&1 | sed 's/^/  /' >&2; return 0; }
 
+# Repeatedly attempts `iptables -D ...` (or equivalent) until it returns
+# non-zero, with a hard iteration cap so a broken iptables cannot spin
+# forever. Used to drain duplicate rules accumulated across crash restarts.
+delete_until_gone() {
+  i=0
+  while [ $i -lt 32 ]; do
+    "$@" 2>/dev/null || break
+    i=$((i + 1))
+  done
+}
+
 # ─── iptables DNS redirect (pkg/iptables/redirect.go) ────────────────
 remove_dns_redirect() {
   command -v iptables >/dev/null 2>&1 || { log "iptables not present; skipping DNS redirect cleanup"; return 0; }
 
   DNS_PORT=15353
   MARK_HEX=0x1
-
-  # Remove in reverse install order. The same rule may not exist (clean
-  # boot), or may exist multiple times (accumulated across crash restarts);
-  # loop -D until it returns non-zero, then move on. Cap iterations so a
-  # broken iptables doesn't spin forever.
-  delete_until_gone() {
-    i=0
-    while [ $i -lt 32 ]; do
-      "$@" 2>/dev/null || break
-      i=$((i + 1))
-    done
-  }
 
   for fam in iptables ip6tables; do
     command -v "$fam" >/dev/null 2>&1 || continue
@@ -92,14 +91,6 @@ remove_transparent_http() {
 
   MITM_PORT="${OPENSANDBOX_EGRESS_MITMPROXY_PORT:-18081}"
   MITM_UID="${OPENSANDBOX_EGRESS_MITMPROXY_UID:-10042}"
-
-  delete_until_gone() {
-    i=0
-    while [ $i -lt 32 ]; do
-      "$@" 2>/dev/null || break
-      i=$((i + 1))
-    done
-  }
 
   delete_until_gone iptables -t nat -D OUTPUT -p tcp \
     -m owner ! --uid-owner "$MITM_UID" \

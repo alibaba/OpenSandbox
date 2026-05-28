@@ -17,6 +17,31 @@
 // breaker, and a structured event log. It is intentionally scoped to one
 // worker per supervisor; multi-process supervision is delegated to higher
 // layers (e.g. Kubernetes pods).
+//
+// Signal handling. Callers control the supervisor's lifecycle via the
+// context passed to Run: cancelling ctx triggers a SIGTERM to the worker
+// followed by SIGKILL after GracePeriod. This package does NOT install any
+// signal.Notify itself; the caller (e.g. cmd/supervisor) is responsible for
+// translating OS signals into context cancellation. As a result:
+//
+//   - SIGINT and SIGTERM, when wired to ctx by the caller, both result in
+//     SIGTERM being sent to the worker (the supervisor does not preserve
+//     which signal triggered shutdown).
+//   - SIGHUP, SIGUSR1, SIGUSR2, SIGWINCH, SIGQUIT, and similar
+//     application-level signals are NOT forwarded to the worker. If the
+//     worker needs them (e.g. config reload, log rotate, tty resize), the
+//     caller must add forwarding around Run.
+//
+// Process group. The worker is started with Setpgid=true on Unix so that
+// signals delivered to the supervisor's process group do not reach the
+// worker by side channel. The supervisor signals the worker explicitly via
+// its PID.
+//
+// PID 1 / reaping. The supervisor does not call PR_SET_CHILD_SUBREAPER and
+// does not reap arbitrary children, only the worker it launched. If the
+// worker spawns its own descendants and is killed, those descendants are
+// reparented per usual kernel rules. Run this supervisor as PID 1 only when
+// the worker itself does not orphan grandchildren.
 package supervisor
 
 import (
@@ -57,11 +82,14 @@ type Spec struct {
 	PostExitTimeout time.Duration // default 30s
 
 	// Backoff controls inter-restart sleep. Sleep grows exponentially from
-	// BackoffMin to BackoffMax with ±BackoffJitter*prev jitter. After the
+	// BackoffMin to BackoffMax with ±*BackoffJitter*prev jitter. After the
 	// worker has been alive at least StableAfter, the backoff resets.
-	BackoffMin    time.Duration // default 1s
-	BackoffMax    time.Duration // default 30s
-	BackoffJitter float64       // default 0.1
+	BackoffMin time.Duration // default 1s
+	BackoffMax time.Duration // default 30s
+	// BackoffJitter is a *float64 so callers can distinguish "unset"
+	// (defaults to 0.1) from "explicitly disabled" (pass &zero). Negative
+	// values are clamped to 0.
+	BackoffJitter *float64
 	StableAfter   time.Duration // default 60s
 
 	// Crashloop circuit breaker. If more than BurstMax launches occur
@@ -133,11 +161,12 @@ func (s *Spec) applyDefaults() {
 	if s.BackoffMax < s.BackoffMin {
 		s.BackoffMax = s.BackoffMin
 	}
-	if s.BackoffJitter < 0 {
-		s.BackoffJitter = 0
-	}
-	if s.BackoffJitter == 0 {
-		s.BackoffJitter = defaultBackoffJitter
+	if s.BackoffJitter == nil {
+		v := defaultBackoffJitter
+		s.BackoffJitter = &v
+	} else if *s.BackoffJitter < 0 {
+		v := 0.0
+		s.BackoffJitter = &v
 	}
 	if s.StableAfter <= 0 {
 		s.StableAfter = defaultStableAfter

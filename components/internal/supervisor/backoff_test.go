@@ -85,3 +85,44 @@ func TestNextBackoff_JitterClampsToMin(t *testing.T) {
 		t.Errorf("got %s < min %s", got, min)
 	}
 }
+
+// Spec.BackoffJitter is *float64 specifically so callers can pass &zero to
+// disable jitter; verify the underlying nextBackoff respects jitter=0.
+func TestNextBackoff_JitterZeroDisablesJitter(t *testing.T) {
+	min := 1 * time.Second
+	max := 16 * time.Second
+	// With jitter=0, output must be the exact doubled value regardless of rng.
+	for _, rng := range []float64{0.0, 0.5, 0.9999} {
+		got := nextBackoff(2*time.Second, min, max, 0, fixedRNG(rng))
+		if got != 4*time.Second {
+			t.Errorf("rng=%v: got %s, want exactly 4s", rng, got)
+		}
+	}
+}
+
+func TestApplyDefaults_BackoffJitter(t *testing.T) {
+	cases := []struct {
+		name string
+		in   *float64
+		want float64
+	}{
+		{"nil applies default", nil, defaultBackoffJitter},
+		{"zero stays zero", floatPtr(0), 0},
+		{"explicit value preserved", floatPtr(0.25), 0.25},
+		{"negative clamped to zero", floatPtr(-0.5), 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := Spec{Cmd: "/bin/true", BackoffJitter: c.in}
+			s.applyDefaults()
+			if s.BackoffJitter == nil {
+				t.Fatal("BackoffJitter still nil after applyDefaults")
+			}
+			if *s.BackoffJitter != c.want {
+				t.Errorf("BackoffJitter = %v, want %v", *s.BackoffJitter, c.want)
+			}
+		})
+	}
+}
+
+func floatPtr(v float64) *float64 { return &v }

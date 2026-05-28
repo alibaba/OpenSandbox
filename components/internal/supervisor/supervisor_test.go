@@ -102,12 +102,6 @@ func (c *fakeClock) After(d time.Duration) <-chan time.Time {
 	return ch
 }
 
-func (c *fakeClock) advance(d time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.t = c.t.Add(d)
-}
-
 func parseEvents(t *testing.T, buf *bytes.Buffer) []Event {
 	t.Helper()
 	var out []Event
@@ -138,11 +132,12 @@ func filterEvents(events []Event, kind string) []Event {
 // baseSpec returns a Spec with short timeouts suitable for tests.
 func baseSpec(buf *bytes.Buffer, clk Clock) Spec {
 	false_ := false
+	jitter := 0.01
 	return Spec{
 		Name:          "test-worker",
 		BackoffMin:    10 * time.Millisecond,
 		BackoffMax:    20 * time.Millisecond,
-		BackoffJitter: 0.01,
+		BackoffJitter: &jitter,
 		StableAfter:   50 * time.Millisecond,
 		BurstWindow:   time.Second,
 		BurstMax:      1000, // disabled by default for most tests

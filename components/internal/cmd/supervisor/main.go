@@ -50,20 +50,21 @@ func main() {
 	version.EchoVersion("OpenSandbox Supervisor")
 
 	var (
-		preStart    multiFlag
-		postExit    multiFlag
-		eventLog    string
-		backoffMin  time.Duration
-		backoffMax  time.Duration
-		stableAfter time.Duration
-		burstWindow time.Duration
-		burstMax    int
-		onBurst     bool
-		grace       time.Duration
-		preTimeout  time.Duration
-		postTimeout time.Duration
-		name        string
-		logLevel    string
+		preStart      multiFlag
+		postExit      multiFlag
+		eventLog      string
+		backoffMin    time.Duration
+		backoffMax    time.Duration
+		backoffJitter float64
+		stableAfter   time.Duration
+		burstWindow   time.Duration
+		burstMax      int
+		onBurst       bool
+		grace         time.Duration
+		preTimeout    time.Duration
+		postTimeout   time.Duration
+		name          string
+		logLevel      string
 	)
 
 	fs := flag.NewFlagSet("opensandbox-supervisor", flag.ExitOnError)
@@ -72,6 +73,7 @@ func main() {
 	fs.StringVar(&eventLog, "event-log", "", "Path to JSONL event log. Empty = stderr.")
 	fs.DurationVar(&backoffMin, "backoff-min", time.Second, "Minimum restart backoff.")
 	fs.DurationVar(&backoffMax, "backoff-max", 30*time.Second, "Maximum restart backoff (exponential capped here).")
+	fs.Float64Var(&backoffJitter, "backoff-jitter", 0.1, "Backoff jitter fraction (0 disables, e.g. 0.1 = ±10%). Negative clamped to 0.")
 	fs.DurationVar(&stableAfter, "stable-after", 60*time.Second, "Worker uptime after which backoff resets.")
 	fs.DurationVar(&burstWindow, "burst-window", 5*time.Minute, "Crashloop budget sliding window.")
 	fs.IntVar(&burstMax, "burst-max", 10, "Max launches inside burst-window before tripping the breaker.")
@@ -111,6 +113,7 @@ func main() {
 		PostExit:        toHooks(postExit),
 		BackoffMin:      backoffMin,
 		BackoffMax:      backoffMax,
+		BackoffJitter:   &backoffJitter,
 		StableAfter:     stableAfter,
 		BurstWindow:     burstWindow,
 		BurstMax:        burstMax,

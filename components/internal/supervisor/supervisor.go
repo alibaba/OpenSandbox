@@ -151,7 +151,12 @@ func Run(ctx context.Context, spec Spec) error {
 		}
 
 		// Post-exit hooks. Receive context env. Errors are logged, not fatal.
-		hookEnv := append(spec.Env,
+		// Build hookEnv into a fresh slice so we never mutate spec.Env's
+		// underlying array (which `append(spec.Env, ...)` may do when
+		// cap > len).
+		hookEnv := make([]string, 0, len(spec.Env)+5)
+		hookEnv = append(hookEnv, spec.Env...)
+		hookEnv = append(hookEnv,
 			"WORKER_EXIT_CODE="+strconv.Itoa(exitCode),
 			"WORKER_SIGNAL="+sigName,
 			"WORKER_DURATION_MS="+strconv.FormatInt(runDur.Milliseconds(), 10),
@@ -183,7 +188,7 @@ func Run(ctx context.Context, spec Spec) error {
 // sleepBackoff computes the next backoff, emits a backoff event, and sleeps.
 // Returns the slept duration, or -1 if ctx was cancelled mid-sleep.
 func sleepBackoff(ctx context.Context, spec Spec, ew *eventWriter, prev time.Duration, nextAttempt int) time.Duration {
-	d := nextBackoff(prev, spec.BackoffMin, spec.BackoffMax, spec.BackoffJitter, defaultRNG)
+	d := nextBackoff(prev, spec.BackoffMin, spec.BackoffMax, *spec.BackoffJitter, defaultRNG)
 	_ = ew.emit(Event{Event: EventBackoff, SleepMS: d.Milliseconds(), NextAttempt: nextAttempt})
 	select {
 	case <-ctx.Done():
