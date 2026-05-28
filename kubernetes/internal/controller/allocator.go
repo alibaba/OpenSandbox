@@ -460,6 +460,12 @@ func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec
 		return nil, err
 	}
 
+	// Build a set of live pool pod names for dead-pod detection during allocation requests.
+	livePodSet := make(map[string]struct{}, len(spec.Pods))
+	for _, p := range spec.Pods {
+		livePodSet[p.Name] = struct{}{}
+	}
+
 	// Fetch pool allocation once and reuse it for both stale-sandbox cleanup and available-pod filtering.
 	// This avoids a double store read on every reconcile.
 	podAllocation, err := allocator.GetPoolAllocation(ctx, spec.Pool)
@@ -473,7 +479,7 @@ func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec
 	// handles them without any special-casing outside this function.
 	// Terminating sandboxes are handled inside getSandboxRequest: they receive no new supplement and
 	// all unreleased pods are queued for release.
-	allRequest, err := allocator.getAllRequest(ctx, spec.Sandboxes, podAllocation)
+	allRequest, err := allocator.getAllRequest(ctx, spec.Sandboxes, podAllocation, livePodSet)
 	if err != nil {
 		return nil, err
 	}
@@ -494,13 +500,13 @@ func (allocator *defaultAllocator) Schedule(ctx context.Context, spec *AllocSpec
 // orphan entries for pods in podAllocation whose sandbox is no longer in the sandboxes list
 // (e.g. force-deleted). Orphan entries carry PodSupplement=0 and ToRelease set to the orphan
 // pods so the normal recycle path handles them without special-casing in the caller.
-func (allocator *defaultAllocator) getAllRequest(ctx context.Context, sandboxes []*sandboxv1alpha1.BatchSandbox, podAllocation map[string]string) ([]*algorithm.SandboxRequest, error) {
+func (allocator *defaultAllocator) getAllRequest(ctx context.Context, sandboxes []*sandboxv1alpha1.BatchSandbox, podAllocation map[string]string, livePodSet map[string]struct{}) ([]*algorithm.SandboxRequest, error) {
 	log := logf.FromContext(ctx)
 	existingSandboxes := make(map[string]struct{}, len(sandboxes))
 	allRequest := make([]*algorithm.SandboxRequest, 0, len(sandboxes))
 	for _, sandbox := range sandboxes {
 		existingSandboxes[sandbox.Name] = struct{}{}
-		request, err := allocator.getSandboxRequest(ctx, sandbox)
+		request, err := allocator.getSandboxRequest(ctx, sandbox, livePodSet)
 		if err != nil {
 			return nil, err
 		}
@@ -523,7 +529,7 @@ func (allocator *defaultAllocator) getAllRequest(ctx context.Context, sandboxes 
 	return allRequest, nil
 }
 
-func (allocator *defaultAllocator) getSandboxRequest(ctx context.Context, sandbox *sandboxv1alpha1.BatchSandbox) (*algorithm.SandboxRequest, error) {
+func (allocator *defaultAllocator) getSandboxRequest(ctx context.Context, sandbox *sandboxv1alpha1.BatchSandbox, livePodSet map[string]struct{}) (*algorithm.SandboxRequest, error) {
 	log := logf.FromContext(ctx)
 	allocated, err := allocator.GetSandboxAllocation(ctx, sandbox)
 	if err != nil {
@@ -539,15 +545,37 @@ func (allocator *defaultAllocator) getSandboxRequest(ctx context.Context, sandbo
 		releasedSet[r] = struct{}{}
 	}
 
+	// Filter out pods that no longer exist in the pool (e.g. externally deleted).
+	// Dead pods are treated as released so the sandbox can receive replacement allocations.
+	liveAllocated := make([]string, 0, len(allocated))
+	deadPods := make([]string, 0)
+	for _, p := range allocated {
+		if _, exists := releasedSet[p]; exists {
+			// Already released, keep in allocated for bookkeeping consistency.
+			liveAllocated = append(liveAllocated, p)
+			continue
+		}
+		if _, alive := livePodSet[p]; alive {
+			liveAllocated = append(liveAllocated, p)
+		} else {
+			deadPods = append(deadPods, p)
+		}
+	}
+	if len(deadPods) > 0 {
+		log.Info("Detected dead allocated pods, queuing for release to trigger re-allocation",
+			"sandbox", sandbox.Name, "deadPods", deadPods)
+	}
+
 	// Terminating sandboxes should not receive new allocations.
 	// Queue all unreleased allocated pods for release and set supplement to zero.
 	if !sandbox.DeletionTimestamp.IsZero() {
 		toRelease := make([]string, 0)
-		for _, p := range allocated {
+		for _, p := range liveAllocated {
 			if _, ok := releasedSet[p]; !ok {
 				toRelease = append(toRelease, p)
 			}
 		}
+		toRelease = append(toRelease, deadPods...)
 		if len(toRelease) > 0 {
 			log.Info("Queuing terminating sandbox pods for release", "sandbox", sandbox.Name, "pods", toRelease)
 		}
@@ -571,15 +599,19 @@ func (allocator *defaultAllocator) getSandboxRequest(ctx context.Context, sandbo
 			toRelease = append(toRelease, r)
 		}
 	}
+	// Also queue dead pods for release so their allocation records are cleaned up.
+	toRelease = append(toRelease, deadPods...)
 
 	replica := int32(0)
 	if sandbox.Spec.Replicas != nil {
 		replica = *sandbox.Spec.Replicas
 	}
 
+	// Use liveAllocated count (excluding dead pods) to compute supplement,
+	// so deleted pods trigger re-allocation from the pool.
 	supplement := int32(0)
-	if replica-int32(len(allocated)) > 0 {
-		supplement = replica - int32(len(allocated))
+	if replica-int32(len(liveAllocated)) > 0 {
+		supplement = replica - int32(len(liveAllocated))
 	}
 
 	return &algorithm.SandboxRequest{
