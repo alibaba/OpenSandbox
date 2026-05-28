@@ -21,7 +21,7 @@ All business logic is delegated to the service layer that backs each operation.
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Body, Header, Query, Request, status
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request, status
 from fastapi.responses import Response
 
 from opensandbox_server.extensions import validate_extensions
@@ -45,6 +45,7 @@ from opensandbox_server.api.schema import (
     Snapshot,
     SnapshotFilter,
 )
+from opensandbox_server.services.constants import SandboxErrorCodes
 from opensandbox_server.services.factory import create_sandbox_service
 from opensandbox_server.services.snapshot_service import create_snapshot_service
 
@@ -504,6 +505,7 @@ def delete_snapshot(
     response_model_exclude_none=True,
     responses={
         200: {"description": "Endpoint retrieved successfully"},
+        400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
         401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
         403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
         404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
@@ -546,6 +548,18 @@ def get_sandbox_endpoint(
         HTTPException: If sandbox not found, endpoint not available, or signed
             routes are not supported by the runtime/configuration (400).
     """
+    if use_server_proxy and expires is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": SandboxErrorCodes.INVALID_PARAMETER,
+                "message": (
+                    "use_server_proxy cannot be combined with expires; "
+                    "signed endpoints require the gateway route."
+                ),
+            },
+        )
+
     # Delegate to the service layer for endpoint resolution
     endpoint = sandbox_service.get_endpoint(sandbox_id, port, expires=expires)
 

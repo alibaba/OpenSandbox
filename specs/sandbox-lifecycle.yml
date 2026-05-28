@@ -640,7 +640,7 @@ paths:
             maximum: 65535
         - name: use_server_proxy
           in: query
-          description: Whether to return a server-proxied URL
+          description: Whether to return a server-proxied URL. Cannot be combined with `expires`.
           schema:
             type: boolean
             default: false
@@ -652,7 +652,7 @@ paths:
             is **Linux / Unix epoch seconds** — a decimal `uint64` count of **whole seconds** since
             the Unix epoch (`1970-01-01 00:00:00` UTC, same as POSIX / `time(2)`), not
             milliseconds. Normalized to `expires_b36` for the four-segment route token. Omit to
-            get the unsigned/legacy response shape.
+            get the unsigned/legacy response shape. Cannot be combined with `use_server_proxy=true`.
           schema:
             type: string
             pattern: '^(0|[1-9][0-9]*)$'

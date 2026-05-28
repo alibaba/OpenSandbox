@@ -91,7 +91,34 @@ def test_get_endpoint_use_server_proxy_prefers_server_eip(
     )
 
     assert response.status_code == 200
-    assert response.json()["endpoint"] == "sandbox.example.com/opensandbox/sandboxes/sbx-001/proxy/44772"
+    assert (
+        response.json()["endpoint"]
+        == "sandbox.example.com/opensandbox/sandboxes/sbx-001/proxy/44772"
+    )
+
+
+def test_get_endpoint_rejects_server_proxy_with_expires(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, **kwargs) -> Endpoint:
+            raise AssertionError("signed endpoint resolution should not run")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    response = client.get(
+        "/v1/sandboxes/sbx-001/endpoints/44772",
+        params={"use_server_proxy": "true", "expires": "2000000000"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["code"] == "SANDBOX::INVALID_PARAMETER"
+    assert "use_server_proxy cannot be combined with expires" in payload["message"]
 
 
 def test_get_endpoint_rejects_non_numeric_port(
