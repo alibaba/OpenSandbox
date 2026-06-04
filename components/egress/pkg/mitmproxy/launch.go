@@ -107,9 +107,18 @@ func Launch(cfg Config) (*Running, error) {
 	// Stream large bodies instead of buffering them in memory (OOM prevention).
 	args = append(args, "--set", "stream_large_bodies=1m")
 
-	// Lazy connection strategy: defer upstream connection until the request is fully received,
-	// which avoids unnecessary connections for blocked/filtered requests.
-	args = append(args, "--set", "connection_strategy=lazy")
+	// Eager connection strategy: open the upstream connection alongside the client
+	// connection so mitm's IO loop continuously observes upstream FIN/RST. Lazy
+	// defers the upstream open until the full request is buffered and checks the
+	// upstream pool per-request; on h1 keepalive sessions this exposes a stale-
+	// connection race where the second request (e.g. POST /git-upload-pack right
+	// after GET /info/refs) picks an upstream conn the peer has already closed,
+	// surfacing as a silent transport error with no fatal output on the client.
+	// Eager trades a wasted TCP/TLS handshake for the small fraction of requests
+	// denied by the egress addon — acceptable because a denied flow already short-
+	// circuits with `flow.response = ...` before any HTTP write reaches upstream,
+	// so the upstream still sees no path/method/headers from the denied request.
+	args = append(args, "--set", "connection_strategy=eager")
 
 	// Transparent mode redirects TCP to IP addresses. Clients connecting to IPs
 	// do not send SNI, so upstream TLS cert hostname verification fails with
