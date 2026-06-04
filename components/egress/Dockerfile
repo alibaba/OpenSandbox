@@ -131,7 +131,8 @@ COPY --from=builder /out/opensandbox-supervisor /opt/opensandbox-egress/supervis
 COPY components/egress/scripts/cleanup.sh /opt/opensandbox-egress/cleanup.sh
 RUN chmod 0755 /opt/opensandbox-egress/cleanup.sh \
             /opt/opensandbox-egress/egress \
-            /opt/opensandbox-egress/supervisor
+            /opt/opensandbox-egress/supervisor \
+    && ln -s /opt/opensandbox-egress/egress /egress
 
 COPY components/egress/mitmscripts /var/egress/mitmscripts
 
