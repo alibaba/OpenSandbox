@@ -32,27 +32,47 @@ export OPENSANDBOX_EGRESS_MITMPROXY_PORT=18081
 
 # Optional: load an additional user-defined mitm addon (loaded after the system addon)
 export OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT=/path/to/your/addon.py
-
-# Optional: bypass decryption for selected domains (semicolon-separated regex list)
-export OPENSANDBOX_EGRESS_MITMPROXY_IGNORE_HOSTS='.*\.log\.aliyuncs\.com;.*\.example\.internal'
 ```
 
+To bypass decryption for selected domains, edit the baked-in
+`components/egress/mitmproxy/config.yaml` and rebuild the image — see
+"Static Configuration (config.yaml)" below.
+
 ## Configuration Reference
+
+### Environment Variables (Per-Deployment Overrides)
 
 | Variable | Required | Purpose | Default |
 |------|----------|------|--------|
 | `OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT` | Yes | Enable transparent mitmproxy (`1/true/on`, etc.) | Disabled |
 | `OPENSANDBOX_EGRESS_MITMPROXY_PORT` | No | mitmdump listen port; `iptables` redirects `80/443` here | `18081` |
 | `OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT` | No | Additional user mitm addon script path (`-s`); loaded after the system addon | Empty |
-| `OPENSANDBOX_EGRESS_MITMPROXY_IGNORE_HOSTS` | No | Host/IP regex list for TLS pass-through (`;` separated) | Empty |
-| `OPENSANDBOX_EGRESS_MITMPROXY_CONFDIR` | No | mitm config and CA directory (passed as `--set confdir=`, also used as `HOME`) | Default directory under `/var/lib/mitmproxy` |
-| `OPENSANDBOX_EGRESS_MITMPROXY_UPSTREAM_TRUST_DIR` | No | Trust directory for upstream TLS verification (OpenSSL style) | `/etc/ssl/certs` |
+| `OPENSANDBOX_EGRESS_MITMPROXY_UPSTREAM_TRUST_DIR` | No | Trust directory for upstream TLS verification (OpenSSL style); overrides the config.yaml default | `/etc/ssl/certs` |
+| `OPENSANDBOX_EGRESS_MITMPROXY_SSL_INSECURE` | No | Skip upstream TLS verification (`1/true/on`); use when clients connect by IP and SNI is unavailable | Disabled |
 
 Notes:
 
-- `OPENSANDBOX_EGRESS_MITMPROXY_IGNORE_HOSTS` means **no decryption**, not “completely bypass mitm process”.
 - In transparent mode, mitmproxy generally recommends matching by IP/range; verify SNI/resolve behavior if using domain regex only.
 - Before mitm, `iptables`, and CA export are ready, `GET /healthz` returns `503 (mitm not ready)` to prevent premature readiness.
+
+### Static Configuration (config.yaml)
+
+Fleet-wide, rarely-changing mitm options live in
+`components/egress/mitmproxy/config.yaml`, baked into the image at
+`/var/lib/mitmproxy/.mitmproxy/config.yaml` and auto-loaded by mitmdump.
+This is the single source of truth for:
+
+- `mode` (`transparent`) — mitm default is `regular`
+- `listen_host` (`127.0.0.1`) — mitm default is `0.0.0.0`
+- `stream_large_bodies` (`10m`) — mitm default is unset (entire body buffered)
+- `ssl_verify_upstream_trusted_confdir` (`/etc/ssl/certs`) — mitm default is unset; overridable per-deployment via env
+- `ignore_hosts` (`[]`) — matches the mitm default; kept in the file as a discoverable extension point for operators adding TLS pass-through entries
+
+Only deviations from the mitm built-in defaults are declared in `config.yaml` (the `ignore_hosts` line is the one intentional exception, kept for discoverability). Other options that happen to match the default (`connection_strategy=lazy`, `http2=true`, etc.) are omitted — the file is the diff against upstream defaults, not a full enumeration.
+
+Precedence: command-line `--set` (from env overrides) > `config.yaml` > mitmproxy built-in defaults.
+
+To change a static option for the whole fleet: edit `config.yaml`, rebuild the egress image, redeploy. To bypass decryption for a specific host **temporarily** in one deployment, the option is to edit and remount `config.yaml` rather than pass an env override.
 
 ## Common Configuration Templates
 
@@ -81,10 +101,17 @@ The user addon is loaded after the system addon (`-s system.py -s user.py`), so 
 
 ### 4) Bypass Decryption for Specific Domains (e.g. log upload)
 
-```bash
-export OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT=true
-export OPENSANDBOX_EGRESS_MITMPROXY_IGNORE_HOSTS='.*\.log\.aliyuncs\.com'
+Edit `components/egress/mitmproxy/config.yaml` and append to `ignore_hosts`,
+then rebuild the egress image:
+
+```yaml
+ignore_hosts:
+  - '.*\.log\.aliyuncs\.com'
 ```
+
+`ignore_hosts` means **no decryption**, not "completely bypass mitm process":
+mitm still proxies the TCP connection, it just forwards bytes without
+breaking TLS, and addons do not see request/response content.
 
 ### 5) Use a Fixed CA (consistent fingerprint across replicas)
 

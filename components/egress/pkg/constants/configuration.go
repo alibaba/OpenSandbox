@@ -36,12 +36,13 @@ const (
 	EnvNameserverExempt        = "OPENSANDBOX_EGRESS_NAMESERVER_EXEMPT"
 
 	// MITM: mitmdump transparent; Linux + CAP_NET_ADMIN, runs as a dedicated user.
+	// Static mitm options (mode, listen_host, connection_strategy, stream_large_bodies,
+	// http2, ignore_hosts, ssl_verify_upstream_trusted_confdir default) live in
+	// /var/lib/mitmproxy/.mitmproxy/config.yaml; only per-deployment overrides are env-driven.
 	EnvMitmproxyTransparent      = "OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT"
 	EnvMitmproxyPort             = "OPENSANDBOX_EGRESS_MITMPROXY_PORT"
-	EnvMitmproxyConfDir          = "OPENSANDBOX_EGRESS_MITMPROXY_CONFDIR"
 	EnvMitmproxyScript           = "OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT"
 	EnvMitmproxyUpstreamTrustDir = "OPENSANDBOX_EGRESS_MITMPROXY_UPSTREAM_TRUST_DIR"
-	EnvMitmproxyIgnoreHosts      = "OPENSANDBOX_EGRESS_MITMPROXY_IGNORE_HOSTS"
 	EnvMitmproxySslInsecure      = "OPENSANDBOX_EGRESS_MITMPROXY_SSL_INSECURE"
 
 	// Comma-separated upstream resolvers: literal IP only (optional :port) — no hostnames (see dnsproxy REDIRECT note).

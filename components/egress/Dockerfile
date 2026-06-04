@@ -104,12 +104,21 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Python mitmproxy (transparent mode): mitmdump runs as user mitmproxy; iptables skips this uid.
+# /var/lib/mitmproxy is mitm's home, used as the confdir (CA + config.yaml live under .mitmproxy/).
 RUN useradd -r -u 10042 -d /var/lib/mitmproxy -s /usr/sbin/nologin mitmproxy \
-    && mkdir -p /var/lib/mitmproxy \
-    && chown mitmproxy:mitmproxy /var/lib/mitmproxy \
+    && mkdir -p /var/lib/mitmproxy/.mitmproxy \
+    && chown -R mitmproxy:mitmproxy /var/lib/mitmproxy \
     && pip3 install --no-cache-dir --break-system-packages 'mitmproxy>=10,<11' \
     && (command -v mitmdump && mitmdump --version) \
     && mkdir -p /var/egress/mitmscripts
+
+# Static mitmproxy options (mode, listen_host, connection_strategy, stream_large_bodies,
+# http2, ignore_hosts, ssl_verify_upstream_trusted_confdir). mitmdump auto-loads
+# config.yaml from its confdir. Dynamic per-deployment options stay env-driven and
+# are applied as --set by launch.go (which overrides values declared here).
+COPY components/egress/mitmproxy/config.yaml /var/lib/mitmproxy/.mitmproxy/config.yaml
+RUN chown mitmproxy:mitmproxy /var/lib/mitmproxy/.mitmproxy/config.yaml \
+    && chmod 0644 /var/lib/mitmproxy/.mitmproxy/config.yaml
 
 # All egress runtime artifacts live under one directory to keep paths grouped.
 COPY --from=builder /out/egress /opt/opensandbox-egress/egress
