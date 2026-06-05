@@ -21,6 +21,7 @@ and configuration for the sandbox lifecycle management service.
 
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -34,10 +35,49 @@ from opensandbox_server.config import load_config
 from opensandbox_server.integrations.renew_intent import start_renew_intent_consumer
 from opensandbox_server.logging_config import configure_logging
 from opensandbox_server.startup_guard import api_key_confirm
+from opensandbox_server.tenants import (
+    FileTenantProvider,
+    HTTPTenantProvider,
+    HTTPTenantProviderConfig,
+    TenantProvider,
+    _resolve_tenants_path,
+)
 
 # Load configuration before initializing routers/middleware
 app_config = load_config()
 _log_config = configure_logging(app_config.log)
+
+# --- Multi-tenant provider initialization ---
+_tenant_provider: TenantProvider | None = None
+
+if app_config.tenants is not None:
+    if app_config.runtime.type == "docker":
+        sys.exit(
+            "FATAL: [tenants] configured but runtime.type='docker'. "
+            "Multi-tenancy requires Kubernetes namespaces."
+        )
+    if app_config.server.api_key and app_config.server.api_key.strip():
+        sys.exit(
+            "FATAL: server.api_key must be removed from server.toml when using [tenants]. "
+            "Tenant API keys are managed by the tenant provider."
+        )
+
+    _tenants_cfg = app_config.tenants
+    if _tenants_cfg.provider == "file":
+        _tenants_path = _resolve_tenants_path()
+        _tenant_provider = FileTenantProvider(_tenants_path)
+        _tenant_provider.start()
+    elif _tenants_cfg.provider == "http":
+        _tenant_provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=_tenants_cfg.endpoint,
+                max_stale_seconds=_tenants_cfg.max_stale_seconds,
+                timeout_seconds=_tenants_cfg.timeout_seconds,
+                auth_header=_tenants_cfg.auth_header,
+                auth_token=_tenants_cfg.auth_token,
+            )
+        )
+        _tenant_provider.start()
 
 from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402
@@ -55,11 +95,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        api_key_confirm(configured_api_key=app_config.server.api_key)
-    except Exception as exc:
-        logger.error("API key startup confirmation failed: %s", exc)
-        os._exit(1)
+    if _tenant_provider is None:
+        try:
+            api_key_confirm(configured_api_key=app_config.server.api_key)
+        except Exception as exc:
+            logger.error("API key startup confirmation failed: %s", exc)
+            os._exit(1)
 
     from anyio.to_thread import current_default_thread_limiter
 
@@ -114,6 +155,8 @@ async def lifespan(app: FastAPI):
     if consumer is not None:
         await consumer.stop()
     snapshot_service.close()
+    if _tenant_provider is not None:
+        _tenant_provider.close()
     await app.state.http_client.aclose()
 
 
@@ -133,7 +176,7 @@ app.state.config = app_config
 
 # Middleware run in reverse order of addition: last added = first to run (outermost).
 # Add auth and CORS first so they run after RequestIdMiddleware.
-app.add_middleware(AuthMiddleware, config=app_config)
+app.add_middleware(AuthMiddleware, config=app_config, tenant_provider=_tenant_provider)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

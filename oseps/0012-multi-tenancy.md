@@ -20,7 +20,7 @@ status: draft
   - [Risks and Mitigations](#risks-and-mitigations)
 - [Design Details](#design-details)
   - [TenantProvider Abstraction](#tenantprovider-abstraction)
-  - [Config Model & Loading Flow (FileTenantProvider)](#config-model--loading-flow-filetenantprovider)
+  - [Tenants Config File Format (FileTenantProvider)](#tenants-config-file-format-filetenantprovider)
   - [Auth Middleware Flow](#auth-middleware-flow)
   - [Sandbox Service — Namespace Resolution](#sandbox-service--namespace-resolution)
   - [Startup Guards](#startup-guards)
@@ -149,77 +149,162 @@ Implementation in 6 steps. No step blocks another except where noted.
 
 Tenant resolution is behind a `TenantProvider` interface, decoupling auth middleware from any specific config source. This lets the initial implementation ship with a simple file-based provider while leaving a clean extension point for enterprise deployments that already manage tenants in an external IAM or tenant management system.
 
-**Interface (pseudocode):**
-```
-TenantProvider (Protocol):
-  lookup(api_key: str) → TenantEntry | None
-  list_tenants() → list[TenantEntry]          # for startup validation
-  ready() → bool                              # provider has loaded initial state
-  on_reload(callback) → None                  # notify consumers on config change (optional)
+**Interface (`opensandbox_server/tenants/provider.py`):**
+
+```python
+class TenantProvider(Protocol):
+    def lookup(self, api_key: str) -> Optional[TenantEntry]:
+        """Resolve API key → tenant. Returns None if not recognized.
+        Raises TenantProviderUnavailable if provider cannot serve."""
+        ...
+
+    def list_tenants(self) -> List[TenantEntry]:
+        """All known tenant entries (startup validation)."""
+        ...
+
+    def ready(self) -> bool:
+        """True once provider can serve lookups."""
+        ...
+
+    def start(self) -> None:
+        """Start background resources (watchers, connections). Called at server startup."""
+        ...
+
+    def close(self) -> None:
+        """Release resources. Called on server shutdown."""
+        ...
+
+    def on_reload(self, callback: Callable[[List[TenantEntry]], None]) -> None:
+        """Register callback invoked on tenant data change.
+        Not all providers support this; those that don't may ignore."""
+        ...
 ```
 
-**Initial provider — FileTenantProvider:**
-- Backed by `tenants.toml`, loaded at startup, hot-reloaded via fsnotify
-- Implements full `TenantProvider` interface
-- `ready()` returns `True` after initial file parse succeeds
-- `on_reload` triggers on fsnotify events; auth middleware picks up new key→tenant mappings without restart
+**Exception:**
+- `TenantProviderUnavailable` — raised when provider cannot serve lookups (e.g., HTTP endpoint unreachable + cache expired beyond `max_stale_seconds`)
 
-**Future providers (not in this OSEP, but the interface accommodates):**
-- `HTTPTenantProvider` — polls or streams from an internal IAM API; tenant metadata, key rotation, enable/disable all managed in the external system
-- `K8sConfigMapProvider` — watches a ConfigMap or Secret across namespaces
-- Composite/chained providers for fallback (e.g., file + external API merge)
+**Data model (`opensandbox_server/tenants/models.py`):**
 
-**Startup wiring (pseudocode):**
+```python
+@dataclass(frozen=True)
+class TenantEntry:
+    name: str
+    namespace: str
+    api_keys: List[str]
 ```
-if tenants.toml exists:
-    provider = FileTenantProvider(path)
-    if not provider.ready():
-        → SystemExit (parse error, duplicates, etc.)
-else:
-    provider = None  # single-tenant mode
-```
-
-Auth middleware depends only on `TenantProvider`, not on `FileTenantProvider` directly. Switching backends in the future does not touch auth code.
 
 ---
 
-### Config Model & Loading Flow (FileTenantProvider)
+#### Provider 1 — FileTenantProvider
 
-**New package:** `opensandbox_server/tenants/`
+Backed by `tenants.toml`, loaded at startup, hot-reloaded via filesystem mtime polling.
 
-This is the initial `TenantProvider` implementation. It reads `tenants.toml` and hot-reloads on file changes.
+- Implements full `TenantProvider` interface
+- `start()` parses file and starts watcher thread (2s mtime poll)
+- `ready()` returns `True` after initial file parse succeeds
+- `on_reload` triggers on file change; auth middleware picks up new key→tenant mappings without restart
+- File delete → all entries cleared (all tenant keys → 401)
+- Parse error during reload → log warning, keep previous state (no downtime)
+- Watcher monitors parent directory for ConfigMap atomic symlink swap
 
-**Data model (pseudocode):**
-```
-TenantEntry:
-  - name: str
-  - namespace: str
-  - api_keys: list[str]
+---
 
-TenantsConfig:
-  - entries: list[TenantEntry]
-  - validation: reject duplicate api_keys across tenants (on parse)
+#### Provider 2 — HTTPTenantProvider
+
+Per-key lookup against a remote HTTP endpoint with in-memory TTL cache. No background thread, no file persistence, no bulk fetch. Keys not looked up are not cached.
+
+**Endpoint contract:**
+
+```
+GET {endpoint}
+Header: OPEN-SANDBOX-API-KEY: <api_key>    // 客户端原始 key 原封不动转发
+
+200 OK:
+{
+    "namespace": "ns-a",       // target K8s namespace for this key
+    "ttl": 60                  // suggested cache duration in seconds
+}
+
+401 Unauthorized:
+{
+    "code": "UNAUTHORIZED",
+    "message": "API key is invalid or revoked"
+}
 ```
 
-**Loading flow:**
-```
-FileTenantProvider(path):
-  1. resolve path: env SANDBOX_TENANTS_CONFIG_PATH || ~/.opensandbox/tenants.toml
-  2. if file absent → ready() returns False → server stays in single-tenant mode
-  3. parse TOML → TenantsConfig → build dict[api_key → TenantEntry]
-  4. on parse error or duplicate keys → raise, server exits
-  5. start fsnotify watcher thread for hot-reload
+Server 将客户端的 `OPEN-SANDBOX-API-KEY` 原封不动转发给 HTTP provider 做校验。Provider 是权威方 — 决定 key 是否有效、映射到哪个 namespace。Server 只需要 `namespace` + `ttl`。
+
+**Cache behavior:**
+
+| Scenario | Action |
+|----------|--------|
+| Cache hit + within server-suggested TTL | Return cached entry immediately |
+| Cache hit + TTL expired | Sync GET → success: update cache with new TTL; failure + within `max_stale_seconds`: return stale; failure + beyond `max_stale_seconds`: raise `TenantProviderUnavailable` |
+| Cache miss | Sync GET → 200: cache + return; 401: return `None`; network error: raise `TenantProviderUnavailable` |
+| Remote returns 401 for previously cached key | Evict from cache + return `None` (key revoked) |
+
+**Configuration (`HTTPTenantProviderConfig`):**
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `endpoint` | (required) | Remote tenant lookup URL |
+| `max_stale_seconds` | 300 | Maximum time to serve stale cache when endpoint unreachable |
+| `timeout_seconds` | 5 | HTTP request timeout |
+| `auth_header` | None | Optional header name for provider-level authentication |
+| `auth_token` | None | Optional token value for provider-level authentication |
+
+**Security properties:**
+- No persistent cache file → no disk attack surface, no stale file after long downtime
+- Cold start (`start()`) only marks ready, does not bulk-fetch (per-key on demand)
+- Revoked key (401) immediately evicted from cache
+- Max stale bounds the window where unreachable endpoint + stale cache could allow a revoked key
+
+---
+
+#### Provider Selection
+
+Provider type is determined at startup:
+
+```python
+# Config field: tenant_provider_type = "file" | "http"
+# Or auto-detect:
+if tenants.toml exists:
+    provider = FileTenantProvider(path)
+elif http_tenant_endpoint configured:
+    provider = HTTPTenantProvider(config)
+else:
+    provider = None  # single-tenant mode
+
+provider.start()
+if not provider.ready():
+    → SystemExit
 ```
 
-**Hot-reload behavior:**
+Auth middleware depends only on `TenantProvider`, not on any specific implementation. Switching backends does not touch auth code.
+
+---
+
+### Tenants Config File Format (FileTenantProvider)
+
+**Package:** `opensandbox_server/tenants/`
+
+**File:** `tenants.toml` (path resolved via `SANDBOX_TENANTS_CONFIG_PATH` env or default `~/.opensandbox/tenants.toml`)
+
+```toml
+[[tenants]]
+name = "team-a"
+namespace = "sandbox-team-a"
+api_keys = ["sk-a-1", "sk-a-2"]
+
+[[tenants]]
+name = "team-b"
+namespace = "sandbox-team-b"
+api_keys = ["sk-b-1"]
 ```
-  - maintains dict[api_key → TenantEntry] under threading.Lock
-  - on file change: reload atomically (swap dict under lock)
-  - on parse error during reload: log warning, keep old entries (no downtime)
-  - file delete → clear all entries (all tenant keys → 401)
-  - new key added → live immediately on next lookup
-```
-Watcher monitors parent directory for ConfigMap atomic symlink swap.
+
+**Validation rules (on parse):**
+- Each tenant must have non-empty `name`, `namespace`, `api_keys`
+- Duplicate `api_keys` across tenants → `ValueError`, server exits
 
 ---
 

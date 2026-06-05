@@ -87,6 +87,7 @@ from opensandbox_server.services.validators import (
 from opensandbox_server.services.k8s.client import K8sClient
 from opensandbox_server.services.k8s.provider_factory import create_workload_provider
 from opensandbox_server.services.snapshot_restore import resolve_sandbox_image_from_request
+from opensandbox_server.tenants.context import get_current_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,11 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             self.namespace,
             self.execd_image,
         )
-    
+
+    def _resolve_namespace(self) -> str:
+        tenant = get_current_tenant()
+        return tenant.namespace if tenant else self.namespace
+
     async def _wait_for_sandbox_ready(
         self,
         sandbox_id: str,
@@ -194,7 +199,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 workload = await asyncio.to_thread(
                     self.workload_provider.get_workload,
                     sandbox_id=sandbox_id,
-                    namespace=self.namespace,
+                    namespace=self._resolve_namespace(),
                 )
                 
                 if not workload:
@@ -324,7 +329,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             seen_claims.add(claim_name)
 
             try:
-                existing = self.k8s_client.get_pvc(self.namespace, claim_name)
+                existing = self.k8s_client.get_pvc(self._resolve_namespace(), claim_name)
             except ApiException as e:
                 if e.status == 403:
                     logger.warning(
@@ -334,7 +339,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     return  # Skip all remaining PVCs — same SA, same permissions
                 raise
             if existing is not None:
-                logger.debug(f"PVC '{claim_name}' already exists in namespace '{self.namespace}'")
+                logger.debug(f"PVC '{claim_name}' already exists in namespace '{self._resolve_namespace()}'")
                 continue
 
             storage = vol.pvc.storage or default_size
@@ -344,7 +349,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             pvc_body = V1PersistentVolumeClaim(
                 metadata=V1ObjectMeta(
                     name=claim_name,
-                    namespace=self.namespace,
+                    namespace=self._resolve_namespace(),
                 ),
                 spec={
                     "accessModes": access_modes,
@@ -355,10 +360,10 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 pvc_body.spec["storageClassName"] = storage_class
 
             try:
-                self.k8s_client.create_pvc(self.namespace, pvc_body)
+                self.k8s_client.create_pvc(self._resolve_namespace(), pvc_body)
                 logger.info(
                     f"Auto-created PVC '{claim_name}' (size={storage}, class={storage_class or '<default>'}) "
-                    f"in namespace '{self.namespace}'"
+                    f"in namespace '{self._resolve_namespace()}'"
                 )
             except ApiException as e:
                 if e.status == 409:
@@ -450,7 +455,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             workload_info = await asyncio.to_thread(
                 self.workload_provider.create_workload,
                 sandbox_id=sandbox_id,
-                namespace=self.namespace,
+                namespace=self._resolve_namespace(),
                 image_spec=request.image,
                 entrypoint=request.entrypoint,
                 env=request.env or {},
@@ -508,7 +513,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                     await asyncio.to_thread(
                         self.workload_provider.delete_workload,
                         sandbox_id,
-                        self.namespace,
+                        self._resolve_namespace(),
                     )
                 except Exception as cleanup_ex:
                     logger.error(f"Failed to cleanup sandbox {sandbox_id}", exc_info=cleanup_ex)
@@ -551,11 +556,11 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         try:
             workload = _get_workload_or_404(
                 self.workload_provider,
-                self.namespace,
+                self._resolve_namespace(),
                 sandbox_id,
             )
             return _build_sandbox_from_workload(workload, self.workload_provider)
-            
+
         except HTTPException:
             raise
         except Exception as e:
@@ -575,7 +580,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         try:
             label_selector = SANDBOX_ID_LABEL
             workloads = self.workload_provider.list_workloads(
-                namespace=self.namespace,
+                namespace=self._resolve_namespace(),
                 label_selector=label_selector,
             )
             sandboxes = [
@@ -608,7 +613,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         try:
             _delete_workload_or_404(
                 self.workload_provider,
-                self.namespace,
+                self._resolve_namespace(),
                 sandbox_id,
             )
             logger.info(f"Deleted sandbox: {sandbox_id}")
@@ -624,7 +629,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         Pause sandbox by delegating to the workload provider.
         """
         try:
-            self.workload_provider.pause_sandbox(sandbox_id, self.namespace)
+            self.workload_provider.pause_sandbox(sandbox_id, self._resolve_namespace())
         except NotImplementedError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -665,7 +670,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         Resume sandbox by delegating to the workload provider.
         """
         try:
-            self.workload_provider.resume_sandbox(sandbox_id, self.namespace)
+            self.workload_provider.resume_sandbox(sandbox_id, self._resolve_namespace())
         except NotImplementedError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -704,7 +709,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
     def get_access_renew_extend_seconds(self, sandbox_id: str) -> Optional[int]:
         workload = self.workload_provider.get_workload(
             sandbox_id=sandbox_id,
-            namespace=self.namespace,
+            namespace=self._resolve_namespace(),
         )
         if not workload:
             return None
@@ -747,7 +752,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         try:
             workload = _get_workload_or_404(
                 self.workload_provider,
-                self.namespace,
+                self._resolve_namespace(),
                 sandbox_id,
             )
 
@@ -763,7 +768,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
 
             self.workload_provider.update_expiration(
                 sandbox_id=sandbox_id,
-                namespace=self.namespace,
+                namespace=self._resolve_namespace(),
                 expires_at=new_expiration,
             )
             
@@ -785,7 +790,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         """Patch sandbox metadata via JSON Merge Patch (RFC 7396). Does not restart the sandbox."""
         workload = _get_workload_or_404(
             self.workload_provider,
-            self.namespace,
+            self._resolve_namespace(),
             sandbox_id,
         )
 
@@ -810,7 +815,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         try:
             updated = self.workload_provider.patch_labels(
                 name=name,
-                namespace=self.namespace,
+                namespace=self._resolve_namespace(),
                 labels=label_patch,
             )
         except Exception as e:
@@ -874,7 +879,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         try:
             workload = _get_workload_or_404(
                 self.workload_provider,
-                self.namespace,
+                self._resolve_namespace(),
                 sandbox_id,
             )
 
