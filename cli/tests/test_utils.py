@@ -21,7 +21,7 @@ from datetime import timedelta
 import click
 import pytest
 
-from opensandbox_cli.utils import DURATION, KEY_VALUE, parse_duration
+from opensandbox_cli.utils import DURATION, KEY_VALUE, parse_duration, parse_nullable_duration
 
 # ---------------------------------------------------------------------------
 # parse_duration
@@ -66,6 +66,25 @@ class TestParseDuration:
 # ---------------------------------------------------------------------------
 # DurationType (Click param type)
 # ---------------------------------------------------------------------------
+
+
+class TestParseNullableDuration:
+    def test_none_literal_returns_none(self) -> None:
+        assert parse_nullable_duration("none") is None
+
+    def test_none_case_insensitive(self) -> None:
+        assert parse_nullable_duration("NONE") is None
+        assert parse_nullable_duration("None") is None
+
+    def test_none_strips_whitespace(self) -> None:
+        assert parse_nullable_duration("  none  ") is None
+
+    def test_valid_duration_parsed(self) -> None:
+        assert parse_nullable_duration("10m") == timedelta(minutes=10)
+
+    def test_invalid_duration_raises(self) -> None:
+        with pytest.raises(click.BadParameter):
+            parse_nullable_duration("invalid")
 
 
 class TestDurationType:
