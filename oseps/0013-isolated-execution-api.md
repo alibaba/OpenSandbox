@@ -66,12 +66,14 @@ The attack surface grows linearly with execution count.
 **Throughput**: in RL training and evaluation, one sandbox = one task. Switching
 between adjacent steps or shards requires a full Pod creation cycle (runc
 startup 40–100ms+, consuming one Pool buffer slot). Per-execution cold-start
-inside a single Pod can be compressed to < 1ms with user namespace isolation,
+inside a single Pod can be compressed to < 1ms with namespace isolation,
 reducing control plane QPS and Pool pressure by an order of magnitude.
 
 bubblewrap (~200KB static C binary, the Flatpak sandbox core) uses Linux
-user/mount/pid namespaces to provide process-level isolation with sub-millisecond
-startup and automatic namespace cleanup on process exit.
+mount/pid namespaces to provide process-level isolation with sub-millisecond
+startup and automatic namespace cleanup on process exit. This design avoids
+user namespaces (which require CRI-level nesting support) and instead uses real
+UID setuid for per-session privilege separation.
 
 ### Goals
 
@@ -118,6 +120,10 @@ startup and automatic namespace cleanup on process exit.
 - Authentication reuses the existing `ServerAccessToken` mechanism.
 - bwrap binary must be embedded in execd and extracted at startup — no external
   dependency on base image packaging.
+- Must not require nested user namespace support from the CRI/container runtime.
+- execd must run as root or with `CAP_SYS_ADMIN` to create mount/PID namespaces.
+- UID/GID isolation must use real setuid, not user namespace mapping — callers
+  declare uid/gid at session creation time.
 
 ## Proposal
 
@@ -144,11 +150,17 @@ calls execute within the same namespace. Session deletion terminates the bwrap
 process group, destroying the namespace and all child processes.
 
 ```text
-execd
- └── exec.Command("bwrap", <profile-args>, "--", bash)
-      └── bash (long-lived in namespace)
+execd (root)
+ └── exec.Command("bwrap", <profile-args>, "--", setpriv, --reuid=N, --regid=N, bash)
+      └── bash (long-lived in namespace, running as uid N)
            └── run: sh -c <code> (forked per run)
 ```
+
+bwrap runs as root to create mount/PID namespaces (requires `CAP_SYS_ADMIN`),
+then drops privileges to the requested uid/gid via `setpriv` before exec'ing
+the user shell. No user namespace is created (`--unshare-user` is not used),
+avoiding CRI nesting requirements. Different sessions use different real UIDs,
+providing file permission isolation at the host level.
 
 Filesystem inheritance follows a "read-only root + selective overlay" strategy:
 
@@ -305,7 +317,7 @@ timeout_seconds: int                   # Per-run timeout (default 300)
 | `extra_writable` | Additional bind-rw paths. Constrained by execd `--isolation-allowed-writable` allowlist (default empty = reject all). Out-of-bounds returns 400 |
 | `share_net` | `true` shares container network (default for both profiles). `false` → `--unshare-net` (loopback only) |
 | `env_passthrough.mode` | `deny` → pass through caller env minus `keys` blacklist. `allow` → `--clearenv` then inject only listed `keys` |
-| `uid` / `gid` | bwrap `--uid`/`--gid` user namespace mapping. Default: execd process uid/gid |
+| `uid` / `gid` | Real setuid via `setpriv --reuid=N --regid=N` (no user namespace). Default: execd process uid/gid. Linux setuid does not require `/etc/passwd` entries; callers manage UID allocation |
 | `idle_timeout_seconds` | Auto-destroy after last `run` completion. Default 1800 (30 min). 0 disables |
 | `timeout_seconds` (run) | Per-run timeout. SIGKILL on expiry. Default 300 |
 
@@ -313,7 +325,7 @@ timeout_seconds: int                   # Per-run timeout (default 300)
 
 | Profile | workspace.mode | /tmp | share_net | env_passthrough | seccomp | uid |
 |---------|---------------|------|-----------|-----------------|---------|-----|
-| `strict` | overlay | tmpfs (private) | true | deny + blacklist | blocklist on | user ns mapped |
+| `strict` | overlay | tmpfs (private) | true | deny + blacklist | blocklist on | real setuid |
 | `balanced` | rw | bind container `/tmp` | true | allow (pass-through) | blocklist on | same |
 
 Default profile = `strict`.
@@ -432,7 +444,7 @@ Mount order is fixed by segment to prevent ordering bugs (e.g., Gemini CLI's
 `--tmpfs /tmp` erasing `--bind /tmp/sub`):
 
 ```text
-1.  Namespace flags: --unshare-pid --unshare-uts --unshare-ipc etc.
+1.  Namespace flags: --unshare-pid --unshare-uts --unshare-ipc etc. (no --unshare-user)
 2.  --ro-bind / /
 3.  --tmpfs /tmp (strict) or --bind /tmp /tmp (balanced)
 4.  --tmpfs /run
@@ -442,8 +454,7 @@ Mount order is fixed by segment to prevent ordering bugs (e.g., Gemini CLI's
 8.  extra_writable segment: --bind per item
 9.  Env segment: --clearenv (deny mode) then --setenv allowlist / passthrough minus blacklist
 10. --seccomp <fd>
-11. --uid <n> --gid <n>
-12. -- <user cmd>
+11. -- setpriv --reuid=<n> --regid=<n> --init-groups <user cmd>
 ```
 
 The builder outputs the complete argv. Unit tests cover segment order and mutual
@@ -660,6 +671,22 @@ the same strategy used by Gemini CLI's LinuxSandboxManager.
 cgroup provides resource limits but not filesystem or PID isolation. bwrap
 namespaces and cgroup are complementary; cgroup wrapper is planned for v2.
 
+### User namespace isolation instead of real setuid
+
+bwrap natively supports `--unshare-user` with `--uid`/`--gid` for user namespace
+UID mapping. This would allow execd to run as non-root. Rejected because:
+
+- Nested user namespaces require CRI/runtime support (`user.max_user_namespaces`,
+  runtime seccomp profiles allowing `clone(CLONE_NEWUSER)`). gVisor and hardened
+  runtimes often restrict this.
+- User namespace UID mapping is virtual — all sessions map to the same host UID,
+  so file permissions do not provide real isolation between sessions.
+- Real setuid provides stronger guarantees: different sessions have different
+  host UIDs, so file permission checks are enforced by the kernel at the host
+  level.
+- The tradeoff (execd must run as root) is acceptable because execd already runs
+  in a dedicated sandbox container, not on shared infrastructure.
+
 ### Dedicated container per execution
 
 Full container isolation (runc/gVisor) provides stronger guarantees but at
@@ -668,8 +695,8 @@ scale. bwrap fills the gap between no isolation and full container isolation.
 
 ## Infrastructure Needed
 
-- Linux kernel with user namespace support (already available on target
-  platforms).
+- execd must run as root or with `CAP_SYS_ADMIN` (required to create mount/PID
+  namespaces without user namespace).
 - emptyDir volume mounted at `--isolation-upper-root` in Pod spec for overlay
   persistence.
 - Optional: seccomp BPF file at `/etc/execd/seccomp.bpf` (shipped with execd).
