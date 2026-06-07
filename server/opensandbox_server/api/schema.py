@@ -618,6 +618,16 @@ class Snapshot(BaseModel):
         ...,
         description="Current snapshot lifecycle status and detailed state information",
     )
+    image_uri: Optional[str] = Field(
+        None,
+        alias="imageUri",
+        description=(
+            "OCI image reference to restore this snapshot from. Populated once the "
+            "snapshot reaches the Ready state. Exposing it enables restoring the "
+            "snapshot on a different server or runtime via the create-from-image path "
+            "(snapshotId restore is limited to the originating server's snapshot store)."
+        ),
+    )
     created_at: datetime = Field(
         ...,
         alias="createdAt",

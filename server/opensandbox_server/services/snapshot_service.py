@@ -515,6 +515,7 @@ class PersistedSnapshotService(SnapshotService):
                 message=record.status.message,
                 lastTransitionAt=record.status.last_transition_at,
             ),
+            imageUri=record.restore_config.image if record.restore_config else None,
             createdAt=record.created_at,
         )
 
