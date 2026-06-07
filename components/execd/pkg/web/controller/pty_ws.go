@@ -46,6 +46,9 @@ const (
 	// wsTakeoverTimeout bounds how long a ?takeover=1 request waits for the current
 	// holder to release after being evicted, before giving up with 409.
 	wsTakeoverTimeout = 5 * time.Second
+	// wsTakeoverCloseTimeout bounds the best-effort close-frame write sent to an
+	// evicted holder, so a full/unresponsive client socket cannot stall the takeover.
+	wsTakeoverCloseTimeout = 200 * time.Millisecond
 )
 
 // PTYSessionWebSocket handles GET /pty/:sessionId/ws.
@@ -84,8 +87,10 @@ func PTYSessionWebSocket(ctx *gin.Context) {
 	//    instead of failing: the shell keeps running, the old client's WS is closed
 	//    with WSCloseTakenOver, and this client reattaches with replay (?since=...).
 	//    This lets a session move between devices without an orchestrator round-trip.
+	//    Gate on a real WS handshake so a plain HTTP GET (curl/proxy probe) cannot
+	//    evict the holder and then fail to upgrade, leaving the session unattached.
 	locked := session.LockWS()
-	if !locked && ctx.Query("takeover") == "1" {
+	if !locked && ctx.Query("takeover") == "1" && websocket.IsWebSocketUpgrade(ctx.Request) {
 		locked = session.TakeoverWS(wsTakeoverTimeout)
 	}
 	if !locked {
@@ -163,13 +168,30 @@ func PTYSessionWebSocket(ctx *gin.Context) {
 		_ = conn.Close()
 	}
 
+	// evictClose is the non-blocking close used by the takeover eviction hook. Unlike
+	// closeConn it must not wait behind a stalled output writer: a takeover targets
+	// exactly the slow/abandoned-client case, so blocking on connMu (held by a pump
+	// stuck in WriteMessage) until wsWriteDeadline would defeat wsTakeoverTimeout. It
+	// therefore sends the close frame only on a best-effort basis (TryLock, short
+	// deadline) and always closes the conn, which unblocks any stuck writer. A client
+	// too backed-up to receive the frame could not have received it anyway.
+	evictClose := func(code int, text string) {
+		if connMu.TryLock() {
+			_ = conn.SetWriteDeadline(time.Now().Add(wsTakeoverCloseTimeout))
+			_ = conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(code, text))
+			connMu.Unlock()
+		}
+		_ = conn.Close()
+	}
+
 	// Register the eviction hook so a later ?takeover=1 client can reclaim this
 	// session: it closes our WS with WSCloseTakenOver (unblocking the read loop) and
 	// cancels our goroutines; the deferred cleanup then releases the lock for the new
 	// client. clearEvictHandler(gen) only clears if the hook is still ours, so it never
 	// races a successor that already registered its own hook after taking over.
 	evictGen := session.SetEvictHandler(func() {
-		closeConn(model.WSCloseTakenOver, model.WSErrCodeTakenOver)
+		evictClose(model.WSCloseTakenOver, model.WSErrCodeTakenOver)
 		cancelOnce()
 	})
 	defer session.ClearEvictHandler(evictGen)

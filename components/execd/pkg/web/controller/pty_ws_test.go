@@ -382,6 +382,32 @@ func TestPTYWS_TakeoverOnFreeSessionConnects(t *testing.T) {
 	require.Equal(t, id, f.SessionID)
 }
 
+// TestPTYWS_TakeoverRequiresWebSocketUpgrade verifies a plain HTTP GET carrying
+// takeover=1 does NOT evict the holder: without a WS handshake it would evict and
+// then fail to upgrade, orphaning the session. It must return 409 and leave the
+// holder attached and functional.
+func TestPTYWS_TakeoverRequiresWebSocketUpgrade(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found")
+	}
+	srv := newPTYTestServer(t)
+	defer srv.Close()
+
+	id := ptyCreateSession(t, srv)
+	conn1 := wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "")
+	ptyWaitFrame(t, conn1, "connected", 10*time.Second)
+
+	// Plain HTTP GET (no Upgrade header) with takeover=1 → must be refused, not evict.
+	resp, err := http.Get(srv.URL + "/pty/" + id + "/ws?takeover=1")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	// The holder is untouched: it still drives the shell.
+	ptyWriteStdin(t, conn1, "echo still_here\n")
+	ptyOutputContains(t, conn1, "still_here", 8*time.Second)
+}
+
 func TestPTYWS_ResizeFrame(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not found")
