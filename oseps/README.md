@@ -17,3 +17,4 @@ This is the complete list of OpenSandbox Enhancement Proposals:
 | [OSEP-0009](0009-auto-renew-sandbox-on-ingress-access.md)  |    Auto-Renew Sandbox on Ingress Access    |  implemented  |  2026-03-23  |
 | [OSEP-0010](0010-opentelemetry-instrumentation.md)             |      OpenTelemetry Metrics and Logs (execd, egress, and ingress)           | implementing  |  2026-04-12  |
 | [OSEP-0011](0011-secure-access-endpoint.md)                    |      Secure Access on GetEndpoint and Signed Endpoint                     |  implemented  |  2026-04-25  |
+| [OSEP-0012](0012-credential-vault.md)                          |      Credential Vault and Credential Proxy                                |  provisional  |  2026-05-28  |
