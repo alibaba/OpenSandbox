@@ -228,10 +228,12 @@ def _workload_platform_constraint_scope(
     pod_template_key: str,
     analyzer: Callable[[Any], tuple[bool, bool]],
 ) -> tuple[bool, bool]:
-    # Use `or {}` instead of `.get(key, {})`: in pool mode the BatchSandbox CR
-    # has spec.template explicitly set to null (the key exists but the value is
-    # None), so `.get("template", {})` returns None rather than {}, causing
-    # the next chained `.get()` to raise AttributeError.
+    # Use `or {}` instead of `.get(key, {})`: when a CRD field is declared
+    # without `omitempty`, Kubernetes serialises an absent value as explicit
+    # null rather than omitting the key.  `.get(key, {})` only substitutes
+    # the default when the key is absent — not when its value is None — so
+    # chaining `.get()` on the result raises AttributeError.  `or {}` treats
+    # both absent keys and explicit None as empty dicts.
     spec = workload.get("spec") or {}
     template = spec.get(pod_template_key) or {}
     pod_spec = template.get("spec") or {}

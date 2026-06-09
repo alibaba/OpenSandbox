@@ -90,29 +90,17 @@ def test_translate_resource_limits_empty_dict():
 # _workload_platform_constraint_scope
 # ---------------------------------------------------------------------------
 
-def test_platform_constraint_scope_null_template_does_not_crash():
-    # Regression: pool-mode BatchSandbox CRs have spec.template: null.
-    # .get("template", {}) returns None when the key exists with value None,
-    # causing AttributeError on the next chained .get().
-    workload = {"spec": {"template": None, "poolRef": "pool-runc"}}
+@pytest.mark.parametrize("workload", [
+    {"spec": {"template": None, "poolRef": "pool-runc"}},  # key exists, value None (pool mode)
+    {"spec": {"poolRef": "pool-runc"}},                    # key absent entirely
+    {"spec": None},                                         # spec itself is None
+    {},                                                     # empty workload
+    {"spec": {"template": {"spec": None}}},                # template present, inner spec is None
+])
+def test_platform_constraint_scope_no_crash_on_null_fields(workload):
+    # Regression: chained .get(key, {}) raises AttributeError when any level
+    # is explicitly None.  `or {}` must handle all these shapes safely.
     result = _workload_platform_constraint_scope(workload, "template", _analyzer)
-    assert result == (False, False)
-
-
-def test_platform_constraint_scope_missing_template_key():
-    workload = {"spec": {"poolRef": "pool-runc"}}
-    result = _workload_platform_constraint_scope(workload, "template", _analyzer)
-    assert result == (False, False)
-
-
-def test_platform_constraint_scope_null_spec():
-    workload = {"spec": None}
-    result = _workload_platform_constraint_scope(workload, "template", _analyzer)
-    assert result == (False, False)
-
-
-def test_platform_constraint_scope_empty_workload():
-    result = _workload_platform_constraint_scope({}, "template", _analyzer)
     assert result == (False, False)
 
 
