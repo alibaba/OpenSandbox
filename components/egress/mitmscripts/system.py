@@ -19,12 +19,48 @@
 #
 # Behavior:
 #   Forces streaming for SSE / chunked responses so each chunk is forwarded
-#   immediately, bypassing the stream_large_bodies=1m buffer set in launch.go
+#   immediately, bypassing the stream_large_bodies=10m buffer set in config.yaml
 #   (which otherwise stalls LLM-style small-chunk streams).
+#
+#   Implements SNI-aware ignore_hosts for transparent mode. mitmproxy's
+#   built-in ignore_hosts check in transparent mode matches against the
+#   destination IP first; the SNI hostname is only available inside the TLS
+#   ClientHello, which arrives after the initial check. This addon re-checks
+#   the same ignore_hosts patterns against the SNI hostname at the
+#   tls_clienthello layer and sets ignore_connection=True when a match is
+#   found, ensuring domain-based TLS pass-through works reliably.
 #
 # User-defined addons can be loaded alongside this script via
 # OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT.
-from mitmproxy import http
+import re
+
+from mitmproxy import ctx, http
+from mitmproxy.tls import ClientHelloData
+
+
+def tls_clienthello(data: ClientHelloData) -> None:
+    """Re-check ignore_hosts patterns against SNI hostname.
+
+    In transparent mode, mitmproxy checks ignore_hosts against the
+    destination IP:port before the TLS handshake.  If the check fails at
+    that stage (SNI not yet available), we get a second chance here with
+    the actual hostname from the ClientHello SNI extension.
+    """
+    sni = data.client_hello.sni
+    if not sni:
+        return
+
+    patterns = ctx.options.ignore_hosts
+    if not patterns:
+        return
+
+    for pattern in patterns:
+        try:
+            if re.search(pattern, sni):
+                data.ignore_connection = True
+                return
+        except re.error:
+            pass
 
 
 def responseheaders(flow: http.HTTPFlow) -> None:
