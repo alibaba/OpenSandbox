@@ -840,7 +840,8 @@ paths:
       description: |
         Downloads a file from the specified path within the sandbox. Supports HTTP
         range requests for resumable downloads and partial content retrieval.
-        Returns file as octet-stream with appropriate headers.
+        Also supports line-based reading with offset and limit parameters.
+        Returns file as octet-stream or plain text with appropriate headers.
       operationId: downloadFile
       tags:
         - Filesystem
@@ -852,10 +853,26 @@ paths:
           schema:
             type: string
           example: /workspace/data.csv
+        - name: offset
+          in: query
+          required: false
+          description: Starting line number (1-based). When provided with limit, enables line-based reading.
+          schema:
+            type: integer
+            minimum: 1
+          example: 100
+        - name: limit
+          in: query
+          required: false
+          description: Number of lines to return. Requires offset to be specified.
+          schema:
+            type: integer
+            minimum: 1
+          example: 20
         - name: Range
           in: header
           required: false
-          description: HTTP Range header for partial content requests
+          description: HTTP Range header for partial content requests (byte range)
           schema:
             type: string
           example: "bytes=0-1023"
@@ -867,6 +884,9 @@ paths:
               schema:
                 type: string
                 format: binary
+            text/plain:
+              schema:
+                type: string
           headers:
             Content-Disposition:
               schema:
@@ -1440,3 +1460,4 @@ components:
           example:
             code: RUNTIME_ERROR
             message: "error running code execution"
+            
