@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,7 @@ func (c *FilesystemController) DownloadFile() {
 		)
 		return
 	}
+
 	resolvedFilePath, err := pathutil.ExpandPath(filePath)
 	if err != nil {
 		c.RespondError(
@@ -48,6 +50,35 @@ func (c *FilesystemController) DownloadFile() {
 			model.ErrorCodeRuntimeError,
 			fmt.Sprintf("error resolving file path: %s. %v", filePath, err),
 		)
+		return
+	}
+
+	// Check for line-based reading parameters
+	offsetStr := c.ctx.Query("offset")
+	limitStr := c.ctx.Query("limit")
+
+	if offsetStr != "" && limitStr != "" {
+		offset, err := strconv.Atoi(offsetStr)
+		if err != nil || offset < 1 {
+			c.RespondError(
+				http.StatusBadRequest,
+				model.ErrorCodeInvalidParameter,
+				"offset must be a positive integer (1-based)",
+			)
+			return
+		}
+
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil || limit < 1 {
+			c.RespondError(
+				http.StatusBadRequest,
+				model.ErrorCodeInvalidParameter,
+				"limit must be a positive integer",
+			)
+			return
+		}
+
+		c.serveLineRange(resolvedFilePath, offset, limit)
 		return
 	}
 
@@ -96,6 +127,39 @@ func (c *FilesystemController) DownloadFile() {
 
 	rec.MarkSuccess()
 	http.ServeContent(c.ctx.Writer, c.ctx.Request, filepath.Base(resolvedFilePath), fileInfo.ModTime(), file)
+}
+
+// serveLineRange serves a specific range of lines from a file
+func (c *FilesystemController) serveLineRange(filePath string, offset, limit int) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		c.handleFileError(err)
+		return
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	currentLine := 1
+	linesWritten := 0
+
+	c.ctx.Header("Content-Type", "text/plain")
+
+	for scanner.Scan() && linesWritten < limit {
+		if currentLine >= offset {
+			c.ctx.Writer.Write(scanner.Bytes())
+			c.ctx.Writer.Write([]byte("\n"))
+			linesWritten++
+		}
+		currentLine++
+	}
+
+	if err := scanner.Err(); err != nil {
+		c.RespondError(
+			http.StatusInternalServerError,
+			model.ErrorCodeRuntimeError,
+			fmt.Sprintf("error reading file: %v", err),
+		)
+	}
 }
 
 // formatContentDisposition formats the Content-Disposition header value with proper
