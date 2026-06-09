@@ -91,6 +91,9 @@ func TestFilesystemControllerReplaceContent(t *testing.T) {
 	ctrl.ReplaceContent()
 
 	require.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]model.ReplaceContentResultItem
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp[target].ReplacedCount)
 	data, err := os.ReadFile(target)
 	require.NoError(t, err)
 	require.Equal(t, "hello universe", string(data))
@@ -116,6 +119,9 @@ func TestFilesystemControllerReplaceContentSupportsHomePath(t *testing.T) {
 	ctrl.ReplaceContent()
 
 	require.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]model.ReplaceContentResultItem
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 1, resp["~/content.txt"].ReplacedCount)
 	data, err := os.ReadFile(target)
 	require.NoError(t, err)
 	require.Equal(t, "hello home", string(data))
@@ -128,6 +134,56 @@ func TestFilesystemControllerSearchFilesHandlesAbsentDir(t *testing.T) {
 	ctrl.SearchFiles()
 
 	require.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestFilesystemControllerReplaceContentReportsZeroWhenNoMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "content.txt")
+	require.NoError(t, os.WriteFile(target, []byte("hello world"), 0o644))
+
+	body, err := json.Marshal(map[string]model.ReplaceFileContentItem{
+		target: {
+			Old: "missing",
+			New: "unused",
+		},
+	})
+	require.NoError(t, err)
+
+	ctrl, rec := newFilesystemController(t, http.MethodPost, "/files/replace", body)
+	ctrl.ReplaceContent()
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]model.ReplaceContentResultItem
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp[target].ReplacedCount)
+	data, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "hello world", string(data))
+}
+
+func TestFilesystemControllerReplaceContentReportsMultipleMatches(t *testing.T) {
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "content.txt")
+	require.NoError(t, os.WriteFile(target, []byte("one two one"), 0o644))
+
+	body, err := json.Marshal(map[string]model.ReplaceFileContentItem{
+		target: {
+			Old: "one",
+			New: "ONE",
+		},
+	})
+	require.NoError(t, err)
+
+	ctrl, rec := newFilesystemController(t, http.MethodPost, "/files/replace", body)
+	ctrl.ReplaceContent()
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	var resp map[string]model.ReplaceContentResultItem
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, 2, resp[target].ReplacedCount)
+	data, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "ONE two ONE", string(data))
 }
 
 func TestReplaceContentFailsUnknownFile(t *testing.T) {

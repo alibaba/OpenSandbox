@@ -31,6 +31,8 @@ from .metrics import Metrics
 from .permission import Permission
 from .rename_file_item import RenameFileItem
 from .replace_content_body import ReplaceContentBody
+from .replace_content_response_200 import ReplaceContentResponse200
+from .replace_content_result_item import ReplaceContentResultItem
 from .replace_file_content_item import ReplaceFileContentItem
 from .run_code_request import RunCodeRequest
 from .run_command_request import RunCommandRequest
@@ -58,6 +60,8 @@ __all__ = (
     "Permission",
     "RenameFileItem",
     "ReplaceContentBody",
+    "ReplaceContentResponse200",
+    "ReplaceContentResultItem",
     "ReplaceFileContentItem",
     "RunCodeRequest",
     "RunCommandRequest",

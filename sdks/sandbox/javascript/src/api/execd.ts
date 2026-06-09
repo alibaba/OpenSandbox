@@ -870,6 +870,14 @@ export interface components {
              */
             new: string;
         };
+        /** @description Replacement result for a single file */
+        ReplaceContentResultItem: {
+            /**
+             * @description Number of replacements applied to the file
+             * @example 2
+             */
+            replacedCount: number;
+        };
         /** @description System resource usage metrics */
         Metrics: {
             /**
@@ -1578,7 +1586,11 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": {
+                        [key: string]: components["schemas"]["ReplaceContentResultItem"];
+                    };
+                };
             };
             400: components["responses"]["BadRequest"];
             500: components["responses"]["InternalServerError"];

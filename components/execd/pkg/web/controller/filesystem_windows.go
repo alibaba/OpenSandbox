@@ -319,8 +319,10 @@ func (c *FilesystemController) ReplaceContent() {
 		return
 	}
 
-	for file, item := range request {
-		file, err := pathutil.ExpandAbsPath(file)
+	response := make(map[string]model.ReplaceContentResultItem, len(request))
+
+	for requestedPath, item := range request {
+		file, err := pathutil.ExpandAbsPath(requestedPath)
 		if err != nil {
 			c.handleFileError(err)
 			return
@@ -344,6 +346,7 @@ func (c *FilesystemController) ReplaceContent() {
 		}
 		mode := fileInfo.Mode()
 
+		replacedCount := strings.Count(string(content), item.Old)
 		newContent := strings.ReplaceAll(string(content), item.Old, item.New)
 
 		err = os.WriteFile(file, []byte(newContent), mode)
@@ -351,8 +354,10 @@ func (c *FilesystemController) ReplaceContent() {
 			c.handleFileError(err)
 			return
 		}
+
+		response[requestedPath] = model.ReplaceContentResultItem{ReplacedCount: replacedCount}
 	}
 
 	rec.MarkSuccess()
-	c.RespondSuccess(nil)
+	c.RespondSuccess(response)
 }
