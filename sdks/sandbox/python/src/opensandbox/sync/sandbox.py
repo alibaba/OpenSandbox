@@ -48,6 +48,7 @@ from opensandbox.models.sandboxes import (
 from opensandbox.sync.adapters.factory import AdapterFactorySync
 from opensandbox.sync.services import (
     CommandsSync,
+    CredentialVaultSync,
     DiagnosticsSync,
     EgressSync,
     FilesystemSync,
@@ -171,6 +172,13 @@ class SandboxSync:
         Allows retrieving resource usage statistics (CPU, memory) and other performance metrics.
         """
         return self._metrics_service
+
+    @property
+    def credential_vault(self) -> CredentialVaultSync:
+        """
+        Provides access to sandbox-scoped Credential Vault operations.
+        """
+        return self._egress_service
 
     @property
     def diagnostics(self) -> DiagnosticsSync:

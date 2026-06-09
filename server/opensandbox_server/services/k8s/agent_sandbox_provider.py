@@ -28,6 +28,7 @@ from opensandbox_server.api.schema import Endpoint, ImageSpec, NetworkPolicy, Pl
 from opensandbox_server.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from opensandbox_server.services.k8s.client import K8sClient
 from opensandbox_server.services.k8s.egress_helper import (
+    apply_credential_proxy_trust_to_pod_spec,
     apply_egress_to_spec,
 )
 from opensandbox_server.services.k8s.provider_common import (
@@ -285,6 +286,7 @@ class AgentSandboxProvider(WorkloadProvider):
             egress_auth_token=egress_auth_token,
             egress_mode=egress_mode,
         )
+        apply_credential_proxy_trust_to_pod_spec(pod_spec)
 
         return pod_spec
 

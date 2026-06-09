@@ -69,10 +69,14 @@ func startPolicyServer(proxy policyUpdater, nft nftApplier, enforcementMode stri
 		maxEgressRules:   maxEgressRules,
 		alwaysLoader:     policy.NewAlwaysRuleLoader(time.Minute),
 		stopAlwaysReload: make(chan struct{}),
+		mitmGate:         mitmGate,
 	}
+	handler.credentialVault = newCredentialVaultStore(mitmGate, func() bool { return strings.TrimSpace(token) != "" })
 	handler.setAlwaysRules(alwaysDeny, alwaysAllow)
 
 	mux.HandleFunc("/policy", handler.handlePolicy)
+	mux.HandleFunc("/credential-vault", handler.handleCredentialVault)
+	mux.HandleFunc("/credential-vault/", handler.handleCredentialVaultSubresource)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		if mitmGate != nil && mitmGate.MitmPending() {
 			w.WriteHeader(http.StatusServiceUnavailable)
@@ -130,6 +134,8 @@ type policyServer struct {
 
 	lastAlwaysFP    uint64
 	lastAlwaysFPSet bool
+	credentialVault *credentialVaultStore
+	mitmGate        *mitmproxy.HealthGate
 }
 
 type policyStatusResponse struct {
@@ -158,6 +164,197 @@ func (s *policyServer) handlePolicy(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, POST, PUT, PATCH, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *policyServer) handleCredentialVault(w http.ResponseWriter, r *http.Request) {
+	if !s.authorize(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		s.handleCredentialVaultGet(w)
+	case http.MethodPost:
+		s.handleCredentialVaultPost(w, r)
+	case http.MethodPatch:
+		s.handleCredentialVaultPatch(w, r)
+	case http.MethodDelete:
+		s.handleCredentialVaultDelete(w)
+	default:
+		w.Header().Set("Allow", "GET, POST, PATCH, DELETE")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *policyServer) handleCredentialVaultSubresource(w http.ResponseWriter, r *http.Request) {
+	if !s.authorize(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/credential-vault/")
+	switch {
+	case path == "_active":
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !isLoopbackRequest(r) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		s.handleCredentialVaultActive(w)
+	case path == "credentials":
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleCredentialVaultCredentials(w)
+	case strings.HasPrefix(path, "credentials/"):
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleCredentialVaultCredential(w, strings.TrimPrefix(path, "credentials/"))
+	case path == "bindings":
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleCredentialVaultBindings(w)
+	case strings.HasPrefix(path, "bindings/"):
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", "GET")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		s.handleCredentialVaultBinding(w, strings.TrimPrefix(path, "bindings/"))
+	default:
+		http.Error(w, "not found", http.StatusNotFound)
+	}
+}
+
+func (s *policyServer) handleCredentialVaultGet(w http.ResponseWriter) {
+	state, err := s.credentialVault.sanitized()
+	if err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
+func (s *policyServer) handleCredentialVaultPost(w http.ResponseWriter, r *http.Request) {
+	if err := s.credentialVault.ready(); err != nil {
+		http.Error(w, err.Error(), http.StatusPreconditionFailed)
+		return
+	}
+	if !credentialVaultWriteTransportAllowed(r) {
+		http.Error(w, "credential vault writes require TLS or loopback transport", http.StatusUpgradeRequired)
+		return
+	}
+	var req credentialVaultCreateRequest
+	if err := readCredentialVaultJSON(r, &req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid credential vault request: %v", err), http.StatusBadRequest)
+		return
+	}
+	state, err := s.credentialVault.create(req, s.effectivePolicy())
+	if err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, state)
+}
+
+func (s *policyServer) handleCredentialVaultPatch(w http.ResponseWriter, r *http.Request) {
+	if err := s.credentialVault.ready(); err != nil {
+		http.Error(w, err.Error(), http.StatusPreconditionFailed)
+		return
+	}
+	if !credentialVaultWriteTransportAllowed(r) {
+		http.Error(w, "credential vault writes require TLS or loopback transport", http.StatusUpgradeRequired)
+		return
+	}
+	var req credentialVaultMutationRequest
+	if err := readCredentialVaultJSON(r, &req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid credential vault mutation request: %v", err), http.StatusBadRequest)
+		return
+	}
+	state, err := s.credentialVault.patch(req, s.effectivePolicy())
+	if err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
+}
+
+func (s *policyServer) handleCredentialVaultDelete(w http.ResponseWriter) {
+	if err := s.credentialVault.delete(); err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *policyServer) handleCredentialVaultCredentials(w http.ResponseWriter) {
+	state, err := s.credentialVault.sanitized()
+	if err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, credentialVaultState{Revision: state.Revision, Credentials: state.Credentials, Bindings: []credentialBindingMetadata{}})
+}
+
+func (s *policyServer) handleCredentialVaultCredential(w http.ResponseWriter, name string) {
+	state, err := s.credentialVault.sanitized()
+	if err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	name = strings.TrimSpace(name)
+	for _, credential := range state.Credentials {
+		if credential.Name == name {
+			writeJSON(w, http.StatusOK, credential)
+			return
+		}
+	}
+	http.Error(w, "credential not found", http.StatusNotFound)
+}
+
+func (s *policyServer) handleCredentialVaultBindings(w http.ResponseWriter) {
+	state, err := s.credentialVault.sanitized()
+	if err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, credentialVaultState{Revision: state.Revision, Credentials: []credentialMetadata{}, Bindings: state.Bindings})
+}
+
+func (s *policyServer) handleCredentialVaultBinding(w http.ResponseWriter, name string) {
+	state, err := s.credentialVault.sanitized()
+	if err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	name = strings.TrimSpace(name)
+	for _, binding := range state.Bindings {
+		if binding.Name == name {
+			writeJSON(w, http.StatusOK, binding)
+			return
+		}
+	}
+	http.Error(w, "binding not found", http.StatusNotFound)
+}
+
+func (s *policyServer) handleCredentialVaultActive(w http.ResponseWriter) {
+	snapshot, err := s.credentialVault.activeSnapshot()
+	if err != nil {
+		writeCredentialVaultError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
 }
 
 func (s *policyServer) handleGet(w http.ResponseWriter) {
@@ -211,6 +408,11 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 
 	mode := modeFromPolicy(pol)
 	log.Infof("policy API: updating policy to mode=%s, enforcement=%s", mode, s.enforcementMode)
+	if err := s.validateCredentialVaultPolicyUpdate(pol); err != nil {
+		logEgressUpdateFailedWarn(fmt.Sprintf("credential vault policy validation: %v", err))
+		http.Error(w, fmt.Sprintf("credential vault policy validation: %v", err), http.StatusBadRequest)
+		return
+	}
 	if !s.commitPolicy(r.Context(), w, pol, "post") {
 		return
 	}
@@ -264,6 +466,11 @@ func (s *policyServer) handlePatch(w http.ResponseWriter, r *http.Request) {
 
 	mode := modeFromPolicy(newPolicy)
 	log.Infof("policy API: patching policy with %d new rule(s), mode=%s, enforcement=%s", len(patchRules), mode, s.enforcementMode)
+	if err := s.validateCredentialVaultPolicyUpdate(newPolicy); err != nil {
+		logEgressUpdateFailedWarn(fmt.Sprintf("credential vault policy validation: %v", err))
+		http.Error(w, fmt.Sprintf("credential vault policy validation: %v", err), http.StatusBadRequest)
+		return
+	}
 	if !s.commitPolicy(r.Context(), w, newPolicy, "patch") {
 		return
 	}
@@ -342,6 +549,11 @@ func (s *policyServer) handleDelete(w http.ResponseWriter, r *http.Request) {
 
 	mode := modeFromPolicy(newPolicy)
 	log.Infof("policy API: deleting %d egress rule(s) by target, removed=%d, mode=%s, enforcement=%s", len(targets), removed, mode, s.enforcementMode)
+	if err := s.validateCredentialVaultPolicyUpdate(newPolicy); err != nil {
+		logEgressUpdateFailedWarn(fmt.Sprintf("credential vault policy validation: %v", err))
+		http.Error(w, fmt.Sprintf("credential vault policy validation: %v", err), http.StatusBadRequest)
+		return
+	}
 	if !s.commitPolicy(r.Context(), w, newPolicy, "delete") {
 		return
 	}
@@ -460,6 +672,23 @@ func (s *policyServer) currentAlwaysRules() (deny, allow []policy.EgressRule) {
 	return s.alwaysLoader.CurrentRules()
 }
 
+func (s *policyServer) effectivePolicy() *policy.NetworkPolicy {
+	current := s.proxy.CurrentPolicy()
+	if current == nil {
+		current = policy.DefaultDenyPolicy()
+	}
+	alwaysDeny, alwaysAllow := s.currentAlwaysRules()
+	return policy.MergeAlwaysOverlay(current, alwaysDeny, alwaysAllow)
+}
+
+func (s *policyServer) validateCredentialVaultPolicyUpdate(pol *policy.NetworkPolicy) error {
+	if s.credentialVault == nil {
+		return nil
+	}
+	alwaysDeny, alwaysAllow := s.currentAlwaysRules()
+	return s.credentialVault.validateActiveAgainstPolicy(policy.MergeAlwaysOverlay(pol, alwaysDeny, alwaysAllow))
+}
+
 func (s *policyServer) authorize(r *http.Request) bool {
 	if s.token == "" {
 		return true
@@ -472,6 +701,10 @@ func (s *policyServer) authorize(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) == 1
+}
+
+func credentialVaultWriteTransportAllowed(r *http.Request) bool {
+	return r.TLS != nil || isLoopbackRequest(r)
 }
 
 func (s *policyServer) enforceEgressRuleLimit(w http.ResponseWriter, egressCount int) bool {

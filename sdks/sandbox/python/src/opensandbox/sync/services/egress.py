@@ -19,10 +19,67 @@ Synchronous egress service interface.
 
 from typing import Protocol
 
-from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
+from opensandbox.models.sandboxes import (
+    Credential,
+    CredentialBinding,
+    CredentialBindingMetadata,
+    CredentialBindingMutationSet,
+    CredentialMetadata,
+    CredentialMutationSet,
+    CredentialVaultState,
+    NetworkPolicy,
+    NetworkRule,
+)
 
 
-class EgressSync(Protocol):
+class CredentialVaultSync(Protocol):
+    """Blocking sandbox-scoped Credential Vault facade."""
+
+    def create(
+        self,
+        *,
+        credentials: list[Credential | dict[str, object]],
+        bindings: list[CredentialBinding | dict[str, object]],
+    ) -> CredentialVaultState:
+        """Create a sandbox-local Credential Vault."""
+        ...
+
+    def get(self) -> CredentialVaultState:
+        """Get sanitized Credential Vault state."""
+        ...
+
+    def patch(
+        self,
+        *,
+        expected_revision: int | None = None,
+        credentials: CredentialMutationSet | dict[str, object] | None = None,
+        bindings: CredentialBindingMutationSet | dict[str, object] | None = None,
+    ) -> CredentialVaultState:
+        """Atomically patch sandbox-local credentials and bindings."""
+        ...
+
+    def delete(self) -> None:
+        """Delete the sandbox-local Credential Vault."""
+        ...
+
+    def list_credentials(self) -> list[CredentialMetadata]:
+        """List sanitized credential metadata."""
+        ...
+
+    def get_credential(self, name: str) -> CredentialMetadata:
+        """Get sanitized metadata for one credential."""
+        ...
+
+    def list_bindings(self) -> list[CredentialBindingMetadata]:
+        """List sanitized binding metadata."""
+        ...
+
+    def get_binding(self, name: str) -> CredentialBindingMetadata:
+        """Get sanitized metadata for one binding."""
+        ...
+
+
+class EgressSync(CredentialVaultSync, Protocol):
     """Blocking direct runtime egress policy service."""
 
     def get_policy(self) -> NetworkPolicy:

@@ -25,6 +25,9 @@ import json
 import logging
 import os
 import socket
+import time
+import urllib.error
+import urllib.request
 from typing import Any, Optional
 
 from docker.errors import DockerException, NotFound as DockerNotFound
@@ -34,7 +37,9 @@ from opensandbox_server.api.schema import Endpoint, NetworkPolicy
 from opensandbox_server.services.constants import (
     EGRESS_MODE_ENV,
     EGRESS_RULES_ENV,
+    OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT,
     OPENSANDBOX_EGRESS_TOKEN,
+    OPENSANDBOX_MITM_CA_CERT_PATH,
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_EMBEDDING_PROXY_PORT_LABEL,
     SANDBOX_HTTP_PORT_LABEL,
@@ -354,6 +359,8 @@ class DockerNetworkingMixin:
         host_execd_port: int,
         host_http_port: int,
         extra_port_bindings: Optional[dict[str, tuple[str, int]]] = None,
+        ca_volume_name: Optional[str] = None,
+        egress_api_host_port: Optional[int] = None,
     ):
         sidecar_name = f"sandbox-egress-{sandbox_id}"
         sidecar_labels = {
@@ -373,6 +380,7 @@ class DockerNetworkingMixin:
             f"{EGRESS_RULES_ENV}={policy_payload}",
             f"{EGRESS_MODE_ENV}={egress_mode}",
             f"{OPENSANDBOX_EGRESS_TOKEN}={egress_token}",
+            f"{OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT}=true",
         ]
 
         sidecar_port_bindings: dict[str, tuple[str, int]] = {
@@ -387,6 +395,10 @@ class DockerNetworkingMixin:
             "cap_add": ["NET_ADMIN"],
             "port_bindings": normalize_port_bindings(sidecar_port_bindings),
         }
+        if ca_volume_name:
+            sidecar_host_config_kwargs["binds"] = [
+                f"{ca_volume_name}:{os.path.dirname(OPENSANDBOX_MITM_CA_CERT_PATH)}:rw"
+            ]
         if self.app_config.egress.disable_ipv6:
             # Optional: disable IPv6 in the shared namespace when egress.disable_ipv6 is set.
             sidecar_host_config_kwargs["sysctls"] = {
@@ -424,6 +436,12 @@ class DockerNetworkingMixin:
             sidecar_container = self.docker_client.containers.get(sidecar_container_id)
             with self._docker_operation("start egress sidecar", sandbox_id):
                 sidecar_container.start()
+            if egress_api_host_port is not None:
+                self._wait_for_egress_sidecar_ready(
+                    sandbox_id,
+                    egress_api_host_port,
+                    egress_token,
+                )
             return sidecar_container
         except Exception as exc:
             if sidecar_container is not None:
@@ -455,6 +473,45 @@ class DockerNetworkingMixin:
                     "message": "Egress sidecar container failed to start.",
                 },
             ) from exc
+
+    def _wait_for_egress_sidecar_ready(
+        self,
+        sandbox_id: str,
+        host_port: int,
+        egress_token: str,
+        timeout_seconds: float = 30.0,
+    ) -> None:
+        deadline = time.monotonic() + timeout_seconds
+        url = f"http://{self._resolve_proxy_host()}:{host_port}/healthz"
+        last_error: Exception | None = None
+        while time.monotonic() < deadline:
+            request = urllib.request.Request(
+                url,
+                headers=build_egress_auth_headers(egress_token),
+                method="GET",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=1.0) as response:  # nosec B310 - local Docker endpoint
+                    if 200 <= response.status < 300:
+                        return
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code >= 500:
+                    time.sleep(0.2)
+                    continue
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+            time.sleep(0.2)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": SandboxErrorCodes.CONTAINER_START_FAILED,
+                "message": (
+                    f"Egress sidecar did not become ready within {timeout_seconds:.0f}s "
+                    f"for sandbox {sandbox_id}: {last_error}"
+                ),
+            },
+        )
 
     @staticmethod
     def _parse_host_port_label(value: Optional[str], label_name: str) -> Optional[int]:

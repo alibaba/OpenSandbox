@@ -83,6 +83,7 @@ from opensandbox_server.services.docker.windows_profile import (
 )
 from opensandbox_server.services.extension_service import ExtensionService
 from opensandbox_server.services.constants import (
+    OPENSANDBOX_MITM_CA_CERT_PATH,
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_EMBEDDING_PROXY_PORT_LABEL,
     SANDBOX_EXPIRES_AT_LABEL,
@@ -783,6 +784,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             )
 
         sidecar_container = None
+        credential_ca_volume: Optional[str] = None
         try:
             # For dockur/windows profile, resourceLimits are translated to
             # guest envs (RAM_SIZE/CPU_CORES/DISK_SIZE). Avoid applying
@@ -808,11 +810,46 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             container_exposed_ports: Optional[list[str]] = exposed_ports
 
             if request.network_policy:
+                credential_ca_volume = f"opensandbox-mitm-ca-{sandbox_id}"
+                with self._docker_operation("create credential CA volume", sandbox_id):
+                    self.docker_client.volumes.create(
+                        name=credential_ca_volume,
+                        labels={SANDBOX_MANAGED_VOLUMES_LABEL: "server"},
+                    )
+                auto_created_volumes = list(auto_created_volumes or [])
+                auto_created_volumes.append(credential_ca_volume)
+                labels[SANDBOX_MANAGED_VOLUMES_LABEL] = json.dumps(
+                    auto_created_volumes,
+                    separators=(",", ":"),
+                )
+                environment = [
+                    entry
+                    for entry in environment
+                    if not entry.startswith(
+                        (
+                            "SSL_CERT_FILE=",
+                            "REQUESTS_CA_BUNDLE=",
+                            "CURL_CA_BUNDLE=",
+                            "GIT_SSL_CAINFO=",
+                            "NODE_EXTRA_CA_CERTS=",
+                        )
+                    )
+                ]
+                environment.extend(
+                    [
+                        f"SSL_CERT_FILE={OPENSANDBOX_MITM_CA_CERT_PATH}",
+                        f"REQUESTS_CA_BUNDLE={OPENSANDBOX_MITM_CA_CERT_PATH}",
+                        f"CURL_CA_BUNDLE={OPENSANDBOX_MITM_CA_CERT_PATH}",
+                        f"GIT_SSL_CAINFO={OPENSANDBOX_MITM_CA_CERT_PATH}",
+                        f"NODE_EXTRA_CA_CERTS={OPENSANDBOX_MITM_CA_CERT_PATH}",
+                    ]
+                )
                 egress_token = generate_egress_token()
                 labels[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] = egress_token
-                sidecar_port_bindings = allocate_port_bindings(exposed_ports)
+                sidecar_port_bindings = allocate_port_bindings([*exposed_ports, "18080"])
                 host_execd_port = sidecar_port_bindings["44772"][1]
                 host_http_port = sidecar_port_bindings["8080"][1]
+                egress_api_binding = sidecar_port_bindings.get("18080")
                 extra_sidecar_port_bindings = {
                     port: binding
                     for port, binding in sidecar_port_bindings.items()
@@ -825,6 +862,10 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                     host_execd_port=host_execd_port,
                     host_http_port=host_http_port,
                     extra_port_bindings=extra_sidecar_port_bindings,
+                    ca_volume_name=credential_ca_volume,
+                    egress_api_host_port=(
+                        egress_api_binding[1] if egress_api_binding is not None else None
+                    ),
                 )
                 labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                 labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
@@ -856,6 +897,10 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                     exposed_ports = None
 
             # Inject volume bind mounts into Docker host config
+            if credential_ca_volume:
+                volume_binds.append(
+                    f"{credential_ca_volume}:{os.path.dirname(OPENSANDBOX_MITM_CA_CERT_PATH)}:ro"
+                )
             if volume_binds:
                 host_config_kwargs["binds"] = volume_binds
             if requested_windows_profile:

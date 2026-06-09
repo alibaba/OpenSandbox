@@ -37,6 +37,7 @@ from opensandbox_server.services.k8s.image_pull_secret_helper import (
 from opensandbox_server.services.k8s.batchsandbox_template import BatchSandboxTemplateManager
 from opensandbox_server.services.k8s.client import K8sClient
 from opensandbox_server.services.k8s.egress_helper import (
+    apply_credential_proxy_trust_to_pod_spec,
     apply_egress_to_spec,
 )
 from opensandbox_server.services.k8s.provider_common import (
@@ -221,6 +222,7 @@ class BatchSandboxProvider(WorkloadProvider):
             egress_auth_token=egress_auth_token,
             egress_mode=egress_mode,
         )
+        apply_credential_proxy_trust_to_pod_spec(pod_spec)
 
         if volumes:
             apply_volumes_to_pod_spec(pod_spec, volumes)

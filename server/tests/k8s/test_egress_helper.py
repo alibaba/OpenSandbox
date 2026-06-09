@@ -17,8 +17,18 @@ from typing import Optional
 
 from opensandbox_server.api.schema import NetworkPolicy, NetworkRule
 from opensandbox_server.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT
-from opensandbox_server.services.constants import EGRESS_MODE_ENV, EGRESS_RULES_ENV, OPENSANDBOX_EGRESS_TOKEN
+from opensandbox_server.services.constants import (
+    EGRESS_MODE_ENV,
+    EGRESS_RULES_ENV,
+    OPEN_SANDBOX_EGRESS_AUTH_HEADER,
+    OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT,
+    OPENSANDBOX_EGRESS_TOKEN,
+    OPENSANDBOX_MITM_CA_CERT_PATH,
+)
 from opensandbox_server.services.k8s.egress_helper import (
+    MITM_CA_MOUNT_PATH,
+    MITM_CA_VOLUME_NAME,
+    apply_credential_proxy_trust_to_pod_spec,
     apply_egress_to_spec,
     build_security_context_for_sandbox_container,
     prep_execd_init_for_egress,
@@ -73,11 +83,10 @@ class TestEgressSidecarViaApply:
         container = _egress_container(egress_image, network_policy)
 
         env_vars = container["env"]
-        assert len(env_vars) == 2
-        assert env_vars[0]["name"] == EGRESS_RULES_ENV
-        assert env_vars[0]["value"] is not None
-        assert env_vars[1]["name"] == EGRESS_MODE_ENV
-        assert env_vars[1]["value"] == EGRESS_MODE_DNS
+        env_by_name = {env["name"]: env["value"] for env in env_vars}
+        assert env_by_name[EGRESS_RULES_ENV] is not None
+        assert env_by_name[EGRESS_MODE_ENV] == EGRESS_MODE_DNS
+        assert env_by_name[OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT] == "true"
 
     def test_contains_egress_token_when_provided(self):
         egress_image = "opensandbox/egress:v1.0.12"
@@ -95,6 +104,9 @@ class TestEgressSidecarViaApply:
         env_vars = {env["name"]: env["value"] for env in container["env"]}
         assert env_vars[OPENSANDBOX_EGRESS_TOKEN] == "egress-token"
         assert env_vars[EGRESS_MODE_ENV] == EGRESS_MODE_DNS
+        assert container["readinessProbe"]["httpGet"]["httpHeaders"] == [
+            {"name": OPEN_SANDBOX_EGRESS_AUTH_HEADER, "value": "egress-token"}
+        ]
 
     def test_egress_mode_dns_nft(self):
         egress_image = "opensandbox/egress:v1.0.12"
@@ -209,6 +221,8 @@ class TestEgressSidecarViaApply:
         assert "name" in container["env"][0]
         assert "value" in container["env"][0]
         assert "command" not in container
+        assert container["ports"] == [{"name": "egress-api", "containerPort": 18080}]
+        assert container["readinessProbe"]["httpGet"]["path"] == "/healthz"
 
     def test_handles_wildcard_domains(self):
         """Test that wildcard domains in egress rules are handled correctly."""
@@ -340,6 +354,44 @@ class TestApplyEgressToSpec:
         )
 
         assert len(containers) == 0
+
+    def test_apply_credential_proxy_trust_to_pod_spec(self):
+        pod_spec = {
+            "containers": [
+                {
+                    "name": "sandbox",
+                    "env": [
+                        {"name": "SSL_CERT_FILE", "value": "/old.pem"},
+                        {"name": "FOO", "value": "bar"},
+                    ],
+                    "volumeMounts": [],
+                },
+                {"name": "egress", "volumeMounts": []},
+            ],
+            "volumes": [{"name": "opensandbox-bin", "emptyDir": {}}],
+        }
+
+        apply_credential_proxy_trust_to_pod_spec(pod_spec)
+
+        main = pod_spec["containers"][0]
+        sidecar = pod_spec["containers"][1]
+        env_vars = {env["name"]: env["value"] for env in main["env"]}
+        assert env_vars["SSL_CERT_FILE"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert env_vars["REQUESTS_CA_BUNDLE"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert env_vars["CURL_CA_BUNDLE"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert env_vars["GIT_SSL_CAINFO"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert env_vars["NODE_EXTRA_CA_CERTS"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert env_vars["FOO"] == "bar"
+        assert {"name": MITM_CA_VOLUME_NAME, "emptyDir": {}} in pod_spec["volumes"]
+        assert {
+            "name": MITM_CA_VOLUME_NAME,
+            "mountPath": MITM_CA_MOUNT_PATH,
+            "readOnly": True,
+        } in main["volumeMounts"]
+        assert {
+            "name": MITM_CA_VOLUME_NAME,
+            "mountPath": MITM_CA_MOUNT_PATH,
+        } in sidecar["volumeMounts"]
 
 class TestPrepExecdInitForEgress:
     def test_returns_privileged_security_dict_and_prefixed_script(self):

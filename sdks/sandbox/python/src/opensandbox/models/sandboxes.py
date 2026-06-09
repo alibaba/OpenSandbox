@@ -144,6 +144,165 @@ class NetworkPolicy(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class InlineCredentialSource(BaseModel):
+    """
+    Write-only inline credential material for Credential Vault.
+    """
+
+    value: str = Field(repr=False, description="Inline credential value.")
+    type: Literal["inline"] = Field(
+        default="inline",
+        description="Credential source type. Defaults to inline for the Python SDK.",
+    )
+
+    @field_validator("value")
+    @classmethod
+    def value_must_not_be_empty(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Credential source value cannot be empty")
+        return v
+
+
+class Credential(BaseModel):
+    """Sandbox-local Credential Vault credential."""
+
+    name: str = Field(description="Sandbox-local credential name.")
+    source: InlineCredentialSource | dict[str, str] = Field(
+        description="Write-only credential source."
+    )
+
+    @field_validator("name")
+    @classmethod
+    def credential_name_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Credential name cannot be blank")
+        return v
+
+    @model_validator(mode="after")
+    def normalize_source(self) -> "Credential":
+        if isinstance(self.source, dict):
+            self.source = InlineCredentialSource.model_validate(self.source)
+        return self
+
+
+class CredentialMatch(BaseModel):
+    """Request match for a Credential Vault binding."""
+
+    schemes: list[Literal["https", "http"]] | None = Field(default=None)
+    ports: list[int] | None = Field(default=None)
+    hosts: list[str] = Field(description="Exact FQDNs or leftmost-label wildcards.")
+    methods: list[str] | None = Field(default=None)
+    paths: list[str] | None = Field(default=None)
+
+    @field_validator("hosts")
+    @classmethod
+    def hosts_must_not_be_empty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("Credential match hosts cannot be empty")
+        if any(not host.strip() for host in v):
+            raise ValueError("Credential match host cannot be blank")
+        return v
+
+
+class CustomHeaderEntry(BaseModel):
+    """Custom header injection entry."""
+
+    name: str
+    credential: str
+
+
+class CredentialAuth(BaseModel):
+    """Typed Credential Vault auth rule."""
+
+    type: Literal["bearer", "basic", "apiKey", "customHeader", "customHeaders"]
+    credential: str | None = None
+    name: str | None = None
+    headers: list[CustomHeaderEntry] | None = None
+
+
+class CredentialBinding(BaseModel):
+    """Sandbox-local Credential Vault binding."""
+
+    name: str
+    match: CredentialMatch | dict[str, object]
+    auth: CredentialAuth | dict[str, object]
+
+    @field_validator("name")
+    @classmethod
+    def binding_name_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Credential binding name cannot be blank")
+        return v
+
+    @model_validator(mode="after")
+    def normalize_nested_models(self) -> "CredentialBinding":
+        if isinstance(self.match, dict):
+            self.match = CredentialMatch.model_validate(self.match)
+        if isinstance(self.auth, dict):
+            self.auth = CredentialAuth.model_validate(self.auth)
+        return self
+
+
+class CredentialMetadata(BaseModel):
+    """Sanitized credential metadata returned by Credential Vault."""
+
+    name: str
+    source_type: str = Field(alias="sourceType")
+    revision: int
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CredentialAuthMetadata(BaseModel):
+    """Sanitized auth metadata returned for a Credential Vault binding."""
+
+    type: str
+    name: str | None = None
+
+
+class CredentialBindingMetadata(BaseModel):
+    """Sanitized binding metadata returned by Credential Vault."""
+
+    name: str
+    revision: int
+    match: CredentialMatch | None = None
+    auth: CredentialAuthMetadata | None = None
+
+
+class CredentialVaultState(BaseModel):
+    """Sanitized Credential Vault state."""
+
+    revision: int
+    credentials: list[CredentialMetadata]
+    bindings: list[CredentialBindingMetadata]
+
+
+class CredentialMutationSet(BaseModel):
+    """Atomic credential mutation set for Credential Vault patch."""
+
+    add: list[Credential | dict[str, object]] | None = None
+    replace: list[Credential | dict[str, object]] | None = None
+    delete: list[str] | None = None
+
+
+class CredentialBindingMutationSet(BaseModel):
+    """Atomic binding mutation set for Credential Vault patch."""
+
+    add: list[CredentialBinding | dict[str, object]] | None = None
+    replace: list[CredentialBinding | dict[str, object]] | None = None
+    delete: list[str] | None = None
+
+
+class CredentialVaultPatchRequest(BaseModel):
+    """Credential Vault patch request."""
+
+    expected_revision: int | None = Field(default=None, alias="expectedRevision")
+    credentials: CredentialMutationSet | dict[str, object] | None = None
+    bindings: CredentialBindingMutationSet | dict[str, object] | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # ============================================================================
 # Volume Models
 # ============================================================================

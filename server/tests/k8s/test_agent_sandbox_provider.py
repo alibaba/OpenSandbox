@@ -31,9 +31,15 @@ from opensandbox_server.config import (
     KubernetesRuntimeConfig,
     RuntimeConfig,
 )
-from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
+from opensandbox_server.services.constants import (
+    OPEN_SANDBOX_EGRESS_AUTH_HEADER,
+    OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT,
+    OPENSANDBOX_MITM_CA_CERT_PATH,
+    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
+)
 from opensandbox_server.services.k8s.agent_sandbox_provider import AgentSandboxProvider
 from opensandbox_server.services.constants import OPENSANDBOX_EGRESS_TOKEN
+from opensandbox_server.services.k8s.egress_helper import MITM_CA_MOUNT_PATH, MITM_CA_VOLUME_NAME
 
 def _app_config(
     shutdown_policy: str = "Delete",
@@ -791,11 +797,14 @@ class TestAgentSandboxProviderEgress:
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
         assert "OPENSANDBOX_EGRESS_RULES" in env_vars
         assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS
+        assert env_vars[OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT] == "true"
 
         caps = sidecar.get("securityContext", {}).get("capabilities", {})
         assert "NET_ADMIN" in caps.get("add", [])
         assert sidecar.get("securityContext", {}).get("privileged") is not True
         assert "command" not in sidecar
+        assert sidecar["readinessProbe"]["httpGet"]["path"] == "/healthz"
+        assert sidecar["readinessProbe"]["httpGet"]["port"] == 18080
 
         inits = pod_spec.get("initContainers", [])
         assert len(inits) == 1
@@ -804,6 +813,24 @@ class TestAgentSandboxProviderEgress:
         assert execd_init["image"] == "execd:latest"
         assert execd_init.get("securityContext", {}).get("privileged") is True
         assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
+
+        main = next(c for c in containers if c["name"] == "sandbox")
+        main_env = {e["name"]: e["value"] for e in main["env"]}
+        assert main_env["SSL_CERT_FILE"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert main_env["REQUESTS_CA_BUNDLE"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert main_env["CURL_CA_BUNDLE"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert main_env["GIT_SSL_CAINFO"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert main_env["NODE_EXTRA_CA_CERTS"] == OPENSANDBOX_MITM_CA_CERT_PATH
+        assert {"name": MITM_CA_VOLUME_NAME, "emptyDir": {}} in pod_spec["volumes"]
+        assert {
+            "name": MITM_CA_VOLUME_NAME,
+            "mountPath": MITM_CA_MOUNT_PATH,
+            "readOnly": True,
+        } in main["volumeMounts"]
+        assert {
+            "name": MITM_CA_VOLUME_NAME,
+            "mountPath": MITM_CA_MOUNT_PATH,
+        } in sidecar["volumeMounts"]
 
     def test_create_workload_with_network_policy_persists_annotation_and_sidecar_token(self, mock_k8s_client):
         provider = AgentSandboxProvider(mock_k8s_client)
@@ -836,6 +863,9 @@ class TestAgentSandboxProviderEgress:
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
         assert env_vars[OPENSANDBOX_EGRESS_TOKEN] == "egress-token"
         assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS
+        assert sidecar["readinessProbe"]["httpGet"]["httpHeaders"] == [
+            {"name": OPEN_SANDBOX_EGRESS_AUTH_HEADER, "value": "egress-token"}
+        ]
 
     def test_create_workload_with_egress_mode_dns_nft(self, mock_k8s_client):
         provider = AgentSandboxProvider(mock_k8s_client)

@@ -21,10 +21,67 @@ Protocol for direct egress sidecar operations.
 
 from typing import Protocol
 
-from opensandbox.models.sandboxes import NetworkPolicy, NetworkRule
+from opensandbox.models.sandboxes import (
+    Credential,
+    CredentialBinding,
+    CredentialBindingMetadata,
+    CredentialBindingMutationSet,
+    CredentialMetadata,
+    CredentialMutationSet,
+    CredentialVaultState,
+    NetworkPolicy,
+    NetworkRule,
+)
 
 
-class Egress(Protocol):
+class CredentialVault(Protocol):
+    """Sandbox-scoped Credential Vault facade."""
+
+    async def create(
+        self,
+        *,
+        credentials: list[Credential | dict[str, object]],
+        bindings: list[CredentialBinding | dict[str, object]],
+    ) -> CredentialVaultState:
+        """Create a sandbox-local Credential Vault."""
+        ...
+
+    async def get(self) -> CredentialVaultState:
+        """Get sanitized Credential Vault state."""
+        ...
+
+    async def patch(
+        self,
+        *,
+        expected_revision: int | None = None,
+        credentials: CredentialMutationSet | dict[str, object] | None = None,
+        bindings: CredentialBindingMutationSet | dict[str, object] | None = None,
+    ) -> CredentialVaultState:
+        """Atomically patch sandbox-local credentials and bindings."""
+        ...
+
+    async def delete(self) -> None:
+        """Delete the sandbox-local Credential Vault."""
+        ...
+
+    async def list_credentials(self) -> list[CredentialMetadata]:
+        """List sanitized credential metadata."""
+        ...
+
+    async def get_credential(self, name: str) -> CredentialMetadata:
+        """Get sanitized metadata for one credential."""
+        ...
+
+    async def list_bindings(self) -> list[CredentialBindingMetadata]:
+        """List sanitized binding metadata."""
+        ...
+
+    async def get_binding(self, name: str) -> CredentialBindingMetadata:
+        """Get sanitized metadata for one binding."""
+        ...
+
+
+class Egress(CredentialVault, Protocol):
     """Direct runtime egress policy service."""
 
     async def get_policy(self) -> NetworkPolicy:

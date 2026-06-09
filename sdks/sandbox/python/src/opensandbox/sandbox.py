@@ -49,6 +49,7 @@ from opensandbox.models.sandboxes import (
 )
 from opensandbox.services import (
     Commands,
+    CredentialVault,
     Diagnostics,
     Egress,
     Filesystem,
@@ -165,6 +166,13 @@ class Sandbox:
         Allows retrieving resource usage statistics (CPU, memory) and other performance metrics.
         """
         return self._metrics_service
+
+    @property
+    def credential_vault(self) -> CredentialVault:
+        """
+        Provides access to sandbox-scoped Credential Vault operations.
+        """
+        return self._egress_service
 
     @property
     def diagnostics(self) -> Diagnostics:
