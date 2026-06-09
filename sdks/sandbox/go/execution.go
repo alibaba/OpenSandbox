@@ -104,6 +104,11 @@ type ExecutionHandlers struct {
 	OnResult   func(ExecutionResult) error
 	OnComplete func(ExecutionComplete) error
 	OnError    func(ExecutionError) error
+
+	// SkipAccumulation, when true, prevents stdout/stderr messages from being
+	// accumulated in the Execution struct. Messages are still delivered to handlers.
+	// Use for long-running executions to prevent unbounded memory growth.
+	SkipAccumulation bool
 }
 
 // sseErrorPayload is the nested error object in a ServerStreamEvent.
@@ -146,7 +151,9 @@ func processStreamEvent(exec *Execution, event StreamEvent, handlers *ExecutionH
 	if err := json.Unmarshal([]byte(data), &ev); err != nil {
 		// Not JSON — treat as raw stdout
 		msg := OutputMessage{Text: data}
-		exec.Stdout = append(exec.Stdout, msg)
+		if handlers == nil || !handlers.SkipAccumulation {
+			exec.Stdout = append(exec.Stdout, msg)
+		}
 		if handlers != nil && handlers.OnStdout != nil {
 			return handlers.OnStdout(msg)
 		}
@@ -163,14 +170,18 @@ func processStreamEvent(exec *Execution, event StreamEvent, handlers *ExecutionH
 
 	case "stdout":
 		msg := OutputMessage{Text: ev.Text, Timestamp: ev.Timestamp}
-		exec.Stdout = append(exec.Stdout, msg)
+		if handlers == nil || !handlers.SkipAccumulation {
+			exec.Stdout = append(exec.Stdout, msg)
+		}
 		if handlers != nil && handlers.OnStdout != nil {
 			return handlers.OnStdout(msg)
 		}
 
 	case "stderr":
 		msg := OutputMessage{Text: ev.Text, Timestamp: ev.Timestamp}
-		exec.Stderr = append(exec.Stderr, msg)
+		if handlers == nil || !handlers.SkipAccumulation {
+			exec.Stderr = append(exec.Stderr, msg)
+		}
 		if handlers != nil && handlers.OnStderr != nil {
 			return handlers.OnStderr(msg)
 		}
@@ -239,7 +250,9 @@ func processStreamEvent(exec *Execution, event StreamEvent, handlers *ExecutionH
 		// Unknown event type — treat as stdout
 		if ev.Text != "" {
 			msg := OutputMessage{Text: ev.Text, Timestamp: ev.Timestamp}
-			exec.Stdout = append(exec.Stdout, msg)
+			if handlers == nil || !handlers.SkipAccumulation {
+				exec.Stdout = append(exec.Stdout, msg)
+			}
 			if handlers != nil && handlers.OnStdout != nil {
 				return handlers.OnStdout(msg)
 			}

@@ -23,10 +23,11 @@ Use this when you need a **long-lived Bash** driven over **WebSocket**: PTY mode
    |-------|-----|
    | `pty=0` | Pipe mode instead of PTY |
    | `since=<offset>` | After reconnect, replay from byte offset (use `output_offset` from `GET /pty/:id`) |
+   | `takeover=1` | Evict the current holder instead of getting **409**, then attach to the same shell (combine with `since=` to replay scrollback) |
 
 3. **Traffic** — after a JSON `connected` frame, the server sends **binary** chunks: first byte is the channel (`0x01` stdout, `0x02` stderr in pipe mode only, `0x03` replay with an 8-byte offset header). Send **stdin** as binary: `0x00` + raw bytes. For **resize** / **signals** / **ping**, send **JSON text** frames, e.g. `{"type":"resize","cols":120,"rows":40}`, `{"type":"signal","signal":"SIGINT"}`, `{"type":"ping"}`.
 
-4. **One WebSocket per session** — a second connection gets **409** until the first closes.
+4. **One WebSocket per session** — a second connection gets **409** until the first closes, unless it passes **`?takeover=1`**: the current holder is then closed with WebSocket code **4001** (reason `TAKEN_OVER`) and the new connection takes over the **same** shell. This lets a session move between clients/devices without restarting Bash.
 
 5. **End** — when Bash exits, you get a JSON `exit` frame with `exit_code` and the socket closes. Use **`DELETE /pty/:id`** to tear down the session from the server side.
 

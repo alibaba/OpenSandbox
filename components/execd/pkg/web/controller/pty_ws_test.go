@@ -26,6 +26,8 @@ import (
 	"net/http/httptest"
 	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -321,6 +323,148 @@ func TestPTYWS_ReplayOnReconnect(t *testing.T) {
 		}
 	}
 	require.True(t, gotReplay, "expected replay frame containing 'replay_test'")
+}
+
+// TestPTYWS_TakeoverEvictsHolder verifies that ?takeover=1 evicts the current
+// holder (closing its WS with WSCloseTakenOver) and that the taking-over client
+// reattaches to the SAME shell: it replays the prior scrollback and can read a
+// shell variable set by the evicted client.
+func TestPTYWS_TakeoverEvictsHolder(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found")
+	}
+	srv := newPTYTestServer(t)
+	defer srv.Close()
+
+	id := ptyCreateSession(t, srv)
+
+	// Holder connects, sets a shell var, and emits a marker.
+	conn1 := wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "")
+	ptyWaitFrame(t, conn1, "connected", 10*time.Second)
+	ptyWriteStdin(t, conn1, "TAKEOVER_VAR=alive\n")
+	ptyWriteStdin(t, conn1, "echo holder_marker\n")
+	ptyOutputContains(t, conn1, "holder_marker", 8*time.Second)
+
+	// A new client takes over.
+	conn2 := wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "takeover=1&since=0")
+
+	// 1. The holder's connection is closed with the takeover close code.
+	var closeErr *websocket.CloseError
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, _, err := conn1.ReadMessage(); err != nil {
+			_ = errors.As(err, &closeErr)
+			break
+		}
+	}
+	require.NotNil(t, closeErr, "holder should be closed with a WS CloseError after takeover")
+	require.Equal(t, model.WSCloseTakenOver, closeErr.Code)
+
+	// 2. The taking-over client replays the prior scrollback...
+	ptyOutputContains(t, conn2, "holder_marker", 8*time.Second)
+	ptyWaitFrame(t, conn2, "connected", 8*time.Second)
+
+	// 3. ...and it is the SAME shell: the var set on conn1 is still readable.
+	ptyWriteStdin(t, conn2, "echo SAMESHELL_$TAKEOVER_VAR\n")
+	ptyOutputContains(t, conn2, "SAMESHELL_alive", 8*time.Second)
+}
+
+// TestPTYWS_TakeoverOnFreeSessionConnects verifies ?takeover=1 is a no-op when the
+// session is free: it connects normally (there is no holder to evict).
+func TestPTYWS_TakeoverOnFreeSessionConnects(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found")
+	}
+	srv := newPTYTestServer(t)
+	defer srv.Close()
+
+	id := ptyCreateSession(t, srv)
+	conn := wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "takeover=1")
+	f := ptyWaitFrame(t, conn, "connected", 10*time.Second)
+	require.Equal(t, id, f.SessionID)
+}
+
+// TestPTYWS_TakeoverRequiresWebSocketUpgrade verifies a plain HTTP GET carrying
+// takeover=1 does NOT evict the holder: without a WS handshake it would evict and
+// then fail to upgrade, orphaning the session. It must return 409 and leave the
+// holder attached and functional.
+func TestPTYWS_TakeoverRequiresWebSocketUpgrade(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found")
+	}
+	srv := newPTYTestServer(t)
+	defer srv.Close()
+
+	id := ptyCreateSession(t, srv)
+	conn1 := wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "")
+	ptyWaitFrame(t, conn1, "connected", 10*time.Second)
+
+	// Plain HTTP GET (no Upgrade header) with takeover=1 → must be refused, not evict.
+	resp, err := http.Get(srv.URL + "/pty/" + id + "/ws?takeover=1")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+
+	// The holder is untouched: it still drives the shell.
+	ptyWriteStdin(t, conn1, "echo still_here\n")
+	ptyOutputContains(t, conn1, "still_here", 8*time.Second)
+}
+
+// TestPTYWS_ConcurrentTakeovers hammers a session with several simultaneous
+// ?takeover=1 reconnects (each with non-empty replay). They must serialize through
+// the lock without tripping the race detector — exercising the initial replay/connected
+// writes vs. eviction and the cleanup-window paths — and the shell must survive.
+func TestPTYWS_ConcurrentTakeovers(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found")
+	}
+	srv := newPTYTestServer(t)
+	defer srv.Close()
+
+	id := ptyCreateSession(t, srv)
+
+	// Holder seeds output so every takeover gets a non-empty replay frame.
+	conn0 := wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "")
+	ptyWaitFrame(t, conn0, "connected", 10*time.Second)
+	ptyWriteStdin(t, conn0, "echo seed_output\n")
+	ptyOutputContains(t, conn0, "seed_output", 8*time.Second)
+
+	const n = 6
+	var wg sync.WaitGroup
+	var connectedCount int32
+	wsURL := "ws" + strings.TrimPrefix(srv.URL+"/pty/"+id+"/ws", "http") + "?takeover=1&since=0"
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				return
+			}
+			defer func() { _ = c.Close() }()
+			deadline := time.Now().Add(6 * time.Second)
+			for time.Now().Before(deadline) {
+				f, err := ptyReadFrame(c, time.Until(deadline))
+				if err != nil {
+					return
+				}
+				if f.Type == "connected" {
+					atomic.AddInt32(&connectedCount, 1)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	// They serialize via the lock; at least one must have attached.
+	require.GreaterOrEqual(t, atomic.LoadInt32(&connectedCount), int32(1))
+
+	// The session is still reclaimable and the shell survived the storm.
+	winner := wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "takeover=1&since=0")
+	ptyWaitFrame(t, winner, "connected", 8*time.Second)
+	ptyWriteStdin(t, winner, "echo still_alive_after_storm\n")
+	ptyOutputContains(t, winner, "still_alive_after_storm", 8*time.Second)
 }
 
 func TestPTYWS_ResizeFrame(t *testing.T) {

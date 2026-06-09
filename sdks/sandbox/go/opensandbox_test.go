@@ -1590,6 +1590,34 @@ func TestReplaceInFiles(t *testing.T) {
 	require.NoErrorf(t, err, "ReplaceInFiles")
 }
 
+func TestReplaceInFilesDetailed(t *testing.T) {
+	_, client := newExecdServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/files/replace" {
+			assert.Fail(t, fmt.Sprintf("expected /files/replace, got %s", r.URL.Path))
+		}
+		if r.URL.Query().Get("verbose") != "true" {
+			assert.Fail(t, "expected verbose=true query param")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(ReplaceResponse{
+			"/tmp/config.txt": {ReplacedCount: 1},
+		})
+	})
+
+	resp, err := client.ReplaceInFilesDetailed(context.Background(), ReplaceRequest{
+		"/tmp/config.txt": {Old: "localhost", New: "production.example.com"},
+	})
+	require.NoErrorf(t, err, "ReplaceInFilesDetailed")
+	if resp == nil {
+		assert.Fail(t, "expected non-nil response")
+	}
+	if resp["/tmp/config.txt"].ReplacedCount != 1 {
+		assert.Fail(t, fmt.Sprintf("expected replacedCount=1, got %d", resp["/tmp/config.txt"].ReplacedCount))
+	}
+}
+
 func TestDownloadFile(t *testing.T) {
 	fileContent := "hello from sandbox file"
 

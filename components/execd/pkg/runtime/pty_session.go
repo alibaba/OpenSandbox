@@ -26,6 +26,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/alibaba/opensandbox/internal/safego"
 	"github.com/creack/pty"
@@ -40,6 +41,9 @@ import (
 type PTYSession interface {
 	LockWS() bool
 	UnlockWS()
+	TakeoverWS(timeout time.Duration) bool
+	SetEvictHandler(fn func()) uint64
+	ClearEvictHandler(gen uint64)
 	IsRunning() bool
 	IsPTY() bool
 	ExitCode() int
@@ -93,6 +97,14 @@ type ptySession struct {
 	// WS exclusive lock: only one WebSocket client at a time.
 	wsConnected atomic.Bool
 
+	// Eviction hook for session takeover. The active WS handler registers a function
+	// that closes its own connection (and stops its pumps) so a newer client can take
+	// over the session. Guarded by evictMu; evictGen lets a handler clear only its own
+	// hook and never a successor's (see SetEvictHandler / ClearEvictHandler).
+	evictMu  sync.Mutex
+	evict    func()
+	evictGen uint64
+
 	// Output broadcast (guards stdoutW / stderrW).
 	// The broadcast goroutine holds outMu only while reading the pointer; writes
 	// to the pipe happen outside the lock to avoid blocking broadcast on slow clients.
@@ -119,6 +131,58 @@ func (s *ptySession) LockWS() bool {
 // UnlockWS releases the WebSocket connection lock.
 func (s *ptySession) UnlockWS() {
 	s.wsConnected.Store(false)
+}
+
+// SetEvictHandler registers fn as the current connection's eviction hook and returns
+// a generation token. A newer handler calling this overwrites the previous hook. Pass
+// the returned token to ClearEvictHandler on teardown.
+func (s *ptySession) SetEvictHandler(fn func()) uint64 {
+	s.evictMu.Lock()
+	defer s.evictMu.Unlock()
+	s.evictGen++
+	s.evict = fn
+	return s.evictGen
+}
+
+// ClearEvictHandler removes the eviction hook only if it still belongs to gen, so a
+// handler tearing down never clears a successor's hook (which would race after a
+// takeover hands the session to a new connection).
+func (s *ptySession) ClearEvictHandler(gen uint64) {
+	s.evictMu.Lock()
+	defer s.evictMu.Unlock()
+	if s.evictGen == gen {
+		s.evict = nil
+	}
+}
+
+// triggerEvict invokes the current eviction hook, if any. The hook is expected to be
+// idempotent (closing an already-closed WS is a no-op), so repeated calls are safe.
+func (s *ptySession) triggerEvict() {
+	s.evictMu.Lock()
+	fn := s.evict
+	s.evictMu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+// TakeoverWS forcibly acquires the WS lock for a new client. It repeatedly evicts the
+// current holder (closing its WS) and retries LockWS until it wins or timeout elapses.
+// The shell process keeps running throughout; the new client reattaches with replay.
+// Returns true if the lock was acquired.
+func (s *ptySession) TakeoverWS(timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if s.LockWS() {
+			return true
+		}
+		s.triggerEvict()
+		if time.Now().After(deadline) {
+			// One last attempt in case the holder released just now.
+			return s.LockWS()
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 // IsRunning returns true if the bash process is currently alive.

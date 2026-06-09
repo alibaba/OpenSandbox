@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 
 from opensandbox.exceptions import PoolStateStoreUnavailableException
-from opensandbox.pool_types import IdleEntry, StoreCounters
+from opensandbox.pool_types import IdleEntry, StoreCounters, TakeIdleResult
 
 try:
     from redis import Redis
@@ -51,16 +51,26 @@ class RedisPoolStateStore:
     _TAKE_IDLE_SCRIPT = """
 local redis_time = redis.call('TIME')
 local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
+local min_remaining_ttl_ms = tonumber(ARGV[1]) or 0
+local cutoff_ms = now_ms + min_remaining_ttl_ms
+local discarded_alive = {}
 while true do
   local sandbox_id = redis.call('LPOP', KEYS[1])
   if not sandbox_id then
-    return nil
+    if #discarded_alive == 0 then
+      return nil
+    end
+    return {'', discarded_alive}
   end
   local expires_at = redis.call('HGET', KEYS[2], sandbox_id)
   if expires_at then
     redis.call('HDEL', KEYS[2], sandbox_id)
-    if tonumber(expires_at) > now_ms then
-      return sandbox_id
+    local exp = tonumber(expires_at)
+    if exp > cutoff_ms then
+      return {sandbox_id, discarded_alive}
+    end
+    if exp > now_ms then
+      table.insert(discarded_alive, sandbox_id)
     end
   end
 end
@@ -99,14 +109,22 @@ return 0
     _REAP_EXPIRED_SCRIPT = """
 local redis_time = redis.call('TIME')
 local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
+local min_remaining_ttl_ms = tonumber(ARGV[1]) or 0
+local cutoff_ms = now_ms + min_remaining_ttl_ms
+local discarded_alive = {}
 local entries = redis.call('HGETALL', KEYS[2])
 for i = 1, #entries, 2 do
-  if tonumber(entries[i + 1]) <= now_ms then
-    redis.call('HDEL', KEYS[2], entries[i])
-    redis.call('LREM', KEYS[1], 0, entries[i])
+  local sandbox_id = entries[i]
+  local exp = tonumber(entries[i + 1])
+  if exp <= cutoff_ms then
+    redis.call('HDEL', KEYS[2], sandbox_id)
+    redis.call('LREM', KEYS[1], 0, sandbox_id)
+    if exp > now_ms then
+      table.insert(discarded_alive, sandbox_id)
+    end
   end
 end
-return 1
+return discarded_alive
 """
 
     def __init__(self, redis: Redis, key_prefix: str = DEFAULT_KEY_PREFIX) -> None:
@@ -116,6 +134,21 @@ return 1
         self._default_idle_ttl = timedelta(hours=24)
 
     def try_take_idle(self, pool_name: str) -> str | None:
+        result = self._eval_take_idle(pool_name, "0")
+        return result.sandbox_id
+
+    def try_take_idle_min_ttl(
+        self, pool_name: str, min_remaining_ttl: timedelta
+    ) -> TakeIdleResult:
+        """Variant of :meth:`try_take_idle` that skips entries with insufficient remaining TTL.
+
+        See :class:`TakeIdleResult` for the return shape.
+        """
+        if min_remaining_ttl.total_seconds() <= 0:
+            return TakeIdleResult(sandbox_id=self.try_take_idle(pool_name))
+        return self._eval_take_idle(pool_name, str(max(0, _millis(min_remaining_ttl))))
+
+    def _eval_take_idle(self, pool_name: str, min_remaining_ttl_ms: str) -> TakeIdleResult:
         result = self._execute(
             "try_take_idle",
             pool_name,
@@ -124,9 +157,10 @@ return 1
                 2,
                 self._idle_list_key(pool_name),
                 self._idle_expires_key(pool_name),
+                min_remaining_ttl_ms,
             ),
         )
-        return _decode(result) if result is not None else None
+        return _decode_take_idle_result(result)
 
     def put_idle(self, pool_name: str, sandbox_id: str) -> None:
         if not sandbox_id or not sandbox_id.strip():
@@ -201,7 +235,22 @@ return 1
         )
 
     def reap_expired_idle(self, pool_name: str, now: datetime) -> None:
-        self._execute(
+        self._reap_idle(pool_name, "0")
+
+    def reap_expired_idle_min_ttl(
+        self, pool_name: str, now: datetime, min_remaining_ttl: timedelta
+    ) -> tuple[str, ...]:
+        """Variant of :meth:`reap_expired_idle` that also evicts near-expiry entries.
+
+        Returns IDs of alive evicted sandboxes (excluding fully-expired entries).
+        """
+        if min_remaining_ttl.total_seconds() <= 0:
+            self.reap_expired_idle(pool_name, now)
+            return ()
+        return self._reap_idle(pool_name, str(max(0, _millis(min_remaining_ttl))))
+
+    def _reap_idle(self, pool_name: str, min_remaining_ttl_ms: str) -> tuple[str, ...]:
+        result = self._execute(
             "reap_expired_idle",
             pool_name,
             lambda: self._redis.eval(
@@ -209,8 +258,12 @@ return 1
                 2,
                 self._idle_list_key(pool_name),
                 self._idle_expires_key(pool_name),
+                min_remaining_ttl_ms,
             ),
         )
+        if not result:
+            return ()
+        return tuple(_decode(item) for item in result)
 
     def snapshot_counters(self, pool_name: str) -> StoreCounters:
         def op() -> StoreCounters:
@@ -326,6 +379,28 @@ return 1
                 f"Redis pool state store operation failed: operation={operation} pool_name={pool_name}",
                 exc,
             ) from exc
+
+
+def _decode_take_idle_result(result: Any) -> TakeIdleResult:
+    """Decode the Lua return value into :class:`TakeIdleResult`.
+
+    The script returns either nil (empty pool with no discarded entries) or a two-element
+    array ``[takenSandboxId | "", [discardedAliveIds...]]``. The empty string in slot 0
+    signals "no eligible entry but there were discarded-alive entries to report".
+    """
+    if result is None:
+        return TakeIdleResult(sandbox_id=None)
+    if isinstance(result, (str, bytes)):
+        return TakeIdleResult(sandbox_id=_decode(result))
+    if isinstance(result, list) and len(result) >= 1:
+        taken_raw = result[0]
+        taken = _decode(taken_raw) if taken_raw is not None else None
+        if taken == "":
+            taken = None
+        discarded_raw = result[1] if len(result) >= 2 else []
+        discarded = tuple(_decode(item) for item in (discarded_raw or []))
+        return TakeIdleResult(sandbox_id=taken, discarded_alive_sandbox_ids=discarded)
+    return TakeIdleResult(sandbox_id=None)
 
 
 def _millis(value: timedelta) -> int:

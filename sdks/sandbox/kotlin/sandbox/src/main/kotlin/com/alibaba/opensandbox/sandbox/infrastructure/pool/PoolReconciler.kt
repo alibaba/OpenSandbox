@@ -72,7 +72,12 @@ internal object PoolReconciler {
         val ttl = config.primaryLockTtl
         val now = Instant.now()
 
-        stateStore.reapExpiredIdle(poolName, now)
+        val discardedAlive = stateStore.reapExpiredIdle(poolName, now, config.acquireMinRemainingTtl)
+        for (sandboxId in discardedAlive) {
+            // Reaped near-expiry but server-side TTL has not yet elapsed; kill so the live sandbox
+            // does not linger past its pool membership and consume quota.
+            onDiscardSandbox(sandboxId)
+        }
         val counters = stateStore.snapshotCounters(poolName)
         val excess = (counters.idleCount - config.maxIdle).coerceAtLeast(0)
         val toRemove = minOf(excess, config.warmupConcurrency)

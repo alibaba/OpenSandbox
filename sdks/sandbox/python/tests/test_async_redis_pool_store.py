@@ -69,6 +69,51 @@ async def test_async_redis_store_reap_expired_idle(
 
 
 @pytest.mark.asyncio
+async def test_async_redis_store_try_take_idle_min_ttl_surfaces_alive_below_threshold(
+    async_redis_store: tuple[AsyncRedisPoolStateStore, Any, str],
+) -> None:
+    store, _, _ = async_redis_store
+    await store.set_idle_entry_ttl("pool", timedelta(seconds=5))
+    await store.put_idle("pool", "id-1")
+    await store.put_idle("pool", "id-2")
+
+    result = await store.try_take_idle_min_ttl("pool", timedelta(seconds=60))
+    assert result.sandbox_id is None
+    assert set(result.discarded_alive_sandbox_ids) == {"id-1", "id-2"}
+    assert (await store.snapshot_counters("pool")).idle_count == 0
+
+
+@pytest.mark.asyncio
+async def test_async_redis_store_try_take_idle_min_ttl_returns_above_threshold(
+    async_redis_store: tuple[AsyncRedisPoolStateStore, Any, str],
+) -> None:
+    store, _, _ = async_redis_store
+    await store.set_idle_entry_ttl("pool", timedelta(minutes=10))
+    await store.put_idle("pool", "id-1")
+
+    result = await store.try_take_idle_min_ttl("pool", timedelta(seconds=60))
+    assert result.sandbox_id == "id-1"
+    assert result.discarded_alive_sandbox_ids == ()
+
+
+@pytest.mark.asyncio
+async def test_async_redis_store_reap_expired_idle_min_ttl_returns_alive_evicted(
+    async_redis_store: tuple[AsyncRedisPoolStateStore, Any, str],
+) -> None:
+    store, _, _ = async_redis_store
+    await store.set_idle_entry_ttl("pool", timedelta(seconds=5))
+    await store.put_idle("pool", "id-1")
+    await store.put_idle("pool", "id-2")
+
+    discarded_alive = await store.reap_expired_idle_min_ttl(
+        "pool", datetime.now(timezone.utc), timedelta(seconds=60)
+    )
+
+    assert set(discarded_alive) == {"id-1", "id-2"}
+    assert (await store.snapshot_counters("pool")).idle_count == 0
+
+
+@pytest.mark.asyncio
 async def test_async_redis_store_primary_lock_owner_semantics(
     async_redis_store: tuple[AsyncRedisPoolStateStore, Any, str],
 ) -> None:

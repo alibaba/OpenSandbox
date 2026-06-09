@@ -51,5 +51,12 @@ const (
 	WSErrCodeStdinWriteFailed = "STDIN_WRITE_FAILED"
 	WSErrCodeInvalidFrame     = "INVALID_FRAME"
 	WSErrCodeAlreadyConnected = "ALREADY_CONNECTED"
+	WSErrCodeTakenOver        = "TAKEN_OVER"
 	WSErrCodeRuntimeError     = "RUNTIME_ERROR"
 )
+
+// WSCloseTakenOver is the WebSocket close code sent to a client whose session was
+// taken over by another client (via ?takeover=1). It lives in the application-private
+// range (4000–4999, RFC 6455 §7.4.2) so clients can distinguish an intentional
+// handoff from a network drop and avoid auto-reconnecting into the new holder.
+const WSCloseTakenOver = 4001

@@ -15,6 +15,7 @@
 import type { SearchFilesResponse } from "../models/filesystem.js";
 import type {
   ContentReplaceEntry,
+  ContentReplaceResult,
   FileInfo,
   MoveEntry,
   SearchEntry,
@@ -43,5 +44,6 @@ export interface SandboxFiles {
   deleteFiles(paths: string[]): Promise<void>;
   moveFiles(entries: MoveEntry[]): Promise<void>;
   replaceContents(entries: ContentReplaceEntry[]): Promise<void>;
+  replaceContentsDetailed(entries: ContentReplaceEntry[]): Promise<ContentReplaceResult[]>;
   setPermissions(entries: SetPermissionEntry[]): Promise<void>;
 }

@@ -24,6 +24,7 @@ from typing import Protocol
 
 from opensandbox.models.filesystem import (
     ContentReplaceEntry,
+    ContentReplaceResult,
     EntryInfo,
     MoveEntry,
     SearchEntry,
@@ -201,6 +202,21 @@ class Filesystem(Protocol):
 
         Args:
             entries: List of ContentReplaceEntry objects specifying replacement operations
+
+        Raises:
+            SandboxException: if the operation fails
+        """
+        ...
+
+    async def replace_contents_detailed(self, entries: list[ContentReplaceEntry]) -> list[ContentReplaceResult]:
+        """
+        Replace content in files and return per-file replacement counts.
+
+        Args:
+            entries: List of ContentReplaceEntry objects specifying replacement operations
+
+        Returns:
+            List of ContentReplaceResult with replacement counts per file
 
         Raises:
             SandboxException: if the operation fails

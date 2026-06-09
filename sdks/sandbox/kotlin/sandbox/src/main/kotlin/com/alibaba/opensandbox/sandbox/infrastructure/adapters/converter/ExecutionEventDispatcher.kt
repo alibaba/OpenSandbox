@@ -62,7 +62,9 @@ class ExecutionEventDispatcher(
     ) {
         val stdoutText = eventNode.text ?: ""
         val stdoutMessage = OutputMessage(stdoutText, timestamp, false)
-        execution.logs.addStdout(stdoutMessage)
+        if (handlers?.skipAccumulation != true) {
+            execution.logs.addStdout(stdoutMessage)
+        }
         handlers?.onStdout?.handle(stdoutMessage)
     }
 
@@ -72,7 +74,9 @@ class ExecutionEventDispatcher(
     ) {
         val stderrText = eventNode.text ?: ""
         val stderrMessage = OutputMessage(stderrText, timestamp, true)
-        execution.logs.addStderr(stderrMessage)
+        if (handlers?.skipAccumulation != true) {
+            execution.logs.addStderr(stderrMessage)
+        }
         handlers?.onStderr?.handle(stderrMessage)
     }
 

@@ -270,6 +270,28 @@ internal sealed class FilesystemAdapter : ISandboxFiles
         await _client.PostAsync("/files/replace", body, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<ContentReplaceResult>> ReplaceContentsDetailedAsync(
+        IEnumerable<ContentReplaceEntry> entries,
+        CancellationToken cancellationToken = default)
+    {
+        var body = entries.ToDictionary(
+            e => e.Path,
+            e => new ReplaceFileContentItem
+            {
+                Old = e.OldContent,
+                New = e.NewContent
+            });
+
+        var response = await _client.PostAsync<Dictionary<string, ReplaceFileContentResult>>(
+            "/files/replace?verbose=true", body, cancellationToken).ConfigureAwait(false);
+
+        return response.Select(kv => new ContentReplaceResult
+        {
+            Path = kv.Key,
+            ReplacedCount = kv.Value.ReplacedCount,
+        }).ToList();
+    }
+
     public async Task SetPermissionsAsync(
         IEnumerable<SetPermissionEntry> entries,
         CancellationToken cancellationToken = default)

@@ -20,6 +20,7 @@ import com.alibaba.opensandbox.sandbox.domain.exceptions.PoolStateStoreUnavailab
 import com.alibaba.opensandbox.sandbox.domain.pool.IdleEntry
 import com.alibaba.opensandbox.sandbox.domain.pool.PoolStateStore
 import com.alibaba.opensandbox.sandbox.domain.pool.StoreCounters
+import com.alibaba.opensandbox.sandbox.domain.pool.TakeIdleResult
 import redis.clients.jedis.UnifiedJedis
 import redis.clients.jedis.params.SetParams
 import java.time.Duration
@@ -55,10 +56,48 @@ class RedisPoolStateStore(
                 redis.eval(
                     TAKE_IDLE_SCRIPT,
                     listOf(idleListKey(poolName), idleExpiresKey(poolName)),
-                    emptyList<String>(),
+                    listOf("0"),
                 )
-            result as? String
+            decodeTakeIdleResult(result).sandboxId
         }
+
+    override fun tryTakeIdle(
+        poolName: String,
+        minRemainingTtl: Duration,
+    ): TakeIdleResult {
+        if (minRemainingTtl.isNegative || minRemainingTtl.isZero) {
+            return TakeIdleResult.of(tryTakeIdle(poolName))
+        }
+        val minRemainingTtlMs = minRemainingTtl.toMillis().coerceAtLeast(0).toString()
+        return execute("tryTakeIdle", poolName) {
+            val result =
+                redis.eval(
+                    TAKE_IDLE_SCRIPT,
+                    listOf(idleListKey(poolName), idleExpiresKey(poolName)),
+                    listOf(minRemainingTtlMs),
+                )
+            decodeTakeIdleResult(result)
+        }
+    }
+
+    /**
+     * Decodes the Lua return value into [TakeIdleResult]. The script returns either nil (empty
+     * pool with no discarded entries) or a two-element array whose first slot holds the taken
+     * sandbox id (or an empty string when no entry satisfied the threshold but discarded-alive
+     * ids still need to be reported) and whose second slot holds the discarded-alive list.
+     * The empty-string sentinel is needed because Redis cannot return a nil literal inside an
+     * array reliably across clients.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun decodeTakeIdleResult(result: Any?): TakeIdleResult {
+        if (result == null) return TakeIdleResult.EMPTY
+        val list = result as? List<Any?> ?: return TakeIdleResult.of(result as? String)
+        if (list.isEmpty()) return TakeIdleResult.EMPTY
+        val takenRaw = list[0] as? String
+        val taken = takenRaw?.takeIf { it.isNotEmpty() }
+        val discarded = (list.getOrNull(1) as? List<Any?>)?.mapNotNull { it as? String } ?: emptyList()
+        return TakeIdleResult(sandboxId = taken, discardedAliveSandboxIds = discarded)
+    }
 
     override fun putIdle(
         poolName: String,
@@ -132,14 +171,35 @@ class RedisPoolStateStore(
         poolName: String,
         now: Instant,
     ) {
-        execute("reapExpiredIdle", poolName) {
-            redis.eval(
-                REAP_EXPIRED_SCRIPT,
-                listOf(idleListKey(poolName), idleExpiresKey(poolName)),
-                emptyList<String>(),
-            )
-        }
+        reapIdle(poolName, "0")
     }
+
+    override fun reapExpiredIdle(
+        poolName: String,
+        now: Instant,
+        minRemainingTtl: Duration,
+    ): List<String> {
+        if (minRemainingTtl.isNegative || minRemainingTtl.isZero) {
+            reapIdle(poolName, "0")
+            return emptyList()
+        }
+        return reapIdle(poolName, minRemainingTtl.toMillis().coerceAtLeast(0).toString())
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun reapIdle(
+        poolName: String,
+        minRemainingTtlMs: String,
+    ): List<String> =
+        execute("reapExpiredIdle", poolName) {
+            val result =
+                redis.eval(
+                    REAP_EXPIRED_SCRIPT,
+                    listOf(idleListKey(poolName), idleExpiresKey(poolName)),
+                    listOf(minRemainingTtlMs),
+                )
+            (result as? List<Any?>)?.mapNotNull { it as? String } ?: emptyList()
+        }
 
     override fun snapshotCounters(poolName: String): StoreCounters =
         execute("snapshotCounters", poolName) {
@@ -240,16 +300,29 @@ class RedisPoolStateStore(
             """
             local redis_time = redis.call('TIME')
             local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
+            local min_remaining_ttl_ms = tonumber(ARGV[1]) or 0
+            local cutoff_ms = now_ms + min_remaining_ttl_ms
+            -- Drop empty entries straight to nil so clients see the empty-pool case clearly.
+            local discarded_alive = {}
             while true do
               local sandbox_id = redis.call('LPOP', KEYS[1])
               if not sandbox_id then
-                return nil
+                if #discarded_alive == 0 then
+                  return nil
+                end
+                return {'', discarded_alive}
               end
               local expires_at = redis.call('HGET', KEYS[2], sandbox_id)
               if expires_at then
                 redis.call('HDEL', KEYS[2], sandbox_id)
-                if tonumber(expires_at) > now_ms then
-                  return sandbox_id
+                local exp = tonumber(expires_at)
+                if exp > cutoff_ms then
+                  return {sandbox_id, discarded_alive}
+                end
+                -- Below threshold. Surface alive entries so the caller can kill them; drop
+                -- already-expired ones silently — the server has reaped them.
+                if exp > now_ms then
+                  table.insert(discarded_alive, sandbox_id)
                 end
               end
             end
@@ -292,14 +365,22 @@ class RedisPoolStateStore(
             """
             local redis_time = redis.call('TIME')
             local now_ms = tonumber(redis_time[1]) * 1000 + math.floor(tonumber(redis_time[2]) / 1000)
+            local min_remaining_ttl_ms = tonumber(ARGV[1]) or 0
+            local cutoff_ms = now_ms + min_remaining_ttl_ms
+            local discarded_alive = {}
             local entries = redis.call('HGETALL', KEYS[2])
             for i = 1, #entries, 2 do
-              if tonumber(entries[i + 1]) <= now_ms then
-                redis.call('HDEL', KEYS[2], entries[i])
-                redis.call('LREM', KEYS[1], 0, entries[i])
+              local sandbox_id = entries[i]
+              local exp = tonumber(entries[i + 1])
+              if exp <= cutoff_ms then
+                redis.call('HDEL', KEYS[2], sandbox_id)
+                redis.call('LREM', KEYS[1], 0, sandbox_id)
+                if exp > now_ms then
+                  table.insert(discarded_alive, sandbox_id)
+                end
               end
             end
-            return 1
+            return discarded_alive
             """
     }
 }

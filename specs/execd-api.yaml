@@ -745,9 +745,20 @@ paths:
         Performs text replacement in one or multiple files. Replaces all occurrences
         of the old string with the new string (similar to strings.ReplaceAll).
         Preserves file permissions. Useful for batch text substitution across files.
+
+        When `verbose=true` is set, the response includes per-file replacement counts.
+        Without this parameter, the response body is empty (backward-compatible behavior).
       operationId: replaceContent
       tags:
         - Filesystem
+      parameters:
+        - name: verbose
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, return per-file replacement counts in the response body.
       requestBody:
         required: true
         content:
@@ -765,7 +776,20 @@ paths:
                 new: "DEBUG = False"
       responses:
         "200":
-          description: Content replaced successfully
+          description: |
+            Content replaced successfully. When `verbose=true`, returns per-file
+            replacement counts. Otherwise, the response body is empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/ReplaceFileContentResult"
+              example:
+                "/workspace/config.yaml":
+                  replacedCount: 1
+                "/workspace/app.py":
+                  replacedCount: 0
         "400":
           $ref: "#/components/responses/BadRequest"
         "500":
@@ -1321,13 +1345,24 @@ components:
       properties:
         old:
           type: string
-          description: String to be replaced
+          description: String to be replaced (must not be empty)
+          minLength: 1
           example: "localhost"
         new:
           type: string
           description: Replacement string
           example: "0.0.0.0"
       required: [old, new]
+
+    ReplaceFileContentResult:
+      type: object
+      description: Result of a content replacement operation on a single file
+      properties:
+        replacedCount:
+          type: integer
+          description: Number of occurrences replaced. 0 means oldContent was not found in the file.
+          example: 1
+      required: [replacedCount]
 
     Metrics:
       type: object

@@ -42,6 +42,7 @@ OPENSANDBOX_DIR = "/opt/opensandbox"
 # even when the server runs on Windows.
 EXECED_INSTALL_PATH = posixpath.join(OPENSANDBOX_DIR, "execd")
 BOOTSTRAP_PATH = posixpath.join(OPENSANDBOX_DIR, "bootstrap.sh")
+DEFAULT_EXECD_ENVS_PATH = posixpath.join(OPENSANDBOX_DIR, ".env")
 
 
 class DockerRuntimeMixin:
@@ -192,7 +193,17 @@ class DockerRuntimeMixin:
             [
                 "#!/bin/sh",
                 "set -e",
-                f"  {execd_binary} >/tmp/execd.log 2>&1 &",
+                'if [ -z "${EXECD_ENVS:-}" ]; then',
+                f'  EXECD_ENVS="{DEFAULT_EXECD_ENVS_PATH}"',
+                "fi",
+                'if ! mkdir -p "$(dirname "$EXECD_ENVS")" 2>/dev/null; then',
+                '  echo "warning: failed to create dir for EXECD_ENVS=$EXECD_ENVS" >&2',
+                "fi",
+                'if ! touch "$EXECD_ENVS" 2>/dev/null; then',
+                '  echo "warning: failed to touch EXECD_ENVS=$EXECD_ENVS" >&2',
+                "fi",
+                "export EXECD_ENVS",
+                f"{execd_binary} >/tmp/execd.log 2>&1 &",
                 'exec "$@"',
                 "",
             ]

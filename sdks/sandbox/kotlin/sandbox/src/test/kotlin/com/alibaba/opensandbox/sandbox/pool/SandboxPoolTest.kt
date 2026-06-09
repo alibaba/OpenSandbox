@@ -498,6 +498,7 @@ class SandboxPoolTest {
                 .acquireHealthCheckPollingInterval(Duration.ofMillis(50))
                 .acquireHealthCheck(healthCheck)
                 .acquireSkipHealthCheck()
+                .acquireMinRemainingTtl(Duration.ofSeconds(90))
                 .idleTimeout(Duration.ofMinutes(15))
                 .build()
 
@@ -509,6 +510,7 @@ class SandboxPoolTest {
         assertEquals(Duration.ofMillis(50), config.acquireHealthCheckPollingInterval)
         assertSame(healthCheck, config.acquireHealthCheck)
         assertEquals(true, config.acquireSkipHealthCheck)
+        assertEquals(Duration.ofSeconds(90), config.acquireMinRemainingTtl)
         assertEquals(Duration.ofMinutes(15), config.idleTimeout)
     }
 

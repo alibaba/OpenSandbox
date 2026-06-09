@@ -43,18 +43,29 @@ const (
 	wsPingInterval  = 30 * time.Second
 	wsReadDeadline  = 60 * time.Second
 	wsWriteDeadline = 10 * time.Second
+	// wsTakeoverTimeout bounds how long a ?takeover=1 request waits for the current
+	// holder to release after being evicted, before giving up with 409.
+	wsTakeoverTimeout = 5 * time.Second
+	// wsTakeoverCloseTimeout bounds the best-effort close-frame write sent to an
+	// evicted holder, so a full/unresponsive client socket cannot stall the takeover.
+	wsTakeoverCloseTimeout = 200 * time.Millisecond
 )
 
 // PTYSessionWebSocket handles GET /pty/:sessionId/ws.
 //
 //  1. Look up session → 404 before upgrade if missing
-//  2. Acquire exclusive WS lock → 409 if already held
+//  2. Acquire WS lock without eviction → 409 if held and not a ?takeover=1 request
 //  3. Upgrade HTTP → WebSocket
+//     3b. Takeover (if requested): evict the holder and acquire — only now that the
+//     handshake is accepted, so a failed upgrade never evicts anyone
 //  4. Start bash if not already running
 //     5+6. AtomicAttachOutputWithSnapshot (snapshot + attach under outMu — no loss window)
-//  7. defer: detach → pumpWg.Wait → UnlockWS
+//  7. defer: detach → pumpWg.Wait → UnlockWS → ClearEvictHandler (hook live through cleanup)
+//     Register close-only eviction hook (before initial writes, so a stalled replay can
+//     be interrupted without a connMu race)
 //  8. Send replay frame if snapshot non-empty
-//  9. Send connected frame
+//  9. Send connected frame, then upgrade hook to full evictClose+cancelOnce
+//     (initial writes done; all subsequent writes serialized by connMu)
 //  10. Start RFC 6455 ping, streamPump(s), exitWatcher goroutines
 //  11. Read loop: dispatch client frames
 func PTYSessionWebSocket(ctx *gin.Context) {
@@ -77,24 +88,44 @@ func PTYSessionWebSocket(ctx *gin.Context) {
 		return
 	}
 
-	// 2. Acquire exclusive WS lock.
-	if !session.LockWS() {
+	// 2. Decide how to acquire the exclusive WS lock. Try without evicting first; a
+	//    plain "already connected" with no takeover is refused with HTTP 409 *before*
+	//    the upgrade. A ?takeover=1 request (on a real WS handshake) instead evicts the
+	//    current holder — but only AFTER the handshake is fully accepted (step 3b), so a
+	//    request that announces an upgrade yet fails the handshake never evicts anyone.
+	locked := session.LockWS()
+	wantsTakeover := !locked && ctx.Query("takeover") == "1" && websocket.IsWebSocketUpgrade(ctx.Request)
+	if !locked && !wantsTakeover {
 		ctx.JSON(http.StatusConflict, model.ErrorResponse{
 			Code:    model.WSErrCodeAlreadyConnected,
 			Message: "another client is already connected to pty session " + id,
 		})
 		return
 	}
-	// NOTE: the lock is released at the very end of this function (see defer below),
-	// only after all pump goroutines have exited.
 
-	// 3. Upgrade HTTP connection to WebSocket.
+	// 3. Upgrade HTTP connection to WebSocket. For a takeover this happens BEFORE
+	//    evicting, so a bad or incomplete handshake cannot kill the current holder.
 	conn, err := wsUpgrader.Upgrade(ctx.Writer, ctx.Request, nil)
 	if err != nil {
 		log.Warning("pty ws upgrade failed for session %s: %v", id, err)
-		session.UnlockWS()
+		if locked {
+			session.UnlockWS()
+		}
 		return
 	}
+
+	// 3b. Takeover: the handshake succeeded, so now evict the current holder and
+	//     acquire the lock. The shell keeps running; this client reattaches with replay.
+	if !locked {
+		if !session.TakeoverWS(wsTakeoverTimeout) {
+			writeErrFrame(conn, model.WSErrCodeAlreadyConnected,
+				"takeover timed out for pty session "+id)
+			_ = conn.Close()
+			return
+		}
+	}
+	// From here we hold the lock; it is released at the very end of this function (see
+	// defer below), only after all pump goroutines have exited.
 
 	// Resolve query parameters.
 	pipeMode := ctx.Query("pty") == "0"
@@ -122,12 +153,20 @@ func PTYSessionWebSocket(ctx *gin.Context) {
 	//      would be dropped by fanout (stdoutW still nil) yet missed by snapshot.
 	stdoutR, stderrR, detach, snapshotBytes, snapshotOffset := session.AttachOutputWithSnapshot(since)
 
-	// 7. Deferred cleanup order: detach writers → wait for pump goroutines → unlock WS.
+	// 7. Deferred cleanup order: detach writers → wait for pump goroutines → unlock WS
+	//    → clear our eviction hook. The hook is cleared LAST (after UnlockWS) so it stays
+	//    live throughout cleanup: a ?takeover=1 arriving while a pump is still blocked
+	//    writing to a dead client can then fire it, and closing the conn unblocks that
+	//    pump so pumpWg.Wait() returns. ClearEvictHandler is generation-guarded, so it
+	//    never clears a successor's hook; a zero evictGen (hook never registered, e.g. an
+	//    early return below) is a no-op.
 	var pumpWg sync.WaitGroup
+	var evictGen uint64
 	defer func() {
 		detach()
 		pumpWg.Wait()
 		session.UnlockWS()
+		session.ClearEvictHandler(evictGen)
 	}()
 
 	// cancelCh is closed to signal all goroutines to stop.
@@ -153,10 +192,39 @@ func PTYSessionWebSocket(ctx *gin.Context) {
 		_ = conn.Close()
 	}
 
+	// evictClose is the non-blocking close used by the takeover eviction hook. Unlike
+	// closeConn it must not wait behind a stalled output writer: a takeover targets
+	// exactly the slow/abandoned-client case, so blocking on connMu (held by a pump
+	// stuck in WriteMessage) until wsWriteDeadline would defeat wsTakeoverTimeout. It
+	// therefore sends the close frame only on a best-effort basis (TryLock, short
+	// deadline) and always closes the conn, which unblocks any stuck writer. A client
+	// too backed-up to receive the frame could not have received it anyway.
+	evictClose := func(code int, text string) {
+		if connMu.TryLock() {
+			_ = conn.SetWriteDeadline(time.Now().Add(wsTakeoverCloseTimeout))
+			_ = conn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(code, text))
+			connMu.Unlock()
+		}
+		_ = conn.Close()
+	}
+
 	// Set initial read deadline; pong handler resets it.
 	_ = conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(wsReadDeadline))
+	})
+
+	// Register a close-only eviction hook BEFORE the initial writes so a concurrent
+	// ?takeover=1 can interrupt a holder stalled during a large replay or the connected
+	// frame. At this point the initial writes run without connMu (pumps not yet started),
+	// so the hook must not acquire connMu or write to conn — only close it. Closing
+	// unblocks any blocked WriteMessage and makes the subsequent read loop exit, which
+	// triggers the deferred cleanup and releases the lock. cancelOnce is also called so
+	// all goroutines stop once the pumps do start.
+	evictGen = session.SetEvictHandler(func() {
+		cancelOnce()
+		_ = conn.Close()
 	})
 
 	// 8. Send replay frame if there is missed output.
@@ -186,6 +254,16 @@ func PTYSessionWebSocket(ctx *gin.Context) {
 		log.Warning("pty ws send connected for session %s: %v", id, err2)
 		return
 	}
+
+	// Upgrade the eviction hook now that the initial writes are done and all subsequent
+	// writes will be serialized by connMu (pumps + evictClose's TryLock). The full hook
+	// sends the WSCloseTakenOver close frame best-effort so the client can distinguish an
+	// intentional handoff from a network drop, then closes the conn and cancels goroutines.
+	// Generation-tokened: a tearing-down handler never clears a successor's hook.
+	evictGen = session.SetEvictHandler(func() {
+		evictClose(model.WSCloseTakenOver, model.WSErrCodeTakenOver)
+		cancelOnce()
+	})
 
 	// 10a. RFC 6455 binary ping goroutine (30 s interval).
 	safego.Go(func() { ptyPingLoop(conn, &connMu, cancelCh, cancelOnce) })

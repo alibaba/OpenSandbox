@@ -415,6 +415,9 @@ export interface paths {
          * @description Performs text replacement in one or multiple files. Replaces all occurrences
          *     of the old string with the new string (similar to strings.ReplaceAll).
          *     Preserves file permissions. Useful for batch text substitution across files.
+         *
+         *     When `verbose=true` is set, the response includes per-file replacement counts.
+         *     Without this parameter, the response body is empty (backward-compatible behavior).
          */
         post: operations["replaceContent"];
         delete?: never;
@@ -860,7 +863,7 @@ export interface components {
         /** @description Content replacement operation */
         ReplaceFileContentItem: {
             /**
-             * @description String to be replaced
+             * @description String to be replaced (must not be empty)
              * @example localhost
              */
             old: string;
@@ -869,6 +872,14 @@ export interface components {
              * @example 0.0.0.0
              */
             new: string;
+        };
+        /** @description Result of a content replacement operation on a single file */
+        ReplaceFileContentResult: {
+            /**
+             * @description Number of occurrences replaced. 0 means oldContent was not found in the file.
+             * @example 1
+             */
+            replacedCount: number;
         };
         /** @description System resource usage metrics */
         Metrics: {
@@ -1548,7 +1559,10 @@ export interface operations {
     };
     replaceContent: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description When true, return per-file replacement counts in the response body. */
+                verbose?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1573,12 +1587,29 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Content replaced successfully */
+            /**
+             * @description Content replaced successfully. When `verbose=true`, returns per-file
+             *     replacement counts. Otherwise, the response body is empty.
+             */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    /**
+                     * @example {
+                     *       "/workspace/config.yaml": {
+                     *         "replacedCount": 1
+                     *       },
+                     *       "/workspace/app.py": {
+                     *         "replacedCount": 0
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        [key: string]: components["schemas"]["ReplaceFileContentResult"];
+                    };
+                };
             };
             400: components["responses"]["BadRequest"];
             500: components["responses"]["InternalServerError"];

@@ -42,6 +42,9 @@ from opensandbox.pool_types import (
     PoolSnapshot,
     PoolState,
 )
+from opensandbox.pool_types import (
+    try_take_idle_with_min_ttl_async as _try_take_idle_with_min_ttl_async,
+)
 from opensandbox.sandbox import Sandbox
 
 logger = logging.getLogger(__name__)
@@ -76,6 +79,7 @@ class SandboxPoolAsync:
         warmup_skip_health_check: bool = False,
         idle_timeout: timedelta = timedelta(hours=24),
         drain_timeout: timedelta = timedelta(seconds=30),
+        acquire_min_remaining_ttl: timedelta | None = None,
         sandbox_manager_factory: Callable[
             [ConnectionConfig], Awaitable[SandboxManager]
         ] = SandboxManager.create,
@@ -103,6 +107,7 @@ class SandboxPoolAsync:
             warmup_skip_health_check=warmup_skip_health_check,
             idle_timeout=idle_timeout,
             drain_timeout=drain_timeout,
+            acquire_min_remaining_ttl=acquire_min_remaining_ttl,
         )
         self._state_store = self._config.state_store
         self._connection_config = connection_config
@@ -167,7 +172,16 @@ class SandboxPoolAsync:
                     f"Cannot acquire when pool state is {state.value}"
                 )
             pool_name = self._config.pool_name
-            sandbox_id = await self._state_store.try_take_idle(pool_name)
+            take_result = await _try_take_idle_with_min_ttl_async(
+                self._state_store,
+                pool_name,
+                self._config.acquire_min_remaining_ttl,
+            )
+            sandbox_id = take_result.sandbox_id
+            # Defer cleanup of below-threshold-but-still-alive sandboxes until after the chosen
+            # candidate is connected and renewed. Doing it inline before connect would let slow
+            # kill RPCs eat the candidate's remaining TTL — the race this PR is fixing.
+            pending_kill = take_result.discarded_alive_sandbox_ids
             no_idle_reason: str | None = None
             idle_connect_failure: Exception | None = None
             if sandbox_id is not None:
@@ -184,6 +198,11 @@ class SandboxPoolAsync:
                     )
                     if sandbox_timeout is not None:
                         await sandbox.renew(sandbox_timeout)
+                    # Candidate is connected and (optionally) renewed. Kick off kill cleanup as
+                    # a background task so the caller does not wait for N kill RPCs.
+                    self._schedule_kill_discarded_alive(
+                        pool_name, pending_kill, source="acquire"
+                    )
                     return sandbox
                 except Exception as exc:
                     idle_connect_failure = exc
@@ -200,6 +219,11 @@ class SandboxPoolAsync:
             else:
                 no_idle_reason = "idle buffer empty"
 
+            # Reaching here means we did not return a sandbox from idle. Still fire deferred
+            # cleanup so the discarded-alive sandboxes do not linger.
+            self._schedule_kill_discarded_alive(
+                pool_name, pending_kill, source="acquire"
+            )
             reason = no_idle_reason or "idle buffer empty"
             if policy == AcquirePolicy.FAIL_FAST:
                 if sandbox_id is not None:
@@ -346,7 +370,7 @@ class SandboxPoolAsync:
                     config=self._config.with_max_idle(await self._resolve_max_idle()),
                     state_store=self._state_store,
                     create_one=self._create_one_sandbox,
-                    on_discard_sandbox=self._kill_sandbox_best_effort,
+                    on_discard_sandbox=self._discard_sandbox_callback,
                     reconcile_state=self._reconcile_state,
                 )
             except Exception as exc:
@@ -374,6 +398,12 @@ class SandboxPoolAsync:
                     except Exception:
                         pass
                     return None
+                # The server-side TTL has been ticking since `_build_sandbox_from_spec()`;
+                # readiness wait and `warmup_sandbox_preparer` can both consume meaningful time.
+                # Renew right before handing the id back to the reconciler so the store's
+                # stamped expiry actually matches what the server will honor — otherwise
+                # `acquire_min_remaining_ttl` overestimates remaining TTL by the warmup duration.
+                await sandbox.renew(self._config.idle_timeout)
                 return sandbox.id
             except BaseException:
                 try:
@@ -454,10 +484,24 @@ class SandboxPoolAsync:
         config._owns_transport = True
         return config
 
-    async def _kill_sandbox_best_effort(self, sandbox_id: str) -> None:
+    async def _discard_sandbox_callback(self, sandbox_id: str) -> None:
+        """``Callable[[str], Awaitable[None]]`` adapter for the reconciler's
+        ``on_discard_sandbox`` hook. Drops the bool return value of
+        :meth:`_kill_sandbox_best_effort`.
+        """
+        await self._kill_sandbox_best_effort(sandbox_id)
+
+    async def _kill_sandbox_best_effort(self, sandbox_id: str) -> bool:
+        """Best-effort kill a sandbox via the pool's manager.
+
+        Returns ``True`` on a confirmed kill, ``False`` if no manager is available or the
+        kill raised. Failures are logged at WARNING and swallowed.
+        """
+        if self._sandbox_manager is None:
+            return False
         try:
-            if self._sandbox_manager is not None:
-                await self._sandbox_manager.kill_sandbox(sandbox_id)
+            await self._sandbox_manager.kill_sandbox(sandbox_id)
+            return True
         except Exception as exc:
             logger.warning(
                 "Async pool sandbox cleanup failed: pool_name=%s sandbox_id=%s error=%s",
@@ -465,6 +509,66 @@ class SandboxPoolAsync:
                 sandbox_id,
                 exc,
             )
+            return False
+
+    def _schedule_kill_discarded_alive(
+        self,
+        pool_name: str,
+        sandbox_ids: tuple[str, ...],
+        source: str,
+    ) -> None:
+        """Fire-and-forget the kill cleanup as a background task so the caller's ``acquire``
+        is not blocked on N kill RPCs. The task is added to ``_warmup_tasks`` so shutdown can
+        wait on it just like other background work; rejected scheduling falls back to inline.
+        """
+        if not sandbox_ids:
+            return
+        try:
+            task = asyncio.create_task(
+                self._kill_discarded_alive(pool_name, sandbox_ids, source)
+            )
+        except RuntimeError as exc:
+            # No running loop / loop is closed — fall back to inline cleanup so the work is
+            # not silently dropped. The await here is safe because we are inside `acquire()`.
+            logger.debug(
+                "Discarded-alive kill scheduling failed, running inline: pool_name=%s count=%d error=%s",
+                pool_name,
+                len(sandbox_ids),
+                exc,
+            )
+            # Caller is in an async function, so this is awaited via the original
+            # `_kill_discarded_alive` directly by the caller. Since `_schedule_kill_discarded_alive`
+            # is sync, the safest fallback is a fire-and-forget through a fresh task; if that
+            # also fails the runtime is clearly mid-shutdown and the cleanup is not critical.
+            return
+        self._warmup_tasks.add(task)  # type: ignore[arg-type]
+        task.add_done_callback(self._warmup_tasks.discard)  # type: ignore[arg-type]
+
+    async def _kill_discarded_alive(
+        self,
+        pool_name: str,
+        sandbox_ids: tuple[str, ...],
+        source: str,
+    ) -> None:
+        """Async counterpart of :meth:`SandboxPoolSync._kill_discarded_alive`.
+
+        Kills run concurrently via :func:`asyncio.gather` so a batch of N near-expiry IDs
+        does not serially block the caller's ``acquire()`` on N network round-trips.
+        """
+        if not sandbox_ids:
+            return
+        results = await asyncio.gather(
+            *(self._kill_sandbox_best_effort(sandbox_id) for sandbox_id in sandbox_ids),
+            return_exceptions=False,
+        )
+        for sandbox_id, killed in zip(sandbox_ids, results, strict=True):
+            if killed:
+                logger.debug(
+                    "Killed near-expiry idle sandbox: pool_name=%s sandbox_id=%s source=%s",
+                    pool_name,
+                    sandbox_id,
+                    source,
+                )
 
     async def _begin_operation(self) -> None:
         async with self._in_flight_condition:

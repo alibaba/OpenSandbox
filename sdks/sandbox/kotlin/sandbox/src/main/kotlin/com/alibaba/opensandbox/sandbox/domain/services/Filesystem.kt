@@ -17,6 +17,7 @@
 package com.alibaba.opensandbox.sandbox.domain.services
 
 import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.ContentReplaceEntry
+import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.ContentReplaceResult
 import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.EntryInfo
 import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.MoveEntry
 import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.SearchEntry
@@ -188,6 +189,15 @@ interface Filesystem {
      * @throws SandboxException if the operation fails
      */
     fun replaceContents(entries: List<ContentReplaceEntry>)
+
+    /**
+     * Replaces content in files and returns per-file replacement counts.
+     *
+     * @param entries List of ContentReplaceEntry objects specifying replacement operations
+     * @return List of ContentReplaceResult with replacement counts per file
+     * @throws SandboxException if the operation fails
+     */
+    fun replaceContentsDetailed(entries: List<ContentReplaceEntry>): List<ContentReplaceResult>
 
     /**
      * Searches for files and directories based on the specified criteria.

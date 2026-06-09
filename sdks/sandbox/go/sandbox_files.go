@@ -108,3 +108,11 @@ func (s *Sandbox) ReplaceInFiles(ctx context.Context, req ReplaceRequest) error 
 	}
 	return s.execd.ReplaceInFiles(ctx, req)
 }
+
+// ReplaceInFilesDetailed performs text replacement and returns per-file replacement counts.
+func (s *Sandbox) ReplaceInFilesDetailed(ctx context.Context, req ReplaceRequest) (ReplaceResponse, error) {
+	if s.execd == nil {
+		return nil, fmt.Errorf("opensandbox: execd client not initialized")
+	}
+	return s.execd.ReplaceInFilesDetailed(ctx, req)
+}

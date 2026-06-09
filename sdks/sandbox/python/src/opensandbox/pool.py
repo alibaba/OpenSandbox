@@ -30,6 +30,7 @@ from opensandbox.pool_types import (
     PoolState,
     PoolStateStore,
     StoreCounters,
+    TakeIdleResult,
 )
 from opensandbox.sync.pool import SandboxPoolSync
 
@@ -53,4 +54,5 @@ __all__ = [
     "SandboxPool",
     "SandboxPoolSync",
     "StoreCounters",
+    "TakeIdleResult",
 ]

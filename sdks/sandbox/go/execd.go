@@ -260,6 +260,16 @@ func (e *ExecdClient) ReplaceInFiles(ctx context.Context, req ReplaceRequest) er
 	return e.client.doRequest(ctx, http.MethodPost, "/files/replace", req, nil)
 }
 
+// ReplaceInFilesDetailed performs text replacement and returns per-file replacement counts.
+func (e *ExecdClient) ReplaceInFilesDetailed(ctx context.Context, req ReplaceRequest) (ReplaceResponse, error) {
+	var resp ReplaceResponse
+	err := e.client.doRequest(ctx, http.MethodPost, "/files/replace?verbose=true", req, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
 // UploadFileOptions configures the destination path and multipart filename for an upload.
 type UploadFileOptions struct {
 	FileName string

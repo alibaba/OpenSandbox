@@ -22,6 +22,7 @@ import com.alibaba.opensandbox.sandbox.infrastructure.pool.InMemoryPoolStateStor
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertSame
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 import java.time.Duration
 
@@ -46,6 +47,8 @@ class PoolConfigTest {
         assertEquals(Duration.ofMillis(200), config.acquireHealthCheckPollingInterval)
         assertFalse(config.acquireSkipHealthCheck)
         assertEquals(null, config.acquireHealthCheck)
+        // 24h idle, default cap of 60s applies → 60s.
+        assertEquals(Duration.ofSeconds(60), config.acquireMinRemainingTtl)
         assertEquals(Duration.ofHours(24), config.idleTimeout)
     }
 
@@ -65,6 +68,7 @@ class PoolConfigTest {
                 .acquireHealthCheckPollingInterval(Duration.ofMillis(250))
                 .acquireHealthCheck(healthCheck)
                 .acquireSkipHealthCheck()
+                .acquireMinRemainingTtl(Duration.ofSeconds(90))
                 .warmupReadyTimeout(Duration.ofSeconds(45))
                 .warmupHealthCheckPollingInterval(Duration.ofSeconds(1))
                 .warmupHealthCheck(healthCheck)
@@ -77,11 +81,97 @@ class PoolConfigTest {
         assertEquals(Duration.ofMillis(250), config.acquireHealthCheckPollingInterval)
         assertSame(healthCheck, config.acquireHealthCheck)
         assertEquals(true, config.acquireSkipHealthCheck)
+        assertEquals(Duration.ofSeconds(90), config.acquireMinRemainingTtl)
         assertEquals(Duration.ofSeconds(45), config.warmupReadyTimeout)
         assertEquals(Duration.ofSeconds(1), config.warmupHealthCheckPollingInterval)
         assertSame(healthCheck, config.warmupHealthCheck)
         assertSame(preparer, config.warmupSandboxPreparer)
         assertEquals(true, config.warmupSkipHealthCheck)
         assertEquals(Duration.ofMinutes(10), config.idleTimeout)
+    }
+
+    @Test
+    fun `build rejects negative acquireMinRemainingTtl`() {
+        val builder =
+            PoolConfig.builder()
+                .poolName("test-pool")
+                .ownerId("test-owner")
+                .maxIdle(2)
+                .stateStore(InMemoryPoolStateStore())
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .acquireMinRemainingTtl(Duration.ofSeconds(-1))
+
+        assertThrows(IllegalArgumentException::class.java) { builder.build() }
+    }
+
+    @Test
+    fun `default acquireMinRemainingTtl scales down for short idleTimeout`() {
+        // idleTimeout = 30s ⇒ default = min(60s, 30s/2) = 15s. Existing users with short idle
+        // timeouts must not get a config-time error from a hidden 60s default.
+        val config =
+            PoolConfig.builder()
+                .poolName("test-pool")
+                .ownerId("test-owner")
+                .maxIdle(2)
+                .stateStore(InMemoryPoolStateStore())
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .idleTimeout(Duration.ofSeconds(30))
+                .build()
+
+        assertEquals(Duration.ofSeconds(15), config.acquireMinRemainingTtl)
+    }
+
+    @Test
+    fun `default acquireMinRemainingTtl caps at 60s for long idleTimeout`() {
+        val config =
+            PoolConfig.builder()
+                .poolName("test-pool")
+                .ownerId("test-owner")
+                .maxIdle(2)
+                .stateStore(InMemoryPoolStateStore())
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .idleTimeout(Duration.ofMinutes(10))
+                .build()
+
+        assertEquals(Duration.ofSeconds(60), config.acquireMinRemainingTtl)
+    }
+
+    @Test
+    fun `build rejects explicit acquireMinRemainingTtl greater than or equal to idleTimeout`() {
+        // The auto-default protects against this, but if a user explicitly sets a value above
+        // idleTimeout the build() guard still fires.
+        val builder =
+            PoolConfig.builder()
+                .poolName("test-pool")
+                .ownerId("test-owner")
+                .maxIdle(2)
+                .stateStore(InMemoryPoolStateStore())
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .idleTimeout(Duration.ofSeconds(30))
+                .acquireMinRemainingTtl(Duration.ofSeconds(30))
+
+        assertThrows(IllegalArgumentException::class.java) { builder.build() }
+    }
+
+    @Test
+    fun `build accepts acquireMinRemainingTtl just below idleTimeout`() {
+        // Strict-less-than boundary: 9s < 10s passes.
+        val config =
+            PoolConfig.builder()
+                .poolName("test-pool")
+                .ownerId("test-owner")
+                .maxIdle(2)
+                .stateStore(InMemoryPoolStateStore())
+                .connectionConfig(ConnectionConfig.builder().build())
+                .creationSpec(PoolCreationSpec.builder().image("ubuntu:22.04").build())
+                .idleTimeout(Duration.ofSeconds(10))
+                .acquireMinRemainingTtl(Duration.ofSeconds(9))
+                .build()
+
+        assertEquals(Duration.ofSeconds(9), config.acquireMinRemainingTtl)
     }
 }

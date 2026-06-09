@@ -309,6 +309,8 @@ func (c *FilesystemController) ReplaceContent() {
 	rec := beginFilesystemMetric("replace")
 	defer rec.Finish(c.basicController)
 
+	verbose := c.ctx.Query("verbose") == "true"
+
 	var request map[string]model.ReplaceFileContentItem
 	if err := c.bindJSON(&request); err != nil {
 		c.RespondError(
@@ -319,7 +321,13 @@ func (c *FilesystemController) ReplaceContent() {
 		return
 	}
 
+	var results map[string]model.ReplaceFileContentResult
+	if verbose {
+		results = make(map[string]model.ReplaceFileContentResult)
+	}
+
 	for file, item := range request {
+		origPath := file
 		file, err := pathutil.ExpandAbsPath(file)
 		if err != nil {
 			c.handleFileError(err)
@@ -344,15 +352,31 @@ func (c *FilesystemController) ReplaceContent() {
 		}
 		mode := fileInfo.Mode()
 
-		newContent := strings.ReplaceAll(string(content), item.Old, item.New)
+		if item.Old == "" {
+			c.RespondError(http.StatusBadRequest, model.ErrorCodeInvalidRequest, "old content must not be empty")
+			return
+		}
+
+		contentStr := string(content)
+		newContent := strings.ReplaceAll(contentStr, item.Old, item.New)
 
 		err = os.WriteFile(file, []byte(newContent), mode)
 		if err != nil {
 			c.handleFileError(err)
 			return
 		}
+
+		if verbose {
+			results[origPath] = model.ReplaceFileContentResult{
+				ReplacedCount: strings.Count(contentStr, item.Old),
+			}
+		}
 	}
 
 	rec.MarkSuccess()
-	c.RespondSuccess(nil)
+	if verbose {
+		c.RespondSuccess(results)
+	} else {
+		c.RespondSuccess(nil)
+	}
 }

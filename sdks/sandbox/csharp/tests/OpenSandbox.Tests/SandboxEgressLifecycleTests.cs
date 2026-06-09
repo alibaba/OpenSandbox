@@ -370,6 +370,9 @@ public class SandboxEgressLifecycleTests
         public Task ReplaceContentsAsync(IEnumerable<ContentReplaceEntry> entries, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
 
+        public Task<IReadOnlyList<ContentReplaceResult>> ReplaceContentsDetailedAsync(IEnumerable<ContentReplaceEntry> entries, CancellationToken cancellationToken = default) =>
+            throw new NotImplementedException();
+
         public Task SetPermissionsAsync(IEnumerable<SetPermissionEntry> entries, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
     }

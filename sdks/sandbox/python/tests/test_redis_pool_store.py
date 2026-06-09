@@ -64,6 +64,63 @@ def test_redis_store_reap_expired_idle(
     assert store.try_take_idle("pool") is None
 
 
+def test_redis_store_try_take_idle_min_ttl_surfaces_alive_below_threshold(
+    redis_store: tuple[RedisPoolStateStore, Any, str],
+) -> None:
+    store, _, _ = redis_store
+    store.set_idle_entry_ttl("pool", timedelta(seconds=5))
+    store.put_idle("pool", "id-1")
+    store.put_idle("pool", "id-2")
+
+    result = store.try_take_idle_min_ttl("pool", timedelta(seconds=60))
+    assert result.sandbox_id is None
+    assert set(result.discarded_alive_sandbox_ids) == {"id-1", "id-2"}
+    assert store.snapshot_counters("pool").idle_count == 0
+
+
+def test_redis_store_try_take_idle_min_ttl_returns_entries_above_threshold(
+    redis_store: tuple[RedisPoolStateStore, Any, str],
+) -> None:
+    store, _, _ = redis_store
+    store.set_idle_entry_ttl("pool", timedelta(minutes=10))
+    store.put_idle("pool", "id-1")
+
+    result = store.try_take_idle_min_ttl("pool", timedelta(seconds=60))
+    assert result.sandbox_id == "id-1"
+    assert result.discarded_alive_sandbox_ids == ()
+
+
+def test_redis_store_try_take_idle_min_ttl_zero_falls_back_to_base(
+    redis_store: tuple[RedisPoolStateStore, Any, str],
+) -> None:
+    store, _, _ = redis_store
+    store.put_idle("pool", "id-1")
+
+    taken = store.try_take_idle_min_ttl("pool", timedelta(0))
+    assert taken.sandbox_id == "id-1"
+    assert taken.discarded_alive_sandbox_ids == ()
+
+    empty = store.try_take_idle_min_ttl("pool", timedelta(0))
+    assert empty.sandbox_id is None
+    assert empty.discarded_alive_sandbox_ids == ()
+
+
+def test_redis_store_reap_expired_idle_min_ttl_returns_alive_evicted(
+    redis_store: tuple[RedisPoolStateStore, Any, str],
+) -> None:
+    store, _, _ = redis_store
+    store.set_idle_entry_ttl("pool", timedelta(seconds=5))
+    store.put_idle("pool", "id-1")
+    store.put_idle("pool", "id-2")
+
+    discarded_alive = store.reap_expired_idle_min_ttl(
+        "pool", datetime.now(timezone.utc), timedelta(seconds=60)
+    )
+
+    assert set(discarded_alive) == {"id-1", "id-2"}
+    assert store.snapshot_counters("pool").idle_count == 0
+
+
 def test_redis_store_primary_lock_owner_semantics(
     redis_store: tuple[RedisPoolStateStore, Any, str],
 ) -> None:
@@ -186,17 +243,18 @@ class _FakeRedis(Redis):
         self._lists: dict[str, list[str]] = {}
         self._hashes: dict[str, dict[str, str]] = {}
 
-    def eval(self, script: str, numkeys: int, *args: str) -> str | int | None:
+    def eval(self, script: str, numkeys: int, *args: Any) -> Any:
         del numkeys
         if "LPOP" in script:
-            return self._take_idle(args[0], args[1])
+            min_remaining_ttl_ms = int(args[2]) if len(args) >= 3 else 0
+            return self._take_idle(args[0], args[1], min_remaining_ttl_ms)
         if "RPUSH" in script:
             return self._put_idle(args[0], args[1], args[2], int(args[3]))
         if "PEXPIRE" in script:
             return int(self._renew_lock(args[0], args[1], int(args[2])))
         if "HGETALL" in script:
-            self._reap_expired(args[0], args[1])
-            return 1
+            min_remaining_ttl_ms = int(args[2]) if len(args) >= 3 else 0
+            return self._reap_expired(args[0], args[1], min_remaining_ttl_ms)
         if "DEL" in script and "GET" in script:
             return self._release_lock(args[0], args[1])
         raise NotImplementedError("unsupported Redis script")
@@ -245,16 +303,27 @@ class _FakeRedis(Redis):
     def hgetall(self, key: str) -> dict[str, str]:
         return dict(self._hashes.get(key, {}))
 
-    def _take_idle(self, list_key: str, expires_key: str) -> str | None:
+    def _take_idle(
+        self, list_key: str, expires_key: str, min_remaining_ttl_ms: int = 0
+    ) -> Any:
         queue = self._lists.setdefault(list_key, [])
         expires = self._hashes.setdefault(expires_key, {})
-        now = _now_ms()
+        now_ms = _now_ms()
+        cutoff = now_ms + max(0, min_remaining_ttl_ms)
+        discarded_alive: list[str] = []
         while queue:
             sandbox_id = queue.pop(0)
             expires_at = expires.pop(sandbox_id, None)
-            if expires_at is not None and int(expires_at) > now:
-                return sandbox_id
-        return None
+            if expires_at is None:
+                continue
+            exp = int(expires_at)
+            if exp > cutoff:
+                return [sandbox_id, discarded_alive]
+            if exp > now_ms:
+                discarded_alive.append(sandbox_id)
+        if not discarded_alive:
+            return None
+        return ["", discarded_alive]
 
     def _put_idle(
         self,
@@ -285,17 +354,26 @@ class _FakeRedis(Redis):
         self._strings.pop(key, None)
         return 1
 
-    def _reap_expired(self, list_key: str, expires_key: str) -> None:
+    def _reap_expired(
+        self, list_key: str, expires_key: str, min_remaining_ttl_ms: int = 0
+    ) -> list[str]:
         expires = self._hashes.setdefault(expires_key, {})
-        expired = {sandbox_id for sandbox_id, expiry in expires.items() if int(expiry) <= _now_ms()}
-        for sandbox_id in expired:
-            expires.pop(sandbox_id, None)
-        if expired:
+        now_ms = _now_ms()
+        cutoff = now_ms + max(0, min_remaining_ttl_ms)
+        evicted: list[tuple[str, int]] = []
+        for sandbox_id, expiry in list(expires.items()):
+            exp = int(expiry)
+            if exp <= cutoff:
+                evicted.append((sandbox_id, exp))
+                expires.pop(sandbox_id, None)
+        if evicted:
+            evicted_ids = {sandbox_id for sandbox_id, _ in evicted}
             self._lists[list_key] = [
                 sandbox_id
                 for sandbox_id in self._lists.get(list_key, [])
-                if sandbox_id not in expired
+                if sandbox_id not in evicted_ids
             ]
+        return [sandbox_id for sandbox_id, exp in evicted if exp > now_ms]
 
     def _expire_string_if_needed(self, key: str) -> None:
         value = self._strings.get(key)

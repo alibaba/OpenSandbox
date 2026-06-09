@@ -72,8 +72,8 @@ def main() -> None:
     port = DEFAULT_PORT
 
     print(f"Creating openclaw sandbox with image={image} on OpenSandbox server {server}...")
-    print(f"  API Key: {api_key[:16]}..." if len(api_key) > 16 else f"  API Key: {api_key}")
-    print(f"  Token: {token[:16]}..." if len(token) > 16 else f"  Token: {token}")
+    print(f"  API Key: {'[REDACTED] (set)' if api_key else '[NOT SET]'}")
+    print(f"  Token: {'[REDACTED] (set)' if token else '[NOT SET]'}")
     print(f"  Port: {port}")
     print(f"  Timeout: {timeout_seconds}s")
     

@@ -689,14 +689,14 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description Whether to return a server-proxied URL */
+                    /** @description Whether to return a server-proxied URL. Cannot be combined with `expires`. */
                     use_server_proxy?: boolean;
                     /**
                      * @description Optional. When set, the server **issues a signed** access route (OSEP-0011). The value
                      *     is **Linux / Unix epoch seconds** — a decimal `uint64` count of **whole seconds** since
                      *     the Unix epoch (`1970-01-01 00:00:00` UTC, same as POSIX / `time(2)`), not
                      *     milliseconds. Normalized to `expires_b36` for the four-segment route token. Omit to
-                     *     get the unsigned/legacy response shape.
+                     *     get the unsigned/legacy response shape. Cannot be combined with `use_server_proxy=true`.
                      */
                     expires?: string;
                 };
@@ -1008,12 +1008,20 @@ export interface components {
             [key: string]: string | null;
         };
         /**
-         * @description Request to create a new sandbox from either a container image or a snapshot.
-         *     Exactly one of `image` or `snapshotId` must be provided.
+         * @description Request to create a new sandbox from either a container image, a snapshot,
+         *     or a pre-configured pool (via `extensions.poolRef`).
+         *
+         *     **Standard mode**: Exactly one of `image` or `snapshotId` must be provided,
+         *     and `resourceLimits` is required.
          *
          *     When `image` is provided, `entrypoint` is required. When `snapshotId` is
          *     provided, `entrypoint` is optional. If omitted, the server defaults the
          *     sandbox entrypoint to `["tail", "-f", "/dev/null"]`.
+         *
+         *     **Pool mode**: When `extensions.poolRef` is set, the sandbox is created from
+         *     a pre-configured pool. In this case `image`, `entrypoint`, and
+         *     `resourceLimits` are all optional (defined by the Pool CRD template).
+         *     `snapshotId` must not be provided together with `poolRef`.
          *
          *     **Note**: API Key authentication is required via the `OPEN-SANDBOX-API-KEY` header.
          */
@@ -1047,9 +1055,11 @@ export interface components {
             timeout?: number | null;
             /**
              * @description Runtime resource constraints for the sandbox instance.
+             *     Required when `extensions.poolRef` is not set.
+             *     Optional when using pool mode (resource limits are defined by the Pool CRD template).
              *     SDK clients should provide sensible defaults (e.g., cpu: "500m", memory: "512Mi").
              */
-            resourceLimits: components["schemas"]["ResourceLimits"];
+            resourceLimits?: components["schemas"]["ResourceLimits"];
             /**
              * @description Environment variables to inject into the sandbox runtime.
              * @example {

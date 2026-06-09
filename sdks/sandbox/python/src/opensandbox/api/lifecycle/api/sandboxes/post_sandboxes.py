@@ -116,13 +116,21 @@ def sync_detailed(
     - `OPEN-SANDBOX-API-KEY: <api-key>` header
 
     Args:
-        body (CreateSandboxRequest): Request to create a new sandbox from either a container image
-            or a snapshot.
-            Exactly one of `image` or `snapshotId` must be provided.
+        body (CreateSandboxRequest): Request to create a new sandbox from either a container
+            image, a snapshot,
+            or a pre-configured pool (via `extensions.poolRef`).
+
+            **Standard mode**: Exactly one of `image` or `snapshotId` must be provided,
+            and `resourceLimits` is required.
 
             When `image` is provided, `entrypoint` is required. When `snapshotId` is
             provided, `entrypoint` is optional. If omitted, the server defaults the
             sandbox entrypoint to `["tail", "-f", "/dev/null"]`.
+
+            **Pool mode**: When `extensions.poolRef` is set, the sandbox is created from
+            a pre-configured pool. In this case `image`, `entrypoint`, and
+            `resourceLimits` are all optional (defined by the Pool CRD template).
+            `snapshotId` must not be provided together with `poolRef`.
 
             **Note**: API Key authentication is required via the `OPEN-SANDBOX-API-KEY` header.
 
@@ -170,13 +178,21 @@ def sync(
     - `OPEN-SANDBOX-API-KEY: <api-key>` header
 
     Args:
-        body (CreateSandboxRequest): Request to create a new sandbox from either a container image
-            or a snapshot.
-            Exactly one of `image` or `snapshotId` must be provided.
+        body (CreateSandboxRequest): Request to create a new sandbox from either a container
+            image, a snapshot,
+            or a pre-configured pool (via `extensions.poolRef`).
+
+            **Standard mode**: Exactly one of `image` or `snapshotId` must be provided,
+            and `resourceLimits` is required.
 
             When `image` is provided, `entrypoint` is required. When `snapshotId` is
             provided, `entrypoint` is optional. If omitted, the server defaults the
             sandbox entrypoint to `["tail", "-f", "/dev/null"]`.
+
+            **Pool mode**: When `extensions.poolRef` is set, the sandbox is created from
+            a pre-configured pool. In this case `image`, `entrypoint`, and
+            `resourceLimits` are all optional (defined by the Pool CRD template).
+            `snapshotId` must not be provided together with `poolRef`.
 
             **Note**: API Key authentication is required via the `OPEN-SANDBOX-API-KEY` header.
 
@@ -219,13 +235,21 @@ async def asyncio_detailed(
     - `OPEN-SANDBOX-API-KEY: <api-key>` header
 
     Args:
-        body (CreateSandboxRequest): Request to create a new sandbox from either a container image
-            or a snapshot.
-            Exactly one of `image` or `snapshotId` must be provided.
+        body (CreateSandboxRequest): Request to create a new sandbox from either a container
+            image, a snapshot,
+            or a pre-configured pool (via `extensions.poolRef`).
+
+            **Standard mode**: Exactly one of `image` or `snapshotId` must be provided,
+            and `resourceLimits` is required.
 
             When `image` is provided, `entrypoint` is required. When `snapshotId` is
             provided, `entrypoint` is optional. If omitted, the server defaults the
             sandbox entrypoint to `["tail", "-f", "/dev/null"]`.
+
+            **Pool mode**: When `extensions.poolRef` is set, the sandbox is created from
+            a pre-configured pool. In this case `image`, `entrypoint`, and
+            `resourceLimits` are all optional (defined by the Pool CRD template).
+            `snapshotId` must not be provided together with `poolRef`.
 
             **Note**: API Key authentication is required via the `OPEN-SANDBOX-API-KEY` header.
 
@@ -271,13 +295,21 @@ async def asyncio(
     - `OPEN-SANDBOX-API-KEY: <api-key>` header
 
     Args:
-        body (CreateSandboxRequest): Request to create a new sandbox from either a container image
-            or a snapshot.
-            Exactly one of `image` or `snapshotId` must be provided.
+        body (CreateSandboxRequest): Request to create a new sandbox from either a container
+            image, a snapshot,
+            or a pre-configured pool (via `extensions.poolRef`).
+
+            **Standard mode**: Exactly one of `image` or `snapshotId` must be provided,
+            and `resourceLimits` is required.
 
             When `image` is provided, `entrypoint` is required. When `snapshotId` is
             provided, `entrypoint` is optional. If omitted, the server defaults the
             sandbox entrypoint to `["tail", "-f", "/dev/null"]`.
+
+            **Pool mode**: When `extensions.poolRef` is set, the sandbox is created from
+            a pre-configured pool. In this case `image`, `entrypoint`, and
+            `resourceLimits` are all optional (defined by the Pool CRD template).
+            `snapshotId` must not be provided together with `poolRef`.
 
             **Note**: API Key authentication is required via the `OPEN-SANDBOX-API-KEY` header.
 

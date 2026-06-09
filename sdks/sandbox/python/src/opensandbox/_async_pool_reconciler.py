@@ -23,7 +23,13 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 from opensandbox._pool_reconciler import ReconcileState
-from opensandbox.pool_types import AsyncPoolConfig, AsyncPoolStateStore
+from opensandbox.pool_types import (
+    AsyncPoolConfig,
+    AsyncPoolStateStore,
+)
+from opensandbox.pool_types import (
+    reap_expired_idle_with_min_ttl_async as _reap_expired_idle_with_min_ttl_async,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +71,11 @@ async def _run_primary_replenish_once(
     ttl = config.primary_lock_ttl
     now = datetime.now(timezone.utc)
 
-    await state_store.reap_expired_idle(pool_name, now)
+    discarded_alive = await _reap_expired_idle_with_min_ttl_async(
+        state_store, pool_name, now, config.acquire_min_remaining_ttl
+    )
+    for sandbox_id in discarded_alive:
+        await on_discard_sandbox(sandbox_id)
     counters = await state_store.snapshot_counters(pool_name)
     excess = max(0, counters.idle_count - config.max_idle)
     to_remove = min(excess, int(config.warmup_concurrency or 1))
