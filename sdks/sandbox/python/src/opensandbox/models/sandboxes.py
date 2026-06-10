@@ -225,7 +225,7 @@ class CustomHeaderEntry(BaseModel):
 class CredentialAuth(BaseModel):
     """Typed Credential Vault auth rule."""
 
-    type: Literal["bearer", "basic", "apiKey", "customHeader", "customHeaders"]
+    type: Literal["bearer", "basic", "apiKey", "customHeaders"]
     credential: str | None = None
     name: str | None = None
     headers: list[CustomHeaderEntry] | None = None

@@ -473,7 +473,6 @@ components:
         - $ref: '#/components/schemas/BearerCredentialAuth'
         - $ref: '#/components/schemas/BasicCredentialAuth'
         - $ref: '#/components/schemas/ApiKeyCredentialAuth'
-        - $ref: '#/components/schemas/CustomHeaderCredentialAuth'
         - $ref: '#/components/schemas/CustomHeadersCredentialAuth'
       discriminator:
         propertyName: type
@@ -481,7 +480,6 @@ components:
           bearer: '#/components/schemas/BearerCredentialAuth'
           basic: '#/components/schemas/BasicCredentialAuth'
           apiKey: '#/components/schemas/ApiKeyCredentialAuth'
-          customHeader: '#/components/schemas/CustomHeaderCredentialAuth'
           customHeaders: '#/components/schemas/CustomHeadersCredentialAuth'
 
     BearerCredentialAuth:
@@ -519,22 +517,6 @@ components:
           type: string
           pattern: '^[A-Za-z0-9!#$%&''*+/=?^_`{|}~-]+$'
           description: Header name used for the API key.
-        credential:
-          type: string
-          description: Sandbox-local credential name.
-      additionalProperties: false
-
-    CustomHeaderCredentialAuth:
-      type: object
-      required: [type, name, credential]
-      properties:
-        type:
-          type: string
-          enum: [customHeader]
-        name:
-          type: string
-          pattern: '^[A-Za-z0-9!#$%&''*+/=?^_`{|}~-]+$'
-          description: Header name to inject. The header value is the referenced credential value.
         credential:
           type: string
           description: Sandbox-local credential name.
@@ -586,7 +568,7 @@ Validation rules:
 - `CredentialVaultCreateRequest.credentials[].name` values and active credential names after any mutation must be unique within a sandbox.
 - `CredentialVaultCreateRequest.bindings[].name` values and active binding names after any mutation must be unique within a sandbox.
 - Every credential reference in `auth.credential` and `auth.headers[].credential` must reference a credential declared in the vault creation request or active post-mutation credential set.
-- Header names in `apiKey`, `customHeader`, and `customHeaders.headers[]` must be valid HTTP field names and must not be routing, framing, hop-by-hop, or proxy-control headers. The egress sidecar must reject at least `Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding`, `Connection`, `Upgrade`, `TE`, `Trailer`, `Proxy-Authorization`, `Proxy-Authenticate`, `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` unless a future design explicitly allows them.
+- Header names in `apiKey` and `customHeaders.headers[]` must be valid HTTP field names and must not be routing, framing, hop-by-hop, or proxy-control headers. The egress sidecar must reject at least `Host`, `Content-Length`, `Content-Type`, `Transfer-Encoding`, `Connection`, `Upgrade`, `TE`, `Trailer`, `Proxy-Authorization`, `Proxy-Authenticate`, `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, and `X-Forwarded-Proto` unless a future design explicitly allows them.
 - Inline ephemeral is the only public MVP credential source. Future provider-backed sources must be added as new `CredentialSource` discriminator variants with source-specific authorization and destination constraints.
 - `match.hosts[]` supports only exact hosts such as `api.github.com` and leftmost-label subdomain wildcards such as `*.github.com`. The wildcard form matches `api.github.com` and `a.b.github.com`, but does not match the apex host `github.com`.
 - Host matching must normalize hosts before evaluation, including lowercase normalization and IDNA handling. Other wildcard forms such as `api.*.com`, `*github.com`, and `*` are invalid.
@@ -872,7 +854,6 @@ type CredentialAuth =
   | { type: "bearer"; credential: string }
   | { type: "basic"; credential: string }
   | { type: "apiKey"; name: string; credential: string }
-  | { type: "customHeader"; name: string; credential: string }
   | { type: "customHeaders"; headers: Array<{ name: string; credential: string }> };
 ```
 
@@ -977,7 +958,7 @@ Authorization: Bearer <github-token>
 
 ```yaml
 auth:
-  type: customHeader
+  type: apiKey
   name: PRIVATE-TOKEN
   credential: gitlab-token
 ```
@@ -1007,8 +988,8 @@ X-Client-Secret: <client-secret>
 
 Rules:
 
-- Built-in auth types are preferred over `customHeader` or `customHeaders` because they keep credential material separate from injection shape.
-- `customHeader` and each `customHeaders.headers[]` entry inject the referenced credential value as the complete header value. They do not support custom value rendering, prefixes, suffixes, filters, functions, string concatenation, arbitrary expressions, or user-defined transforms.
+- Built-in auth types are preferred over `customHeaders` because they keep credential material separate from injection shape.
+- `apiKey` and each `customHeaders.headers[]` entry inject the referenced credential value as the complete header value. They do not support custom value rendering, prefixes, suffixes, filters, functions, string concatenation, arbitrary expressions, or user-defined transforms.
 - Callers that need `Authorization: Bearer <token>` must use `auth.type: bearer`; callers that need `Authorization: Basic <value>` must use `auth.type: basic`.
 - Credential Proxy must reject duplicate header names within a single `customHeaders` auth rule unless a future merge strategy is explicitly added.
 - Credential Proxy must inject only for HTTPS on port 443 by default.
@@ -1187,7 +1168,7 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 - Schema validation rejects duplicate credential names and duplicate binding names.
 - Schema validation rejects binding auth references to unknown credential names, including `customHeaders.headers[].credential`.
 - Schema validation accepts `customHeaders` with multiple header entries and rejects duplicate header names within one auth rule.
-- Schema validation rejects invalid, routing, framing, hop-by-hop, and proxy-control header names in `apiKey`, `customHeader`, and `customHeaders`.
+- Schema validation rejects invalid, routing, framing, hop-by-hop, and proxy-control header names in `apiKey` and `customHeaders`.
 - Scheme, port, FQDN, wildcard, method, and path matching work as expected.
 - Injection defaults to HTTPS/443 only and rejects HTTP injection unless explicitly configured and permitted.
 - Binding matches that use ports outside configured transparent MITM intercept ports are rejected.

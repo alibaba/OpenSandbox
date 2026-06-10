@@ -34,8 +34,6 @@ from .credential_mutation_set import CredentialMutationSet
 from .credential_vault_create_request import CredentialVaultCreateRequest
 from .credential_vault_mutation_request import CredentialVaultMutationRequest
 from .credential_vault_state import CredentialVaultState
-from .custom_header_credential_auth import CustomHeaderCredentialAuth
-from .custom_header_credential_auth_type import CustomHeaderCredentialAuthType
 from .custom_header_entry import CustomHeaderEntry
 from .custom_headers_credential_auth import CustomHeadersCredentialAuth
 from .custom_headers_credential_auth_type import CustomHeadersCredentialAuthType
@@ -66,8 +64,6 @@ __all__ = (
     "CredentialVaultCreateRequest",
     "CredentialVaultMutationRequest",
     "CredentialVaultState",
-    "CustomHeaderCredentialAuth",
-    "CustomHeaderCredentialAuthType",
     "CustomHeaderEntry",
     "CustomHeadersCredentialAuth",
     "CustomHeadersCredentialAuthType",

@@ -32,9 +32,6 @@ EXPECTED_HEADERS: dict[str, dict[str, str]] = {
     "/api-key": {
         "x-api-key": "vault-api-key-token",
     },
-    "/custom-header": {
-        "private-token": "vault-private-token",
-    },
     "/custom-headers": {
         "x-client-id": "vault-client-id",
         "x-client-secret": "vault-client-secret",

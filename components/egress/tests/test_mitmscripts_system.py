@@ -63,8 +63,8 @@ class _Headers:
 
 class _Request:
     def __init__(self) -> None:
-        self.pretty_host = "code.alibaba-inc.com"
-        self.host = "code.alibaba-inc.com"
+        self.pretty_host = "code.example.com"
+        self.host = "code.example.com"
         self.port = 443
         self.scheme = "https"
         self.method = "GET"
@@ -185,7 +185,7 @@ class SystemAddonRedactionTest(unittest.TestCase):
                 {
                     "name": "gitlab-api",
                     "match": {
-                        "hosts": ["code.alibaba-inc.com"],
+                        "hosts": ["code.example.com"],
                         "methods": ["GET"],
                         "paths": ["/api/v8/*"],
                     },

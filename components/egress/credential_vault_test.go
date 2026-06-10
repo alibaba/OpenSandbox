@@ -53,12 +53,12 @@ func testCredentialVaultRequest() credentialVaultCreateRequest {
 			{
 				Name: "gitlab-api",
 				Match: credentialMatch{
-					Hosts:   []string{"code.alibaba-inc.com"},
+					Hosts:   []string{"code.example.com"},
 					Methods: []string{"GET"},
 					Paths:   []string{"/api/v8/*"},
 				},
 				Auth: credentialAuth{
-					Type:       "customHeader",
+					Type:       "apiKey",
 					Name:       "PRIVATE-TOKEN",
 					Credential: "gitlab-token",
 				},
@@ -69,13 +69,13 @@ func testCredentialVaultRequest() credentialVaultCreateRequest {
 
 func TestCredentialVaultCreateSanitizesAndRendersActiveSnapshot(t *testing.T) {
 	store := newCredentialVaultStore(nil, func() bool { return true })
-	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.example.com"}]}`)
 
 	state, err := store.create(testCredentialVaultRequest(), pol)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Revision)
 	require.Equal(t, []credentialMetadata{{Name: "gitlab-token", SourceType: "inline", Revision: 1}}, state.Credentials)
-	require.Equal(t, "customHeader", state.Bindings[0].Auth.Type)
+	require.Equal(t, "apiKey", state.Bindings[0].Auth.Type)
 	require.Equal(t, "Private-Token", state.Bindings[0].Auth.Name)
 
 	payload, err := store.activeSnapshot()
@@ -87,7 +87,7 @@ func TestCredentialVaultCreateSanitizesAndRendersActiveSnapshot(t *testing.T) {
 
 func TestCredentialVaultActiveTCPAlwaysForbidden(t *testing.T) {
 	store := newCredentialVaultStore(nil, func() bool { return true })
-	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.example.com"}]}`)
 	_, err := store.create(testCredentialVaultRequest(), pol)
 	require.NoError(t, err)
 	srv := &policyServer{
@@ -108,7 +108,7 @@ func TestCredentialVaultActiveTCPAlwaysForbidden(t *testing.T) {
 
 func TestCredentialVaultActiveUnixSocketReturnsSnapshot(t *testing.T) {
 	store := newCredentialVaultStore(nil, func() bool { return true })
-	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.example.com"}]}`)
 	_, err := store.create(testCredentialVaultRequest(), pol)
 	require.NoError(t, err)
 	srv := &policyServer{
@@ -160,9 +160,9 @@ func TestCredentialVaultRejectsDefaultAllowWithoutExplicitCoverage(t *testing.T)
 func TestCredentialVaultRejectsReservedAndDuplicateHeaderNamesCaseInsensitively(t *testing.T) {
 	_, err := normalizeBinding(credentialBinding{
 		Name:  "bad",
-		Match: credentialMatch{Hosts: []string{"code.alibaba-inc.com"}},
+		Match: credentialMatch{Hosts: []string{"code.example.com"}},
 		Auth: credentialAuth{
-			Type:       "customHeader",
+			Type:       "apiKey",
 			Name:       "Content-Length",
 			Credential: "token",
 		},
@@ -171,7 +171,7 @@ func TestCredentialVaultRejectsReservedAndDuplicateHeaderNamesCaseInsensitively(
 
 	_, err = normalizeBinding(credentialBinding{
 		Name:  "dupe",
-		Match: credentialMatch{Hosts: []string{"code.alibaba-inc.com"}},
+		Match: credentialMatch{Hosts: []string{"code.example.com"}},
 		Auth: credentialAuth{
 			Type: "customHeaders",
 			Headers: []customHeaderEntry{
@@ -185,7 +185,7 @@ func TestCredentialVaultRejectsReservedAndDuplicateHeaderNamesCaseInsensitively(
 
 func TestCredentialVaultPatchRejectsDeletingReferencedCredential(t *testing.T) {
 	store := newCredentialVaultStore(nil, func() bool { return true })
-	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.example.com"}]}`)
 	_, err := store.create(testCredentialVaultRequest(), pol)
 	require.NoError(t, err)
 
@@ -204,7 +204,7 @@ func TestCredentialVaultPatchRejectsDeletingReferencedCredential(t *testing.T) {
 }
 
 func TestCredentialVaultActiveBindingBlocksEgressPolicyRemoval(t *testing.T) {
-	initial := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	initial := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.example.com"}]}`)
 	proxy := &stubProxy{updated: initial}
 	nft := &stubNft{}
 	store := newCredentialVaultStore(nil, func() bool { return true })
@@ -217,7 +217,7 @@ func TestCredentialVaultActiveBindingBlocksEgressPolicyRemoval(t *testing.T) {
 		credentialVault: store,
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(`["code.alibaba-inc.com"]`))
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(`["code.example.com"]`))
 	w := httptest.NewRecorder()
 	srv.handlePolicy(w, req)
 
@@ -227,7 +227,7 @@ func TestCredentialVaultActiveBindingBlocksEgressPolicyRemoval(t *testing.T) {
 }
 
 func TestCredentialVaultActiveBindingBlocksPolicyReset(t *testing.T) {
-	initial := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	initial := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.example.com"}]}`)
 	proxy := &stubProxy{updated: initial}
 	nft := &stubNft{}
 	store := newCredentialVaultStore(nil, func() bool { return true })
@@ -267,7 +267,7 @@ func TestCredentialVaultDeleteRequiresReady(t *testing.T) {
 
 func TestCredentialVaultWriteRequiresTLSOrLoopback(t *testing.T) {
 	t.Setenv(constants.EnvMitmproxyTransparent, "true")
-	initial := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	initial := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.example.com"}]}`)
 	srv := &policyServer{
 		proxy:           &stubProxy{updated: initial},
 		credentialVault: newCredentialVaultStore(nil, func() bool { return true }),

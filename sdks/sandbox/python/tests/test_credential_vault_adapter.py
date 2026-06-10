@@ -45,8 +45,8 @@ class _CredentialVaultAsyncTransport(httpx.AsyncBaseTransport):
                         {
                             "name": "gitlab-api",
                             "revision": 1,
-                            "auth": {"type": "customHeader", "name": "PRIVATE-TOKEN"},
-                            "match": {"hosts": ["code.alibaba-inc.com"]},
+                            "auth": {"type": "apiKey", "name": "PRIVATE-TOKEN"},
+                            "match": {"hosts": ["code.example.com"]},
                         }
                     ],
                 },
@@ -104,9 +104,9 @@ async def test_async_credential_vault_create_patch_and_list_bindings() -> None:
         bindings=[
             {
                 "name": "gitlab-api",
-                "match": {"hosts": ["code.alibaba-inc.com"]},
+                "match": {"hosts": ["code.example.com"]},
                 "auth": {
-                    "type": "customHeader",
+                    "type": "apiKey",
                     "name": "PRIVATE-TOKEN",
                     "credential": "gitlab-token",
                 },
@@ -121,7 +121,7 @@ async def test_async_credential_vault_create_patch_and_list_bindings() -> None:
         "type": "inline",
         "value": "secret-token",
     }
-    assert post_body["bindings"][0]["auth"]["type"] == "customHeader"
+    assert post_body["bindings"][0]["auth"]["type"] == "apiKey"
     assert transport.requests[0].headers["X-Egress"] == "1"
 
     patched = await adapter.patch(

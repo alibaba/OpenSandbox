@@ -510,7 +510,7 @@ func normalizeAuth(a *credentialAuth) error {
 		if a.Credential == "" {
 			return fmt.Errorf("%s auth requires credential", a.Type)
 		}
-	case "apiKey", "customHeader":
+	case "apiKey":
 		a.Name = canonicalHeaderName(strings.TrimSpace(a.Name))
 		if err := validateCredentialHeaderName(a.Name); err != nil {
 			return err
@@ -603,7 +603,7 @@ func renderInjectionHeaders(auth credentialAuth, credentials map[string]credenti
 		rendered := "Basic " + value
 		headers = append(headers, injectionHeader{Name: "Authorization", Value: rendered})
 		redactions = append(redactions, value, rendered)
-	case "apiKey", "customHeader":
+	case "apiKey":
 		value, err := valueFor(auth.Credential)
 		if err != nil {
 			return nil, nil, err
@@ -628,7 +628,7 @@ func renderInjectionHeaders(auth credentialAuth, credentials map[string]credenti
 func sanitizeAuth(auth credentialAuth) credentialAuthMetadata {
 	meta := credentialAuthMetadata{Type: auth.Type}
 	switch auth.Type {
-	case "apiKey", "customHeader":
+	case "apiKey":
 		meta.Name = auth.Name
 	}
 	return meta

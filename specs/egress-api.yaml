@@ -557,7 +557,6 @@ components:
         - $ref: '#/components/schemas/BearerCredentialAuth'
         - $ref: '#/components/schemas/BasicCredentialAuth'
         - $ref: '#/components/schemas/ApiKeyCredentialAuth'
-        - $ref: '#/components/schemas/CustomHeaderCredentialAuth'
         - $ref: '#/components/schemas/CustomHeadersCredentialAuth'
       discriminator:
         propertyName: type
@@ -565,7 +564,6 @@ components:
           bearer: '#/components/schemas/BearerCredentialAuth'
           basic: '#/components/schemas/BasicCredentialAuth'
           apiKey: '#/components/schemas/ApiKeyCredentialAuth'
-          customHeader: '#/components/schemas/CustomHeaderCredentialAuth'
           customHeaders: '#/components/schemas/CustomHeadersCredentialAuth'
     BearerCredentialAuth:
       type: object
@@ -595,19 +593,6 @@ components:
         type:
           type: string
           enum: [apiKey]
-        name:
-          type: string
-          pattern: '^[A-Za-z0-9!#$%&''*+\-.^_`|~]+$'
-        credential:
-          type: string
-      additionalProperties: false
-    CustomHeaderCredentialAuth:
-      type: object
-      required: [type, name, credential]
-      properties:
-        type:
-          type: string
-          enum: [customHeader]
         name:
           type: string
           pattern: '^[A-Za-z0-9!#$%&''*+\-.^_`|~]+$'

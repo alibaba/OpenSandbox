@@ -49,7 +49,6 @@ SECRET_VALUES = {
     "bearer-token": "vault-bearer-token",
     "basic-token": "dXNlcjpwYXNz",
     "api-key-token": "vault-api-key-token",
-    "private-token": "vault-private-token",
     "client-id": "vault-client-id",
     "client-secret": "vault-client-secret",
 }
@@ -101,15 +100,6 @@ def test_credential_vault_injects_all_auth_types(credential_vault_target_ip: str
                     {"type": "apiKey", "name": "X-Api-Key", "credential": "api-key-token"},
                 ),
                 _binding(
-                    "custom-header",
-                    "/custom-header",
-                    {
-                        "type": "customHeader",
-                        "name": "PRIVATE-TOKEN",
-                        "credential": "private-token",
-                    },
-                ),
-                _binding(
                     "custom-headers",
                     "/custom-headers",
                     {
@@ -130,11 +120,10 @@ def test_credential_vault_injects_all_auth_types(credential_vault_target_ip: str
             "bearer",
             "basic",
             "apiKey",
-            "customHeader",
             "customHeaders",
         }
 
-        for path in ["/bearer", "/basic", "/api-key", "/custom-header", "/custom-headers"]:
+        for path in ["/bearer", "/basic", "/api-key", "/custom-headers"]:
             response = _curl_json(sandbox, credential_vault_target_ip, path)
             assert response["ok"] is True
             assert response["case"] == path.lstrip("/")
