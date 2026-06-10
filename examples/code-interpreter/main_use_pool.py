@@ -39,7 +39,7 @@ async def main() -> None:
         image,
         connection_config=config,
         extensions={"poolRef":"pool-sample"},
-        entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+        entrypoint=["/opt/code-interpreter/code-interpreter.sh"],
         env={
             "TEST_ENV": "test",
         },

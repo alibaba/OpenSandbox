@@ -50,7 +50,7 @@ const config = new ConnectionConfig({
 const sandbox = await Sandbox.create({
   connectionConfig: config,
   image: "opensandbox/code-interpreter:v1.0.2",
-  entrypoint: ["/opt/opensandbox/code-interpreter.sh"],
+  entrypoint: ["/opt/code-interpreter/code-interpreter.sh"],
   env: {
     PYTHON_VERSION: "3.11",
     JAVA_VERSION: "17",
@@ -100,7 +100,7 @@ Code Interpreter SDK 依赖于特定的运行环境。请确保你的沙箱服�
 const sandbox = await Sandbox.create({
   connectionConfig: config,
   image: "opensandbox/code-interpreter:v1.0.2",
-  entrypoint: ["/opt/opensandbox/code-interpreter.sh"],
+  entrypoint: ["/opt/code-interpreter/code-interpreter.sh"],
   env: {
     JAVA_VERSION: "17",
     GO_VERSION: "1.24",

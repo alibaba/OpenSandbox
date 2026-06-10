@@ -54,7 +54,7 @@ async def main() -> None:
     sandbox = await Sandbox.create(
         "opensandbox/code-interpreter:v1.0.2",
         connection_config=config,
-        entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+        entrypoint=["/opt/code-interpreter/code-interpreter.sh"],
         env={
             "PYTHON_VERSION": "3.11",
             "JAVA_VERSION": "17",
@@ -115,7 +115,7 @@ config = ConnectionConfigSync(
 sandbox = SandboxSync.create(
     "opensandbox/code-interpreter:v1.0.2",
     connection_config=config,
-    entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+    entrypoint=["/opt/code-interpreter/code-interpreter.sh"],
     env={"PYTHON_VERSION": "3.11"},
 )
 with sandbox:

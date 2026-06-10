@@ -14,12 +14,12 @@
 # limitations under the License.
 
 # This script is used to switch versions of different languages in the OpenSandbox environment
-# Usage: source /opt/opensandbox/code-interpreter-env.sh <language> <version>
+# Usage: source /opt/code-interpreter/code-interpreter-env.sh <language> <version>
 # Examples:
-#   source /opt/opensandbox/code-interpreter-env.sh python 3.13
-#   source /opt/opensandbox/code-interpreter-env.sh java 21
-#   source /opt/opensandbox/code-interpreter-env.sh node 22
-#   source /opt/opensandbox/code-interpreter-env.sh go 1.25
+#   source /opt/code-interpreter/code-interpreter-env.sh python 3.13
+#   source /opt/code-interpreter/code-interpreter-env.sh java 21
+#   source /opt/code-interpreter/code-interpreter-env.sh node 22
+#   source /opt/code-interpreter/code-interpreter-env.sh go 1.25
 
 function usage() {
 	echo "Usage: source code-interpreter-env.sh <language> <version>"

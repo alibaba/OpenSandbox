@@ -41,7 +41,7 @@ try
     {
         ConnectionConfig = config,
         Image = "opensandbox/code-interpreter:v1.0.2",
-        Entrypoint = new[] { "/opt/opensandbox/code-interpreter.sh" },
+        Entrypoint = new[] { "/opt/code-interpreter/code-interpreter.sh" },
         Env = new Dictionary<string, string>
         {
             ["PYTHON_VERSION"] = "3.11",
@@ -89,7 +89,7 @@ await using var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
 {
     ConnectionConfig = new ConnectionConfig(),
     Image = "opensandbox/code-interpreter:v1.0.2",
-    Entrypoint = new[] { "/opt/opensandbox/code-interpreter.sh" },
+    Entrypoint = new[] { "/opt/code-interpreter/code-interpreter.sh" },
     Diagnostics = new SdkDiagnosticsOptions
     {
         LoggerFactory = loggerFactory

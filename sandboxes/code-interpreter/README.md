@@ -65,13 +65,13 @@ If you set `EXECD_CLONE3_COMPAT` to `1`, `true`, `yes`, `on`, or `reexec` (same 
 
 ## Version Switching
 
-The image includes a built-in version switching script `/opt/opensandbox/code-interpreter-env.sh`. You need to use the
+The image includes a built-in version switching script `/opt/code-interpreter/code-interpreter-env.sh`. You need to use the
 `source` command to load it to modify the current shell's environment variables.
 
 ### Basic Usage
 
 ```bash
-source /opt/opensandbox/code-interpreter-env.sh <language> <version>
+source /opt/code-interpreter/code-interpreter-env.sh <language> <version>
 ```
 
 ### Examples
@@ -80,7 +80,7 @@ source /opt/opensandbox/code-interpreter-env.sh <language> <version>
 
 ```bash
 # Switch to Python 3.11
-source /opt/opensandbox/code-interpreter-env.sh python 3.11
+source /opt/code-interpreter/code-interpreter-env.sh python 3.11
 python3 --version
 # Output: Python 3.11.x
 ```
@@ -89,7 +89,7 @@ python3 --version
 
 ```bash
 # Switch to Java 8
-source /opt/opensandbox/code-interpreter-env.sh java 8
+source /opt/code-interpreter/code-interpreter-env.sh java 8
 java -version
 ```
 
@@ -97,7 +97,7 @@ java -version
 
 ```bash
 # Switch to Node 22
-source /opt/opensandbox/code-interpreter-env.sh node 22
+source /opt/code-interpreter/code-interpreter-env.sh node 22
 node -v
 ```
 
@@ -105,7 +105,7 @@ node -v
 
 ```bash
 # Switch to Go 1.25
-source /opt/opensandbox/code-interpreter-env.sh go 1.25
+source /opt/code-interpreter/code-interpreter-env.sh go 1.25
 go version
 ```
 
@@ -115,16 +115,16 @@ If you don't specify a version number, the script will list all available versio
 
 ```bash
 # List all Python versions
-source /opt/opensandbox/code-interpreter-env.sh python
+source /opt/code-interpreter/code-interpreter-env.sh python
 
 # List all Java versions
-source /opt/opensandbox/code-interpreter-env.sh java
+source /opt/code-interpreter/code-interpreter-env.sh java
 
 # List all Node.js versions
-source /opt/opensandbox/code-interpreter-env.sh node
+source /opt/code-interpreter/code-interpreter-env.sh node
 
 # List all Go versions
-source /opt/opensandbox/code-interpreter-env.sh go
+source /opt/code-interpreter/code-interpreter-env.sh go
 ```
 
 ## Default Versions
@@ -154,7 +154,7 @@ The image comes with pre-configured Jupyter kernels for all supported languages:
 ### Starting Jupyter
 
 ```bash
-/opt/opensandbox/code-interpreter.sh
+/opt/code-interpreter/code-interpreter.sh
 ```
 
 ### Environment Variables
@@ -230,7 +230,7 @@ code-interpreter/
 If a specific version is not found, list available versions:
 
 ```bash
-source /opt/opensandbox/code-interpreter-env.sh <language>
+source /opt/code-interpreter/code-interpreter-env.sh <language>
 ```
 
 ## License

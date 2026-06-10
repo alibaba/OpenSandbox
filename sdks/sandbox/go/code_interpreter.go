@@ -23,7 +23,7 @@ import (
 const CodeInterpreterImage = "opensandbox/code-interpreter:latest"
 
 // CodeInterpreterEntrypoint is the default entrypoint for the code interpreter.
-var CodeInterpreterEntrypoint = []string{"/opt/opensandbox/code-interpreter.sh"}
+var CodeInterpreterEntrypoint = []string{"/opt/code-interpreter/code-interpreter.sh"}
 
 // CodeInterpreterCreateOptions configures code interpreter creation.
 type CodeInterpreterCreateOptions struct {

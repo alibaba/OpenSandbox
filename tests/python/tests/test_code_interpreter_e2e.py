@@ -367,7 +367,7 @@ class TestCodeInterpreterE2E:
         connection_config = create_connection_config()
         sandbox = await Sandbox.create(
             image=SandboxImageSpec(get_sandbox_image()),
-            entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+            entrypoint=["/opt/code-interpreter/code-interpreter.sh"],
             connection_config=connection_config,
             resource=get_e2e_sandbox_resource(),
             timeout=timedelta(minutes=15),
@@ -420,7 +420,7 @@ class TestCodeInterpreterE2E:
 
         cls.sandbox = await Sandbox.create(
             image=SandboxImageSpec(get_sandbox_image()),
-            entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+            entrypoint=["/opt/code-interpreter/code-interpreter.sh"],
             connection_config=cls.connection_config,
             resource=get_e2e_sandbox_resource(),
             timeout=timedelta(minutes=15),

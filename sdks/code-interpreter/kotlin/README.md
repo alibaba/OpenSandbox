@@ -56,7 +56,7 @@ public class QuickStart {
         try (Sandbox sandbox = Sandbox.builder()
                 .connectionConfig(config)
                 .image("opensandbox/code-interpreter:v1.0.2")
-                .entrypoint("/opt/opensandbox/code-interpreter.sh")
+                .entrypoint("/opt/code-interpreter/code-interpreter.sh")
                 .env("PYTHON_VERSION", "3.11") // Select specific language version
                 .build()) {
 
@@ -112,7 +112,7 @@ Code Interpreter entrypoint:
 ```java
 Sandbox sandbox = Sandbox.builder()
     .image("opensandbox/code-interpreter:v1.0.2")
-    .entrypoint("/opt/opensandbox/code-interpreter.sh")
+    .entrypoint("/opt/code-interpreter/code-interpreter.sh")
     .env("PYTHON_VERSION", "3.11")
     .build();
 ```
@@ -138,7 +138,7 @@ You can specify the desired version of a programming language by setting the cor
 ```java
 Sandbox sandbox = Sandbox.builder()
     .image("opensandbox/code-interpreter:v1.0.2")
-    .entrypoint("/opt/opensandbox/code-interpreter.sh")
+    .entrypoint("/opt/code-interpreter/code-interpreter.sh")
     .env("JAVA_VERSION", "17")
     .env("GO_VERSION", "1.23")
     .build();

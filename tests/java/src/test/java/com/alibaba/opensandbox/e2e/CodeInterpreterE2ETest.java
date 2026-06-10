@@ -131,7 +131,7 @@ public class CodeInterpreterE2ETest extends BaseE2ETest {
         sandbox =
                 Sandbox.builder()
                         .connectionConfig(sharedConnectionConfig)
-                        .entrypoint(List.of("/opt/opensandbox/code-interpreter.sh"))
+                        .entrypoint(List.of("/opt/code-interpreter/code-interpreter.sh"))
                         .image(getSandboxImage())
                         .resource(java.util.Map.of("cpu", "2", "memory", "4Gi"))
                         .timeout(Duration.ofMinutes(20))

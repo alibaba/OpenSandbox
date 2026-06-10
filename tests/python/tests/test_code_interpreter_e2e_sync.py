@@ -294,7 +294,7 @@ class TestCodeInterpreterE2ESync:
         connection_config = create_connection_config_sync()
         sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
-            entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+            entrypoint=["/opt/code-interpreter/code-interpreter.sh"],
             connection_config=connection_config,
             resource=get_e2e_sandbox_resource(),
             timeout=timedelta(minutes=15),
@@ -346,7 +346,7 @@ class TestCodeInterpreterE2ESync:
 
         cls.sandbox = SandboxSync.create(
             image=SandboxImageSpec(get_sandbox_image()),
-            entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+            entrypoint=["/opt/code-interpreter/code-interpreter.sh"],
             connection_config=cls.connection_config,
             resource=get_e2e_sandbox_resource(),
             timeout=timedelta(minutes=15),

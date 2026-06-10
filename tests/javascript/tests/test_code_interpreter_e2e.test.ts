@@ -39,7 +39,7 @@ function sandboxCreateOptions() {
   return {
     connectionConfig: createConnectionConfig(),
     image: getSandboxImage(),
-    entrypoint: ["/opt/opensandbox/code-interpreter.sh"],
+    entrypoint: ["/opt/code-interpreter/code-interpreter.sh"],
     timeoutSeconds: 15 * 60,
     readyTimeoutSeconds: 60,
     metadata: { tag: "e2e-code-interpreter" },

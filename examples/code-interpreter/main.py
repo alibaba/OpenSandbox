@@ -38,7 +38,7 @@ async def main() -> None:
     sandbox = await Sandbox.create(
         image,
         connection_config=config,
-        entrypoint=["/opt/opensandbox/code-interpreter.sh"]
+        entrypoint=["/opt/code-interpreter/code-interpreter.sh"]
     )
 
     async with sandbox:

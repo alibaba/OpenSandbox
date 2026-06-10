@@ -671,7 +671,7 @@ public sealed class CodeInterpreterE2ETestFixture : IAsyncLifetime
         {
             ConnectionConfig = _baseFixture.ConnectionConfig,
             Image = _baseFixture.DefaultImage,
-            Entrypoint = new[] { "/opt/opensandbox/code-interpreter.sh" },
+            Entrypoint = new[] { "/opt/code-interpreter/code-interpreter.sh" },
             TimeoutSeconds = _baseFixture.DefaultTimeoutSeconds,
             ReadyTimeoutSeconds = _baseFixture.DefaultReadyTimeoutSeconds,
             Resource = new Dictionary<string, string>
