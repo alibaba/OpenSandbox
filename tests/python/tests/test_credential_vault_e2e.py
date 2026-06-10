@@ -136,6 +136,8 @@ def test_credential_vault_injects_all_auth_types(credential_vault_target_ip: str
             try:
                 cfg.transport.close()
             except Exception:
+                # Best-effort teardown: do not fail the test if transport is already closed
+                # or cannot be closed during cleanup.
                 pass
 
 
