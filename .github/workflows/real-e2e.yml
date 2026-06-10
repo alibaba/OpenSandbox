@@ -11,14 +11,6 @@ on:
         required: false
         type: boolean
         default: false
-      e2e_target:
-        description: 'E2E target to run'
-        required: false
-        type: choice
-        default: all
-        options:
-          - all
-          - credential-vault
   pull_request:
     branches: [ main ]
     paths:
@@ -37,7 +29,6 @@ concurrency:
 jobs:
   python-e2e:
     name: Python E2E (docker bridge)
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.e2e_target == 'all' }}
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
@@ -133,7 +124,6 @@ jobs:
 
   python-credential-vault-e2e:
     name: Python Credential Vault E2E (docker bridge)
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.e2e_target == 'all' || inputs.e2e_target == 'credential-vault' }}
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
@@ -187,7 +177,6 @@ jobs:
 
   java-e2e:
     name: Java E2E (docker bridge)
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.e2e_target == 'all' }}
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
@@ -303,7 +292,6 @@ jobs:
 
   javascript-e2e:
     name: JavaScript E2E (docker bridge)
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.e2e_target == 'all' }}
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
@@ -402,7 +390,6 @@ jobs:
 
   csharp-e2e:
     name: C# E2E (docker bridge)
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.e2e_target == 'all' }}
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
@@ -490,7 +477,6 @@ jobs:
 
   go-e2e:
     name: Go E2E (docker bridge)
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.e2e_target == 'all' }}
     runs-on: self-hosted
     env:
       UV_BIN: /home/admin/.local/bin
