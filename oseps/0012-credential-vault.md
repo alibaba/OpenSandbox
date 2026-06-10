@@ -3,8 +3,8 @@ title: Credential Vault and Credential Proxy
 authors:
   - "@jwx0925"
 creation-date: 2026-05-28
-last-updated: 2026-06-02
-status: provisional
+last-updated: 2026-06-10
+status: implementing
 ---
 
 # OSEP-0012: Credential Vault and Credential Proxy
@@ -70,7 +70,7 @@ to:
 5. **Runtime agnostic**: Support both Docker and Kubernetes through the existing egress sidecar pattern that shares the sandbox network namespace.
 6. **Transparent by default**: Use the existing egress transparent mitmproxy path as Credential Proxy so applications do not need proxy or base URL changes.
 7. **Auditable and redacted**: Emit useful audit events and metrics while redacting credential material from logs, diagnostics, and responses.
-8. **Backward compatible**: Keep existing sandbox creation request shape unchanged; Credential Vault is created after sandbox creation through the egress sidecar API.
+8. **Backward compatible**: Keep credential values and Credential Vault revisions out of the sandbox creation request. Sandbox creation may carry an explicit `credentialProxy.enabled` startup opt-in so the runtime can prepare transparent MITM before user code starts; the Credential Vault itself is still created after sandbox creation through the egress sidecar API.
 9. **Runtime mutation**: Let callers with egress endpoint access create a sandbox Credential Vault and add, replace, and delete sandbox credential bindings while the sandbox is running without exposing plaintext credentials to sandbox processes.
 
 ### Non-Goals
@@ -108,7 +108,7 @@ Add Credential Vault as an egress sidecar runtime API. Add Credential Proxy as t
 
 The first implementation supports **transparent proxy mode**:
 
-1. The user creates a sandbox normally, without `credentialVault` in `CreateSandboxRequest`.
+1. The user creates a sandbox normally, without `credentialVault` or plaintext credential material in `CreateSandboxRequest`. When Credential Vault will be used, the request sets `credentialProxy.enabled: true` so the runtime starts the egress sidecar with transparent MITM support before user code starts.
 2. The user resolves the sandbox egress endpoint, for example by calling `GET /v1/sandboxes/{sandboxId}/endpoints/18080`.
 3. The user calls the egress sidecar API `POST /credential-vault` with initial `credentials` and `bindings`.
 4. The sandbox application container sends normal outbound HTTP/HTTPS traffic, for example to `https://api.github.com/repos/alibaba/OpenSandbox`.
@@ -163,7 +163,7 @@ At a high level:
 4. **Credential material must be short-lived in memory**: Credential Proxy should not persist plaintext credentials on disk. If temporary files are unavoidable for runtime delivery, they must be scoped to one sandbox and cleaned up with sandbox deletion.
 5. **Binding scope must be covered by egress scope**: A sandbox must include `networkPolicy.egress` before a Credential Vault can be created, and every credential binding target must be covered by an explicit allow rule. Missing or inconsistent egress policy fails vault creation or mutation.
 6. **Multiple matching bindings are ambiguous**: If more than one binding matches a request and no deterministic precedence is declared, Credential Proxy must fail closed.
-7. **Upstream echo is outside the absolute secrecy guarantee**: OpenSandbox-managed runtime, API, diagnostic, and log surfaces must not expose credentials, but an upstream service can still echo request headers in response bodies or headers. Credential Proxy should redact known credential values from responses where practical, and users should avoid binding credentials to services that echo sensitive request headers.
+7. **Upstream echo is outside the absolute secrecy guarantee**: OpenSandbox-managed runtime, API, diagnostic, and log surfaces must not expose credentials, but an upstream service can still echo request headers in response bodies or headers. The MVP redacts known credential values from response headers and does not rewrite response bodies. Users should avoid binding credentials to services that echo sensitive request headers in response bodies.
 8. **Runtime mutations use egress API auth**: Callers that can resolve the egress endpoint and provide the required egress auth header can create or mutate the Credential Vault.
 
 ### Risks and Mitigations
@@ -172,7 +172,7 @@ At a high level:
 |------|--------|------------|
 | Sandbox bypasses Credential Proxy | Credential not injected, or traffic reaches destination without policy mediation | Use egress transparent redirect for TCP 80/443 and recommend `networkPolicy.defaultAction=deny` with `dns+nft` |
 | Credential leakage through logs | Secret exposure | Central redaction helpers; never log injected headers or rendered values; regression tests for logs |
-| Upstream echoes injected credential | Credential appears in sandbox-visible response content | Redact known credential values from response headers and text bodies where practical; document that services which echo sensitive request headers are unsupported unless response redaction is sufficient |
+| Upstream echoes injected credential | Credential appears in sandbox-visible response content | Redact known credential values from response headers; do not promise body rewriting in the MVP; document that services which echo sensitive request headers in response bodies are unsupported |
 | Inline credential value leaked by API logging | Secret exposure | Treat inline credential `value` as write-only input; redact request bodies, validation errors, SDK debug logs, and sidecar logs |
 | Credential source over-permissioned to sidecars | Cluster-wide secret access risk | MVP supports only inline values sent to the egress sidecar API; sidecar has no Kubernetes API permission by default |
 | Binding and egress policy drift | Credential may be configured for unreachable or unintended destinations | Require `networkPolicy.egress` and fail vault creation or mutation when any binding target is not covered |
@@ -586,6 +586,9 @@ Example sandbox creation request:
     "egress": [
       { "action": "allow", "target": "api.github.com" }
     ]
+  },
+  "credentialProxy": {
+    "enabled": true
   }
 }
 ```
@@ -743,7 +746,7 @@ Runtime material cleanup:
 
 ### SDK API
 
-SDKs should expose Credential Vault through a sandbox-scoped facade instead of `Sandbox.create()` options. This preserves the API model that sandbox creation and vault creation are separate operations:
+SDKs should expose Credential Vault through a sandbox-scoped facade for vault content and mutations. Sandbox creation and vault creation remain separate operations: `Sandbox.create()` may expose `credentialProxy.enabled` only as a runtime startup opt-in, while credentials and bindings are created later through the facade.
 
 1. Create or connect to a sandbox.
 2. Resolve the egress endpoint and endpoint auth headers through the existing lifecycle endpoint API.
@@ -762,6 +765,7 @@ const sandbox = await Sandbox.create({
     defaultAction: "deny",
     egress: [{ action: "allow", target: "api.github.com" }],
   },
+  credentialProxy: { enabled: true },
 });
 
 await sandbox.credentialVault.create({
@@ -864,6 +868,15 @@ For the MVP, SDK public inputs treat inline as the default credential source typ
 Python should expose the same operation set with snake_case naming:
 
 ```py
+sandbox = await Sandbox.create(
+    image="ubuntu:22.04",
+    network_policy={
+        "defaultAction": "deny",
+        "egress": [{"action": "allow", "target": "api.github.com"}],
+    },
+    credential_proxy={"enabled": True},
+)
+
 await sandbox.credential_vault.create(
     credentials=[
         {
@@ -917,7 +930,7 @@ The cross-language SDK contract is:
 - `patch` is the only update API for credentials and bindings.
 - Credential and binding subresources are read-only list/get helpers.
 - SDKs resolve the egress endpoint, merge endpoint headers, and call the sidecar directly.
-- SDKs do not add Credential Vault fields to sandbox creation requests in the MVP.
+- SDKs may expose `credential_proxy` / `credentialProxy` on sandbox creation only to opt into credential-capable transparent MITM startup. SDKs must not put Credential Vault credentials, bindings, or plaintext credential material into sandbox creation requests.
 
 ### Kubernetes Runtime Delivery
 
@@ -1001,7 +1014,7 @@ Rules:
 
 ### Response Redaction and Echo Handling
 
-Credential Proxy should redact known credential values from upstream response headers and text-like response bodies where practical. This protects against common debug endpoints and error handlers that echo request headers.
+Credential Proxy redacts known credential values from upstream response headers. The MVP intentionally does not rewrite response bodies, including text-like bodies. This keeps the transparent proxy path simple and avoids buffering or transforming application payloads.
 
 Redaction must include both source and rendered credential values, including:
 
@@ -1011,19 +1024,19 @@ Redaction must include both source and rendered credential values, including:
 
 This redaction is best effort, not an absolute secrecy guarantee:
 
-- Binary, compressed, encrypted, streaming, or very large response bodies may be passed without full body rewriting.
-- If response redaction is disabled or not possible, Credential Proxy should at least strip or redact response headers that contain known credential values.
-- Operators should not bind credentials to upstream services that intentionally echo sensitive request headers back to callers unless the response path is known to be safely redacted.
+- Response headers that contain known credential values should be stripped or redacted.
+- Response bodies, including JSON/text debug payloads, binary payloads, compressed payloads, streaming responses, and very large responses, are passed through without credential redaction in the MVP.
+- Operators should not bind credentials to upstream services that intentionally echo sensitive request headers in response bodies.
 
 The formal guarantee is that OpenSandbox-managed runtime, API, diagnostic, and log surfaces do not expose plaintext credentials. It cannot guarantee that arbitrary upstream services will never include an injected credential in application-level response content.
 
 ### Runtime Path
 
-The MVP runtime path is **transparent proxy**. This is the default behavior for Credential Vault and is not a user-selectable request field in the MVP.
+The MVP runtime path is **transparent proxy**. Credential Vault content remains a runtime sidecar API, but the lifecycle create request includes `credentialProxy.enabled` as an explicit startup opt-in so the platform can prepare the transparent proxy path before application code starts.
 
 #### Transparent Proxy Path
 
-The runtime uses the existing egress transparent mitmproxy path after a Credential Vault is created. The application container keeps using normal outbound URLs. Credential Proxy runs as an OpenSandbox-managed mitm addon loaded by the egress sidecar. Because Kubernetes cannot add a sidecar to an already-created Pod, the runtime must expose a credential-capable egress sidecar before `POST /credential-vault` can succeed; the vault itself is created by calling the egress sidecar API after sandbox creation.
+When `credentialProxy.enabled` is set, the runtime prepares the existing egress transparent mitmproxy path before a Credential Vault is created. The application container keeps using normal outbound URLs. Credential Proxy runs as an OpenSandbox-managed mitm addon loaded by the egress sidecar. Because Kubernetes cannot add a sidecar to an already-created Pod, the runtime must expose a credential-capable egress sidecar before `POST /credential-vault` can succeed; the vault itself is created by calling the egress sidecar API after sandbox creation.
 
 Advantages:
 
@@ -1108,7 +1121,7 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 #### Specs
 
 - Add Credential Vault create, read, delete, and mutation schemas to `specs/egress-api.yaml`.
-- Add examples for normal sandbox creation, egress endpoint resolution, and direct `POST /credential-vault`.
+- Add examples for normal sandbox creation with `credentialProxy.enabled`, egress endpoint resolution, and direct `POST /credential-vault`.
 - Add Credential Vault metadata reads and atomic mutation APIs for adding, replacing, and deleting sandbox-local credentials and bindings.
 - Add examples for vault create, runtime add, replace, and delete flows, including acknowledged revision responses and failed proxy acknowledgement errors.
 
@@ -1153,6 +1166,7 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 #### SDKs and CLI
 
 - Add sandbox-scoped Credential Vault facades such as `sandbox.credentialVault` in TypeScript/JavaScript and `sandbox.credential_vault` in Python.
+- Expose sandbox creation `credentialProxy` / `credential_proxy` only as the explicit startup opt-in for credential-capable transparent MITM; do not accept Credential Vault content there.
 - Add typed request and response models for credentials, bindings, vault state, vault revisions, and vault patch requests.
 - Add client helpers for resolving the egress endpoint, merging endpoint auth headers, and calling Credential Vault APIs directly on that endpoint.
 - Expose `create`, `get`, `patch`, `delete`, `listCredentials`, `getCredential`, `listBindings`, and `getBinding` operations.
@@ -1175,7 +1189,7 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 - Multiple matching bindings fail closed.
 - Existing headers with injected names, including names from `customHeaders`, are replaced or rejected according to the selected implementation rule.
 - Redaction removes credential values from logs and errors.
-- Response redaction removes known credential values from response headers and supported text bodies.
+- Response redaction removes known credential values from response headers.
 - Inline credential `value` is accepted only as write-only Credential Vault create or runtime mutation input and never appears in serialized sandbox metadata or API responses.
 - Egress validation requires `networkPolicy.egress`, catches binding hosts not covered by explicit allow rules, and does not treat `defaultAction=allow` as credential binding coverage.
 - The egress Credential Vault API rejects candidate revisions that conflict with the sidecar's effective egress policy.
@@ -1187,7 +1201,7 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 - `PATCH /credential-vault` rejects requests when the vault does not exist.
 - Runtime mutations reject post-mutation binding sets that create ambiguous matches.
 - Runtime mutation revision handling keeps the previous acknowledged revision active when proxy acknowledgement fails and cleans up candidate runtime material prepared for the failed revision.
-- SDK facades resolve the egress endpoint, merge endpoint headers, call the sidecar directly, expose `CredentialAuth` shapes that match the egress API wire schema, and do not expose credential or binding subresource write helpers.
+- SDK facades resolve the egress endpoint, merge endpoint headers, call the sidecar directly, expose `CredentialAuth` shapes that match the egress API wire schema, do not expose credential or binding subresource write helpers, and only expose `credentialProxy` / `credential_proxy` on sandbox creation as a startup opt-in.
 
 ### Integration Tests
 
@@ -1223,8 +1237,8 @@ All diagnostics APIs that surface runtime logs must preserve redaction behavior.
 - Delete the runtime GitHub credential binding and verify subsequent matching requests are not credentialed.
 - Verify direct access to a non-allowed domain fails under egress policy.
 - Verify logs and diagnostic APIs never contain the credential string.
-- Verify a mock upstream that echoes request headers does not expose known credential values in supported response headers or text bodies.
-- Verify response redaction covers both raw and rendered injected credential values.
+- Verify a mock upstream that echoes request headers does not expose known credential values in supported response headers.
+- Verify response header redaction covers both raw and rendered injected credential values.
 
 ## Drawbacks
 

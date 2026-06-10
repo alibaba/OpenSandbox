@@ -36,6 +36,12 @@ EXPECTED_HEADERS: dict[str, dict[str, str]] = {
         "x-client-id": "vault-client-id",
         "x-client-secret": "vault-client-secret",
     },
+    "/runtime-added": {
+        "x-runtime-token": "vault-runtime-token",
+    },
+    "/runtime-replaced": {
+        "x-runtime-token": "vault-runtime-token-replaced",
+    },
 }
 
 

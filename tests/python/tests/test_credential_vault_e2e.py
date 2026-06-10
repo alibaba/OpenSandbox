@@ -57,6 +57,8 @@ SECRET_VALUES = {
     "api-key-token": "vault-api-key-token",
     "client-id": "vault-client-id",
     "client-secret": "vault-client-secret",
+    "runtime-token": "vault-runtime-token",
+    "runtime-token-replaced": "vault-runtime-token-replaced",
 }
 
 
@@ -72,20 +74,7 @@ def credential_vault_target_ip() -> str:
 def test_credential_vault_injects_all_auth_types(
     credential_vault_target_ip: str,
 ) -> None:
-    cfg = create_connection_config_sync()
-    sandbox = SandboxSync.create(
-        image=SandboxImageSpec(get_sandbox_image()),
-        resource=get_e2e_sandbox_resource(),
-        connection_config=cfg,
-        timeout=timedelta(minutes=5),
-        ready_timeout=timedelta(seconds=60),
-        network_policy=NetworkPolicy(
-            defaultAction="allow",
-            egress=[NetworkRule(action="allow", target=TARGET_HOST)],
-        ),
-        credential_proxy=CredentialProxyConfig(enabled=True),
-        metadata={E2E_LABEL_KEY: E2E_LABEL_VALUE},
-    )
+    cfg, sandbox = _create_credential_proxy_sandbox()
     try:
         state = sandbox.credential_vault.create(
             credentials=[
@@ -142,16 +131,152 @@ def test_credential_vault_injects_all_auth_types(
             assert response["case"] == path.lstrip("/")
             assert response["missingOrInvalid"] == []
     finally:
+        _close_sandbox(cfg, sandbox)
+
+
+def test_credential_vault_runtime_mutation_adds_replaces_and_deletes_binding(
+    credential_vault_target_ip: str,
+) -> None:
+    cfg, sandbox = _create_credential_proxy_sandbox()
+    try:
+        state = sandbox.credential_vault.create(credentials=[], bindings=[])
+        assert state.revision == 1
+        assert state.credentials == []
+        assert state.bindings == []
+
+        state = sandbox.credential_vault.patch(
+            expected_revision=state.revision,
+            credentials={
+                "add": [
+                    {
+                        "name": "runtime-token",
+                        "source": {"value": SECRET_VALUES["runtime-token"]},
+                    }
+                ]
+            },
+            bindings={
+                "add": [
+                    _binding(
+                        "runtime-added",
+                        "/runtime-added",
+                        {
+                            "type": "apiKey",
+                            "name": "X-Runtime-Token",
+                            "credential": "runtime-token",
+                        },
+                    )
+                ]
+            },
+        )
+        assert state.revision == 2
+        assert [credential.name for credential in state.credentials] == ["runtime-token"]
+        assert [binding.name for binding in state.bindings] == ["runtime-added"]
+        assert SECRET_VALUES["runtime-token"] not in state.model_dump_json(by_alias=True)
+
+        response = _curl_json(sandbox, credential_vault_target_ip, "/runtime-added")
+        assert response["ok"] is True
+        assert response["case"] == "runtime-added"
+        assert response["missingOrInvalid"] == []
+
+        state = sandbox.credential_vault.patch(
+            expected_revision=state.revision,
+            bindings={"delete": ["runtime-added"]},
+        )
+        assert state.revision == 3
+        assert state.bindings == []
+
+        state = sandbox.credential_vault.patch(
+            expected_revision=state.revision,
+            credentials={
+                "replace": [
+                    {
+                        "name": "runtime-token",
+                        "source": {"value": SECRET_VALUES["runtime-token-replaced"]},
+                    }
+                ]
+            },
+            bindings={
+                "add": [
+                    _binding(
+                        "runtime-replaced",
+                        "/runtime-replaced",
+                        {
+                            "type": "apiKey",
+                            "name": "X-Runtime-Token",
+                            "credential": "runtime-token",
+                        },
+                    )
+                ]
+            },
+        )
+        assert state.revision == 4
+        assert [credential.name for credential in state.credentials] == ["runtime-token"]
+        assert [binding.name for binding in state.bindings] == ["runtime-replaced"]
+        state_payload = state.model_dump_json(by_alias=True)
+        assert SECRET_VALUES["runtime-token"] not in state_payload
+        assert SECRET_VALUES["runtime-token-replaced"] not in state_payload
+
+        response = _curl_json(sandbox, credential_vault_target_ip, "/runtime-replaced")
+        assert response["ok"] is True
+        assert response["case"] == "runtime-replaced"
+        assert response["missingOrInvalid"] == []
+
+        response = _curl_json(
+            sandbox,
+            credential_vault_target_ip,
+            "/runtime-added",
+            fail_on_http_error=False,
+        )
+        assert response["ok"] is False
+        assert response["case"] == "runtime-added"
+        assert response["missingOrInvalid"] == ["x-runtime-token"]
+
+        state = sandbox.credential_vault.patch(
+            expected_revision=state.revision,
+            bindings={"delete": ["runtime-replaced"]},
+        )
+        assert state.revision == 5
+        assert state.bindings == []
+
+        state = sandbox.credential_vault.patch(
+            expected_revision=state.revision,
+            credentials={"delete": ["runtime-token"]},
+        )
+        assert state.revision == 6
+        assert state.credentials == []
+    finally:
+        _close_sandbox(cfg, sandbox)
+
+
+def _create_credential_proxy_sandbox() -> tuple[object, SandboxSync]:
+    cfg = create_connection_config_sync()
+    sandbox = SandboxSync.create(
+        image=SandboxImageSpec(get_sandbox_image()),
+        resource=get_e2e_sandbox_resource(),
+        connection_config=cfg,
+        timeout=timedelta(minutes=5),
+        ready_timeout=timedelta(seconds=60),
+        network_policy=NetworkPolicy(
+            defaultAction="allow",
+            egress=[NetworkRule(action="allow", target=TARGET_HOST)],
+        ),
+        credential_proxy=CredentialProxyConfig(enabled=True),
+        metadata={E2E_LABEL_KEY: E2E_LABEL_VALUE},
+    )
+    return cfg, sandbox
+
+
+def _close_sandbox(cfg: object, sandbox: SandboxSync) -> None:
+    try:
+        sandbox.kill()
+    finally:
+        sandbox.close()
         try:
-            sandbox.kill()
-        finally:
-            sandbox.close()
-            try:
-                cfg.transport.close()
-            except Exception:
-                # Best-effort teardown: do not fail the test if transport is already closed
-                # or cannot be closed during cleanup.
-                pass
+            cfg.transport.close()
+        except Exception:
+            # Best-effort teardown: do not fail the test if transport is already closed
+            # or cannot be closed during cleanup.
+            pass
 
 
 def _binding(name: str, path: str, auth: dict[str, object]) -> CredentialBinding:
@@ -168,9 +293,16 @@ def _binding(name: str, path: str, auth: dict[str, object]) -> CredentialBinding
     )
 
 
-def _curl_json(sandbox: SandboxSync, target_ip: str, path: str) -> dict[str, object]:
+def _curl_json(
+    sandbox: SandboxSync,
+    target_ip: str,
+    path: str,
+    *,
+    fail_on_http_error: bool = True,
+) -> dict[str, object]:
+    fail_flag = "--fail " if fail_on_http_error else ""
     command = (
-        "curl --fail --silent --show-error "
+        f"curl {fail_flag}--silent --show-error "
         "--connect-timeout 5 --max-time 20 "
         f"--resolve {TARGET_HOST}:80:{target_ip} "
         f"http://{TARGET_HOST}{path}"
