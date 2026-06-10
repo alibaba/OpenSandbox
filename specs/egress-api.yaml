@@ -243,7 +243,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CredentialVaultState'
+                $ref: '#/components/schemas/CredentialListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -279,7 +279,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CredentialVaultState'
+                $ref: '#/components/schemas/CredentialBindingListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -462,6 +462,28 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CredentialMetadata'
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialBindingMetadata'
+      additionalProperties: false
+    CredentialListResponse:
+      type: object
+      required: [revision, credentials]
+      properties:
+        revision:
+          type: integer
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialMetadata'
+      additionalProperties: false
+    CredentialBindingListResponse:
+      type: object
+      required: [revision, bindings]
+      properties:
+        revision:
+          type: integer
         bindings:
           type: array
           items:

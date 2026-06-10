@@ -63,7 +63,6 @@ class _CredentialVaultAsyncTransport(httpx.AsyncBaseTransport):
                 200,
                 json={
                     "revision": 2,
-                    "credentials": [],
                     "bindings": [{"name": "gitlab-api", "revision": 2}],
                 },
                 request=request,

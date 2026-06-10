@@ -66,7 +66,7 @@ const (
 	DefaultMaxEgressRules        = 4096
 	DefaultDNSUpstreamTimeoutSec = 5
 
-	OpenSandboxRootDir = "/etc/opensandbox"
+	OpenSandboxRootDir = "/opt/opensandbox"
 )
 
 func EnvIntOrDefault(key string, defaultVal int) int {

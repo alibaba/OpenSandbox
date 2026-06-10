@@ -37,6 +37,7 @@ from opensandbox_server.services.constants import (
 MITM_CA_VOLUME_NAME = "opensandbox-mitm-ca"
 MITM_CA_MOUNT_PATH = posixpath.dirname(OPENSANDBOX_MITM_CA_CERT_PATH)
 MITM_CA_ENV = {
+    OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT: "true",
     "SSL_CERT_FILE": OPENSANDBOX_MITM_CA_CERT_PATH,
     "REQUESTS_CA_BUNDLE": OPENSANDBOX_MITM_CA_CERT_PATH,
     "CURL_CA_BUNDLE": OPENSANDBOX_MITM_CA_CERT_PATH,
@@ -56,11 +57,7 @@ def prep_execd_init_for_egress(exec_install_script: str) -> tuple[str, Dict[str,
     Returns:
         ``(prefixed_shell_script, {"privileged": True})``
     """
-    script = (
-        "set -e; "
-        "echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 && "
-        f"{exec_install_script}"
-    )
+    script = f"set -e; echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 && {exec_install_script}"
     return script, {"privileged": True}
 
 
@@ -98,9 +95,7 @@ def apply_egress_to_spec(
     if not network_policy or not egress_image:
         return
 
-    policy_payload = json.dumps(
-        network_policy.model_dump(by_alias=True, exclude_none=True)
-    )
+    policy_payload = json.dumps(network_policy.model_dump(by_alias=True, exclude_none=True))
 
     env: List[Dict[str, str]] = [
         {"name": EGRESS_RULES_ENV, "value": policy_payload},

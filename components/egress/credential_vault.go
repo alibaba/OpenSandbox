@@ -144,6 +144,16 @@ type credentialVaultState struct {
 	Bindings    []credentialBindingMetadata `json:"bindings"`
 }
 
+type credentialListResponse struct {
+	Revision    int64                `json:"revision"`
+	Credentials []credentialMetadata `json:"credentials"`
+}
+
+type credentialBindingListResponse struct {
+	Revision int64                       `json:"revision"`
+	Bindings []credentialBindingMetadata `json:"bindings"`
+}
+
 type credentialMetadata struct {
 	Name       string `json:"name"`
 	SourceType string `json:"sourceType"`

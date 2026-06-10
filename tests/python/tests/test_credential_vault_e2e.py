@@ -44,6 +44,12 @@ TARGET_HOST = os.getenv(
     "credential-vault-e2e.opensandbox.test",
 )
 TARGET_IP = os.getenv("OPENSANDBOX_CREDENTIAL_VAULT_E2E_TARGET_IP", "")
+E2E_LABEL_KEY = os.getenv(
+    "OPENSANDBOX_CREDENTIAL_VAULT_E2E_LABEL_KEY", "opensandbox.e2e"
+)
+E2E_LABEL_VALUE = os.getenv(
+    "OPENSANDBOX_CREDENTIAL_VAULT_E2E_LABEL_VALUE", "credential-vault"
+)
 
 SECRET_VALUES = {
     "bearer-token": "vault-bearer-token",
@@ -63,7 +69,9 @@ def credential_vault_target_ip() -> str:
     return TARGET_IP
 
 
-def test_credential_vault_injects_all_auth_types(credential_vault_target_ip: str) -> None:
+def test_credential_vault_injects_all_auth_types(
+    credential_vault_target_ip: str,
+) -> None:
     cfg = create_connection_config_sync()
     sandbox = SandboxSync.create(
         image=SandboxImageSpec(get_sandbox_image()),
@@ -76,6 +84,7 @@ def test_credential_vault_injects_all_auth_types(credential_vault_target_ip: str
             egress=[NetworkRule(action="allow", target=TARGET_HOST)],
         ),
         credential_proxy=CredentialProxyConfig(enabled=True),
+        metadata={E2E_LABEL_KEY: E2E_LABEL_VALUE},
     )
     try:
         state = sandbox.credential_vault.create(
@@ -97,7 +106,11 @@ def test_credential_vault_injects_all_auth_types(credential_vault_target_ip: str
                 _binding(
                     "api-key",
                     "/api-key",
-                    {"type": "apiKey", "name": "X-Api-Key", "credential": "api-key-token"},
+                    {
+                        "type": "apiKey",
+                        "name": "X-Api-Key",
+                        "credential": "api-key-token",
+                    },
                 ),
                 _binding(
                     "custom-headers",

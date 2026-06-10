@@ -72,7 +72,11 @@ class SandboxImageSpec(BaseModel):
     )
 
     def __init__(
-        self, image: str | None = None, *, auth: SandboxImageAuth | None = None, **data: object
+        self,
+        image: str | None = None,
+        *,
+        auth: SandboxImageAuth | None = None,
+        **data: object,
     ) -> None:
         """
         Initialize SandboxImageSpec.
@@ -288,6 +292,20 @@ class CredentialVaultState(BaseModel):
     bindings: list[CredentialBindingMetadata]
 
 
+class CredentialListResponse(BaseModel):
+    """Sanitized Credential Vault credential list response."""
+
+    revision: int
+    credentials: list[CredentialMetadata]
+
+
+class CredentialBindingListResponse(BaseModel):
+    """Sanitized Credential Vault binding list response."""
+
+    revision: int
+    bindings: list[CredentialBindingMetadata]
+
+
 class CredentialMutationSet(BaseModel):
     """Atomic credential mutation set for Credential Vault patch."""
 
@@ -322,6 +340,7 @@ class CredentialVaultPatchRequest(BaseModel):
 # Aligned with server-side pattern in server/opensandbox_server/api/schema.py.
 _HOST_PATH_RE = re.compile(r"^(/|[A-Za-z]:[\\/])")
 
+
 class Host(BaseModel):
     """
     Host path bind mount backend.
@@ -330,9 +349,7 @@ class Host(BaseModel):
     Only available when the runtime supports host mounts.
     """
 
-    path: str = Field(
-        description="Absolute path on the host filesystem to mount."
-    )
+    path: str = Field(description="Absolute path on the host filesystem to mount.")
 
     @field_validator("path")
     @classmethod
@@ -412,7 +429,9 @@ class OSSFS(BaseModel):
     """Alibaba Cloud OSS mount backend via ossfs."""
 
     bucket: str = Field(description="OSS bucket name.")
-    endpoint: str = Field(description="OSS endpoint (e.g., oss-cn-hangzhou.aliyuncs.com).")
+    endpoint: str = Field(
+        description="OSS endpoint (e.g., oss-cn-hangzhou.aliyuncs.com)."
+    )
     version: Literal["1.0", "2.0"] = Field(
         default="2.0",
         description="ossfs major version used by runtime mount integration.",
@@ -844,6 +863,5 @@ class SandboxState:
     def values(cls) -> set[str]:
         """Returns a set of all known state values."""
         return {
-            v for k, v in cls.__dict__.items()
-            if k.isupper() and not k.startswith("_")
+            v for k, v in cls.__dict__.items() if k.isupper() and not k.startswith("_")
         }

@@ -21,7 +21,7 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.credential_vault_state import CredentialVaultState
+from ...models.credential_binding_list_response import CredentialBindingListResponse
 from ...types import Response
 
 
@@ -36,9 +36,9 @@ def _get_kwargs() -> dict[str, Any]:
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> CredentialVaultState | str | None:
+) -> CredentialBindingListResponse | str | None:
     if response.status_code == 200:
-        response_200 = CredentialVaultState.from_dict(response.json())
+        response_200 = CredentialBindingListResponse.from_dict(response.json())
 
         return response_200
 
@@ -58,7 +58,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[CredentialVaultState | str]:
+) -> Response[CredentialBindingListResponse | str]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -70,7 +70,7 @@ def _build_response(
 def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
-) -> Response[CredentialVaultState | str]:
+) -> Response[CredentialBindingListResponse | str]:
     """List sanitized credential binding metadata
 
     Raises:
@@ -78,7 +78,7 @@ def sync_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[CredentialVaultState | str]
+        Response[CredentialBindingListResponse | str]
     """
 
     kwargs = _get_kwargs()
@@ -93,7 +93,7 @@ def sync_detailed(
 def sync(
     *,
     client: AuthenticatedClient | Client,
-) -> CredentialVaultState | str | None:
+) -> CredentialBindingListResponse | str | None:
     """List sanitized credential binding metadata
 
     Raises:
@@ -101,7 +101,7 @@ def sync(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        CredentialVaultState | str
+        CredentialBindingListResponse | str
     """
 
     return sync_detailed(
@@ -112,7 +112,7 @@ def sync(
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
-) -> Response[CredentialVaultState | str]:
+) -> Response[CredentialBindingListResponse | str]:
     """List sanitized credential binding metadata
 
     Raises:
@@ -120,7 +120,7 @@ async def asyncio_detailed(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[CredentialVaultState | str]
+        Response[CredentialBindingListResponse | str]
     """
 
     kwargs = _get_kwargs()
@@ -133,7 +133,7 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: AuthenticatedClient | Client,
-) -> CredentialVaultState | str | None:
+) -> CredentialBindingListResponse | str | None:
     """List sanitized credential binding metadata
 
     Raises:
@@ -141,7 +141,7 @@ async def asyncio(
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        CredentialVaultState | str
+        CredentialBindingListResponse | str
     """
 
     return (

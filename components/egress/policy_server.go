@@ -353,7 +353,7 @@ func (s *policyServer) handleCredentialVaultCredentials(w http.ResponseWriter) {
 		writeCredentialVaultError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, credentialVaultState{Revision: state.Revision, Credentials: state.Credentials, Bindings: []credentialBindingMetadata{}})
+	writeJSON(w, http.StatusOK, credentialListResponse{Revision: state.Revision, Credentials: state.Credentials})
 }
 
 func (s *policyServer) handleCredentialVaultCredential(w http.ResponseWriter, name string) {
@@ -378,7 +378,7 @@ func (s *policyServer) handleCredentialVaultBindings(w http.ResponseWriter) {
 		writeCredentialVaultError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, credentialVaultState{Revision: state.Revision, Credentials: []credentialMetadata{}, Bindings: state.Bindings})
+	writeJSON(w, http.StatusOK, credentialBindingListResponse{Revision: state.Revision, Bindings: state.Bindings})
 }
 
 func (s *policyServer) handleCredentialVaultBinding(w http.ResponseWriter, name string) {

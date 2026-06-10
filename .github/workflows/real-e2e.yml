@@ -147,7 +147,7 @@ jobs:
 
       - name: Clean up previous Credential Vault E2E resources
         run: |
-          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker ps -aq --filter "label=opensandbox.e2e=credential-vault" | xargs -r docker rm -f || true
           docker rm -f opensandbox-e2e-credential-vault-target || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf \
             /host_tmp/opensandbox-e2e \
@@ -172,7 +172,7 @@ jobs:
       - name: Clean up after Credential Vault E2E
         if: always()
         run: |
-          docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+          docker ps -aq --filter "label=opensandbox.e2e=credential-vault" | xargs -r docker rm -f || true
           docker rm -f opensandbox-e2e-credential-vault-target || true
           docker run --rm -v /tmp:/host_tmp alpine rm -rf \
             /host_tmp/opensandbox-e2e \

@@ -21,8 +21,13 @@ LOG_DIR=${OPENSANDBOX_CREDENTIAL_VAULT_E2E_LOG_DIR:-/tmp/opensandbox-credential-
 TARGET_CONTAINER=${OPENSANDBOX_CREDENTIAL_VAULT_E2E_TARGET_CONTAINER:-opensandbox-e2e-credential-vault-target}
 TARGET_IMAGE=${OPENSANDBOX_CREDENTIAL_VAULT_E2E_TARGET_IMAGE:-python:3.11-alpine}
 SANDBOX_IMAGE=${OPENSANDBOX_SANDBOX_DEFAULT_IMAGE:-opensandbox/code-interpreter:${TAG}}
+E2E_LABEL_KEY=${OPENSANDBOX_CREDENTIAL_VAULT_E2E_LABEL_KEY:-opensandbox.e2e}
+E2E_LABEL_VALUE=${OPENSANDBOX_CREDENTIAL_VAULT_E2E_LABEL_VALUE:-credential-vault}
+E2E_LABEL="${E2E_LABEL_KEY}=${E2E_LABEL_VALUE}"
 
 export HOME="${HOME:-/home/admin}"
+export OPENSANDBOX_CREDENTIAL_VAULT_E2E_LABEL_KEY="${E2E_LABEL_KEY}"
+export OPENSANDBOX_CREDENTIAL_VAULT_E2E_LABEL_VALUE="${E2E_LABEL_VALUE}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SERVER_PID=""
 
@@ -31,7 +36,7 @@ cleanup() {
     kill "${SERVER_PID}" 2>/dev/null || true
   fi
   docker rm -f "${TARGET_CONTAINER}" >/dev/null 2>&1 || true
-  docker ps -aq --filter "label=opensandbox" | xargs -r docker rm -f || true
+  docker ps -aq --filter "label=${E2E_LABEL}" | xargs -r docker rm -f || true
   docker run --rm -v /tmp:/host_tmp alpine rm -rf /host_tmp/opensandbox-e2e >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -71,7 +76,7 @@ docker pull "${TARGET_IMAGE}"
 docker rm -f "${TARGET_CONTAINER}" >/dev/null 2>&1 || true
 docker run -d \
   --name "${TARGET_CONTAINER}" \
-  --label opensandbox.e2e=credential-vault \
+  --label "${E2E_LABEL}" \
   -v "${REPO_ROOT}/tests/python/tests/support:/srv:ro" \
   "${TARGET_IMAGE}" \
   python /srv/credential_vault_echo_server.py >/dev/null
