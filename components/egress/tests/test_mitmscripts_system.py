@@ -96,6 +96,7 @@ class _Flow:
     def __init__(self) -> None:
         self.request = _Request()
         self.response = _Response()
+        self.metadata: dict[str, Any] = {}
 
 
 def _load_system_module() -> Any:
@@ -203,7 +204,7 @@ class SystemAddonRedactionTest(unittest.TestCase):
     def test_responseheaders_redacts_headers_without_body_hook(self) -> None:
         system = _load_system_module()
         flow = _Flow()
-        system._load_active_vault = lambda: system.ActiveVault(1, [], ["secret-token"])
+        flow.metadata[system.FLOW_REDACTIONS_KEY] = ["secret-token"]
 
         system.responseheaders(flow)
 
@@ -211,6 +212,28 @@ class SystemAddonRedactionTest(unittest.TestCase):
         self.assertEqual("upstream body includes secret-token", flow.response.body)
         self.assertFalse(flow.response.set_text_called)
         self.assertFalse(hasattr(system, "response"))
+
+    def test_responseheaders_uses_injected_flow_redactions(self) -> None:
+        system = _load_system_module()
+        flow = _Flow()
+        system._load_active_vault = lambda: system.ActiveVault(
+            1,
+            [
+                {
+                    "name": "gitlab-api",
+                    "match": {"hosts": ["code.example.com"]},
+                    "headers": [{"name": "Private-Token", "value": "old-secret"}],
+                }
+            ],
+            ["old-secret"],
+        )
+
+        system.request(flow)
+        system._load_active_vault = lambda: system.ActiveVault(2, [], ["new-secret"])
+        flow.response.headers["x-token-echo"] = "old-secret"
+        system.responseheaders(flow)
+
+        self.assertEqual("[REDACTED]", flow.response.headers.get("x-token-echo"))
 
 
 if __name__ == "__main__":

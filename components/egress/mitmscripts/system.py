@@ -54,6 +54,7 @@ CREDENTIAL_PROXY_SOCKET_ENV = "OPENSANDBOX_CREDENTIAL_PROXY_SOCKET"
 DEFAULT_CREDENTIAL_PROXY_SOCKET = "/run/opensandbox/credential-proxy/active.sock"
 ACTIVE_VAULT_PATH = "/credential-vault/_active"
 VAULT_CACHE_TTL_SECONDS = 0.5
+FLOW_REDACTIONS_KEY = "opensandbox_credential_redactions"
 
 
 class ActiveVault:
@@ -259,6 +260,7 @@ def request(flow: http.HTTPFlow) -> None:
         injected_names.append(name)
 
     if injected_names:
+        flow.metadata[FLOW_REDACTIONS_KEY] = list(vault.redactions)
         ctx.log.info(
             "credential proxy: injected binding="
             f"{binding.get('name')} revision={vault.revision} "
@@ -278,11 +280,11 @@ def responseheaders(flow: http.HTTPFlow) -> None:
 
 
 def _redact_response_headers(flow: http.HTTPFlow) -> None:
-    vault = _load_active_vault()
-    if vault is None or not vault.redactions or flow.response is None:
+    redactions = flow.metadata.get(FLOW_REDACTIONS_KEY, [])
+    if not redactions or flow.response is None:
         return
     for name, value in list(flow.response.headers.items()):
-        redacted = _redact_text(value, vault.redactions)
+        redacted = _redact_text(value, redactions)
         if redacted != value:
             flow.response.headers[name] = redacted
 

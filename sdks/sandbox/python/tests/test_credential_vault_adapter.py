@@ -23,6 +23,7 @@ import pytest
 from opensandbox.adapters.egress_adapter import EgressAdapter
 from opensandbox.config import ConnectionConfig
 from opensandbox.config.connection_sync import ConnectionConfigSync
+from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.sandboxes import SandboxEndpoint
 from opensandbox.sync.adapters.egress_adapter import EgressAdapterSync
 
@@ -67,6 +68,8 @@ class _CredentialVaultAsyncTransport(httpx.AsyncBaseTransport):
                 },
                 request=request,
             )
+        if request.method == "GET" and request.url.path == "/credential-vault/credentials/missing":
+            return httpx.Response(404, text="credential not found", request=request)
         return httpx.Response(204, request=request)
 
 
@@ -82,6 +85,8 @@ class _CredentialVaultSyncTransport(httpx.BaseTransport):
                 json={"revision": 7, "credentials": [], "bindings": []},
                 request=request,
             )
+        if request.method == "GET" and request.url.path == "/credential-vault/credentials/missing":
+            return httpx.Response(404, text="credential not found", request=request)
         return httpx.Response(204, request=request)
 
 
@@ -139,6 +144,10 @@ async def test_async_credential_vault_create_patch_and_list_bindings() -> None:
     bindings = await adapter.list_bindings()
     assert bindings[0].name == "gitlab-api"
 
+    with pytest.raises(SandboxApiException) as exc_info:
+        await adapter.get_credential("missing")
+    assert exc_info.value.status_code == 404
+
 
 def test_sync_credential_vault_get_and_delete() -> None:
     transport = _CredentialVaultSyncTransport()
@@ -152,3 +161,7 @@ def test_sync_credential_vault_get_and_delete() -> None:
 
     adapter.delete()
     assert [request.method for request in transport.requests] == ["GET", "DELETE"]
+
+    with pytest.raises(SandboxApiException) as exc_info:
+        adapter.get_credential("missing")
+    assert exc_info.value.status_code == 404

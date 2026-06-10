@@ -140,10 +140,7 @@ class EgressAdapterSync(EgressSync):
     ) -> object:
         response = self._httpx_client.request(method, path, json=json_body)
         if response.status_code >= 400:
-            body = response.text[:500]
-            raise RuntimeError(
-                f"{operation} failed with status {response.status_code}: {body}"
-            )
+            response.raise_for_status()
         if response.status_code == 204 or not response.content:
             return None
         return response.json()

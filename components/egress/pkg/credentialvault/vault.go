@@ -42,6 +42,7 @@ var (
 	ErrExists   = errors.New("credential vault already exists")
 
 	headerFieldNamePattern = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+\-.^_` + "`" + `|~]+$`)
+	hostnameLabelPattern   = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 	reservedHeaderNames    = map[string]struct{}{
 		"host":                {},
 		"content-length":      {},
@@ -783,6 +784,9 @@ func normalizeCredentialHost(host string) (string, error) {
 		if _, err := netip.ParseAddr(suffix); err == nil {
 			return "", fmt.Errorf("wildcard host %q cannot target an IP address", host)
 		}
+		if !isValidCredentialFQDN(suffix) {
+			return "", fmt.Errorf("invalid wildcard host %q", host)
+		}
 		return "*." + suffix, nil
 	}
 	if strings.Contains(host, "*") {
@@ -791,7 +795,22 @@ func normalizeCredentialHost(host string) (string, error) {
 	if _, err := netip.ParseAddr(host); err == nil {
 		return "", fmt.Errorf("credential binding host %q must be an FQDN, not an IP address", host)
 	}
+	if !isValidCredentialFQDN(host) {
+		return "", fmt.Errorf("credential binding host %q must be an FQDN", host)
+	}
 	return host, nil
+}
+
+func isValidCredentialFQDN(host string) bool {
+	if len(host) > 253 || !strings.Contains(host, ".") {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if !hostnameLabelPattern.MatchString(label) {
+			return false
+		}
+	}
+	return true
 }
 
 func explicitAllowCoversHost(pol *policy.NetworkPolicy, host string) bool {

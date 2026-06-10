@@ -109,6 +109,26 @@ func TestCredentialVaultRejectsReservedAndDuplicateHeaderNamesCaseInsensitively(
 	require.ErrorContains(t, err, "duplicate custom header name")
 }
 
+func TestCredentialVaultRejectsNonFQDNBindingHosts(t *testing.T) {
+	for _, host := range []string{
+		"api.example.com:443",
+		"api_example.com",
+		"localhost",
+		"*.localhost",
+		"*.example.com:443",
+	} {
+		_, err := normalizeBinding(Binding{
+			Name:  "bad-host",
+			Match: Match{Hosts: []string{host}},
+			Auth: Auth{
+				Type:       "bearer",
+				Credential: "token",
+			},
+		})
+		require.Error(t, err, host)
+	}
+}
+
 func TestCredentialVaultPatchRejectsDeletingReferencedCredential(t *testing.T) {
 	store := NewStore(nil, func() bool { return true })
 	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.example.com"}]}`)
