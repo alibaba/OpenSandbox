@@ -72,7 +72,7 @@ Multi-tenancy gives each tenant its own namespace and API key(s), single server 
 - When `tenants.toml` exists, `server.api_key` in `server.toml` MUST be rejected
 - Each tenant entry MUST have: `name`, `namespace`, `api_keys` (non-empty)
 - Auth MUST use constant-time comparison on API keys
-- Startup MUST validate all tenant namespaces exist and are accessible
+- Namespace existence validated lazily at sandbox creation, not at startup
 - Sandbox `create`/`get`/`list`/`delete` operate within authenticated tenant's namespace
 - Proxy routes MUST validate tenant ownership of target sandbox
 - Tenant config changes propagate to all server replicas without restart
@@ -135,7 +135,7 @@ Request with OPEN-SANDBOX-API-KEY header
 |------|------------|
 | Plaintext API keys in `tenants.toml` | File permissions 0600; ConfigMap with restricted RBAC; future: K8s Secret reference |
 | ConfigMap update delay on multi-replica | kubelet syncs ~1 min; fsnotify triggers reload on each replica independently |
-| Namespace doesn't exist at tenant creation | Startup validation; `create_sandbox` returns clear 400 |
+| Namespace doesn't exist | `create_sandbox` returns clear 400 with missing namespace details |
 | Timing attack on API key comparison | `secrets.compare_digest` (constant-time) |
 | Informer memory growth with many namespaces | Lazily created per namespace, only for active sandboxes |
 
@@ -385,11 +385,10 @@ No tenant context is injected on proxy paths. The server resolves the sandbox en
 ```
 validate_tenant_startup():
   1. Docker + tenants.toml → SystemExit
-  2. Missing tenant namespaces → SystemExit (list missing)
-  3. server.api_key + tenants.toml coexisting → SystemExit
+  2. server.api_key + tenants.toml coexisting → SystemExit
 ```
 
-Namespace validation: iterate all tenant entries, call `k8s.read_namespace()` for each. Collect missing. All must exist at startup.
+Namespace existence is validated lazily at sandbox creation time. A missing namespace returns a clear 400 error with the namespace name, rather than blocking server startup.
 
 ---
 

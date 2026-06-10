@@ -37,7 +37,9 @@ class FakeK8sClient:
         self.created: list[dict] = []
         self.deleted: list[str] = []
 
-    def create_custom_object(self, *, group: str, version: str, namespace: str, plural: str, body: dict):
+    def create_custom_object(
+        self, *, group: str, version: str, namespace: str, plural: str, body: dict
+    ):
         self.created.append(deepcopy(body))
         name = body["metadata"]["name"]
         if name in self.objects:
@@ -46,11 +48,15 @@ class FakeK8sClient:
         self.objects[name] = stored
         return stored
 
-    def get_custom_object(self, *, group: str, version: str, namespace: str, plural: str, name: str):
+    def get_custom_object(
+        self, *, group: str, version: str, namespace: str, plural: str, name: str
+    ):
         obj = self.objects.get(name)
         return deepcopy(obj) if obj is not None else None
 
-    def delete_custom_object(self, *, group: str, version: str, namespace: str, plural: str, name: str, **kwargs):
+    def delete_custom_object(
+        self, *, group: str, version: str, namespace: str, plural: str, name: str, **kwargs
+    ):
         self.deleted.append(name)
         if name not in self.objects:
             raise ApiException(status=404, reason="Not Found")
@@ -62,7 +68,9 @@ class TransientGetK8sClient(FakeK8sClient):
         super().__init__()
         self.failures = failures
 
-    def get_custom_object(self, *, group: str, version: str, namespace: str, plural: str, name: str):
+    def get_custom_object(
+        self, *, group: str, version: str, namespace: str, plural: str, name: str
+    ):
         if self.failures > 0:
             self.failures -= 1
             raise ApiException(status=500, reason="temporary apiserver error")
@@ -76,7 +84,9 @@ class TransientGetK8sClient(FakeK8sClient):
 
 
 class TransientThenReadyK8sClient(TransientGetK8sClient):
-    def get_custom_object(self, *, group: str, version: str, namespace: str, plural: str, name: str):
+    def get_custom_object(
+        self, *, group: str, version: str, namespace: str, plural: str, name: str
+    ):
         obj = super().get_custom_object(
             group=group,
             version=version,
@@ -95,7 +105,9 @@ class TransientThenReadyK8sClient(TransientGetK8sClient):
         return obj
 
 
-def _snapshot_cr(*, phase: str, containers: list[dict] | None = None, sandbox_id: str = SANDBOX_ID) -> dict:
+def _snapshot_cr(
+    *, phase: str, containers: list[dict] | None = None, sandbox_id: str = SANDBOX_ID
+) -> dict:
     name = build_public_snapshot_name(SNAPSHOT_ID)
     return {
         "apiVersion": "sandbox.opensandbox.io/v1alpha1",

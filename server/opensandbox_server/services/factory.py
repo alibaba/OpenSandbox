@@ -64,8 +64,7 @@ def create_sandbox_service(
     if selected_type not in implementations:
         supported_types = ", ".join(implementations.keys())
         raise ValueError(
-            f"Unsupported sandbox service type: {selected_type}. "
-            f"Supported types: {supported_types}"
+            f"Unsupported sandbox service type: {selected_type}. Supported types: {supported_types}"
         )
 
     implementation_class = implementations[selected_type]

@@ -66,7 +66,9 @@ class SnapshotRuntime(Protocol):
         Delete runtime-managed artifacts for a snapshot.
         """
 
-    def inspect_snapshot(self, snapshot_id: str, image: Optional[str] = None) -> SnapshotRuntimeStatus:
+    def inspect_snapshot(
+        self, snapshot_id: str, image: Optional[str] = None
+    ) -> SnapshotRuntimeStatus:
         """
         Inspect runtime-managed artifacts for startup recovery.
         """
@@ -96,7 +98,9 @@ class NoopSnapshotRuntime:
     def delete_snapshot(self, snapshot_id: str, image: Optional[str] = None) -> None:
         return None
 
-    def inspect_snapshot(self, snapshot_id: str, image: Optional[str] = None) -> SnapshotRuntimeStatus:
+    def inspect_snapshot(
+        self, snapshot_id: str, image: Optional[str] = None
+    ) -> SnapshotRuntimeStatus:
         return SnapshotRuntimeStatus(
             state=SnapshotState.FAILED,
             reason="snapshot_recovery_not_supported",

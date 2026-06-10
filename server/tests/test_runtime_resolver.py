@@ -80,9 +80,7 @@ async def test_validate_secure_runtime_skips_when_disabled() -> None:
 async def test_validate_secure_runtime_checks_docker_runtime() -> None:
     docker_client = MagicMock()
     docker_client.info.return_value = {"Runtimes": {"runsc": {"path": "/usr/bin/runsc"}}}
-    config = _config(
-        secure_runtime=SecureRuntimeConfig(type="gvisor", docker_runtime="runsc")
-    )
+    config = _config(secure_runtime=SecureRuntimeConfig(type="gvisor", docker_runtime="runsc"))
 
     await validate_secure_runtime_on_startup(config, docker_client=docker_client)
 
@@ -93,9 +91,7 @@ async def test_validate_secure_runtime_checks_docker_runtime() -> None:
 async def test_validate_secure_runtime_rejects_missing_docker_runtime() -> None:
     docker_client = MagicMock()
     docker_client.info.return_value = {"Runtimes": {"runc": {}}}
-    config = _config(
-        secure_runtime=SecureRuntimeConfig(type="gvisor", docker_runtime="runsc")
-    )
+    config = _config(secure_runtime=SecureRuntimeConfig(type="gvisor", docker_runtime="runsc"))
 
     with pytest.raises(ValueError, match="runsc"):
         await validate_secure_runtime_on_startup(config, docker_client=docker_client)
@@ -103,9 +99,7 @@ async def test_validate_secure_runtime_rejects_missing_docker_runtime() -> None:
 
 @pytest.mark.asyncio
 async def test_validate_secure_runtime_allows_missing_docker_client() -> None:
-    config = _config(
-        secure_runtime=SecureRuntimeConfig(type="gvisor", docker_runtime="runsc")
-    )
+    config = _config(secure_runtime=SecureRuntimeConfig(type="gvisor", docker_runtime="runsc"))
 
     await validate_secure_runtime_on_startup(config, docker_client=None)
 

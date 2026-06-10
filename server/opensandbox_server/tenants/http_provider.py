@@ -85,6 +85,8 @@ class HTTPTenantProvider:
         self._lock = threading.Lock()
         self._cache: Dict[str, _CacheEntry] = {}
         self._inflight: Dict[str, threading.Event] = {}
+        self._inflight_result: Dict[str, Optional[TenantEntry]] = {}
+        self._inflight_error: Dict[str, Exception] = {}
         self._ready = False
         self._callbacks: List[Callable[[List[TenantEntry]], None]] = []
         self._client: Optional[httpx.Client] = None
@@ -113,9 +115,7 @@ class HTTPTenantProvider:
                         f"HTTP tenant endpoint unreachable and cache stale "
                         f"beyond {self._config.max_stale_seconds}s"
                     )
-                logger.warning(
-                    "HTTP tenant fetch failed, serving stale entry (age=%.1fs)", age
-                )
+                logger.warning("HTTP tenant fetch failed, serving stale entry (age=%.1fs)", age)
                 return cached.tenant
 
         # Cache miss — sync fetch
@@ -124,9 +124,7 @@ class HTTPTenantProvider:
         except _Unauthorized:
             return None
         except Exception as e:
-            raise TenantProviderUnavailable(
-                f"HTTP tenant endpoint unreachable: {e}"
-            ) from e
+            raise TenantProviderUnavailable(f"HTTP tenant endpoint unreachable: {e}") from e
 
     def list_tenants(self) -> List[TenantEntry]:
         with self._lock:
@@ -161,7 +159,11 @@ class HTTPTenantProvider:
         self._callbacks.append(callback)
 
     def _fetch_and_cache(self, api_key: str, now: float) -> Optional[TenantEntry]:
-        """Singleflight GET: only one fetch per key at a time, others wait."""
+        """Singleflight GET: only one fetch per key at a time, others wait.
+
+        Propagates leader result (entry or exception) to all waiters so
+        provider outages / 5xx errors don't masquerade as invalid credentials.
+        """
         with self._lock:
             event = self._inflight.get(api_key)
             if event is not None:
@@ -169,18 +171,28 @@ class HTTPTenantProvider:
             else:
                 event = threading.Event()
                 self._inflight[api_key] = event
+                self._inflight_result[api_key] = None
+                self._inflight_error.pop(api_key, None)
                 is_leader = True
 
         if not is_leader:
             event.wait(timeout=self._config.timeout_seconds)
             with self._lock:
                 cached = self._cache.get(api_key)
+                error = self._inflight_error.pop(api_key, None)
             if cached:
                 return cached.tenant
-            return None
+            if error is not None:
+                raise error
+            raise TenantProviderUnavailable("Timed out waiting for in-flight tenant lookup")
 
         try:
             return self._do_fetch(api_key, now)
+        except Exception as e:
+            with self._lock:
+                if api_key in self._inflight:
+                    self._inflight_error[api_key] = e
+            raise
         finally:
             with self._lock:
                 self._inflight.pop(api_key, None)

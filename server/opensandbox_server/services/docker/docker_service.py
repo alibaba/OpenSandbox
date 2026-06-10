@@ -115,6 +115,7 @@ from opensandbox_server.services.validators import (
     ensure_platform_valid,
     ensure_timeout_within_limit,
 )
+
 logger = logging.getLogger(__name__)
 
 PENDING_FAILURE_TTL_SECONDS = int(os.environ.get("PENDING_FAILURE_TTL", "3600"))
@@ -128,7 +129,16 @@ class PendingSandbox:
     status: SandboxStatus
 
 
-class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVolumesMixin, DockerNetworkingMixin, DockerContainerOpsMixin, OSSFSMixin, SandboxService, ExtensionService):
+class DockerSandboxService(
+    DockerDiagnosticsMixin,
+    DockerRuntimeMixin,
+    DockerVolumesMixin,
+    DockerNetworkingMixin,
+    DockerContainerOpsMixin,
+    OSSFSMixin,
+    SandboxService,
+    ExtensionService,
+):
     """
     Docker-based implementation of SandboxService.
 
@@ -357,8 +367,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                     )
                 else:
                     logger.warning(
-                        "Failed to fetch sandbox %s for expiration: %s — "
-                        "scheduling retry in 30s",
+                        "Failed to fetch sandbox %s for expiration: %s — scheduling retry in 30s",
                         sandbox_id,
                         exc.detail,
                     )
@@ -633,7 +642,12 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         pvc_inspect_cache, auto_created_volumes = self._validate_volumes(request)
         sandbox_id, created_at, expires_at = self._prepare_creation_context(request)
         return self._provision_sandbox(
-            sandbox_id, request, created_at, expires_at, pvc_inspect_cache, auto_created_volumes,
+            sandbox_id,
+            request,
+            created_at,
+            expires_at,
+            pvc_inspect_cache,
+            auto_created_volumes,
         )
 
     def _async_provision_worker(
@@ -765,7 +779,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         labels, environment = self._build_labels_and_env(sandbox_id, request, expires_at)
         if auto_created_volumes:
             labels[SANDBOX_MANAGED_VOLUMES_LABEL] = json.dumps(
-                auto_created_volumes, separators=(",", ":"),
+                auto_created_volumes,
+                separators=(",", ":"),
             )
         image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
         mem_limit, nano_cpus, gpu_count = self._resolve_resource_limits(request)
@@ -773,7 +788,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         requested_windows_profile = is_windows_platform(request.platform)
 
         if requested_windows_profile:
-            validate_windows_resource_limits((request.resource_limits.root if request.resource_limits else None) or {})
+            validate_windows_resource_limits(
+                (request.resource_limits.root if request.resource_limits else None) or {}
+            )
             validate_windows_runtime_prerequisites()
 
         # Prepare OSSFS mounts first so binds can reference mounted host paths.
@@ -863,7 +880,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                 labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                 labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
                 host_config_kwargs = self._base_host_config_kwargs(
-                    effective_mem_limit, effective_nano_cpus, f"container:{sidecar_container.id}",
+                    effective_mem_limit,
+                    effective_nano_cpus,
+                    f"container:{sidecar_container.id}",
                     gpu_count=effective_gpu_count,
                 )
                 # Container network namespace is shared with sidecar. Docker rejects
@@ -876,7 +895,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                     host_config_kwargs["cap_drop"] = list(cap_drop)
             else:
                 host_config_kwargs = self._base_host_config_kwargs(
-                    effective_mem_limit, effective_nano_cpus, self.network_mode,
+                    effective_mem_limit,
+                    effective_nano_cpus,
+                    self.network_mode,
                     gpu_count=effective_gpu_count,
                 )
                 if self.network_mode != HOST_NETWORK_MODE:
@@ -1225,7 +1246,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
 
     # Patch sandbox metadata
 
-    def patch_sandbox_metadata(self, sandbox_id: str, patch: PatchSandboxMetadataRequest) -> Sandbox:
+    def patch_sandbox_metadata(
+        self, sandbox_id: str, patch: PatchSandboxMetadataRequest
+    ) -> Sandbox:
         """Patch sandbox metadata via JSON Merge Patch (RFC 7396). Docker cannot update labels on running containers, so metadata is persisted to file."""
         from opensandbox_server.services.validators import ensure_metadata_labels
 

@@ -95,9 +95,7 @@ class AgentSandboxProvider(WorkloadProvider):
         self.execd_init_resources = k8s_config.execd_init_resources if k8s_config else None
 
         self.resolver = SecureRuntimeResolver(app_config) if app_config else None
-        self.runtime_class = (
-            self.resolver.get_k8s_runtime_class() if self.resolver else None
-        )
+        self.runtime_class = self.resolver.get_k8s_runtime_class() if self.resolver else None
 
         self.egress_disable_ipv6 = (
             bool(app_config.egress.disable_ipv6)
@@ -145,7 +143,9 @@ class AgentSandboxProvider(WorkloadProvider):
             raise ValueError("agent-sandbox does not support platform.os=windows.")
 
         if self.runtime_class:
-            logger.info(f"Using Kubernetes RuntimeClass '{self.runtime_class}' for sandbox {sandbox_id}")
+            logger.info(
+                f"Using Kubernetes RuntimeClass '{self.runtime_class}' for sandbox {sandbox_id}"
+            )
 
         pod_spec = self._build_pod_spec(
             image_spec=image_spec,
@@ -222,11 +222,7 @@ class AgentSandboxProvider(WorkloadProvider):
             return
 
         template = self.template_manager.get_base_template()
-        template_spec = (
-            template.get("spec", {})
-            .get("podTemplate", {})
-            .get("spec", {})
-        )
+        template_spec = template.get("spec", {}).get("podTemplate", {}).get("spec", {})
         WorkloadProvider.apply_platform_node_selector(
             pod_spec=pod_spec,
             template_spec=template_spec if isinstance(template_spec, dict) else {},
@@ -248,9 +244,7 @@ class AgentSandboxProvider(WorkloadProvider):
     ) -> Dict[str, Any]:
         """Build pod spec dict for the Sandbox CRD."""
         disable_ipv6_for_egress = (
-            network_policy is not None
-            and egress_image is not None
-            and self.egress_disable_ipv6
+            network_policy is not None and egress_image is not None and self.egress_disable_ipv6
         )
         init_container = _build_execd_init_container(
             execd_image,
@@ -268,7 +262,7 @@ class AgentSandboxProvider(WorkloadProvider):
             resource_limits=resource_limits,
             has_network_policy=network_policy is not None,
         )
-        
+
         containers = [_container_to_dict(main_container)]
         pod_spec: Dict[str, Any] = {
             "initContainers": [_container_to_dict(init_container)],
@@ -406,10 +400,12 @@ class AgentSandboxProvider(WorkloadProvider):
         reason = ready_condition.get("reason")
         message = ready_condition.get("message")
         last_transition_at = ready_condition.get("lastTransitionTime") or creation_timestamp
-        has_platform_constraints, has_non_platform_constraints = _workload_platform_constraint_scope(
-            workload,
-            "podTemplate",
-            self.analyze_platform_constraints_in_pod_spec,
+        has_platform_constraints, has_non_platform_constraints = (
+            _workload_platform_constraint_scope(
+                workload,
+                "podTemplate",
+                self.analyze_platform_constraints_in_pod_spec,
+            )
         )
 
         if cond_status == "True":
@@ -453,10 +449,12 @@ class AgentSandboxProvider(WorkloadProvider):
         except Exception:
             return None
 
-        has_platform_constraints, has_non_platform_constraints = _workload_platform_constraint_scope(
-            workload,
-            "podTemplate",
-            self.analyze_platform_constraints_in_pod_spec,
+        has_platform_constraints, has_non_platform_constraints = (
+            _workload_platform_constraint_scope(
+                workload,
+                "podTemplate",
+                self.analyze_platform_constraints_in_pod_spec,
+            )
         )
         for pod in pods:
             unschedulable_message = _extract_platform_unschedulable_message_from_pod(
@@ -468,7 +466,9 @@ class AgentSandboxProvider(WorkloadProvider):
             if unschedulable_message:
                 return ("Failed", "POD_PLATFORM_UNSCHEDULABLE", unschedulable_message)
 
-            pod_status = pod.get("status") if isinstance(pod, dict) else getattr(pod, "status", None)
+            pod_status = (
+                pod.get("status") if isinstance(pod, dict) else getattr(pod, "status", None)
+            )
             if pod_status:
                 pod_ip = (
                     pod_status.get("podIP")
@@ -503,7 +503,9 @@ class AgentSandboxProvider(WorkloadProvider):
 
         return None
 
-    def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[Endpoint]:
+    def get_endpoint_info(
+        self, workload: Dict[str, Any], port: int, sandbox_id: str
+    ) -> Optional[Endpoint]:
         ingress_endpoint = format_ingress_endpoint(self.ingress_config, sandbox_id, port)
         if ingress_endpoint:
             return ingress_endpoint

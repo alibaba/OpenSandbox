@@ -99,7 +99,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={
                     "code": "MISSING_API_KEY",
                     "message": "Authentication credentials are missing. "
-                              f"Provide API key via {SANDBOX_API_KEY_HEADER} header.",
+                    f"Provide API key via {SANDBOX_API_KEY_HEADER} header.",
                 },
             )
 
@@ -131,7 +131,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={
                     "code": "INVALID_API_KEY",
                     "message": "Authentication credentials are invalid. "
-                              "Check your API key and try again.",
+                    "Check your API key and try again.",
                 },
             )
 
@@ -149,7 +149,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={
                     "code": "INVALID_API_KEY",
                     "message": "Authentication credentials are invalid. "
-                              "Check your API key and try again.",
+                    "Check your API key and try again.",
                 },
             )
 

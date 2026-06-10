@@ -42,8 +42,13 @@ from opensandbox_server.integrations.renew_intent.logutil import (
     RENEW_SOURCE_SERVER_PROXY,
     renew_bundle,
 )
-from opensandbox_server.integrations.renew_intent.redis_client import connect_renew_intent_redis_from_config
-from opensandbox_server.services.extension_service import ExtensionService, require_extension_service
+from opensandbox_server.integrations.renew_intent.redis_client import (
+    connect_renew_intent_redis_from_config,
+)
+from opensandbox_server.services.extension_service import (
+    ExtensionService,
+    require_extension_service,
+)
 from opensandbox_server.services.factory import create_sandbox_service
 from opensandbox_server.services.sandbox_service import SandboxService
 

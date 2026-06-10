@@ -54,7 +54,9 @@ def test_apply_windows_runtime_host_config_defaults_removes_net_admin_from_cap_d
 
 
 def test_validate_windows_runtime_prerequisites_reports_missing_devices():
-    with patch("opensandbox_server.services.docker.windows_profile.os.path.exists", return_value=False):
+    with patch(
+        "opensandbox_server.services.docker.windows_profile.os.path.exists", return_value=False
+    ):
         with pytest.raises(HTTPException) as exc_info:
             validate_windows_runtime_prerequisites()
 
@@ -64,17 +66,11 @@ def test_validate_windows_runtime_prerequisites_reports_missing_devices():
 
 
 def test_resolve_docker_platform_skips_windows_profile():
-    assert (
-        resolve_docker_platform(PlatformSpec(os="windows", arch="amd64"))
-        is None
-    )
+    assert resolve_docker_platform(PlatformSpec(os="windows", arch="amd64")) is None
 
 
 def test_resolve_docker_platform_preserves_linux_profile():
-    assert (
-        resolve_docker_platform(PlatformSpec(os="linux", arch="arm64"))
-        == "linux/arm64"
-    )
+    assert resolve_docker_platform(PlatformSpec(os="linux", arch="arm64")) == "linux/arm64"
 
 
 def test_inject_windows_user_ports_appends_when_missing():
@@ -149,5 +145,3 @@ def test_validate_windows_resource_limits_rejects_values_below_minimum(
         validate_windows_resource_limits(resource_limits)
     assert exc_info.value.status_code == 400
     assert expected_message_fragment in exc_info.value.detail["message"]
-
-

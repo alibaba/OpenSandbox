@@ -30,7 +30,13 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from opensandbox_server.config import AppConfig, IngressConfig, RuntimeConfig, ServerConfig, TenantsConfig
+from opensandbox_server.config import (
+    AppConfig,
+    IngressConfig,
+    RuntimeConfig,
+    ServerConfig,
+    TenantsConfig,
+)
 from opensandbox_server.middleware.auth import AuthMiddleware
 from opensandbox_server.tenants import (
     FileTenantProvider,
@@ -47,6 +53,7 @@ from opensandbox_server.tenants import (
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def tenants_toml(tmp_path):
@@ -94,10 +101,14 @@ def mock_http_tenant_server():
                 self.send_response(401)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
-                self.wfile.write(json.dumps({
-                    "code": "UNAUTHORIZED",
-                    "message": "Invalid API key",
-                }).encode())
+                self.wfile.write(
+                    json.dumps(
+                        {
+                            "code": "UNAUTHORIZED",
+                            "message": "Invalid API key",
+                        }
+                    ).encode()
+                )
 
         def log_message(self, format, *args):
             pass  # suppress logging
@@ -114,8 +125,8 @@ def mock_http_tenant_server():
 # FileTenantProvider tests
 # ---------------------------------------------------------------------------
 
-class TestFileTenantProvider:
 
+class TestFileTenantProvider:
     def test_load_valid_config(self, tenants_toml):
         provider = FileTenantProvider(tenants_toml)
         provider.start()
@@ -252,12 +263,14 @@ class TestFileTenantProvider:
 # HTTPTenantProvider tests
 # ---------------------------------------------------------------------------
 
-class TestHTTPTenantProvider:
 
+class TestHTTPTenantProvider:
     def test_lookup_valid_key(self, mock_http_tenant_server):
-        provider = HTTPTenantProvider(HTTPTenantProviderConfig(
-            endpoint=mock_http_tenant_server,
-        ))
+        provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=mock_http_tenant_server,
+            )
+        )
         provider.start()
         try:
             entry = provider.lookup("sk-http-valid")
@@ -267,9 +280,11 @@ class TestHTTPTenantProvider:
             provider.close()
 
     def test_lookup_invalid_key_returns_none(self, mock_http_tenant_server):
-        provider = HTTPTenantProvider(HTTPTenantProviderConfig(
-            endpoint=mock_http_tenant_server,
-        ))
+        provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=mock_http_tenant_server,
+            )
+        )
         provider.start()
         try:
             entry = provider.lookup("sk-invalid")
@@ -278,9 +293,11 @@ class TestHTTPTenantProvider:
             provider.close()
 
     def test_cache_hit_within_ttl(self, mock_http_tenant_server):
-        provider = HTTPTenantProvider(HTTPTenantProviderConfig(
-            endpoint=mock_http_tenant_server,
-        ))
+        provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=mock_http_tenant_server,
+            )
+        )
         provider.start()
         try:
             # First call — fetches from server
@@ -294,9 +311,11 @@ class TestHTTPTenantProvider:
             provider.close()
 
     def test_cache_expires_after_ttl(self, mock_http_tenant_server):
-        provider = HTTPTenantProvider(HTTPTenantProviderConfig(
-            endpoint=mock_http_tenant_server,
-        ))
+        provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=mock_http_tenant_server,
+            )
+        )
         provider.start()
         try:
             entry = provider.lookup("sk-http-short-ttl")
@@ -314,10 +333,12 @@ class TestHTTPTenantProvider:
             provider.close()
 
     def test_unreachable_endpoint_raises_unavailable(self):
-        provider = HTTPTenantProvider(HTTPTenantProviderConfig(
-            endpoint="http://127.0.0.1:1",  # unlikely to be listening
-            timeout_seconds=0.5,
-        ))
+        provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint="http://127.0.0.1:1",  # unlikely to be listening
+                timeout_seconds=0.5,
+            )
+        )
         provider.start()
         try:
             with pytest.raises(TenantProviderUnavailable):
@@ -326,10 +347,12 @@ class TestHTTPTenantProvider:
             provider.close()
 
     def test_stale_cache_served_when_endpoint_down(self, mock_http_tenant_server):
-        provider = HTTPTenantProvider(HTTPTenantProviderConfig(
-            endpoint=mock_http_tenant_server,
-            max_stale_seconds=60,
-        ))
+        provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=mock_http_tenant_server,
+                max_stale_seconds=60,
+            )
+        )
         provider.start()
         try:
             # Populate cache with short TTL
@@ -344,6 +367,7 @@ class TestHTTPTenantProvider:
             )
             provider._client.close()
             import httpx
+
             provider._client = httpx.Client(timeout=0.5)
 
             time.sleep(1.5)  # TTL expires
@@ -356,9 +380,11 @@ class TestHTTPTenantProvider:
             provider.close()
 
     def test_revoked_key_evicted_from_cache(self, mock_http_tenant_server):
-        provider = HTTPTenantProvider(HTTPTenantProviderConfig(
-            endpoint=mock_http_tenant_server,
-        ))
+        provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=mock_http_tenant_server,
+            )
+        )
         provider.start()
         try:
             # This key is valid
@@ -391,8 +417,8 @@ class TestHTTPTenantProvider:
 # Auth middleware multi-tenant integration
 # ---------------------------------------------------------------------------
 
-class TestAuthMiddlewareMultiTenant:
 
+class TestAuthMiddlewareMultiTenant:
     def _build_multi_tenant_app(self, provider):
         app = FastAPI()
         config = AppConfig(
@@ -463,6 +489,7 @@ class TestAuthMiddlewareMultiTenant:
             # Monkey-patch lookup to raise
             def broken_lookup(key):
                 raise TenantProviderUnavailable("test")
+
             provider.lookup = broken_lookup
 
             resp = client.get("/secured", headers={"OPEN-SANDBOX-API-KEY": "sk-alpha-1"})
@@ -472,9 +499,11 @@ class TestAuthMiddlewareMultiTenant:
             provider.close()
 
     def test_http_provider_auth_integration(self, mock_http_tenant_server):
-        provider = HTTPTenantProvider(HTTPTenantProviderConfig(
-            endpoint=mock_http_tenant_server,
-        ))
+        provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=mock_http_tenant_server,
+            )
+        )
         provider.start()
         try:
             app = self._build_multi_tenant_app(provider)
@@ -494,8 +523,8 @@ class TestAuthMiddlewareMultiTenant:
 # Namespace resolution
 # ---------------------------------------------------------------------------
 
-class TestNamespaceResolution:
 
+class TestNamespaceResolution:
     def test_resolve_namespace_with_tenant(self):
         from opensandbox_server.tenants.context import set_current_tenant, get_current_tenant
 
@@ -515,8 +544,8 @@ class TestNamespaceResolution:
 # Startup guards
 # ---------------------------------------------------------------------------
 
-class TestStartupGuards:
 
+class TestStartupGuards:
     def test_tenants_config_with_docker_runtime_rejected(self):
         with pytest.raises(ValueError, match="runtime.type='docker'"):
             validate_tenant_config(runtime_type="docker", api_key="")

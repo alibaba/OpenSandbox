@@ -46,6 +46,9 @@ class SandboxService(ABC):
     Implementations should handle creating, managing, and destroying sandboxes.
     """
 
+    def set_tenant_provider(self, provider: object) -> None:
+        """Inject tenant provider (no-op for non-K8s implementations)."""
+
     @staticmethod
     def generate_sandbox_id() -> str:
         """
@@ -65,7 +68,9 @@ class SandboxService(ABC):
             str: Detected local IP address, or 127.0.0.1 as a safe fallback.
         """
         try:
-            target = ("2001:4860:4860::8888", 80, 0, 0) if family == socket.AF_INET6 else ("8.8.8.8", 80)
+            target = (
+                ("2001:4860:4860::8888", 80, 0, 0) if family == socket.AF_INET6 else ("8.8.8.8", 80)
+            )
             with socket.socket(family, socket.SOCK_DGRAM) as sock:
                 sock.connect(target)
                 ip = sock.getsockname()[0]
@@ -208,7 +213,9 @@ class SandboxService(ABC):
         pass
 
     @abstractmethod
-    def patch_sandbox_metadata(self, sandbox_id: str, patch: PatchSandboxMetadataRequest) -> Sandbox:
+    def patch_sandbox_metadata(
+        self, sandbox_id: str, patch: PatchSandboxMetadataRequest
+    ) -> Sandbox:
         """Patch sandbox metadata via JSON Merge Patch (RFC 7396). Non-null adds/replaces, null deletes, absent keeps."""
         pass
 
@@ -298,8 +305,13 @@ class SandboxService(ABC):
         pass
 
     @abstractmethod
-    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False,
-                     expires: Optional[int] = None) -> Endpoint:
+    def get_endpoint(
+        self,
+        sandbox_id: str,
+        port: int,
+        resolve_internal: bool = False,
+        expires: Optional[int] = None,
+    ) -> Endpoint:
         """
         Get sandbox access endpoint.
 

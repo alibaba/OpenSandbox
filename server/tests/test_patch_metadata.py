@@ -91,6 +91,7 @@ class TestApplyMetadataPatch:
     @staticmethod
     def _merge(labels: dict, patch: dict) -> dict:
         from opensandbox_server.services.sandbox_service import SandboxService
+
         return SandboxService._apply_metadata_patch(labels, patch)
 
     def test_preserves_system_labels(self):
@@ -169,14 +170,29 @@ class TestPatchLabelsMethod:
             version = "v1"
             plural = "tests"
 
-            def create_workload(self, *args, **kwargs): pass
-            def get_workload(self, *args, **kwargs): pass
-            def delete_workload(self, *args, **kwargs): pass
-            def list_workloads(self, *args, **kwargs): pass
-            def update_expiration(self, *args, **kwargs): pass
-            def get_expiration(self, *args, **kwargs): pass
-            def get_status(self, *args, **kwargs): pass
-            def get_endpoint_info(self, *args, **kwargs): pass
+            def create_workload(self, *args, **kwargs):
+                pass
+
+            def get_workload(self, *args, **kwargs):
+                pass
+
+            def delete_workload(self, *args, **kwargs):
+                pass
+
+            def list_workloads(self, *args, **kwargs):
+                pass
+
+            def update_expiration(self, *args, **kwargs):
+                pass
+
+            def get_expiration(self, *args, **kwargs):
+                pass
+
+            def get_status(self, *args, **kwargs):
+                pass
+
+            def get_endpoint_info(self, *args, **kwargs):
+                pass
 
         for attr, val in overrides.items():
             setattr(StubProvider, attr, val)

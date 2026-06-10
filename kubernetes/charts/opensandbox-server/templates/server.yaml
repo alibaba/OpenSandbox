@@ -121,7 +121,7 @@ spec:
               value: "/etc/opensandbox/config.toml"
             {{- if .Values.tenantsToml }}
             - name: SANDBOX_TENANTS_CONFIG_PATH
-              value: "/etc/opensandbox/tenants.toml"
+              value: "/etc/opensandbox/tenants-config/tenants.toml"
             {{- end }}
             {{- with .Values.server.env }}
             {{- toYaml . | nindent 12 }}
@@ -133,8 +133,7 @@ spec:
               readOnly: true
             {{- if .Values.tenantsToml }}
             - name: tenants
-              mountPath: /etc/opensandbox/tenants.toml
-              subPath: tenants.toml
+              mountPath: /etc/opensandbox/tenants-config
               readOnly: true
             {{- end }}
             {{- with .Values.server.volumeMounts }}

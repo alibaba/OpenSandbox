@@ -35,13 +35,7 @@ from opensandbox_server.config import (
     KubernetesRuntimeConfig,
     RuntimeConfig,
 )
-from opensandbox_server.services.constants import (
-    OPEN_SANDBOX_EGRESS_AUTH_HEADER,
-    OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT,
-    OPENSANDBOX_RUNTIME_MOUNT_PATH,
-    OPENSANDBOX_RUNTIME_VOLUME_NAME,
-    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
-)
+from opensandbox_server.services.constants import SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY
 from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from opensandbox_server.services.constants import OPENSANDBOX_EGRESS_TOKEN
 from opensandbox_server.services.k8s.image_pull_secret_helper import IMAGE_AUTH_SECRET_PREFIX
@@ -493,7 +487,7 @@ spec:
         main_container = body["spec"]["template"]["spec"]["containers"][0]
 
         assert main_container["command"] == [
-            "/opt/opensandbox/bootstrap.sh",
+            "/opt/opensandbox/bin/bootstrap.sh",
             "/usr/bin/python",
             "app.py",
         ]
@@ -525,7 +519,7 @@ spec:
         assert env_dict["FOO"] == "bar"
         assert env_dict["BAZ"] == "qux"
         # Verify EXECD is automatically injected
-        assert env_dict["EXECD"] == "/opt/opensandbox/execd"
+        assert env_dict["EXECD"] == "/opt/opensandbox/bin/execd"
 
     def test_create_workload_merges_template_volumes_and_mounts(self, mock_k8s_client, tmp_path):
         template_file = tmp_path / "template.yaml"
@@ -598,7 +592,7 @@ spec:
         - name: sandbox
           volumeMounts:
             - name: opensandbox-bin
-              mountPath: /opt/opensandbox
+              mountPath: /opt/opensandbox/bin
             - name: sandbox-shared-data
               mountPath: /data
 """
@@ -1375,8 +1369,8 @@ spec:
         assert command[0] == "/bin/sh"
         assert command[1] == "-c"
         # Command should contain bootstrap.sh execution
-        # Example: /opt/opensandbox/bootstrap.sh python app.py &
-        assert "/opt/opensandbox/bootstrap.sh python app.py" in command[2]
+        # Example: /opt/opensandbox/bin/bootstrap.sh python app.py &
+        assert "/opt/opensandbox/bin/bootstrap.sh python app.py" in command[2]
         assert command[2].endswith(" &")
         assert task_template["spec"]["process"]["env"] == [{"name": "FOO", "value": "bar"}]
 
@@ -1390,7 +1384,7 @@ spec:
         - Env list formatted correctly for K8s
 
         Generated command example:
-        /bin/sh -c "/opt/opensandbox/bootstrap.sh /usr/bin/python app.py &"
+        /bin/sh -c "/opt/opensandbox/bin/bootstrap.sh /usr/bin/python app.py &"
         """
         provider = BatchSandboxProvider(mock_k8s_client)
 
@@ -1407,7 +1401,7 @@ spec:
         assert command[0] == "/bin/sh"
         assert command[1] == "-c"
         # Should execute via bootstrap.sh in background (&)
-        assert "/opt/opensandbox/bootstrap.sh" in command[2]
+        assert "/opt/opensandbox/bin/bootstrap.sh" in command[2]
         assert "/usr/bin/python" in command[2]
         assert "app.py" in command[2]
         # Should end with & (run in background)
@@ -1426,7 +1420,7 @@ spec:
         Verifies command is wrapped in shell and executes via bootstrap.sh in background.
 
         Generated command example:
-        /bin/sh -c "/opt/opensandbox/bootstrap.sh /usr/bin/python app.py &"
+        /bin/sh -c "/opt/opensandbox/bin/bootstrap.sh /usr/bin/python app.py &"
         """
         provider = BatchSandboxProvider(mock_k8s_client)
 
@@ -1441,7 +1435,7 @@ spec:
         assert command[0] == "/bin/sh"
         assert command[1] == "-c"
         # Check escaped entrypoint
-        assert "/opt/opensandbox/bootstrap.sh" in command[2]
+        assert "/opt/opensandbox/bin/bootstrap.sh" in command[2]
         assert "/usr/bin/python" in command[2]
         assert "app.py" in command[2]
         assert command[2].endswith(" &")
@@ -1462,7 +1456,7 @@ spec:
 
         command = result["spec"]["process"]["command"][2]
         # Should execute bootstrap.sh in background
-        assert "/opt/opensandbox/bootstrap.sh" in command
+        assert "/opt/opensandbox/bin/bootstrap.sh" in command
         assert "python" in command
         assert "app.py" in command
         assert command.endswith(" &")
@@ -1594,34 +1588,6 @@ spec:
         task_template = body["spec"]["taskTemplate"]
         assert task_template["spec"]["process"]["env"] == [{"name": "VERSION", "value": "11"}]
 
-    def test_create_workload_poolref_none_entrypoint_no_env_omits_task_template(self, mock_k8s_client):
-        """When entrypoint is None and env is empty, taskTemplate is omitted.
-
-        SDK pool mode callers omit entrypoint entirely (None), expecting the pool's
-        default command to run. This must not raise a TypeError.
-        """
-        provider = BatchSandboxProvider(mock_k8s_client)
-        mock_k8s_client.create_custom_object.return_value = {
-            "metadata": {"name": "test-id", "uid": "test-uid"}
-        }
-
-        provider.create_workload(
-            sandbox_id="test-id",
-            namespace="test-ns",
-            image_spec=ImageSpec(uri="python:3.11"),
-            entrypoint=None,
-            env={},
-            resource_limits={},
-            labels={},
-            expires_at=None,
-            execd_image="execd:latest",
-            extensions={"poolRef": "my-pool"},
-        )
-
-        body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
-        assert body["spec"]["poolRef"] == "my-pool"
-        assert "taskTemplate" not in body["spec"]
-
 
 class TestBatchSandboxProviderEgress:
     """BatchSandboxProvider egress sidecar tests"""
@@ -1687,7 +1653,6 @@ class TestBatchSandboxProviderEgress:
             execd_image="execd:latest",
             network_policy=network_policy,
             egress_image="opensandbox/egress:v1.0.12",
-            credential_proxy_enabled=True,
         )
 
         body = mock_k8s_client.create_custom_object.call_args.kwargs["body"]
@@ -1706,14 +1671,11 @@ class TestBatchSandboxProviderEgress:
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
         assert "OPENSANDBOX_EGRESS_RULES" in env_vars
         assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS
-        assert env_vars[OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT] == "true"
 
         caps = sidecar.get("securityContext", {}).get("capabilities", {})
         assert "NET_ADMIN" in caps.get("add", [])
         assert sidecar.get("securityContext", {}).get("privileged") is not True
         assert "command" not in sidecar
-        assert sidecar["readinessProbe"]["httpGet"]["path"] == "/healthz"
-        assert sidecar["readinessProbe"]["httpGet"]["port"] == 18080
 
         inits = pod_spec.get("initContainers", [])
         assert len(inits) == 1
@@ -1722,24 +1684,6 @@ class TestBatchSandboxProviderEgress:
         assert execd_init["image"] == "execd:latest"
         assert execd_init.get("securityContext", {}).get("privileged") is True
         assert "/proc/sys/net/ipv6/conf/all/disable_ipv6" in execd_init["args"][0]
-
-        main = next(c for c in containers if c["name"] == "sandbox")
-        main_env = {e["name"]: e["value"] for e in main["env"]}
-        assert main_env[OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT] == "true"
-        assert "SSL_CERT_FILE" not in main_env
-        assert "REQUESTS_CA_BUNDLE" not in main_env
-        assert "CURL_CA_BUNDLE" not in main_env
-        assert "GIT_SSL_CAINFO" not in main_env
-        assert "NODE_EXTRA_CA_CERTS" not in main_env
-        assert "opensandbox-mitm-ca" not in {v["name"] for v in pod_spec["volumes"]}
-        assert {
-            "name": OPENSANDBOX_RUNTIME_VOLUME_NAME,
-            "mountPath": OPENSANDBOX_RUNTIME_MOUNT_PATH,
-        } in main["volumeMounts"]
-        assert {
-            "name": OPENSANDBOX_RUNTIME_VOLUME_NAME,
-            "mountPath": OPENSANDBOX_RUNTIME_MOUNT_PATH,
-        } in sidecar["volumeMounts"]
 
     def test_create_workload_windows_profile_with_network_policy_keeps_ipv6_disable(
         self, mock_k8s_client
@@ -1820,9 +1764,6 @@ class TestBatchSandboxProviderEgress:
         env_vars = {e["name"]: e["value"] for e in sidecar.get("env", [])}
         assert env_vars[OPENSANDBOX_EGRESS_TOKEN] == "egress-token"
         assert env_vars["OPENSANDBOX_EGRESS_MODE"] == EGRESS_MODE_DNS
-        assert sidecar["readinessProbe"]["httpGet"]["httpHeaders"] == [
-            {"name": OPEN_SANDBOX_EGRESS_AUTH_HEADER, "value": "egress-token"}
-        ]
 
     def test_create_workload_with_egress_mode_dns_nft(self, mock_k8s_client):
         provider = BatchSandboxProvider(mock_k8s_client)

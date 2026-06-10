@@ -108,7 +108,9 @@ class KubernetesSnapshotRuntime:
             logger.info("Kubernetes SandboxSnapshot %s already exists; continuing", snapshot_name)
             should_validate_existing_source = True
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Failed to create Kubernetes SandboxSnapshot %s: %s", snapshot_name, exc)
+            logger.exception(
+                "Failed to create Kubernetes SandboxSnapshot %s: %s", snapshot_name, exc
+            )
             return SnapshotRuntimeStatus(
                 state=SnapshotState.FAILED,
                 reason="snapshot_runtime_create_failed",
@@ -148,14 +150,20 @@ class KubernetesSnapshotRuntime:
             if exc.status == 404:
                 logger.info("Kubernetes SandboxSnapshot %s already absent", snapshot_name)
                 return
-            raise RuntimeError(f"Failed to delete Kubernetes SandboxSnapshot {snapshot_name}: {exc}") from exc
+            raise RuntimeError(
+                f"Failed to delete Kubernetes SandboxSnapshot {snapshot_name}: {exc}"
+            ) from exc
 
-    def inspect_snapshot(self, snapshot_id: str, image: Optional[str] = None) -> SnapshotRuntimeStatus:
+    def inspect_snapshot(
+        self, snapshot_id: str, image: Optional[str] = None
+    ) -> SnapshotRuntimeStatus:
         snapshot_name = build_public_snapshot_name(snapshot_id)
         try:
             snapshot = self._get_snapshot_cr(snapshot_name)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Failed to inspect Kubernetes SandboxSnapshot %s: %s", snapshot_name, exc)
+            logger.warning(
+                "Failed to inspect Kubernetes SandboxSnapshot %s: %s", snapshot_name, exc
+            )
             return SnapshotRuntimeStatus(
                 state=SnapshotState.CREATING,
                 reason="snapshot_runtime_inspect_failed",
@@ -198,14 +206,14 @@ class KubernetesSnapshotRuntime:
             name=snapshot_name,
         )
 
-    def _validate_existing_source(self, snapshot: Optional[dict], sandbox_id: str) -> Optional[SnapshotRuntimeStatus]:
+    def _validate_existing_source(
+        self, snapshot: Optional[dict], sandbox_id: str
+    ) -> Optional[SnapshotRuntimeStatus]:
         if snapshot is None:
             return None
 
         existing_sandbox = (
-            snapshot.get("spec", {}).get("sandboxName")
-            if isinstance(snapshot, dict)
-            else None
+            snapshot.get("spec", {}).get("sandboxName") if isinstance(snapshot, dict) else None
         )
         if existing_sandbox in (None, sandbox_id):
             return None
@@ -276,7 +284,8 @@ class KubernetesSnapshotRuntime:
             )
 
         sandbox_containers = [
-            container for container in containers
+            container
+            for container in containers
             if container.get("containerName") == MAIN_CONTAINER_NAME
         ]
         if sandbox_containers:

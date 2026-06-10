@@ -36,7 +36,6 @@ def _make_sandbox(metadata: Optional[Dict[str, str]] = None) -> Sandbox:
 
 
 class TestPatchMetadataRoute:
-
     def test_add_keys(self, client: TestClient, auth_headers: dict, monkeypatch) -> None:
         sandbox = _make_sandbox({"team": "old"})
 
@@ -116,7 +115,10 @@ class TestPatchMetadataRoute:
             def patch_sandbox_metadata(sandbox_id: str, patch: dict) -> Sandbox:
                 raise HTTPException(
                     status_code=404,
-                    detail={"code": "SANDBOX_NOT_FOUND", "message": f"Sandbox {sandbox_id} not found"},
+                    detail={
+                        "code": "SANDBOX_NOT_FOUND",
+                        "message": f"Sandbox {sandbox_id} not found",
+                    },
                 )
 
         monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
@@ -128,7 +130,9 @@ class TestPatchMetadataRoute:
         )
         assert resp.status_code == 404
 
-    def test_invalid_metadata_rejected(self, client: TestClient, auth_headers: dict, monkeypatch) -> None:
+    def test_invalid_metadata_rejected(
+        self, client: TestClient, auth_headers: dict, monkeypatch
+    ) -> None:
         class StubService:
             @staticmethod
             def patch_sandbox_metadata(sandbox_id: str, patch: dict) -> Sandbox:

@@ -103,9 +103,7 @@ def _apply_file_config(log_config: dict, log_cfg: LogConfig, level: str) -> None
 
     if access_file_path:
         Path(access_file_path).parent.mkdir(parents=True, exist_ok=True)
-        log_config["handlers"]["access_file"] = _rotating_file_handler(
-            access_file_path, log_cfg
-        )
+        log_config["handlers"]["access_file"] = _rotating_file_handler(access_file_path, log_cfg)
         access_handler = "access_file"
     else:
         access_handler = "file"

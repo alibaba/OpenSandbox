@@ -46,9 +46,7 @@ logger = logging.getLogger(__name__)
 class DockerVolumesMixin:
     """Mixin providing volume validation, bind mount building, and cleanup."""
 
-    def _validate_volumes(
-        self, request
-    ) -> tuple[dict[str, dict], list[str]]:
+    def _validate_volumes(self, request) -> tuple[dict[str, dict], list[str]]:
         """
         Validate volume definitions for Docker runtime.
 
@@ -266,9 +264,7 @@ class DockerVolumesMixin:
                     },
                 )
 
-            resolved_path = posixpath.normpath(
-                posixpath.join(mountpoint, volume.sub_path)
-            )
+            resolved_path = posixpath.normpath(posixpath.join(mountpoint, volume.sub_path))
 
             # ── Path-escape check (lexical + symlink) ──
             #
@@ -276,12 +272,8 @@ class DockerVolumesMixin:
             #    Use mountpoint + "/" to avoid false positives when one
             #    mountpoint is a prefix of another (e.g., …/_data vs …/_data2).
             #    Docker Mountpoint paths are always POSIX, so use "/" directly.
-            mountpoint_prefix = (
-                mountpoint if mountpoint.endswith("/") else mountpoint + "/"
-            )
-            if resolved_path != mountpoint and not resolved_path.startswith(
-                mountpoint_prefix
-            ):
+            mountpoint_prefix = mountpoint if mountpoint.endswith("/") else mountpoint + "/"
+            if resolved_path != mountpoint and not resolved_path.startswith(mountpoint_prefix):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
@@ -302,12 +294,8 @@ class DockerVolumesMixin:
             #    accessible, this detects symlink-escape attacks (e.g., a
             #    malicious symlink datasets -> /).
             try:
-                canonical_mountpoint = os.path.realpath(
-                    mountpoint, strict=True
-                )
-                canonical_resolved = os.path.realpath(
-                    resolved_path, strict=True
-                )
+                canonical_mountpoint = os.path.realpath(mountpoint, strict=True)
+                canonical_resolved = os.path.realpath(resolved_path, strict=True)
                 # os.path.realpath returns OS-native separators, so use
                 # os.sep here (unlike the lexical check above which operates
                 # on POSIX-normalised Docker Mountpoint strings).
@@ -316,9 +304,8 @@ class DockerVolumesMixin:
                     if canonical_mountpoint.endswith(os.sep)
                     else canonical_mountpoint + os.sep
                 )
-                if (
-                    canonical_resolved != canonical_mountpoint
-                    and not canonical_resolved.startswith(canonical_prefix)
+                if canonical_resolved != canonical_mountpoint and not canonical_resolved.startswith(
+                    canonical_prefix
                 ):
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -393,9 +380,7 @@ class DockerVolumesMixin:
                 # Resolve the concrete host path (host.path + optional subPath)
                 host_path = volume.host.path
                 if volume.sub_path:
-                    host_path = os.path.normpath(
-                        os.path.join(host_path, volume.sub_path)
-                    )
+                    host_path = os.path.normpath(os.path.join(host_path, volume.sub_path))
                 binds.append(f"{host_path}:{container_path}:{mode}")
 
             elif volume.pvc is not None:
@@ -407,15 +392,11 @@ class DockerVolumesMixin:
                     # redundant Docker API call and potential race condition.
                     vol_info = cache.get(volume.pvc.claim_name, {})
                     mountpoint = vol_info.get("Mountpoint", "")
-                    resolved = posixpath.normpath(
-                        posixpath.join(mountpoint, volume.sub_path)
-                    )
+                    resolved = posixpath.normpath(posixpath.join(mountpoint, volume.sub_path))
                     binds.append(f"{resolved}:{container_path}:{mode}")
                 else:
                     # No subPath: use claimName directly as Docker volume ref.
-                    binds.append(
-                        f"{volume.pvc.claim_name}:{container_path}:{mode}"
-                    )
+                    binds.append(f"{volume.pvc.claim_name}:{container_path}:{mode}")
             elif volume.ossfs is not None:
                 _, host_path = self._resolve_ossfs_paths(volume)
                 binds.append(f"{host_path}:{container_path}:{mode}")
@@ -460,17 +441,22 @@ class DockerVolumesMixin:
                 if vol_labels.get(SANDBOX_MANAGED_VOLUMES_LABEL) != "server":
                     logger.debug(
                         "sandbox=%s | volume '%s' not managed by server, skipping removal",
-                        sandbox_id, name,
+                        sandbox_id,
+                        name,
                     )
                     continue
                 self.docker_client.api.remove_volume(name)
                 logger.info("sandbox=%s | removed managed volume '%s'", sandbox_id, name)
             except DockerNotFound:
                 logger.debug(
-                    "sandbox=%s | managed volume '%s' already removed", sandbox_id, name,
+                    "sandbox=%s | managed volume '%s' already removed",
+                    sandbox_id,
+                    name,
                 )
             except DockerException as exc:
                 logger.warning(
                     "sandbox=%s | failed to remove managed volume '%s': %s",
-                    sandbox_id, name, exc,
+                    sandbox_id,
+                    name,
+                    exc,
                 )

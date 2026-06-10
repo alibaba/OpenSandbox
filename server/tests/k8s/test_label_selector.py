@@ -26,9 +26,7 @@ class TestParseSelector:
         assert parse_selector("   ") == []
 
     def test_bare_key_parses_as_existence_term(self):
-        assert parse_selector("opensandbox.io/id") == [
-            ("opensandbox.io/id", "exists", None)
-        ]
+        assert parse_selector("opensandbox.io/id") == [("opensandbox.io/id", "exists", None)]
 
     def test_equality_parses_as_eq_term(self):
         assert parse_selector("team=infra") == [("team", "eq", "infra")]

@@ -41,10 +41,10 @@ class TestMemoryWithQemuOverhead:
     @pytest.mark.parametrize(
         ("input_value", "expected"),
         [
-            ("8192M", "10Gi"),     # 8192/1024 = 8, + 2 = 10
+            ("8192M", "10Gi"),  # 8192/1024 = 8, + 2 = 10
             ("8192Mi", "10Gi"),
-            ("4096Mb", "6Gi"),     # 4096/1024 = 4, + 2 = 6
-            ("1000Mi", "3Gi"),     # ceil(1000/1024) = 1, + 2 = 3
+            ("4096Mb", "6Gi"),  # 4096/1024 = 4, + 2 = 6
+            ("1000Mi", "3Gi"),  # ceil(1000/1024) = 1, + 2 = 3
         ],
     )
     def test_megabyte_units(self, input_value, expected):
@@ -53,7 +53,7 @@ class TestMemoryWithQemuOverhead:
     @pytest.mark.parametrize(
         ("input_value", "expected"),
         [
-            ("1T", "1026Gi"),      # 1*1024 + 2 = 1026
+            ("1T", "1026Gi"),  # 1*1024 + 2 = 1026
             ("1Ti", "1026Gi"),
         ],
     )
@@ -245,5 +245,7 @@ class TestApplyWindowsProfileOverrides:
         main = pod_spec["containers"][0]
         mount_names = [m["name"] for m in main["volumeMounts"]]
         assert "opensandbox-win-storage" in mount_names
-        storage_mount = next(m for m in main["volumeMounts"] if m["name"] == "opensandbox-win-storage")
+        storage_mount = next(
+            m for m in main["volumeMounts"] if m["name"] == "opensandbox-win-storage"
+        )
         assert storage_mount["mountPath"] == "/storage"

@@ -107,9 +107,7 @@ def _filter_proxy_headers(
     if extra_excluded:
         excluded.update(extra_excluded)
     if connection_header:
-        excluded.update(
-            h.strip().lower() for h in connection_header.split(",") if h.strip()
-        )
+        excluded.update(h.strip().lower() for h in connection_header.split(",") if h.strip())
 
     forwarded: dict[str, str] = {}
     for key, value in headers.items():
@@ -207,14 +205,10 @@ async def _proxy_http_request(
         connection_header = resp.headers.get("connection")
         if connection_header:
             hop_by_hop.update(
-                header.strip().lower()
-                for header in connection_header.split(",")
-                if header.strip()
+                header.strip().lower() for header in connection_header.split(",") if header.strip()
             )
         response_headers = {
-            key: value
-            for key, value in resp.headers.items()
-            if key.lower() not in hop_by_hop
+            key: value for key, value in resp.headers.items() if key.lower() not in hop_by_hop
         }
 
         return StreamingResponse(

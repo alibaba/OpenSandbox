@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 
 
 class TestHealthCheck:
-
     def test_health_check(self, client: TestClient):
         response = client.get("/health")
         assert response.status_code == 200

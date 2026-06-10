@@ -34,9 +34,7 @@ def _analyzer(pod_spec):
 
 
 def test_translate_resource_limits_passes_gpu_count():
-    result = _translate_resource_limits_for_k8s(
-        {"cpu": "1", "memory": "1Gi", "gpu": "2"}
-    )
+    result = _translate_resource_limits_for_k8s({"cpu": "1", "memory": "1Gi", "gpu": "2"})
     assert result["nvidia.com/gpu"] == "2"
 
 
@@ -74,9 +72,7 @@ def test_translate_resource_limits_rejects_all():
 
 @pytest.mark.parametrize("bad_value", ["0", "-1", "bad", ""])
 def test_translate_resource_limits_drops_invalid_gpu(bad_value):
-    result = _translate_resource_limits_for_k8s(
-        {"cpu": "1", "gpu": bad_value}
-    )
+    result = _translate_resource_limits_for_k8s({"cpu": "1", "gpu": bad_value})
     assert "nvidia.com/gpu" not in result
     assert "gpu" not in result
     assert result == {"cpu": "1"}

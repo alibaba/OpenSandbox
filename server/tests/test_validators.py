@@ -29,6 +29,7 @@ from opensandbox_server.services.validators import (
     ensure_volumes_valid,
 )
 
+
 def test_ensure_platform_valid_accepts_windows_amd64():
     platform = PlatformSpec(os="windows", arch="amd64")
     assert ensure_platform_valid(platform) is None
@@ -42,12 +43,14 @@ def test_ensure_platform_valid_accepts_windows_arm64():
     assert platform.os == "windows"
     assert platform.arch == "arm64"
 
+
 def test_ensure_platform_valid_rejects_unsupported_os():
     platform = PlatformSpec(os="darwin", arch="amd64")
     with pytest.raises(HTTPException) as exc_info:
         assert ensure_platform_valid(platform) is None
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+
 
 def test_ensure_metadata_labels_accepts_common_k8s_forms():
     valid_metadata = {
@@ -60,9 +63,11 @@ def test_ensure_metadata_labels_accepts_common_k8s_forms():
 
     assert ensure_metadata_labels(valid_metadata) is None
 
+
 def test_ensure_metadata_labels_allows_none_or_empty():
     assert ensure_metadata_labels(None) is None
     assert ensure_metadata_labels({}) is None
+
 
 def test_ensure_metadata_labels_rejects_name_too_long():
     """Label name part exceeding 63 characters should be rejected."""
@@ -71,6 +76,7 @@ def test_ensure_metadata_labels_rejects_name_too_long():
         assert ensure_metadata_labels({long_name: "value"}) is None
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
 
 def test_ensure_metadata_labels_rejects_prefix_too_long():
     """Label prefix (DNS subdomain) exceeding 253 characters should be rejected."""
@@ -83,6 +89,7 @@ def test_ensure_metadata_labels_rejects_prefix_too_long():
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
 
+
 def test_ensure_metadata_labels_accepts_key_with_max_length_prefix_and_name():
     """Valid key where prefix <= 253 chars and name <= 63 chars but total > 253 should be accepted."""
     label_part = "a" * 62
@@ -91,12 +98,14 @@ def test_ensure_metadata_labels_accepts_key_with_max_length_prefix_and_name():
     key = f"{prefix}/valid-name"
     assert ensure_metadata_labels({key: "value"}) is None
 
+
 def test_ensure_metadata_labels_rejects_invalid_prefix_format():
     """Label prefix with invalid DNS subdomain characters should be rejected."""
     with pytest.raises(HTTPException) as exc_info:
         assert ensure_metadata_labels({"INVALID_PREFIX.io/name": "value"}) is None
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
 
 def test_ensure_metadata_labels_rejects_value_too_long():
     """Label value exceeding 63 characters should be rejected."""
@@ -106,12 +115,14 @@ def test_ensure_metadata_labels_rejects_value_too_long():
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
 
+
 def test_ensure_metadata_labels_rejects_key_with_empty_prefix():
     """Key with an empty prefix (starts with '/') should be rejected."""
     with pytest.raises(HTTPException) as exc_info:
         assert ensure_metadata_labels({"/name": "value"}) is None
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
+
 
 def test_ensure_metadata_labels_rejects_reserved_prefix():
     """User metadata must not use the opensandbox.io/ reserved prefix."""
@@ -121,6 +132,7 @@ def test_ensure_metadata_labels_rejects_reserved_prefix():
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
     assert "reserved prefix" in exc_info.value.detail["message"]
 
+
 def test_ensure_metadata_labels_rejects_manual_cleanup_key():
     """User must not inject the manual-cleanup lifecycle label."""
     with pytest.raises(HTTPException) as exc_info:
@@ -129,6 +141,7 @@ def test_ensure_metadata_labels_rejects_manual_cleanup_key():
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
     assert "reserved prefix" in exc_info.value.detail["message"]
 
+
 def test_ensure_metadata_labels_rejects_arbitrary_reserved_key():
     """Any key under opensandbox.io/ should be rejected, not just known labels."""
     with pytest.raises(HTTPException) as exc_info:
@@ -136,11 +149,14 @@ def test_ensure_metadata_labels_rejects_arbitrary_reserved_key():
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_METADATA_LABEL
 
+
 def test_ensure_timeout_within_limit_allows_equal_boundary():
     assert ensure_timeout_within_limit(3600, 3600) is None
 
+
 def test_ensure_timeout_within_limit_allows_disabled_upper_bound():
     assert ensure_timeout_within_limit(7200, None) is None
+
 
 def test_ensure_timeout_within_limit_rejects_timeout_above_limit():
     with pytest.raises(HTTPException) as exc_info:
@@ -148,6 +164,7 @@ def test_ensure_timeout_within_limit_rejects_timeout_above_limit():
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+
 
 def test_ensure_timeout_within_limit_rejects_unrepresentable_timeout():
     with pytest.raises(HTTPException) as exc_info:
@@ -157,8 +174,8 @@ def test_ensure_timeout_within_limit_rejects_unrepresentable_timeout():
     assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
     assert "too large" in exc_info.value.detail["message"]
 
-class TestEnsureValidVolumeName:
 
+class TestEnsureValidVolumeName:
     def test_valid_simple_name(self):
         """Simple lowercase names should be valid."""
         assert ensure_valid_volume_name("workdir") is None
@@ -220,8 +237,8 @@ class TestEnsureValidVolumeName:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_VOLUME_NAME
 
-class TestEnsureValidMountPath:
 
+class TestEnsureValidMountPath:
     def test_valid_absolute_path(self):
         """Absolute paths should be valid."""
         assert ensure_valid_mount_path("/mnt/data") is None
@@ -249,8 +266,8 @@ class TestEnsureValidMountPath:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_MOUNT_PATH
 
-class TestEnsureValidSubPath:
 
+class TestEnsureValidSubPath:
     def test_none_subpath_valid(self):
         """None subpath should be valid."""
         assert ensure_valid_sub_path(None) is None
@@ -286,8 +303,8 @@ class TestEnsureValidSubPath:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_SUB_PATH
 
-class TestEnsureValidHostPath:
 
+class TestEnsureValidHostPath:
     def test_valid_absolute_path(self):
         """Absolute paths should be valid."""
         assert ensure_valid_host_path("/data/opensandbox") is None
@@ -369,8 +386,8 @@ class TestEnsureValidHostPath:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.HOST_PATH_NOT_ALLOWED
 
-class TestEnsureValidPvcName:
 
+class TestEnsureValidPvcName:
     def test_valid_simple_name(self):
         """Simple lowercase names should be valid."""
         assert ensure_valid_pvc_name("my-pvc") is None
@@ -406,8 +423,8 @@ class TestEnsureValidPvcName:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PVC_NAME
 
-class TestEnsureVolumesValid:
 
+class TestEnsureVolumesValid:
     def test_none_volumes_valid(self):
         """None volumes should be valid."""
         assert ensure_volumes_valid(None) is None
@@ -443,7 +460,7 @@ class TestEnsureVolumesValid:
             ossfs=OSSFS(
                 bucket="bucket-test-3",
                 endpoint="oss-cn-hangzhou.aliyuncs.com",
-                    access_key_id="AKIDEXAMPLE",
+                access_key_id="AKIDEXAMPLE",
                 access_key_secret="SECRETEXAMPLE",
             ),
             mount_path="/mnt/data",

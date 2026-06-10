@@ -86,7 +86,9 @@ def apply_windows_profile_overrides(
         "chmod 0644 /oem/install.bat /oem/execd.exe"
     )
     if disable_ipv6_for_egress:
-        init_container["args"] = [f"set -e; echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 && {init_script}"]
+        init_container["args"] = [
+            f"set -e; echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 && {init_script}"
+        ]
         init_container["securityContext"] = {"privileged": True}
     else:
         init_container["args"] = [init_script]
@@ -276,7 +278,9 @@ def _template_allows_arch(template_spec: Dict[str, Any], requested_arch: str) ->
     if not isinstance(terms, list) or not terms:
         return True
 
-    return any(_arch_term_satisfiable(term, requested_arch) for term in terms if isinstance(term, dict))
+    return any(
+        _arch_term_satisfiable(term, requested_arch) for term in terms if isinstance(term, dict)
+    )
 
 
 def _arch_term_satisfiable(term: Dict[str, Any], requested_arch: str) -> bool:

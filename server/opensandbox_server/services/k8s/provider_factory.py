@@ -45,8 +45,7 @@ def create_workload_provider(
     if provider_type is None:
         if not _PROVIDER_REGISTRY:
             raise ValueError(
-                "No workload providers are registered. "
-                "Cannot create a default provider."
+                "No workload providers are registered. Cannot create a default provider."
             )
         provider_type = next(iter(_PROVIDER_REGISTRY.keys()))
         logger.info(f"No provider specified, using default: {provider_type}")
@@ -73,16 +72,13 @@ def register_provider(name: str, provider_class: Type[WorkloadProvider]) -> None
     """Register a custom workload provider implementation."""
     if not issubclass(provider_class, WorkloadProvider):
         raise TypeError(
-            f"Provider class must inherit from WorkloadProvider, "
-            f"got {provider_class.__name__}"
+            f"Provider class must inherit from WorkloadProvider, got {provider_class.__name__}"
         )
-    
+
     name_lower = name.lower()
     if name_lower in _PROVIDER_REGISTRY:
-        logger.warning(
-            f"Overwriting existing provider registration: {name_lower}"
-        )
-    
+        logger.warning(f"Overwriting existing provider registration: {name_lower}")
+
     _PROVIDER_REGISTRY[name_lower] = provider_class
     logger.info(f"Registered workload provider: {name_lower} -> {provider_class.__name__}")
 

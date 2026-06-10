@@ -24,7 +24,10 @@ import opensandbox_server.api.proxy as proxy_api
 from opensandbox_server.api import lifecycle
 from opensandbox_server.api.schema import Endpoint
 from opensandbox_server.middleware.auth import SANDBOX_API_KEY_HEADER
-from opensandbox_server.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER, OPEN_SANDBOX_INGRESS_HEADER
+from opensandbox_server.services.constants import (
+    OPEN_SANDBOX_EGRESS_AUTH_HEADER,
+    OPEN_SANDBOX_INGRESS_HEADER,
+)
 from opensandbox_server.services.constants import OPEN_SANDBOX_SECURE_ACCESS_HEADER
 
 
@@ -231,9 +234,7 @@ def test_proxy_root_path_forwards_endpoint_headers_and_query(
     assert fake_client.built is not None
     assert fake_client.built["url"] == "http://10.57.1.91:40109/base"
     assert fake_client.built["params"] == "q=search"
-    lowered_headers = {
-        key.lower(): value for key, value in fake_client.built["headers"].items()
-    }
+    lowered_headers = {key.lower(): value for key, value in fake_client.built["headers"].items()}
     assert lowered_headers["opensandbox-ingress-to"] == "sbx-123-44772"
     assert lowered_headers["x-trace"] == "trace-root"
 
@@ -270,9 +271,7 @@ def test_proxy_does_not_auto_inject_secure_access_header(
     )
 
     assert response.status_code == 200
-    lowered_headers = {
-        key.lower(): value for key, value in fake_client.built["headers"].items()
-    }
+    lowered_headers = {key.lower(): value for key, value in fake_client.built["headers"].items()}
     assert lowered_headers["opensandbox-ingress-to"] == "sbx-123-44772"
     assert OPEN_SANDBOX_SECURE_ACCESS_HEADER.lower() not in lowered_headers
 
@@ -311,9 +310,7 @@ def test_proxy_forwards_client_supplied_secure_access_header(
     )
 
     assert response.status_code == 200
-    lowered_headers = {
-        key.lower(): value for key, value in fake_client.built["headers"].items()
-    }
+    lowered_headers = {key.lower(): value for key, value in fake_client.built["headers"].items()}
     assert lowered_headers[OPEN_SANDBOX_SECURE_ACCESS_HEADER.lower()] == "client-token"
 
 
@@ -328,6 +325,7 @@ def test_proxy_forwards_get_request_with_query_params(
     parameters were failing with 400 MISSING_QUERY when using use_server_proxy.
     The query string should be passed via httpx params, not embedded in URL.
     """
+
     class StubService:
         @staticmethod
         def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
@@ -370,6 +368,7 @@ def test_proxy_forwards_delete_request_with_body(
     This verifies that DELETE requests with JSON/body payload are not
     incorrectly stripped when proxying.
     """
+
     class StubService:
         @staticmethod
         def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:

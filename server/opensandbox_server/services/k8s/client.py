@@ -87,8 +87,9 @@ class K8sClient:
             self._node_v1_api = client.NodeV1Api()
         return self._node_v1_api
 
-
-    def _lookup_informer(self, group: str, version: str, plural: str, namespace: str) -> Optional[WorkloadInformer]:
+    def _lookup_informer(
+        self, group: str, version: str, plural: str, namespace: str
+    ) -> Optional[WorkloadInformer]:
         """Return an existing informer without starting one. Used by write paths
         to invalidate cache entries; never auto-create on writes since list paths
         own the lazy-start contract."""
@@ -98,7 +99,9 @@ class K8sClient:
         with self._informers_lock:
             return self._informers.get(key)
 
-    def _get_informer(self, group: str, version: str, plural: str, namespace: str) -> Optional[WorkloadInformer]:
+    def _get_informer(
+        self, group: str, version: str, plural: str, namespace: str
+    ) -> Optional[WorkloadInformer]:
         """Return the informer for this resource+namespace, starting it lazily."""
         if not self.config.informer_enabled:
             return None
@@ -128,7 +131,6 @@ class K8sClient:
                     self._informers.pop(key, None)
                     return None
         return informer
-
 
     def create_custom_object(
         self,
@@ -329,7 +331,6 @@ class K8sClient:
             namespace=namespace,
             body=body,
         )
-
 
     def list_pods(
         self,

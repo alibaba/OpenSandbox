@@ -18,7 +18,11 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from opensandbox_server.api.schema import CreateSnapshotRequest, ListSnapshotsRequest, SnapshotFilter
+from opensandbox_server.api.schema import (
+    CreateSnapshotRequest,
+    ListSnapshotsRequest,
+    SnapshotFilter,
+)
 from opensandbox_server.repositories.snapshots.sqlite import SQLiteSnapshotRepository
 from opensandbox_server.services.snapshot_models import (
     SnapshotRecord,
@@ -37,7 +41,7 @@ class StubSandboxService:
             raise HTTPException(
                 status_code=404,
                 detail={"code": "SANDBOX::NOT_FOUND", "message": f"Sandbox {sandbox_id} not found"},
-        )
+            )
         return {
             "id": sandbox_id,
             "status": {
@@ -134,7 +138,9 @@ def test_snapshot_service_persists_create_and_get(tmp_path) -> None:
         snapshot_executor=ImmediateExecutor(),
     )
 
-    created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint-before-import"))
+    created = service.create_snapshot(
+        "sbx-001", CreateSnapshotRequest(name="checkpoint-before-import")
+    )
     fetched = service.get_snapshot(created.id)
 
     assert created.status.state == "Creating"
@@ -171,9 +177,7 @@ def test_snapshot_service_rejects_create_when_source_sandbox_not_running(tmp_pat
 def test_snapshot_service_rejects_create_when_source_sandbox_state_missing(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
-    sandbox_service = SimpleNamespace(
-        get_sandbox=lambda sandbox_id: SimpleNamespace(id=sandbox_id)
-    )
+    sandbox_service = SimpleNamespace(get_sandbox=lambda sandbox_id: SimpleNamespace(id=sandbox_id))
     service = PersistedSnapshotService(
         repo,
         sandbox_service,
@@ -212,7 +216,9 @@ def test_snapshot_service_marks_snapshot_ready_from_worker(tmp_path) -> None:
 
     runtime.create_snapshot = create_snapshot
 
-    created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint-before-import"))
+    created = service.create_snapshot(
+        "sbx-001", CreateSnapshotRequest(name="checkpoint-before-import")
+    )
     stored = repo.get(created.id)
 
     assert created.status.state == "Creating"
@@ -244,7 +250,9 @@ def test_snapshot_service_marks_snapshot_failed_from_worker(tmp_path) -> None:
 
     runtime.create_snapshot = create_snapshot
 
-    created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint-before-import"))
+    created = service.create_snapshot(
+        "sbx-001", CreateSnapshotRequest(name="checkpoint-before-import")
+    )
     stored = repo.get(created.id)
 
     assert created.status.state == "Creating"
@@ -264,7 +272,9 @@ def test_snapshot_service_marks_snapshot_failed_when_worker_returns_none(tmp_pat
         snapshot_executor=ImmediateExecutor(),
     )
 
-    created = service.create_snapshot("sbx-001", CreateSnapshotRequest(name="checkpoint-before-import"))
+    created = service.create_snapshot(
+        "sbx-001", CreateSnapshotRequest(name="checkpoint-before-import")
+    )
     stored = repo.get(created.id)
 
     assert created.status.state == "Creating"
@@ -273,7 +283,9 @@ def test_snapshot_service_marks_snapshot_failed_when_worker_returns_none(tmp_pat
     assert stored.status.reason == "snapshot_runtime_missing_result"
 
 
-def test_recover_unfinished_snapshot_reschedules_creating_runtime_status_without_progress(tmp_path) -> None:
+def test_recover_unfinished_snapshot_reschedules_creating_runtime_status_without_progress(
+    tmp_path,
+) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     record = _snapshot_record("snap-in-progress", SnapshotState.CREATING)
     repo.create(record)
@@ -462,13 +474,17 @@ def test_snapshot_service_recovers_delete_after_runtime_cleanup_succeeds(tmp_pat
     stored = repo.get("snap-delete-crash")
     assert stored is not None
     assert stored.status.state == SnapshotState.DELETING
-    assert runtime.delete_calls == [("snap-delete-crash", "opensandbox-snapshots:snap-delete-crash")]
+    assert runtime.delete_calls == [
+        ("snap-delete-crash", "opensandbox-snapshots:snap-delete-crash")
+    ]
 
     repo.delete = original_delete
     recovery_runtime = StubSnapshotRuntime()
     PersistedSnapshotService(repo, StubSandboxService(), snapshot_runtime=recovery_runtime)
 
-    assert recovery_runtime.delete_calls == [("snap-delete-crash", "opensandbox-snapshots:snap-delete-crash")]
+    assert recovery_runtime.delete_calls == [
+        ("snap-delete-crash", "opensandbox-snapshots:snap-delete-crash")
+    ]
     assert repo.get("snap-delete-crash") is None
 
 
@@ -573,7 +589,9 @@ def test_snapshot_service_propagates_missing_sandbox(tmp_path) -> None:
 
 def test_snapshot_service_returns_501_when_runtime_is_not_supported(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
-    service = PersistedSnapshotService(repo, StubSandboxService(), snapshot_runtime=NoopSnapshotRuntime())
+    service = PersistedSnapshotService(
+        repo, StubSandboxService(), snapshot_runtime=NoopSnapshotRuntime()
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         service.create_snapshot("sbx-001", CreateSnapshotRequest())

@@ -44,7 +44,9 @@ def is_windows_platform(platform: Optional["PlatformSpec"]) -> bool:
     return bool(platform and platform.os == "windows")
 
 
-def inject_windows_user_ports(environment: list[str], exposed_ports: Optional[list[str]]) -> list[str]:
+def inject_windows_user_ports(
+    environment: list[str], exposed_ports: Optional[list[str]]
+) -> list[str]:
     """Ensure USER_PORTS includes container ports exposed for windows profile."""
     if not exposed_ports:
         return environment
@@ -164,8 +166,7 @@ def validate_windows_resource_limits(resource_limits: Optional[dict[str, str]]) 
                 detail={
                     "code": SandboxErrorCodes.INVALID_PARAMETER,
                     "message": (
-                        "Windows profile requires resourceLimits.cpu >= 2 "
-                        f"(received: {cpu_limit})."
+                        f"Windows profile requires resourceLimits.cpu >= 2 (received: {cpu_limit})."
                     ),
                 },
             )

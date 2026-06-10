@@ -109,19 +109,25 @@ class TestPoolNotSupportedOnDockerRuntime:
     """Pool endpoints return 501 when PoolService raises 501 (non-k8s runtime)."""
 
     def test_list_pools_returns_501(self, client: TestClient, auth_headers: dict):
-        with patch(_POOL_SERVICE_PATCH, side_effect=HTTPException(
-            status_code=501,
-            detail={"code": SandboxErrorCodes.K8S_POOL_NOT_SUPPORTED, "message": "not k8s"},
-        )):
+        with patch(
+            _POOL_SERVICE_PATCH,
+            side_effect=HTTPException(
+                status_code=501,
+                detail={"code": SandboxErrorCodes.K8S_POOL_NOT_SUPPORTED, "message": "not k8s"},
+            ),
+        ):
             response = client.get("/pools", headers=auth_headers)
         assert response.status_code == 501
         assert SandboxErrorCodes.K8S_POOL_NOT_SUPPORTED in response.json()["code"]
 
     def test_create_pool_returns_501(self, client: TestClient, auth_headers: dict):
-        with patch(_POOL_SERVICE_PATCH, side_effect=HTTPException(
-            status_code=501,
-            detail={"code": SandboxErrorCodes.K8S_POOL_NOT_SUPPORTED, "message": "not k8s"},
-        )):
+        with patch(
+            _POOL_SERVICE_PATCH,
+            side_effect=HTTPException(
+                status_code=501,
+                detail={"code": SandboxErrorCodes.K8S_POOL_NOT_SUPPORTED, "message": "not k8s"},
+            ),
+        ):
             response = client.post("/pools", json=_create_request_body(), headers=auth_headers)
         assert response.status_code == 501
 
@@ -132,7 +138,9 @@ class TestCreatePoolRoute:
         mock_svc.create_pool.return_value = _pool_response(name="new-pool")
 
         with patch(_POOL_SERVICE_PATCH, return_value=mock_svc):
-            response = client.post("/pools", json=_create_request_body("new-pool"), headers=auth_headers)
+            response = client.post(
+                "/pools", json=_create_request_body("new-pool"), headers=auth_headers
+            )
 
         assert response.status_code == 201
         body = response.json()
@@ -154,21 +162,27 @@ class TestCreatePoolRoute:
             response = client.post("/pools", json=body, headers=auth_headers)
         assert response.status_code == 422
 
-    def test_create_pool_missing_capacity_spec_returns_422(self, client: TestClient, auth_headers: dict):
+    def test_create_pool_missing_capacity_spec_returns_422(
+        self, client: TestClient, auth_headers: dict
+    ):
         body = _create_request_body()
         del body["capacitySpec"]
         with patch(_POOL_SERVICE_PATCH, return_value=MagicMock()):
             response = client.post("/pools", json=body, headers=auth_headers)
         assert response.status_code == 422
 
-    def test_create_pool_invalid_name_pattern_returns_422(self, client: TestClient, auth_headers: dict):
+    def test_create_pool_invalid_name_pattern_returns_422(
+        self, client: TestClient, auth_headers: dict
+    ):
         """Pool name must be a valid k8s name (no uppercase, no spaces)."""
         body = _create_request_body("Invalid_Name")
         with patch(_POOL_SERVICE_PATCH, return_value=MagicMock()):
             response = client.post("/pools", json=body, headers=auth_headers)
         assert response.status_code == 422
 
-    def test_create_pool_negative_buffer_max_returns_422(self, client: TestClient, auth_headers: dict):
+    def test_create_pool_negative_buffer_max_returns_422(
+        self, client: TestClient, auth_headers: dict
+    ):
         body = _create_request_body()
         body["capacitySpec"]["bufferMax"] = -1
         with patch(_POOL_SERVICE_PATCH, return_value=MagicMock()):
@@ -185,7 +199,9 @@ class TestCreatePoolRoute:
             },
         )
         with patch(_POOL_SERVICE_PATCH, return_value=mock_svc):
-            response = client.post("/pools", json=_create_request_body("dup-pool"), headers=auth_headers)
+            response = client.post(
+                "/pools", json=_create_request_body("dup-pool"), headers=auth_headers
+            )
 
         assert response.status_code == 409
         assert SandboxErrorCodes.K8S_POOL_ALREADY_EXISTS in response.json()["code"]
@@ -323,7 +339,9 @@ class TestUpdatePoolRoute:
         with patch(_POOL_SERVICE_PATCH, return_value=MagicMock()):
             response = client.put(
                 "/pools/p",
-                json={"capacitySpec": {"bufferMax": 1, "bufferMin": 0, "poolMax": -5, "poolMin": 0}},
+                json={
+                    "capacitySpec": {"bufferMax": 1, "bufferMin": 0, "poolMax": -5, "poolMin": 0}
+                },
                 headers=auth_headers,
             )
         assert response.status_code == 422

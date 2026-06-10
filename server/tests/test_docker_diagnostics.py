@@ -40,7 +40,9 @@ def _container(attrs: dict):
 
 
 def test_parse_since_to_timestamp_uses_valid_units_and_default() -> None:
-    with patch("opensandbox_server.services.docker.docker_diagnostics.time.time", return_value=1000):
+    with patch(
+        "opensandbox_server.services.docker.docker_diagnostics.time.time", return_value=1000
+    ):
         assert _parse_since_to_timestamp("2m") == 880
         assert _parse_since_to_timestamp("1 h") == -2600
         assert _parse_since_to_timestamp("nonsense") == 400

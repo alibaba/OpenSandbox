@@ -19,9 +19,7 @@ from typing import Optional
 
 from opensandbox_server.tenants.models import TenantEntry
 
-_current_tenant: ContextVar[Optional[TenantEntry]] = ContextVar(
-    "current_tenant", default=None
-)
+_current_tenant: ContextVar[Optional[TenantEntry]] = ContextVar("current_tenant", default=None)
 
 
 def get_current_tenant() -> Optional[TenantEntry]:

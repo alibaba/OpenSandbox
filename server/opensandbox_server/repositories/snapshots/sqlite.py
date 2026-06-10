@@ -104,9 +104,7 @@ class SQLiteSnapshotRepository:
             params.append(query.source_sandbox_id)
 
         if query.states:
-            clauses.append(
-                f"state IN ({', '.join('?' for _ in query.states)})"
-            )
+            clauses.append(f"state IN ({', '.join('?' for _ in query.states)})")
             params.extend(query.states)
 
         where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -299,7 +297,9 @@ class SQLiteSnapshotRepository:
                 state=SnapshotState(row["state"]),
                 reason=row["reason"],
                 message=row["message"],
-                last_transition_at=SQLiteSnapshotRepository._str_to_datetime(row["last_transition_at"]),
+                last_transition_at=SQLiteSnapshotRepository._str_to_datetime(
+                    row["last_transition_at"]
+                ),
             ),
             created_at=SQLiteSnapshotRepository._str_to_datetime(row["created_at"]),
             updated_at=SQLiteSnapshotRepository._str_to_datetime(row["updated_at"]),

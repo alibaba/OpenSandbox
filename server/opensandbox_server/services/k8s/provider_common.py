@@ -1,11 +1,11 @@
 # Copyright 2026 Alibaba Group Holding Ltd.
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -75,9 +75,7 @@ def _translate_resource_limits_for_k8s(
         return {}
 
     translated: Dict[str, str] = {
-        key: value
-        for key, value in resource_limits.items()
-        if key != _GPU_RESOURCE_LIMIT_KEY
+        key: value for key, value in resource_limits.items() if key != _GPU_RESOURCE_LIMIT_KEY
     }
 
     raw_gpu = resource_limits.get(_GPU_RESOURCE_LIMIT_KEY)
@@ -108,6 +106,8 @@ def _translate_resource_limits_for_k8s(
     # for extended resources.
     translated[_K8S_NVIDIA_GPU_RESOURCE] = str(gpu_count)
     return translated
+
+
 def _build_execd_init_container(
     execd_image: str,
     execd_init_resources: Any,
@@ -213,8 +213,7 @@ def _container_to_dict(container: V1Container) -> Dict[str, Any]:
             result["resources"]["requests"] = container.resources.requests
     if container.volume_mounts:
         result["volumeMounts"] = [
-            {"name": vm.name, "mountPath": vm.mount_path}
-            for vm in container.volume_mounts
+            {"name": vm.name, "mountPath": vm.mount_path} for vm in container.volume_mounts
         ]
     if container.security_context:
         security_context_dict = serialize_security_context_to_dict(container.security_context)

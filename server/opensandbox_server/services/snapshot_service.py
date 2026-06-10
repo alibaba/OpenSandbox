@@ -161,7 +161,9 @@ class PersistedSnapshotService(SnapshotService):
             )
         )
 
-        total_pages = ceil(result.total_items / pagination.page_size) if result.total_items > 0 else 0
+        total_pages = (
+            ceil(result.total_items / pagination.page_size) if result.total_items > 0 else 0
+        )
         return ListSnapshotsResponse(
             items=[self._to_snapshot_response(item) for item in result.items],
             pagination=PaginationInfo(

@@ -78,6 +78,8 @@ from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402
 from opensandbox_server.api.lifecycle import router, sandbox_service, snapshot_service  # noqa: E402
 from opensandbox_server.api.proxy import router as proxy_router  # noqa: E402
+
+sandbox_service.set_tenant_provider(_tenant_provider)
 from opensandbox_server.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator  # noqa: E402
 from opensandbox_server.middleware.auth import AuthMiddleware  # noqa: E402
 from opensandbox_server.middleware.request_id import RequestIdMiddleware  # noqa: E402
@@ -87,6 +89,7 @@ from opensandbox_server.services.runtime_resolver import (  # noqa: E402
 )
 
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -160,7 +163,7 @@ app = FastAPI(
     title="OpenSandbox Lifecycle API",
     version="0.1.0",
     description="The Sandbox Lifecycle API coordinates how untrusted workloads are created, "
-                "executed, paused, resumed, and finally disposed.",
+    "executed, paused, resumed, and finally disposed.",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,

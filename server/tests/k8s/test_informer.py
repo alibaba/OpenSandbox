@@ -196,20 +196,24 @@ class TestWorkloadInformerHandleEvent:
     def test_handle_event_updates_resource_version(self):
         """_handle_event advances _resource_version from the object metadata."""
         informer = _make_informer()
-        informer._handle_event({
-            "type": "ADDED",
-            "object": {"metadata": {"name": "foo", "resourceVersion": "77"}},
-        })
+        informer._handle_event(
+            {
+                "type": "ADDED",
+                "object": {"metadata": {"name": "foo", "resourceVersion": "77"}},
+            }
+        )
         assert informer._resource_version == "77"
 
     def test_handle_event_does_not_downgrade_resource_version(self):
         """_handle_event never rolls back _resource_version to an older value."""
         informer = _make_informer()
         informer._resource_version = "200"
-        informer._handle_event({
-            "type": "MODIFIED",
-            "object": {"metadata": {"name": "foo", "resourceVersion": "50"}},
-        })
+        informer._handle_event(
+            {
+                "type": "MODIFIED",
+                "object": {"metadata": {"name": "foo", "resourceVersion": "50"}},
+            }
+        )
         assert informer._resource_version == "200"
 
 
@@ -219,8 +223,7 @@ class TestWorkloadInformerStartStop:
     def test_start_launches_daemon_thread(self):
         """start() spawns a daemon thread that is alive."""
         list_fn = MagicMock(return_value={"items": [], "metadata": {}})
-        informer = WorkloadInformer(list_fn=list_fn, enable_watch=False,
-                                    resync_period_seconds=9999)
+        informer = WorkloadInformer(list_fn=list_fn, enable_watch=False, resync_period_seconds=9999)
         informer.start()
         assert informer._thread is not None
         assert informer._thread.is_alive()
@@ -229,8 +232,7 @@ class TestWorkloadInformerStartStop:
     def test_start_is_idempotent(self):
         """Calling start() twice does not create a second thread."""
         list_fn = MagicMock(return_value={"items": [], "metadata": {}})
-        informer = WorkloadInformer(list_fn=list_fn, enable_watch=False,
-                                    resync_period_seconds=9999)
+        informer = WorkloadInformer(list_fn=list_fn, enable_watch=False, resync_period_seconds=9999)
         informer.start()
         first_thread = informer._thread
         informer.start()

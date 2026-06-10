@@ -230,7 +230,6 @@ class TestComputeSignature:
         assert sig == compute_hex8(b"secret", b"canonical") + key_id
 
 
-
 # ============================================================
 # Integration: end-to-end signing flow
 # ============================================================

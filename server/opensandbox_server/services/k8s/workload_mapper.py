@@ -1,11 +1,11 @@
 # Copyright 2026 Alibaba Group Holding Ltd.
-# 
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
-# 
+#
 #     http://www.apache.org/licenses/LICENSE-2.0
-# 
+#
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -41,9 +41,7 @@ def _build_sandbox_from_workload(workload: Any, workload_provider: Any) -> Sandb
     expires_at = workload_provider.get_expiration(workload)
     status_info = workload_provider.get_status(workload)
 
-    user_metadata = {
-        k: v for k, v in labels.items() if not _is_opensandbox_label(k)
-    }
+    user_metadata = {k: v for k, v in labels.items() if not _is_opensandbox_label(k)}
 
     image_uri = ""
     entrypoint = []
@@ -96,11 +94,7 @@ def _extract_platform_from_workload(workload: Any) -> Optional[PlatformSpec]:
         spec = getattr(workload, "spec", None)
         template = getattr(spec, "template", None)
         pod_template = getattr(spec, "pod_template", None)
-        pod_spec = (
-            getattr(template, "spec", None)
-            or getattr(pod_template, "spec", None)
-            or {}
-        )
+        pod_spec = getattr(template, "spec", None) or getattr(pod_template, "spec", None) or {}
 
     node_selector = (
         pod_spec.get("nodeSelector", {})
@@ -179,17 +173,11 @@ def _extract_platform_value_from_affinity(
             return None
         term_value: Optional[str] = None
         for expr in expressions:
-            expr_key = (
-                expr.get("key")
-                if isinstance(expr, dict)
-                else getattr(expr, "key", None)
-            )
+            expr_key = expr.get("key") if isinstance(expr, dict) else getattr(expr, "key", None)
             if expr_key != key:
                 continue
             operator = (
-                expr.get("operator")
-                if isinstance(expr, dict)
-                else getattr(expr, "operator", None)
+                expr.get("operator") if isinstance(expr, dict) else getattr(expr, "operator", None)
             )
             values = (
                 expr.get("values", [])
