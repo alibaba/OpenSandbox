@@ -217,7 +217,7 @@ class DockerNetworkingMixin:
             endpoint = Endpoint(endpoint=f"{public_host}:{port}")
             container = self._get_container_by_sandbox_id(sandbox_id)
             labels = container.attrs.get("Config", {}).get("Labels") or {}
-            self._attach_egress_auth_headers(endpoint, labels)
+            self._attach_egress_auth_headers(endpoint, labels, port)
             return endpoint
 
         # non-host mode (bridge / user-defined network)
@@ -250,7 +250,7 @@ class DockerNetworkingMixin:
                     },
                 )
             endpoint = Endpoint(endpoint=f"{public_host}:{http_host_port}")
-            self._attach_egress_auth_headers(endpoint, labels)
+            self._attach_egress_auth_headers(endpoint, labels, port)
             return endpoint
 
         if execd_host_port is None:
@@ -263,14 +263,17 @@ class DockerNetworkingMixin:
             )
 
         endpoint = Endpoint(endpoint=f"{public_host}:{execd_host_port}/proxy/{port}")
-        self._attach_egress_auth_headers(endpoint, labels)
+        self._attach_egress_auth_headers(endpoint, labels, port)
         return endpoint
 
     def _attach_egress_auth_headers(
         self,
         endpoint: Endpoint,
         labels: dict[str, str],
+        port: int,
     ) -> None:
+        if port != 18080:
+            return
         token = labels.get(SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY)
         if not token:
             return

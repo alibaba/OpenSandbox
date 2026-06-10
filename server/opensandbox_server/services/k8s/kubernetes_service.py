@@ -893,7 +893,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 )
             if expires is None:
                 _attach_secure_access_headers(endpoint, workload)
-            _attach_egress_auth_headers(endpoint, workload)
+            _attach_egress_auth_headers(endpoint, workload, port)
             return endpoint
 
         except HTTPException:
