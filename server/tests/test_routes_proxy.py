@@ -24,6 +24,7 @@ import opensandbox_server.api.proxy as proxy_api
 from opensandbox_server.api import lifecycle
 from opensandbox_server.api.schema import Endpoint
 from opensandbox_server.middleware.auth import SANDBOX_API_KEY_HEADER
+from opensandbox_server.services.constants import OPEN_SANDBOX_CREDENTIAL_PROXY_AUTH_HEADER
 from opensandbox_server.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER, OPEN_SANDBOX_INGRESS_HEADER
 from opensandbox_server.services.constants import OPEN_SANDBOX_SECURE_ACCESS_HEADER
 
@@ -687,3 +688,74 @@ def test_proxy_forwards_egress_auth_header_for_18080(
     assert fake_client.built is not None
     lowered_headers = {k.lower(): v for k, v in fake_client.built["headers"].items()}
     assert lowered_headers[OPEN_SANDBOX_EGRESS_AUTH_HEADER.lower()] == "egress-token"
+
+
+def test_proxy_active_credential_vault_returns_sidecar_forbidden(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert port == 18080
+            assert resolve_internal is True
+            return Endpoint(endpoint="10.57.1.91:18080")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(
+        status_code=403,
+        headers={"content-type": "text/plain"},
+        chunks=[b"forbidden\n"],
+    )
+    _set_http_client(client, fake_client)
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/18080/credential-vault/_active",
+        headers={**auth_headers, OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token"},
+    )
+
+    assert response.status_code == 403
+    assert response.content == b"forbidden\n"
+    assert fake_client.built is not None
+    assert fake_client.built["url"] == "http://10.57.1.91:18080/credential-vault/_active"
+    lowered_headers = {k.lower(): v for k, v in fake_client.built["headers"].items()}
+    assert OPEN_SANDBOX_CREDENTIAL_PROXY_AUTH_HEADER.lower() not in lowered_headers
+
+
+def test_proxy_strips_client_supplied_credential_proxy_auth_header(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+            assert port == 18080
+            assert resolve_internal is True
+            return Endpoint(endpoint="10.57.1.91:18080")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(
+        status_code=403,
+        headers={"content-type": "text/plain"},
+        chunks=[b"forbidden\n"],
+    )
+    _set_http_client(client, fake_client)
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/18080/credential-vault/_active",
+        headers={
+            **auth_headers,
+            OPEN_SANDBOX_CREDENTIAL_PROXY_AUTH_HEADER: "client-supplied-token",
+        },
+    )
+
+    assert response.status_code == 403
+    assert fake_client.built is not None
+    lowered_headers = {k.lower(): v for k, v in fake_client.built["headers"].items()}
+    assert OPEN_SANDBOX_CREDENTIAL_PROXY_AUTH_HEADER.lower() not in lowered_headers

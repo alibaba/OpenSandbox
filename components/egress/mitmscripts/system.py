@@ -23,7 +23,10 @@
 #      (which otherwise stalls LLM-style small-chunk streams).
 #   2. Acts as Credential Proxy when the egress sidecar has an active
 #      Credential Vault revision. The active revision is stored in the Go
-#      sidecar process and read over a loopback-only runtime endpoint.
+#      sidecar process and read over an internal-token-protected loopback
+#      runtime endpoint.
+#      Credential values are not logged, and response header values containing
+#      credentials are redacted. Response bodies are not rewritten by default.
 #   3. Implements SNI-aware ignore_hosts for transparent mode. mitmproxy's
 #      built-in ignore_hosts check in transparent mode matches against the
 #      destination IP first; the SNI hostname is only available inside the TLS
@@ -48,7 +51,8 @@ from mitmproxy import ctx, http
 from mitmproxy.tls import ClientHelloData
 
 
-EGRESS_TOKEN_HEADER = "OPENSANDBOX-EGRESS-AUTH"
+CREDENTIAL_PROXY_TOKEN_ENV = "OPENSANDBOX_CREDENTIAL_PROXY_TOKEN"
+CREDENTIAL_PROXY_TOKEN_HEADER = "OPENSANDBOX-CREDENTIAL-PROXY-AUTH"
 ACTIVE_VAULT_URL = "http://127.0.0.1:18080/credential-vault/_active"
 VAULT_CACHE_TTL_SECONDS = 0.5
 
@@ -100,7 +104,7 @@ def _load_active_vault() -> ActiveVault | None:
     if _vault_cache is not None and now - _vault_cache_loaded_at < VAULT_CACHE_TTL_SECONDS:
         return _vault_cache
 
-    token = os.environ.get("OPENSANDBOX_EGRESS_TOKEN", "")
+    token = os.environ.get(CREDENTIAL_PROXY_TOKEN_ENV, "")
     if not token:
         _vault_cache = None
         _vault_cache_loaded_at = now
@@ -108,7 +112,7 @@ def _load_active_vault() -> ActiveVault | None:
 
     request = urllib.request.Request(
         ACTIVE_VAULT_URL,
-        headers={EGRESS_TOKEN_HEADER: token},
+        headers={CREDENTIAL_PROXY_TOKEN_HEADER: token},
         method="GET",
     )
     try:
@@ -257,26 +261,6 @@ def responseheaders(flow: http.HTTPFlow) -> None:
     transfer_encoding = flow.response.headers.get("transfer-encoding", "").lower()
     if "text/event-stream" in content_type or "chunked" in transfer_encoding:
         flow.response.stream = True
-
-
-def response(flow: http.HTTPFlow) -> None:
-    if flow.response is None or flow.response.stream:
-        return
-    vault = _load_active_vault()
-    if vault is None or not vault.redactions:
-        return
-
-    content_type = flow.response.headers.get("content-type", "").lower()
-    if not any(t in content_type for t in ("text/", "json", "xml", "html", "javascript")):
-        return
-
-    try:
-        text = flow.response.get_text(strict=False)
-    except ValueError:
-        return
-    redacted = _redact_text(text, vault.redactions)
-    if redacted != text:
-        flow.response.set_text(redacted)
 
 
 def _redact_response_headers(flow: http.HTTPFlow) -> None:

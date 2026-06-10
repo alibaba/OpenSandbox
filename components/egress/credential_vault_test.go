@@ -79,6 +79,51 @@ func TestCredentialVaultCreateSanitizesAndRendersActiveSnapshot(t *testing.T) {
 	require.Contains(t, payload.Redactions, "secret-token")
 }
 
+func TestCredentialVaultActiveRejectsProxiedPublicEgressToken(t *testing.T) {
+	store := newCredentialVaultStore(nil, func() bool { return true })
+	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	_, err := store.create(testCredentialVaultRequest(), pol)
+	require.NoError(t, err)
+	srv := &policyServer{
+		token:                "public-egress-token",
+		credentialProxyToken: "internal-credential-proxy-token",
+		credentialVault:      store,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/credential-vault/_active", nil)
+	req.RemoteAddr = "127.0.0.1:4321"
+	req.Header.Set(constants.EgressAuthTokenHeader, "public-egress-token")
+	w := httptest.NewRecorder()
+
+	srv.handleCredentialVaultSubresource(w, req)
+
+	require.Equal(t, http.StatusForbidden, w.Result().StatusCode)
+	require.NotContains(t, w.Body.String(), "secret-token")
+}
+
+func TestCredentialVaultActiveAllowsInternalCredentialProxyToken(t *testing.T) {
+	store := newCredentialVaultStore(nil, func() bool { return true })
+	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	_, err := store.create(testCredentialVaultRequest(), pol)
+	require.NoError(t, err)
+	srv := &policyServer{
+		token:                "public-egress-token",
+		credentialProxyToken: "internal-credential-proxy-token",
+		credentialVault:      store,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/credential-vault/_active", nil)
+	req.RemoteAddr = "127.0.0.1:4321"
+	req.Header.Set(constants.CredentialProxyAuthHeader, "internal-credential-proxy-token")
+	w := httptest.NewRecorder()
+
+	srv.handleCredentialVaultSubresource(w, req)
+
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+	require.Contains(t, w.Body.String(), "secret-token")
+	require.Contains(t, w.Body.String(), "Private-Token")
+}
+
 func TestCredentialVaultRejectsDefaultAllowWithoutExplicitCoverage(t *testing.T) {
 	store := newCredentialVaultStore(nil, func() bool { return true })
 	pol := testCredentialPolicy(t, `{"defaultAction":"allow","egress":[]}`)
@@ -156,6 +201,45 @@ func TestCredentialVaultActiveBindingBlocksEgressPolicyRemoval(t *testing.T) {
 	require.Equal(t, 0, nft.calls)
 }
 
+func TestCredentialVaultActiveBindingBlocksPolicyReset(t *testing.T) {
+	initial := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
+	proxy := &stubProxy{updated: initial}
+	nft := &stubNft{}
+	store := newCredentialVaultStore(nil, func() bool { return true })
+	_, err := store.create(testCredentialVaultRequest(), initial)
+	require.NoError(t, err)
+	srv := &policyServer{
+		proxy:           proxy,
+		nft:             nft,
+		enforcementMode: "dns+nft",
+		credentialVault: store,
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/policy", strings.NewReader(""))
+	w := httptest.NewRecorder()
+	srv.handlePolicy(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Result().StatusCode)
+	require.Contains(t, w.Body.String(), "credential vault policy validation")
+	require.Len(t, proxy.updated.Egress, 1)
+	require.Equal(t, 0, nft.calls)
+}
+
+func TestCredentialVaultDeleteRequiresReady(t *testing.T) {
+	t.Setenv(constants.EnvMitmproxyTransparent, "")
+	srv := &policyServer{
+		credentialVault: newCredentialVaultStore(nil, func() bool { return true }),
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/credential-vault", nil)
+	req.RemoteAddr = "127.0.0.1:4321"
+	w := httptest.NewRecorder()
+	srv.handleCredentialVault(w, req)
+
+	require.Equal(t, http.StatusPreconditionFailed, w.Result().StatusCode)
+	require.Contains(t, w.Body.String(), "transparent mitmproxy")
+}
+
 func TestCredentialVaultWriteRequiresTLSOrLoopback(t *testing.T) {
 	t.Setenv(constants.EnvMitmproxyTransparent, "true")
 	initial := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
@@ -177,6 +261,20 @@ func TestCredentialVaultWriteRequiresTLSOrLoopback(t *testing.T) {
 	srv.handleCredentialVault(w, req)
 
 	require.Equal(t, http.StatusCreated, w.Result().StatusCode)
+
+	req = httptest.NewRequest(http.MethodDelete, "/credential-vault", nil)
+	req.RemoteAddr = "198.51.100.10:1234"
+	w = httptest.NewRecorder()
+	srv.handleCredentialVault(w, req)
+
+	require.Equal(t, http.StatusUpgradeRequired, w.Result().StatusCode)
+
+	req = httptest.NewRequest(http.MethodDelete, "/credential-vault", nil)
+	req.RemoteAddr = "127.0.0.1:4321"
+	w = httptest.NewRecorder()
+	srv.handleCredentialVault(w, req)
+
+	require.Equal(t, http.StatusNoContent, w.Result().StatusCode)
 }
 
 func TestParseMitmproxyIgnoreHosts(t *testing.T) {

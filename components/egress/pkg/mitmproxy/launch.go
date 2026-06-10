@@ -51,6 +51,8 @@ type Config struct {
 	UserName   string
 	// ScriptPath is an optional user-supplied addon, loaded after the system addon.
 	ScriptPath string
+	// CredentialProxyToken is injected only into the mitmdump child process.
+	CredentialProxyToken string
 	// OnExit is called (if non-nil) when mitmdump exits. Called from a background goroutine.
 	OnExit func(error)
 }
@@ -136,7 +138,7 @@ func Launch(cfg Config) (*Running, error) {
 	}
 	// HOME determines mitm's confdir (~/.mitmproxy) which holds both the CA
 	// and the baked-in config.yaml.
-	cmd.Env = append(os.Environ(), "HOME="+home)
+	cmd.Env = buildMitmdumpEnv(os.Environ(), home, cfg.CredentialProxyToken)
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("mitmproxy: start mitmdump: %w", err)
@@ -153,4 +155,20 @@ func Launch(cfg Config) (*Running, error) {
 
 	log.Infof("[mitmproxy] mitmdump started (pid %d, transparent on %s:%d)", cmd.Process.Pid, listenHostLoopback, cfg.ListenPort)
 	return &Running{Cmd: cmd, done: done}, nil
+}
+
+func buildMitmdumpEnv(base []string, home string, credentialProxyToken string) []string {
+	env := make([]string, 0, len(base)+2)
+	tokenPrefix := constants.EnvCredentialProxyToken + "="
+	for _, entry := range base {
+		if strings.HasPrefix(entry, tokenPrefix) {
+			continue
+		}
+		env = append(env, entry)
+	}
+	env = append(env, "HOME="+home)
+	if credentialProxyToken != "" {
+		env = append(env, constants.EnvCredentialProxyToken+"="+credentialProxyToken)
+	}
+	return env
 }

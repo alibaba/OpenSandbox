@@ -52,7 +52,18 @@ type nftApplier interface {
 
 // startPolicyServer: runtime POST/GET /policy, GET /healthz. nameserverIPs are merged into every nft
 // static apply so the pod’s resolv / private DNS still works alongside user egress rules.
-func startPolicyServer(proxy policyUpdater, nft nftApplier, enforcementMode string, addr string, token string, nameserverIPs []netip.Addr, policyFile string, alwaysDeny, alwaysAllow []policy.EgressRule, mitmGate *mitmproxy.HealthGate) (*http.Server, error) {
+func startPolicyServer(
+	proxy policyUpdater,
+	nft nftApplier,
+	enforcementMode string,
+	addr string,
+	token string,
+	credentialProxyToken string,
+	nameserverIPs []netip.Addr,
+	policyFile string,
+	alwaysDeny, alwaysAllow []policy.EgressRule,
+	mitmGate *mitmproxy.HealthGate,
+) (*http.Server, error) {
 	maxEgressRules := maxEgressRulesFromEnv()
 	if maxEgressRules > 0 {
 		log.Infof("policy API: max egress rules per policy (POST/PATCH) = %d (set %s=0 to disable)", maxEgressRules, constants.EnvMaxEgressRules)
@@ -60,16 +71,17 @@ func startPolicyServer(proxy policyUpdater, nft nftApplier, enforcementMode stri
 
 	mux := http.NewServeMux()
 	handler := &policyServer{
-		proxy:            proxy,
-		nft:              nft,
-		token:            token,
-		enforcementMode:  enforcementMode,
-		nameserverIPs:    nameserverIPs,
-		policyFile:       strings.TrimSpace(policyFile),
-		maxEgressRules:   maxEgressRules,
-		alwaysLoader:     policy.NewAlwaysRuleLoader(time.Minute),
-		stopAlwaysReload: make(chan struct{}),
-		mitmGate:         mitmGate,
+		proxy:                proxy,
+		nft:                  nft,
+		token:                token,
+		credentialProxyToken: credentialProxyToken,
+		enforcementMode:      enforcementMode,
+		nameserverIPs:        nameserverIPs,
+		policyFile:           strings.TrimSpace(policyFile),
+		maxEgressRules:       maxEgressRules,
+		alwaysLoader:         policy.NewAlwaysRuleLoader(time.Minute),
+		stopAlwaysReload:     make(chan struct{}),
+		mitmGate:             mitmGate,
 	}
 	handler.credentialVault = newCredentialVaultStore(mitmGate, func() bool { return strings.TrimSpace(token) != "" })
 	handler.setAlwaysRules(alwaysDeny, alwaysAllow)
@@ -119,15 +131,16 @@ func startPolicyServer(proxy policyUpdater, nft nftApplier, enforcementMode stri
 }
 
 type policyServer struct {
-	proxy           policyUpdater
-	nft             nftApplier
-	server          *http.Server
-	token           string
-	enforcementMode string
-	nameserverIPs   []netip.Addr
-	policyFile      string     // if set, successful /policy changes persist (truncate+write+fsync)
-	maxEgressRules  int        // 0 = unlimited; cap len(Egress) for POST/PATCH
-	mu              sync.Mutex // serializes /policy handlers (no lost update across POST vs PATCH)
+	proxy                policyUpdater
+	nft                  nftApplier
+	server               *http.Server
+	token                string
+	credentialProxyToken string
+	enforcementMode      string
+	nameserverIPs        []netip.Addr
+	policyFile           string     // if set, successful /policy changes persist (truncate+write+fsync)
+	maxEgressRules       int        // 0 = unlimited; cap len(Egress) for POST/PATCH
+	mu                   sync.Mutex // serializes /policy handlers (no lost update across POST vs PATCH)
 
 	alwaysLoader     *policy.AlwaysRuleLoader
 	stopAlwaysReload chan struct{}
@@ -179,7 +192,7 @@ func (s *policyServer) handleCredentialVault(w http.ResponseWriter, r *http.Requ
 	case http.MethodPatch:
 		s.handleCredentialVaultPatch(w, r)
 	case http.MethodDelete:
-		s.handleCredentialVaultDelete(w)
+		s.handleCredentialVaultDelete(w, r)
 	default:
 		w.Header().Set("Allow", "GET, POST, PATCH, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -187,10 +200,6 @@ func (s *policyServer) handleCredentialVault(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *policyServer) handleCredentialVaultSubresource(w http.ResponseWriter, r *http.Request) {
-	if !s.authorize(r) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
 	path := strings.TrimPrefix(r.URL.Path, "/credential-vault/")
 	switch {
 	case path == "_active":
@@ -203,7 +212,20 @@ func (s *policyServer) handleCredentialVaultSubresource(w http.ResponseWriter, r
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
+		if !s.authorizeCredentialProxy(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
 		s.handleCredentialVaultActive(w)
+		return
+	}
+
+	if !s.authorize(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	switch {
 	case path == "credentials":
 		if r.Method != http.MethodGet {
 			w.Header().Set("Allow", "GET")
@@ -290,7 +312,15 @@ func (s *policyServer) handleCredentialVaultPatch(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, state)
 }
 
-func (s *policyServer) handleCredentialVaultDelete(w http.ResponseWriter) {
+func (s *policyServer) handleCredentialVaultDelete(w http.ResponseWriter, r *http.Request) {
+	if err := s.credentialVault.ready(); err != nil {
+		http.Error(w, err.Error(), http.StatusPreconditionFailed)
+		return
+	}
+	if !credentialVaultWriteTransportAllowed(r) {
+		http.Error(w, "credential vault writes require TLS or loopback transport", http.StatusUpgradeRequired)
+		return
+	}
 	if err := s.credentialVault.delete(); err != nil {
 		writeCredentialVaultError(w, err)
 		return
@@ -383,6 +413,11 @@ func (s *policyServer) handlePost(w http.ResponseWriter, r *http.Request) {
 	if raw == "" {
 		log.Infof("policy API: reset to default deny-all")
 		def := policy.DefaultDenyPolicy()
+		if err := s.validateCredentialVaultPolicyUpdate(def); err != nil {
+			logEgressUpdateFailedWarn(fmt.Sprintf("credential vault policy validation: %v", err))
+			http.Error(w, fmt.Sprintf("credential vault policy validation: %v", err), http.StatusBadRequest)
+			return
+		}
 		if !s.commitPolicy(r.Context(), w, def, "reset") {
 			return
 		}
@@ -701,6 +736,20 @@ func (s *policyServer) authorize(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) == 1
+}
+
+func (s *policyServer) authorizeCredentialProxy(r *http.Request) bool {
+	if s.credentialProxyToken == "" {
+		return false
+	}
+	provided := r.Header.Get(constants.CredentialProxyAuthHeader)
+	if provided == "" {
+		return false
+	}
+	if len(provided) != len(s.credentialProxyToken) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.credentialProxyToken)) == 1
 }
 
 func credentialVaultWriteTransportAllowed(r *http.Request) bool {

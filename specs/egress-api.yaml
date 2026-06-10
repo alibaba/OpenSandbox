@@ -597,7 +597,7 @@ components:
           enum: [apiKey]
         name:
           type: string
-          pattern: '^[A-Za-z0-9!#$%&''*+/=?^_`{|}~-]+$'
+          pattern: '^[A-Za-z0-9!#$%&''*+\-.^_`|~]+$'
         credential:
           type: string
       additionalProperties: false
@@ -610,7 +610,7 @@ components:
           enum: [customHeader]
         name:
           type: string
-          pattern: '^[A-Za-z0-9!#$%&''*+/=?^_`{|}~-]+$'
+          pattern: '^[A-Za-z0-9!#$%&''*+\-.^_`|~]+$'
         credential:
           type: string
       additionalProperties: false
@@ -633,7 +633,7 @@ components:
       properties:
         name:
           type: string
-          pattern: '^[A-Za-z0-9!#$%&''*+/=?^_`{|}~-]+$'
+          pattern: '^[A-Za-z0-9!#$%&''*+\-.^_`|~]+$'
         credential:
           type: string
       additionalProperties: false

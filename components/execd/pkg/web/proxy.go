@@ -27,6 +27,8 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 )
 
+const credentialProxyAuthHeader = "OPENSANDBOX-CREDENTIAL-PROXY-AUTH"
+
 func ProxyMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !strings.HasPrefix(c.Request.URL.Path, "/proxy/") {
@@ -74,6 +76,7 @@ func ProxyMiddleware() gin.HandlerFunc {
 			req.Header.Set("X-Forwarded-For", getClientIP(r))
 			req.Header.Set("X-Forwarded-Proto", "http")
 			req.Header.Del("X-Forwarded-Host")
+			req.Header.Del(credentialProxyAuthHeader)
 
 			if isWebSocket {
 				req.Header.Set("Connection", "Upgrade")

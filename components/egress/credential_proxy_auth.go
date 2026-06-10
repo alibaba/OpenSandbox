@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package constants
+package main
 
-const (
-	MarkValue = 0x1
-	MarkHex   = "0x1"
+import (
+	"crypto/rand"
+	"encoding/base64"
 )
 
-const (
-	EgressAuthTokenHeader     = "OPENSANDBOX-EGRESS-AUTH"
-	CredentialProxyAuthHeader = "OPENSANDBOX-CREDENTIAL-PROXY-AUTH"
-)
+const credentialProxyTokenBytes = 32
+
+func newCredentialProxyToken() (string, error) {
+	token := make([]byte, credentialProxyTokenBytes)
+	if _, err := rand.Read(token); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(token), nil
+}
