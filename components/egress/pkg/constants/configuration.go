@@ -26,7 +26,7 @@ const (
 	EnvEgressMode              = "OPENSANDBOX_EGRESS_MODE"
 	EnvEgressHTTPAddr          = "OPENSANDBOX_EGRESS_HTTP_ADDR"
 	EnvEgressToken             = "OPENSANDBOX_EGRESS_TOKEN"
-	EnvCredentialProxyToken    = "OPENSANDBOX_CREDENTIAL_PROXY_TOKEN"
+	EnvCredentialProxySocket   = "OPENSANDBOX_CREDENTIAL_PROXY_SOCKET"
 	EnvEgressRules             = "OPENSANDBOX_EGRESS_RULES"
 	EnvEgressPolicyFile        = "OPENSANDBOX_EGRESS_POLICY_FILE"
 	EnvEgressLogLevel          = "OPENSANDBOX_EGRESS_LOG_LEVEL"
@@ -61,6 +61,7 @@ const (
 const (
 	DefaultEgressServerAddr      = ":18080"
 	DefaultMitmproxyPort         = 18081
+	DefaultCredentialProxySocket = "/run/opensandbox/credential-proxy/active.sock"
 	ResolvNameserverCap          = 10
 	DefaultMaxEgressRules        = 4096
 	DefaultDNSUpstreamTimeoutSec = 5

@@ -15,6 +15,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import sys
 import types
 import unittest
@@ -116,6 +118,64 @@ def _load_system_module() -> Any:
 
 
 class SystemAddonRedactionTest(unittest.TestCase):
+    def test_load_active_vault_reads_unix_socket(self) -> None:
+        system = _load_system_module()
+        calls: list[tuple[str, Any, Any]] = []
+
+        class FakeResponse:
+            status = 200
+
+            def read(self) -> bytes:
+                return json.dumps(
+                    {
+                        "revision": 7,
+                        "bindings": [
+                            {
+                                "name": "gitlab-api",
+                                "headers": [
+                                    {"name": "Private-Token", "value": "secret-token"}
+                                ],
+                            }
+                        ],
+                        "redactions": ["secret-token"],
+                    }
+                ).encode("utf-8")
+
+        class FakeConnection:
+            def __init__(self, socket_path: str, timeout: float) -> None:
+                calls.append(("init", socket_path, timeout))
+
+            def request(self, method: str, path: str) -> None:
+                calls.append(("request", method, path))
+
+            def getresponse(self) -> FakeResponse:
+                calls.append(("getresponse", None, None))
+                return FakeResponse()
+
+            def close(self) -> None:
+                calls.append(("close", None, None))
+
+        old_socket = os.environ.get(system.CREDENTIAL_PROXY_SOCKET_ENV)
+        old_connection = system.UnixSocketHTTPConnection
+        os.environ[system.CREDENTIAL_PROXY_SOCKET_ENV] = "/tmp/active.sock"
+        system.UnixSocketHTTPConnection = FakeConnection
+        try:
+            vault = system._load_active_vault()
+        finally:
+            system.UnixSocketHTTPConnection = old_connection
+            if old_socket is None:
+                os.environ.pop(system.CREDENTIAL_PROXY_SOCKET_ENV, None)
+            else:
+                os.environ[system.CREDENTIAL_PROXY_SOCKET_ENV] = old_socket
+
+        self.assertIsNotNone(vault)
+        assert vault is not None
+        self.assertEqual(7, vault.revision)
+        self.assertEqual(["secret-token"], vault.redactions)
+        self.assertEqual(("init", "/tmp/active.sock", 0.25), calls[0])
+        self.assertEqual(("request", "GET", system.ACTIVE_VAULT_PATH), calls[1])
+        self.assertEqual(("close", None, None), calls[-1])
+
     def test_request_injection_log_does_not_include_secret_value(self) -> None:
         system = _load_system_module()
         flow = _Flow()

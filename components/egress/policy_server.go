@@ -23,6 +23,7 @@ import (
 	"hash/fnv"
 	"net/http"
 	"net/netip"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -58,7 +59,6 @@ func startPolicyServer(
 	enforcementMode string,
 	addr string,
 	token string,
-	credentialProxyToken string,
 	nameserverIPs []netip.Addr,
 	policyFile string,
 	alwaysDeny, alwaysAllow []policy.EgressRule,
@@ -71,17 +71,16 @@ func startPolicyServer(
 
 	mux := http.NewServeMux()
 	handler := &policyServer{
-		proxy:                proxy,
-		nft:                  nft,
-		token:                token,
-		credentialProxyToken: credentialProxyToken,
-		enforcementMode:      enforcementMode,
-		nameserverIPs:        nameserverIPs,
-		policyFile:           strings.TrimSpace(policyFile),
-		maxEgressRules:       maxEgressRules,
-		alwaysLoader:         policy.NewAlwaysRuleLoader(time.Minute),
-		stopAlwaysReload:     make(chan struct{}),
-		mitmGate:             mitmGate,
+		proxy:            proxy,
+		nft:              nft,
+		token:            token,
+		enforcementMode:  enforcementMode,
+		nameserverIPs:    nameserverIPs,
+		policyFile:       strings.TrimSpace(policyFile),
+		maxEgressRules:   maxEgressRules,
+		alwaysLoader:     policy.NewAlwaysRuleLoader(time.Minute),
+		stopAlwaysReload: make(chan struct{}),
+		mitmGate:         mitmGate,
 	}
 	handler.credentialVault = newCredentialVaultStore(mitmGate, func() bool { return strings.TrimSpace(token) != "" })
 	handler.setAlwaysRules(alwaysDeny, alwaysAllow)
@@ -99,6 +98,21 @@ func startPolicyServer(
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	var activeSrv *http.Server
+	var cleanupActiveSocket func(context.Context) error
+	if constants.IsTruthy(os.Getenv(constants.EnvMitmproxyTransparent)) {
+		socketPath := envOrDefault(constants.EnvCredentialProxySocket, constants.DefaultCredentialProxySocket)
+		_, mitmGID, _, err := mitmproxy.LookupUser(mitmproxy.RunAsUser)
+		if err != nil {
+			return nil, fmt.Errorf("lookup credential proxy user %q: %w", mitmproxy.RunAsUser, err)
+		}
+		activeSrv, cleanupActiveSocket, err = startCredentialVaultActiveSocketServer(handler, socketPath, int(mitmGID))
+		if err != nil {
+			return nil, fmt.Errorf("credential vault active socket: %w", err)
+		}
+		log.Infof("credential vault active API listening on unix socket %s", socketPath)
+	}
+
 	srv := &http.Server{Addr: addr, Handler: mux}
 	handler.server = srv
 	srv.RegisterOnShutdown(func() {
@@ -106,6 +120,13 @@ func startPolicyServer(
 		case <-handler.stopAlwaysReload:
 		default:
 			close(handler.stopAlwaysReload)
+		}
+		if activeSrv != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := cleanupActiveSocket(shutdownCtx); err != nil {
+				log.Errorf("credential vault active socket shutdown error: %v", err)
+			}
 		}
 	})
 
@@ -118,6 +139,13 @@ func startPolicyServer(
 
 	select {
 	case err := <-errCh:
+		if activeSrv != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			if cleanupErr := cleanupActiveSocket(shutdownCtx); cleanupErr != nil {
+				log.Errorf("credential vault active socket shutdown error: %v", cleanupErr)
+			}
+			cancel()
+		}
 		return nil, err
 	case <-time.After(200 * time.Millisecond):
 		handler.startAlwaysRuleReloadJob()
@@ -131,16 +159,15 @@ func startPolicyServer(
 }
 
 type policyServer struct {
-	proxy                policyUpdater
-	nft                  nftApplier
-	server               *http.Server
-	token                string
-	credentialProxyToken string
-	enforcementMode      string
-	nameserverIPs        []netip.Addr
-	policyFile           string     // if set, successful /policy changes persist (truncate+write+fsync)
-	maxEgressRules       int        // 0 = unlimited; cap len(Egress) for POST/PATCH
-	mu                   sync.Mutex // serializes /policy handlers (no lost update across POST vs PATCH)
+	proxy           policyUpdater
+	nft             nftApplier
+	server          *http.Server
+	token           string
+	enforcementMode string
+	nameserverIPs   []netip.Addr
+	policyFile      string     // if set, successful /policy changes persist (truncate+write+fsync)
+	maxEgressRules  int        // 0 = unlimited; cap len(Egress) for POST/PATCH
+	mu              sync.Mutex // serializes /policy handlers (no lost update across POST vs PATCH)
 
 	alwaysLoader     *policy.AlwaysRuleLoader
 	stopAlwaysReload chan struct{}
@@ -208,15 +235,7 @@ func (s *policyServer) handleCredentialVaultSubresource(w http.ResponseWriter, r
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !isLoopbackRequest(r) {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		if !s.authorizeCredentialProxy(r) {
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
-		s.handleCredentialVaultActive(w)
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
@@ -736,20 +755,6 @@ func (s *policyServer) authorize(r *http.Request) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.token)) == 1
-}
-
-func (s *policyServer) authorizeCredentialProxy(r *http.Request) bool {
-	if s.credentialProxyToken == "" {
-		return false
-	}
-	provided := r.Header.Get(constants.CredentialProxyAuthHeader)
-	if provided == "" {
-		return false
-	}
-	if len(provided) != len(s.credentialProxyToken) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(provided), []byte(s.credentialProxyToken)) == 1
 }
 
 func credentialVaultWriteTransportAllowed(r *http.Request) bool {

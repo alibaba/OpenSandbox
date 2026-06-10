@@ -17,39 +17,17 @@ package mitmproxy
 import (
 	"testing"
 
-	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/stretchr/testify/require"
 )
 
-func TestBuildMitmdumpEnvInjectsCredentialProxyToken(t *testing.T) {
+func TestBuildMitmdumpEnvSetsMitmproxyHome(t *testing.T) {
 	env := buildMitmdumpEnv(
 		[]string{
 			"PATH=/usr/bin",
-			constants.EnvCredentialProxyToken + "=stale-parent-token",
 		},
 		"/home/mitmproxy",
-		"child-only-token",
 	)
 
 	require.Contains(t, env, "PATH=/usr/bin")
 	require.Contains(t, env, "HOME=/home/mitmproxy")
-	require.Contains(t, env, constants.EnvCredentialProxyToken+"=child-only-token")
-	require.NotContains(t, env, constants.EnvCredentialProxyToken+"=stale-parent-token")
-}
-
-func TestBuildMitmdumpEnvOmitsBlankCredentialProxyToken(t *testing.T) {
-	env := buildMitmdumpEnv(
-		[]string{
-			"PATH=/usr/bin",
-			constants.EnvCredentialProxyToken + "=stale-parent-token",
-		},
-		"/home/mitmproxy",
-		"",
-	)
-
-	require.Contains(t, env, "HOME=/home/mitmproxy")
-	require.NotContains(t, env, constants.EnvCredentialProxyToken+"=stale-parent-token")
-	for _, entry := range env {
-		require.NotRegexp(t, "^"+constants.EnvCredentialProxyToken+"=", entry)
-	}
 }

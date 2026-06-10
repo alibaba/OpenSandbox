@@ -20,6 +20,5 @@ const (
 )
 
 const (
-	EgressAuthTokenHeader     = "OPENSANDBOX-EGRESS-AUTH"
-	CredentialProxyAuthHeader = "OPENSANDBOX-CREDENTIAL-PROXY-AUTH"
+	EgressAuthTokenHeader = "OPENSANDBOX-EGRESS-AUTH"
 )

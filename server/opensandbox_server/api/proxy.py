@@ -33,7 +33,6 @@ from websockets.typing import Origin
 from opensandbox_server.api import lifecycle
 from opensandbox_server.api.schema import Endpoint
 from opensandbox_server.middleware.auth import SANDBOX_API_KEY_HEADER
-from opensandbox_server.services.constants import OPEN_SANDBOX_CREDENTIAL_PROXY_AUTH_HEADER
 from opensandbox_server.services.constants import OPEN_SANDBOX_SECURE_ACCESS_HEADER
 
 logger = logging.getLogger(__name__)
@@ -54,7 +53,6 @@ HOP_BY_HOP_HEADERS = {
 SENSITIVE_HEADERS = {
     "authorization",
     "cookie",
-    OPEN_SANDBOX_CREDENTIAL_PROXY_AUTH_HEADER.lower(),
     SANDBOX_API_KEY_HEADER.lower(),
 }
 

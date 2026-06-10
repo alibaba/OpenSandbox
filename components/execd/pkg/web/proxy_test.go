@@ -25,11 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProxyMiddlewareStripsCredentialProxyAuthHeader(t *testing.T) {
+func TestProxyMiddlewareReturnsSidecarForbiddenForActiveVault(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	receivedHeader := make(chan string, 1)
+	receivedPath := make(chan string, 1)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedHeader <- r.Header.Get(credentialProxyAuthHeader)
+		receivedPath <- r.URL.Path
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}))
 	defer backend.Close()
@@ -46,11 +46,10 @@ func TestProxyMiddlewareStripsCredentialProxyAuthHeader(t *testing.T) {
 
 	req, err := http.NewRequest(http.MethodGet, proxyServer.URL+"/proxy/"+port+"/credential-vault/_active", nil)
 	require.NoError(t, err)
-	req.Header.Set(credentialProxyAuthHeader, "client-supplied-token")
 	resp, err := proxyServer.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	require.Equal(t, http.StatusForbidden, resp.StatusCode)
-	require.Empty(t, <-receivedHeader)
+	require.Equal(t, "/credential-vault/_active", <-receivedPath)
 }

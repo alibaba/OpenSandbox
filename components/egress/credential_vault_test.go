@@ -15,10 +15,16 @@
 package main
 
 import (
+	"context"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
@@ -79,15 +85,14 @@ func TestCredentialVaultCreateSanitizesAndRendersActiveSnapshot(t *testing.T) {
 	require.Contains(t, payload.Redactions, "secret-token")
 }
 
-func TestCredentialVaultActiveRejectsProxiedPublicEgressToken(t *testing.T) {
+func TestCredentialVaultActiveTCPAlwaysForbidden(t *testing.T) {
 	store := newCredentialVaultStore(nil, func() bool { return true })
 	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
 	_, err := store.create(testCredentialVaultRequest(), pol)
 	require.NoError(t, err)
 	srv := &policyServer{
-		token:                "public-egress-token",
-		credentialProxyToken: "internal-credential-proxy-token",
-		credentialVault:      store,
+		token:           "public-egress-token",
+		credentialVault: store,
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/credential-vault/_active", nil)
@@ -101,27 +106,47 @@ func TestCredentialVaultActiveRejectsProxiedPublicEgressToken(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "secret-token")
 }
 
-func TestCredentialVaultActiveAllowsInternalCredentialProxyToken(t *testing.T) {
+func TestCredentialVaultActiveUnixSocketReturnsSnapshot(t *testing.T) {
 	store := newCredentialVaultStore(nil, func() bool { return true })
 	pol := testCredentialPolicy(t, `{"defaultAction":"deny","egress":[{"action":"allow","target":"code.alibaba-inc.com"}]}`)
 	_, err := store.create(testCredentialVaultRequest(), pol)
 	require.NoError(t, err)
 	srv := &policyServer{
-		token:                "public-egress-token",
-		credentialProxyToken: "internal-credential-proxy-token",
-		credentialVault:      store,
+		token:           "public-egress-token",
+		credentialVault: store,
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/credential-vault/_active", nil)
-	req.RemoteAddr = "127.0.0.1:4321"
-	req.Header.Set(constants.CredentialProxyAuthHeader, "internal-credential-proxy-token")
-	w := httptest.NewRecorder()
+	tmpDir, err := os.MkdirTemp("/tmp", "opensandbox-active-*")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, os.RemoveAll(tmpDir))
+	})
+	socketPath := filepath.Join(tmpDir, "credential-proxy", "active.sock")
+	_, cleanup, err := startCredentialVaultActiveSocketServer(srv, socketPath, -1)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		require.NoError(t, cleanup(ctx))
+	})
 
-	srv.handleCredentialVaultSubresource(w, req)
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var dialer net.Dialer
+				return dialer.DialContext(ctx, "unix", socketPath)
+			},
+		},
+	}
+	resp, err := client.Get("http://credential-proxy/credential-vault/_active")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
 
-	require.Equal(t, http.StatusOK, w.Result().StatusCode)
-	require.Contains(t, w.Body.String(), "secret-token")
-	require.Contains(t, w.Body.String(), "Private-Token")
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, string(body), "secret-token")
+	require.Contains(t, string(body), "Private-Token")
 }
 
 func TestCredentialVaultRejectsDefaultAllowWithoutExplicitCoverage(t *testing.T) {

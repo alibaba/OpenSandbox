@@ -92,7 +92,7 @@ func launchTagged(cfg mitmproxy.Config, restartCh chan<- exitEvent, shutdownCh <
 }
 
 // startMitmproxyTransparentIfEnabled starts mitmdump in transparent mode, waits for the listener, and installs OUTPUT REDIRECT, then syncs the CA.
-func startMitmproxyTransparentIfEnabled(credentialProxyToken string) (*mitmTransparent, error) {
+func startMitmproxyTransparentIfEnabled() (*mitmTransparent, error) {
 	if !constants.IsTruthy(os.Getenv(constants.EnvMitmproxyTransparent)) {
 		return nil, nil
 	}
@@ -104,10 +104,9 @@ func startMitmproxyTransparentIfEnabled(credentialProxyToken string) (*mitmTrans
 	}
 
 	cfg := mitmproxy.Config{
-		ListenPort:           mpPort,
-		UserName:             mitmproxy.RunAsUser,
-		ScriptPath:           strings.TrimSpace(os.Getenv(constants.EnvMitmproxyScript)),
-		CredentialProxyToken: credentialProxyToken,
+		ListenPort: mpPort,
+		UserName:   mitmproxy.RunAsUser,
+		ScriptPath: strings.TrimSpace(os.Getenv(constants.EnvMitmproxyScript)),
 	}
 	// Buffer absorbs OnExit events from a retry storm so OnExit goroutines
 	// don't all park waiting for the watcher to drain. Correctness does not

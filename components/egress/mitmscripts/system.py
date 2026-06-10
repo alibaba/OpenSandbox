@@ -23,8 +23,7 @@
 #      (which otherwise stalls LLM-style small-chunk streams).
 #   2. Acts as Credential Proxy when the egress sidecar has an active
 #      Credential Vault revision. The active revision is stored in the Go
-#      sidecar process and read over an internal-token-protected loopback
-#      runtime endpoint.
+#      sidecar process and read over an egress-container-private Unix socket.
 #      Credential values are not logged, and response header values containing
 #      credentials are redacted. Response bodies are not rewritten by default.
 #   3. Implements SNI-aware ignore_hosts for transparent mode. mitmproxy's
@@ -39,21 +38,21 @@
 # OPENSANDBOX_EGRESS_MITMPROXY_SCRIPT.
 from __future__ import annotations
 
+import http.client as http_client
 import json
 import os
 import re
+import socket
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 from mitmproxy import ctx, http
 from mitmproxy.tls import ClientHelloData
 
 
-CREDENTIAL_PROXY_TOKEN_ENV = "OPENSANDBOX_CREDENTIAL_PROXY_TOKEN"
-CREDENTIAL_PROXY_TOKEN_HEADER = "OPENSANDBOX-CREDENTIAL-PROXY-AUTH"
-ACTIVE_VAULT_URL = "http://127.0.0.1:18080/credential-vault/_active"
+CREDENTIAL_PROXY_SOCKET_ENV = "OPENSANDBOX_CREDENTIAL_PROXY_SOCKET"
+DEFAULT_CREDENTIAL_PROXY_SOCKET = "/run/opensandbox/credential-proxy/active.sock"
+ACTIVE_VAULT_PATH = "/credential-vault/_active"
 VAULT_CACHE_TTL_SECONDS = 0.5
 
 
@@ -71,6 +70,18 @@ class ActiveVault:
 
 _vault_cache: ActiveVault | None = None
 _vault_cache_loaded_at = 0.0
+
+
+class UnixSocketHTTPConnection(http_client.HTTPConnection):
+    def __init__(self, socket_path: str, timeout: float) -> None:
+        super().__init__("credential-proxy", timeout=timeout)
+        self.socket_path = socket_path
+
+    def connect(self) -> None:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(self.timeout)
+        sock.connect(self.socket_path)
+        self.sock = sock
 
 
 def tls_clienthello(data: ClientHelloData) -> None:
@@ -104,31 +115,34 @@ def _load_active_vault() -> ActiveVault | None:
     if _vault_cache is not None and now - _vault_cache_loaded_at < VAULT_CACHE_TTL_SECONDS:
         return _vault_cache
 
-    token = os.environ.get(CREDENTIAL_PROXY_TOKEN_ENV, "")
-    if not token:
-        _vault_cache = None
-        _vault_cache_loaded_at = now
-        return None
-
-    request = urllib.request.Request(
-        ACTIVE_VAULT_URL,
-        headers={CREDENTIAL_PROXY_TOKEN_HEADER: token},
-        method="GET",
+    socket_path = (
+        os.environ.get(CREDENTIAL_PROXY_SOCKET_ENV, "").strip()
+        or DEFAULT_CREDENTIAL_PROXY_SOCKET
     )
+    connection = UnixSocketHTTPConnection(socket_path, timeout=0.25)
     try:
-        with urllib.request.urlopen(request, timeout=0.25) as response:  # nosec B310 - loopback sidecar endpoint
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        if exc.code != 404:
-            ctx.log.warn(f"credential proxy: active vault lookup failed with HTTP {exc.code}")
-        _vault_cache = None
-        _vault_cache_loaded_at = now
-        return None
+        connection.request("GET", ACTIVE_VAULT_PATH)
+        response = connection.getresponse()
+        body = response.read()
+        if response.status == 404:
+            _vault_cache = None
+            _vault_cache_loaded_at = now
+            return None
+        if response.status != 200:
+            ctx.log.warn(
+                f"credential proxy: active vault lookup failed with HTTP {response.status}"
+            )
+            _vault_cache = None
+            _vault_cache_loaded_at = now
+            return None
+        payload = json.loads(body.decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 - mitm addon must not crash traffic handling
         ctx.log.warn(f"credential proxy: active vault lookup failed: {exc}")
         _vault_cache = None
         _vault_cache_loaded_at = now
         return None
+    finally:
+        connection.close()
 
     bindings = payload.get("bindings") or []
     redactions = [v for v in (payload.get("redactions") or []) if isinstance(v, str) and v]
