@@ -46,6 +46,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Clean Docker runner cache
+        run: bash scripts/ci-docker-cleanup.sh
+
       - name: Set up uv PATH and verify
         run: |
           echo "${UV_BIN}" >> "$GITHUB_PATH"
@@ -138,6 +141,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Clean Docker runner cache
+        run: bash scripts/ci-docker-cleanup.sh
+
       - name: Set up uv PATH and verify
         run: |
           echo "${UV_BIN}" >> "$GITHUB_PATH"
@@ -189,6 +195,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Clean Docker runner cache
+        run: bash scripts/ci-docker-cleanup.sh
 
       - name: Set up uv PATH and verify
         run: |
@@ -304,6 +313,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Clean Docker runner cache
+        run: bash scripts/ci-docker-cleanup.sh
+
       - name: Set up uv PATH and verify
         run: |
           echo "${UV_BIN}" >> "$GITHUB_PATH"
@@ -399,6 +411,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Clean Docker runner cache
+        run: bash scripts/ci-docker-cleanup.sh
+
       - name: Set up uv PATH and verify
         run: |
           echo "${UV_BIN}" >> "$GITHUB_PATH"
@@ -486,6 +501,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Clean Docker runner cache
+        run: bash scripts/ci-docker-cleanup.sh
 
       - name: Set up uv PATH and verify
         run: |

@@ -52,6 +52,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Clean Docker runner cache
+        run: bash scripts/ci-docker-cleanup.sh
+
       - name: Run dns test
         working-directory: components/egress
         run: |
