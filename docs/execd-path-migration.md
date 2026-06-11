@@ -31,24 +31,34 @@ and chained commands.
 
 | User profile | Impact |
 |---|---|
-| **code-interpreter SDK users** | Must upgrade to code-interpreter `>=v1.1.0` |
+| **code-interpreter image `<=v1.0.2`** | **Must upgrade to `v1.1.0`** — emptyDir at `/opt/opensandbox` shadows old scripts under `/opt/opensandbox/` |
 | **Pool CR with custom templates** | Must update execd init container paths and volume mount |
 | **Custom execd images** | Must now include `/bootstrap.sh` alongside `/execd` |
 | **Docker runtime users (default)** | No manual action — bootstrap.sh is auto-installed |
-| **Kubernetes runtime via server (no Pool CR)** | No action — paths are built programmatically |
 
 ## Migration steps
 
-### 1. code-interpreter SDK
+### 1. code-interpreter image
 
-Upgrade to v1.1.0 or later:
+**Must upgrade the image from `v1.0.2` to `v1.1.0`.**
 
-```bash
-pip install --upgrade opensandbox-code-interpreter>=1.1.0
+In code-interpreter `v1.0.2`, the entrypoint scripts (`code-interpreter.sh`,
+`code-interpreter-env.sh`) live directly under `/opt/opensandbox/`. Before this PR,
+the emptyDir volume was mounted at `/opt/opensandbox/bin/`, shadowing only that
+subdirectory. Now the emptyDir mounts at `/opt/opensandbox/`, shadowing the entire
+directory — including those scripts. The pod starts but cannot find its own entrypoint.
+
+[PR #1012](https://github.com/opensandbox-group/OpenSandbox/pull/1012) moved all
+code-interpreter scripts from `/opt/opensandbox/` to `/opt/code-interpreter/`,
+avoiding the conflict. Version `v1.1.0` is the first image with that change.
+
+```yaml
+# In your Pool CR or sandbox creation request:
+image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.1.0
 ```
 
-SDK versions before v1.1.0 internally reference `/opt/opensandbox/bin/task-executor` and
-will fail when running against the updated server.
+The Python SDK (`opensandbox-code-interpreter`) does not require an upgrade — it
+communicates with execd over the network and does not reference filesystem paths.
 
 ### 2. Pool CR template
 
@@ -144,7 +154,7 @@ template referencing them will fail with "file not found".
 
 | Scenario | Failure mode |
 |---|---|
-| Old code-interpreter SDK version | `task-executor` not found; sandbox enters error state |
+| Old code-interpreter image (`<=v1.0.2`) | emptyDir at `/opt/opensandbox` shadows `code-interpreter.sh`; pod starts but entrypoint not found |
 | Old Pool CR template | execd init container succeeds (it copies to its own mount), but main container cannot find `/opt/opensandbox/bin/bootstrap.sh` |
 | Old custom execd image (no bootstrap.sh) | Docker sandbox creation fails with "bootstrap.sh not found in execd image cache" |
 
@@ -167,7 +177,7 @@ For release note authors: include a summary that links to this document.
 ### Breaking: execd install path flattened
 
 execd and bootstrap.sh are now installed to `/opt/opensandbox/` instead of
-`/opt/opensandbox/bin/`. code-interpreter SDK users must upgrade to `>=v1.1.0`.
+`/opt/opensandbox/bin/`. code-interpreter image users must upgrade to `>=v1.1.0`.
 Custom Pool CR templates and custom execd images require updates.
 
 See [execd Path Migration Guide](docs/execd-path-migration.md) for full details.
