@@ -87,6 +87,36 @@ internal class SandboxesAdapter(
         platform: PlatformSpec?,
         secureAccess: Boolean,
         snapshotId: String?,
+    ): SandboxCreateResponse =
+        createSandbox(
+            spec = spec,
+            entrypoint = entrypoint,
+            env = env,
+            metadata = metadata,
+            timeout = timeout,
+            resource = resource,
+            networkPolicy = networkPolicy,
+            extensions = extensions,
+            volumes = volumes,
+            platform = platform,
+            secureAccess = secureAccess,
+            snapshotId = snapshotId,
+            credentialProxy = null,
+        )
+
+    override fun createSandbox(
+        spec: SandboxImageSpec?,
+        entrypoint: List<String>?,
+        env: Map<String, String>,
+        metadata: Map<String, String>,
+        timeout: Duration?,
+        resource: Map<String, String>,
+        networkPolicy: NetworkPolicy?,
+        extensions: Map<String, String>,
+        volumes: List<Volume>?,
+        platform: PlatformSpec?,
+        secureAccess: Boolean,
+        snapshotId: String?,
         credentialProxy: CredentialProxyConfig?,
     ): SandboxCreateResponse {
         logger.info("Creating sandbox with startup source: {}", spec?.image ?: snapshotId)

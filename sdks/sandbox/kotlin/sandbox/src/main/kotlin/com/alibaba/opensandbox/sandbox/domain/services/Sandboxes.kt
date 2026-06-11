@@ -55,7 +55,6 @@ interface Sandboxes {
      * @param extensions Opaque extension parameters passed through to the server as-is. Prefer namespaced keys
      * @param volumes Optional list of volume mounts for persistent storage
      * @param snapshotId Optional snapshot identifier used to restore a sandbox instead of booting from an image
-     * @param credentialProxy Optional Credential Vault proxy startup settings
      * @return Sandbox creation response containing the sandbox id
      */
     fun createSandbox(
@@ -71,8 +70,46 @@ interface Sandboxes {
         platform: PlatformSpec? = null,
         secureAccess: Boolean = false,
         snapshotId: String? = null,
-        credentialProxy: CredentialProxyConfig? = null,
     ): SandboxCreateResponse
+
+    /**
+     * Creates a sandbox with optional Credential Vault proxy startup settings.
+     */
+    fun createSandbox(
+        spec: SandboxImageSpec?,
+        entrypoint: List<String>?,
+        env: Map<String, String>,
+        metadata: Map<String, String>,
+        timeout: Duration?,
+        resource: Map<String, String>,
+        networkPolicy: NetworkPolicy?,
+        extensions: Map<String, String>,
+        volumes: List<Volume>?,
+        platform: PlatformSpec? = null,
+        secureAccess: Boolean = false,
+        snapshotId: String? = null,
+        credentialProxy: CredentialProxyConfig?,
+    ): SandboxCreateResponse {
+        if (credentialProxy == null) {
+            return createSandbox(
+                spec = spec,
+                entrypoint = entrypoint,
+                env = env,
+                metadata = metadata,
+                timeout = timeout,
+                resource = resource,
+                networkPolicy = networkPolicy,
+                extensions = extensions,
+                volumes = volumes,
+                platform = platform,
+                secureAccess = secureAccess,
+                snapshotId = snapshotId,
+            )
+        }
+        throw UnsupportedOperationException(
+            "Credential Vault proxy is not supported by this Sandboxes implementation",
+        )
+    }
 
     /**
      * Retrieves information about an existing sandbox.

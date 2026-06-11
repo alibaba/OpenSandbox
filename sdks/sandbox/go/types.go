@@ -17,6 +17,7 @@
 package opensandbox
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -275,6 +276,17 @@ const (
 type InlineCredentialSource struct {
 	Type  CredentialSourceType `json:"type"`
 	Value string               `json:"value"`
+}
+
+// MarshalJSON defaults the only supported source type so callers can use the
+// natural zero-value form InlineCredentialSource{Value: secret}.
+func (s InlineCredentialSource) MarshalJSON() ([]byte, error) {
+	type inlineCredentialSource InlineCredentialSource
+	source := inlineCredentialSource(s)
+	if source.Type == "" {
+		source.Type = CredentialSourceInline
+	}
+	return json.Marshal(source)
 }
 
 // Credential is a sandbox-local Credential Vault credential create/update

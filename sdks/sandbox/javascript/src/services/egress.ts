@@ -57,7 +57,7 @@ export interface CredentialVault {
   getBinding(name: string): Promise<CredentialBindingMetadata>;
 }
 
-export interface Egress extends CredentialVault {
+export interface Egress {
   getPolicy(): Promise<NetworkPolicy>;
   /**
    * Patch egress rules with sidecar merge semantics.

@@ -9,11 +9,11 @@ import {
   Sandbox,
 } from "../dist/index.js";
 
-function createAdapterFactory() {
+function createAdapterFactory({ includeCredentialVault = true } = {}) {
   const recordedRequests = [];
   const endpointCalls = [];
   const egressStackCalls = [];
-  const egressService = {
+  const policyOnlyEgressService = {
     async getPolicy() {
       return {
         defaultAction: "deny",
@@ -22,6 +22,8 @@ function createAdapterFactory() {
     },
     async patchRules() {},
     async deleteRules() {},
+  };
+  const credentialVaultService = {
     async create() {
       return { revision: 1, credentials: [], bindings: [] };
     },
@@ -45,6 +47,9 @@ function createAdapterFactory() {
       return { name, revision: 1 };
     },
   };
+  const egressService = includeCredentialVault
+    ? { ...policyOnlyEgressService, ...credentialVaultService }
+    : policyOnlyEgressService;
   const sandboxes = {
     async createSandbox(req) {
       recordedRequests.push(req);
@@ -269,6 +274,26 @@ test("Sandbox creates and reuses egress service during sandbox lifecycle", async
   assert.equal(egressStackCalls[0].egressBaseUrl, `http://127.0.0.1:${DEFAULT_EGRESS_PORT}`);
   assert.deepEqual(egressStackCalls[0].endpointHeaders, { "x-port": String(DEFAULT_EGRESS_PORT) });
   assert.deepEqual(vaultState, { revision: 1, credentials: [], bindings: [] });
+});
+
+test("Sandbox.create accepts custom egress adapters without Credential Vault methods", async () => {
+  const { adapterFactory } = createAdapterFactory({ includeCredentialVault: false });
+
+  const sandbox = await Sandbox.create({
+    adapterFactory,
+    connectionConfig: { domain: "http://127.0.0.1:8080" },
+    image: "python:3.12",
+    skipHealthCheck: true,
+  });
+
+  assert.deepEqual(await sandbox.getEgressPolicy(), {
+    defaultAction: "deny",
+    egress: [{ action: "allow", target: "pypi.org" }],
+  });
+  await assert.rejects(
+    () => sandbox.credentialVault.get(),
+    /Credential Vault is not available/
+  );
 });
 
 test("Sandbox.create passes OSSFS volume to request", async () => {

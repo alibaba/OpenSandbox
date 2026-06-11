@@ -27,7 +27,7 @@ import type {
   NetworkPolicy,
   NetworkRule,
 } from "../models/sandboxes.js";
-import type { Egress } from "../services/egress.js";
+import type { CredentialVault, Egress } from "../services/egress.js";
 
 type ApiGetPolicyOk =
   EgressPaths["/policy"]["get"]["responses"][200]["content"]["application/json"];
@@ -222,7 +222,7 @@ function sanitizeCredentialBindingListResponse(
   return response.bindings;
 }
 
-export class EgressAdapter implements Egress {
+export class EgressAdapter implements Egress, CredentialVault {
   private readonly rawBaseUrl?: string;
   private readonly rawHeaders: Record<string, string>;
   private readonly rawFetch: typeof fetch;

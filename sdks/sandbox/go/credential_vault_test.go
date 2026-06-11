@@ -87,6 +87,18 @@ func TestCreateCredentialVaultPayloadAndHeaders(t *testing.T) {
 	require.Equal(t, "apiKey", got.Bindings[0].Auth.Type)
 }
 
+func TestInlineCredentialSourceDefaultsTypeWhenMarshaled(t *testing.T) {
+	body, err := json.Marshal(InlineCredentialSource{Value: "dummy-inline-value"})
+	require.NoError(t, err)
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(body, &got))
+	require.Equal(t, map[string]any{
+		"type":  "inline",
+		"value": "dummy-inline-value",
+	}, got)
+}
+
 func TestPatchCredentialVaultPayload(t *testing.T) {
 	expectedRevision := 3
 

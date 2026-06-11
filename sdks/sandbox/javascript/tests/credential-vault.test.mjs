@@ -240,6 +240,17 @@ test("Credential Vault state omits plaintext secret fields", async () => {
   assert.match(bindingMetadata, /\bauth\??: CredentialAuthMetadata/);
 });
 
+test("Egress declarations keep Credential Vault optional for custom adapters", async () => {
+  const dts = await readDistDeclarations();
+  const egress = declarationBlock(dts, "Egress");
+  const egressStack = declarationBlock(dts, "EgressStack");
+
+  assert.doesNotMatch(egress, /extends CredentialVault/);
+  assert.doesNotMatch(egress, /\bcreate\(/);
+  assert.match(egressStack, /\begress: Egress/);
+  assert.match(egressStack, /\bcredentialVault\??: CredentialVault/);
+});
+
 async function readDistDeclarations() {
   const distDir = new URL("../dist/", import.meta.url);
   const entries = await readdir(distDir);
