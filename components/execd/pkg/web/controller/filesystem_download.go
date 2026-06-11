@@ -148,31 +148,36 @@ func (c *FilesystemController) serveLineRange(filePath string, offset, limit int
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	// Increase buffer for long lines (default 64KB -> 1MB)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
-	
+	reader := bufio.NewReader(file)
 	currentLine := 1
 	linesWritten := 0
 
 	c.ctx.Header("Content-Type", "text/plain")
 
-	for scanner.Scan() && linesWritten < limit {
+	for linesWritten < limit {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				// If we have partial line without newline, process it
+				if len(line) > 0 && currentLine >= offset {
+					c.ctx.Writer.Write(line)
+					linesWritten++
+				}
+				break
+			}
+			c.RespondError(
+				http.StatusInternalServerError,
+				model.ErrorCodeRuntimeError,
+				fmt.Sprintf("error reading file: %v", err),
+			)
+			return
+		}
+
 		if currentLine >= offset {
-			c.ctx.Writer.Write(scanner.Bytes())
-			c.ctx.Writer.Write([]byte("\n"))
+			c.ctx.Writer.Write(line)
 			linesWritten++
 		}
 		currentLine++
-	}
-
-	if err := scanner.Err(); err != nil {
-		c.RespondError(
-			http.StatusInternalServerError,
-			model.ErrorCodeRuntimeError,
-			fmt.Sprintf("error reading file: %v", err),
-		)
-		return
 	}
 
 	rec.MarkSuccess()
