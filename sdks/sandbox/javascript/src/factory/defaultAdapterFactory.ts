@@ -91,6 +91,7 @@ export class DefaultAdapterFactory implements AdapterFactory {
       baseUrl: opts.egressBaseUrl,
       fetch: opts.connectionConfig.fetch,
       headers,
+      credentialVaultWritesAllowed: !opts.connectionConfig.useServerProxy,
     });
     return {
       egress,

@@ -31,7 +31,8 @@ public class SandboxEgressLifecycleTests
     {
         var sandboxes = new StubSandboxes();
         var egress = new StubEgress();
-        var adapterFactory = new StubAdapterFactory(sandboxes, egress);
+        var credentialVault = new StubCredentialVault();
+        var adapterFactory = new StubAdapterFactory(sandboxes, egress, credentialVault);
 
         var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
         {
@@ -65,8 +66,39 @@ public class SandboxEgressLifecycleTests
         egress.GetPolicyCallCount.Should().Be(1);
         egress.PatchRulesCallCount.Should().Be(1);
         egress.DeleteRulesCallCount.Should().Be(1);
-        egress.GetVaultCallCount.Should().Be(2);
+        credentialVault.GetVaultCallCount.Should().Be(2);
         egress.LastDeleteTargets.Should().Equal("www.github.com", "*.blocked.org");
+    }
+
+    [Fact]
+    public async Task CreateAsync_ShouldAcceptCustomEgressWithoutCredentialVaultMethods()
+    {
+        var sandboxes = new StubSandboxes();
+        var egress = new StubEgress();
+        var adapterFactory = new StubAdapterFactory(sandboxes, egress);
+
+        var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+        {
+            Image = "python:3.12",
+            ConnectionConfig = new ConnectionConfig(new ConnectionConfigOptions
+            {
+                Domain = "127.0.0.1:8080",
+                Protocol = ConnectionProtocol.Http
+            }),
+            AdapterFactory = adapterFactory,
+            SkipHealthCheck = true,
+            Diagnostics = new SdkDiagnosticsOptions
+            {
+                LoggerFactory = NullLoggerFactory.Instance
+            }
+        });
+
+        await sandbox.GetEgressPolicyAsync();
+        Func<Task> act = () => sandbox.CredentialVault.GetAsync();
+
+        egress.GetPolicyCallCount.Should().Be(1);
+        await act.Should().ThrowAsync<InvalidArgumentException>()
+            .WithMessage("Credential Vault is not available for this adapter factory*");
     }
 
     [Fact]
@@ -183,11 +215,16 @@ public class SandboxEgressLifecycleTests
     {
         private readonly ISandboxes _sandboxes;
         private readonly IEgress _egress;
+        private readonly ICredentialVault? _credentialVault;
 
-        public StubAdapterFactory(ISandboxes sandboxes, IEgress egress)
+        public StubAdapterFactory(
+            ISandboxes sandboxes,
+            IEgress egress,
+            ICredentialVault? credentialVault = null)
         {
             _sandboxes = sandboxes;
             _egress = egress;
+            _credentialVault = credentialVault;
         }
 
         public int EgressStackCallCount { get; private set; }
@@ -221,7 +258,8 @@ public class SandboxEgressLifecycleTests
             LastEgressBaseUrl = options.EgressBaseUrl;
             return new EgressStack
             {
-                Egress = _egress
+                Egress = _egress,
+                CredentialVault = _credentialVault
             };
         }
     }
@@ -314,9 +352,39 @@ public class SandboxEgressLifecycleTests
 
         public int DeleteRulesCallCount { get; private set; }
 
-        public int GetVaultCallCount { get; private set; }
-
         public IReadOnlyList<string> LastDeleteTargets { get; private set; } = [];
+
+        public Task<NetworkPolicy> GetPolicyAsync(CancellationToken cancellationToken = default)
+        {
+            GetPolicyCallCount++;
+            return Task.FromResult(new NetworkPolicy
+            {
+                DefaultAction = NetworkRuleAction.Deny,
+                Egress = [new NetworkRule
+                {
+                    Action = NetworkRuleAction.Allow,
+                    Target = "pypi.org"
+                }]
+            });
+        }
+
+        public Task PatchRulesAsync(IReadOnlyList<NetworkRule> rules, CancellationToken cancellationToken = default)
+        {
+            PatchRulesCallCount++;
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteRulesAsync(IReadOnlyList<string> targets, CancellationToken cancellationToken = default)
+        {
+            DeleteRulesCallCount++;
+            LastDeleteTargets = targets.ToList();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class StubCredentialVault : ICredentialVault
+    {
+        public int GetVaultCallCount { get; private set; }
 
         public Task<CredentialVaultState> CreateAsync(
             IReadOnlyList<Credential> credentials,
@@ -363,33 +431,6 @@ public class SandboxEgressLifecycleTests
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult(CreateVaultState().Bindings[0]);
-        }
-
-        public Task<NetworkPolicy> GetPolicyAsync(CancellationToken cancellationToken = default)
-        {
-            GetPolicyCallCount++;
-            return Task.FromResult(new NetworkPolicy
-            {
-                DefaultAction = NetworkRuleAction.Deny,
-                Egress = [new NetworkRule
-                {
-                    Action = NetworkRuleAction.Allow,
-                    Target = "pypi.org"
-                }]
-            });
-        }
-
-        public Task PatchRulesAsync(IReadOnlyList<NetworkRule> rules, CancellationToken cancellationToken = default)
-        {
-            PatchRulesCallCount++;
-            return Task.CompletedTask;
-        }
-
-        public Task DeleteRulesAsync(IReadOnlyList<string> targets, CancellationToken cancellationToken = default)
-        {
-            DeleteRulesCallCount++;
-            LastDeleteTargets = targets.ToList();
-            return Task.CompletedTask;
         }
 
         private static CredentialVaultState CreateVaultState()

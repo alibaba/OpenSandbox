@@ -86,9 +86,9 @@ export interface CredentialProxyConfig extends Record<string, unknown> {
 
 export interface InlineCredentialSource extends Record<string, unknown> {
   /**
-   * Credential source type.
+   * Credential source type. Defaults to "inline" when omitted.
    */
-  type: "inline";
+  type?: "inline";
   /**
    * Write-only inline credential value. This field is accepted in create/patch
    * requests and is never present in Credential Vault state responses.

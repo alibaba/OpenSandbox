@@ -6,7 +6,7 @@ import { EgressAdapter } from "../dist/internal.js";
 
 const credential = {
   name: "api-token",
-  source: { type: "inline", value: "write-only-value" },
+  source: { value: "write-only-value" },
 };
 
 const binding = {
@@ -77,7 +77,7 @@ function jsonResponse(body, init = {}) {
   });
 }
 
-function createAdapter() {
+function createAdapter({ credentialVaultWritesAllowed = true } = {}) {
   const requests = [];
   const fetchImpl = async (input, init = {}) => {
     const url = new URL(String(input));
@@ -138,6 +138,7 @@ function createAdapter() {
         "OPEN-SANDBOX-API-KEY": "sdk-key",
         "x-endpoint-token": "route-token",
       },
+      credentialVaultWritesAllowed,
     }),
     requests,
   };
@@ -227,10 +228,12 @@ test("Credential Vault state omits plaintext secret fields", async () => {
   assert.equal(Object.hasOwn(state.bindings[0].auth, "headers"), false);
 
   const dts = await readDistDeclarations();
+  const inlineCredentialSource = declarationBlock(dts, "InlineCredentialSource");
   const credentialMetadata = declarationBlock(dts, "CredentialMetadata");
   const authMetadata = declarationBlock(dts, "CredentialAuthMetadata");
   const bindingMetadata = declarationBlock(dts, "CredentialBindingMetadata");
 
+  assert.match(inlineCredentialSource, /\btype\?: "inline"/);
   assert.doesNotMatch(credentialMetadata, /extends Record/);
   assert.doesNotMatch(credentialMetadata, /\bsource\s*[?:]/);
   assert.doesNotMatch(authMetadata, /extends Record/);
@@ -238,6 +241,37 @@ test("Credential Vault state omits plaintext secret fields", async () => {
   assert.doesNotMatch(authMetadata, /\bheaders\s*[?:]/);
   assert.doesNotMatch(bindingMetadata, /extends Record/);
   assert.match(bindingMetadata, /\bauth\??: CredentialAuthMetadata/);
+});
+
+test("Credential Vault writes fail fast through server-proxied transports", async () => {
+  const { adapter, requests } = createAdapter({
+    credentialVaultWritesAllowed: false,
+  });
+
+  await assert.rejects(
+    () => adapter.create({ credentials: [credential], bindings: [binding] }),
+    /Credential Vault writes are not supported when useServerProxy=true/
+  );
+  await assert.rejects(
+    () => adapter.patch({ credentials: { add: [credential] } }),
+    /Credential Vault writes are not supported when useServerProxy=true/
+  );
+  await assert.rejects(
+    () => adapter.delete(),
+    /Credential Vault writes are not supported when useServerProxy=true/
+  );
+
+  const state = await adapter.get();
+
+  assert.deepEqual(state, {
+    revision: 9,
+    credentials: [sanitizedCredential],
+    bindings: [sanitizedBinding],
+  });
+  assert.deepEqual(
+    requests.map((request) => [request.method, request.pathname]),
+    [["GET", "/credential-vault"]]
+  );
 });
 
 test("Egress declarations keep Credential Vault optional for custom adapters", async () => {

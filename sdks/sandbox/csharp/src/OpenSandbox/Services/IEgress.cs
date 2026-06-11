@@ -50,7 +50,7 @@ public interface ICredentialVault
 /// <summary>
 /// Service interface for direct egress sidecar operations.
 /// </summary>
-public interface IEgress : ICredentialVault
+public interface IEgress
 {
     Task<NetworkPolicy> GetPolicyAsync(CancellationToken cancellationToken = default);
 

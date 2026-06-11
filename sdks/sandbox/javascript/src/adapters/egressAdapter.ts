@@ -15,7 +15,11 @@
 import type { EgressClient } from "../openapi/egressClient.js";
 import { throwOnOpenApiFetchError } from "./openapiError.js";
 import type { paths as EgressPaths } from "../api/egress.js";
-import { SandboxApiException, SandboxError } from "../core/exceptions.js";
+import {
+  InvalidArgumentException,
+  SandboxApiException,
+  SandboxError,
+} from "../core/exceptions.js";
 import type {
   CredentialBindingMetadata,
   CredentialBindingListResponse,
@@ -49,6 +53,12 @@ export interface EgressRawHttpOptions {
    * Custom fetch implementation.
    */
   fetch?: typeof fetch;
+  /**
+   * Whether Credential Vault create/patch/delete requests may be sent through
+   * this transport. Server-proxied endpoints use plain HTTP to the sidecar and
+   * cannot satisfy the sidecar's loopback/TLS write gate.
+   */
+  credentialVaultWritesAllowed?: boolean;
 }
 
 type JsonObject = Record<string, unknown>;
@@ -226,6 +236,7 @@ export class EgressAdapter implements Egress, CredentialVault {
   private readonly rawBaseUrl?: string;
   private readonly rawHeaders: Record<string, string>;
   private readonly rawFetch: typeof fetch;
+  private readonly credentialVaultWritesAllowed: boolean;
 
   constructor(
     private readonly client: EgressClient,
@@ -234,6 +245,8 @@ export class EgressAdapter implements Egress, CredentialVault {
     this.rawBaseUrl = rawHttp ? stripTrailingSlashes(rawHttp.baseUrl) : undefined;
     this.rawHeaders = rawHttp?.headers ?? {};
     this.rawFetch = rawHttp?.fetch ?? fetch;
+    this.credentialVaultWritesAllowed =
+      rawHttp?.credentialVaultWritesAllowed ?? true;
   }
 
   private credentialVaultUrl(path: string): string {
@@ -241,6 +254,16 @@ export class EgressAdapter implements Egress, CredentialVault {
       throw new Error("Credential Vault transport is not configured");
     }
     return `${this.rawBaseUrl}${path}`;
+  }
+
+  private requireCredentialVaultWriteTransport(): void {
+    if (this.credentialVaultWritesAllowed) {
+      return;
+    }
+    throw new InvalidArgumentException({
+      message:
+        "Credential Vault writes are not supported when useServerProxy=true because the server proxy forwards plain HTTP to the egress sidecar. Disable useServerProxy or use a direct egress endpoint for create, patch, and delete.",
+    });
   }
 
   private async readErrorResponse(response: Response): Promise<{
@@ -327,6 +350,7 @@ export class EgressAdapter implements Egress, CredentialVault {
   }
 
   async create(request: CredentialVaultCreateRequest): Promise<CredentialVaultState> {
+    this.requireCredentialVaultWriteTransport();
     const payload = await this.requestJson(
       "POST",
       "/credential-vault",
@@ -346,6 +370,7 @@ export class EgressAdapter implements Egress, CredentialVault {
   }
 
   async patch(request: CredentialVaultPatchRequest): Promise<CredentialVaultState> {
+    this.requireCredentialVaultWriteTransport();
     const payload = await this.requestJson(
       "PATCH",
       "/credential-vault",
@@ -356,6 +381,7 @@ export class EgressAdapter implements Egress, CredentialVault {
   }
 
   async delete(): Promise<void> {
+    this.requireCredentialVaultWriteTransport();
     await this.requestJson("DELETE", "/credential-vault", "Delete credential vault");
   }
 

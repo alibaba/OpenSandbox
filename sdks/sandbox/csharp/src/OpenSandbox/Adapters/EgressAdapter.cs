@@ -21,7 +21,7 @@ using OpenSandbox.Services;
 
 namespace OpenSandbox.Adapters;
 
-internal sealed class EgressAdapter : IEgress
+internal sealed class EgressAdapter : IEgress, ICredentialVault
 {
     private readonly HttpClientWrapper _client;
 

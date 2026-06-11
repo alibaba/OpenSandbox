@@ -96,7 +96,8 @@ public sealed class Sandbox : IAsyncDisposable
         ISandboxFiles files,
         IExecdHealth health,
         IExecdMetrics metrics,
-        IEgress egress)
+        IEgress egress,
+        ICredentialVault? credentialVault)
     {
         Id = id;
         ConnectionConfig = connectionConfig;
@@ -112,7 +113,9 @@ public sealed class Sandbox : IAsyncDisposable
         Health = health;
         Metrics = metrics;
         _egress = egress;
-        CredentialVault = egress;
+        CredentialVault = credentialVault
+            ?? egress as ICredentialVault
+            ?? new UnavailableCredentialVault();
     }
 
     /// <summary>
@@ -252,7 +255,8 @@ public sealed class Sandbox : IAsyncDisposable
                 execdStack.Files,
                 execdStack.Health,
                 execdStack.Metrics,
-                egressStack.Egress);
+                egressStack.Egress,
+                egressStack.CredentialVault);
 
             if (!options.SkipHealthCheck)
             {
@@ -376,7 +380,8 @@ public sealed class Sandbox : IAsyncDisposable
                 execdStack.Files,
                 execdStack.Health,
                 execdStack.Metrics,
-                egressStack.Egress);
+                egressStack.Egress,
+                egressStack.CredentialVault);
 
             if (!options.SkipHealthCheck)
             {
@@ -862,5 +867,46 @@ public sealed class Sandbox : IAsyncDisposable
         }
 
         return merged;
+    }
+
+    private sealed class UnavailableCredentialVault : ICredentialVault
+    {
+        private const string Message =
+            "Credential Vault is not available for this adapter factory. Provide EgressStack.CredentialVault to use Credential Vault with a custom adapter.";
+
+        public Task<CredentialVaultState> CreateAsync(
+            IReadOnlyList<Credential> credentials,
+            IReadOnlyList<CredentialBinding> bindings,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<CredentialVaultState>(CreateException());
+
+        public Task<CredentialVaultState> GetAsync(CancellationToken cancellationToken = default) =>
+            Task.FromException<CredentialVaultState>(CreateException());
+
+        public Task<CredentialVaultState> PatchAsync(
+            CredentialVaultPatchRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<CredentialVaultState>(CreateException());
+
+        public Task DeleteAsync(CancellationToken cancellationToken = default) =>
+            Task.FromException(CreateException());
+
+        public Task<IReadOnlyList<CredentialMetadata>> ListCredentialsAsync(CancellationToken cancellationToken = default) =>
+            Task.FromException<IReadOnlyList<CredentialMetadata>>(CreateException());
+
+        public Task<CredentialMetadata> GetCredentialAsync(
+            string name,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<CredentialMetadata>(CreateException());
+
+        public Task<IReadOnlyList<CredentialBindingMetadata>> ListBindingsAsync(CancellationToken cancellationToken = default) =>
+            Task.FromException<IReadOnlyList<CredentialBindingMetadata>>(CreateException());
+
+        public Task<CredentialBindingMetadata> GetBindingAsync(
+            string name,
+            CancellationToken cancellationToken = default) =>
+            Task.FromException<CredentialBindingMetadata>(CreateException());
+
+        private static InvalidArgumentException CreateException() => new(Message);
     }
 }
