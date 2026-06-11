@@ -18,6 +18,7 @@ description: OpenSandbox Lifecycle API server for sandbox creation and managemen
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+# execd bootstrap.sh installed to /opt/opensandbox (flattened from /opt/opensandbox/bin)
 
 keywords:
   - sandbox
