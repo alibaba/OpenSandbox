@@ -179,7 +179,7 @@ class HTTPTenantProvider:
             event.wait(timeout=self._config.timeout_seconds)
             with self._lock:
                 cached = self._cache.get(api_key)
-                error = self._inflight_error.pop(api_key, None)
+                error = self._inflight_error.get(api_key)
             if cached:
                 return cached.tenant
             if error is not None:

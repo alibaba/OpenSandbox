@@ -129,7 +129,11 @@ class PersistedSnapshotService(SnapshotService):
             )
 
         tenant = get_current_tenant()
-        namespace = tenant.namespace if tenant else "default"
+        namespace = (
+            tenant.namespace
+            if tenant
+            else getattr(self._sandbox_service, "namespace", "default")
+        )
         now = datetime.now(timezone.utc)
         record = SnapshotRecord(
             id=str(uuid4()),

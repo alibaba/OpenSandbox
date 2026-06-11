@@ -35,6 +35,8 @@ from opensandbox_server.services.snapshot_service import PersistedSnapshotServic
 
 
 class StubSandboxService:
+    namespace = "default"
+
     @staticmethod
     def get_sandbox(sandbox_id: str):
         if sandbox_id == "missing":
@@ -158,10 +160,11 @@ def test_snapshot_service_rejects_create_when_source_sandbox_not_running(tmp_pat
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
     sandbox_service = SimpleNamespace(
+        namespace="default",
         get_sandbox=lambda sandbox_id: SimpleNamespace(
             id=sandbox_id,
             status=SimpleNamespace(state="Paused"),
-        )
+        ),
     )
     service = PersistedSnapshotService(
         repo,
@@ -181,7 +184,10 @@ def test_snapshot_service_rejects_create_when_source_sandbox_not_running(tmp_pat
 def test_snapshot_service_rejects_create_when_source_sandbox_state_missing(tmp_path) -> None:
     repo = SQLiteSnapshotRepository(tmp_path / "snapshots.db")
     runtime = StubSnapshotRuntime()
-    sandbox_service = SimpleNamespace(get_sandbox=lambda sandbox_id: SimpleNamespace(id=sandbox_id))
+    sandbox_service = SimpleNamespace(
+        namespace="default",
+        get_sandbox=lambda sandbox_id: SimpleNamespace(id=sandbox_id),
+    )
     service = PersistedSnapshotService(
         repo,
         sandbox_service,

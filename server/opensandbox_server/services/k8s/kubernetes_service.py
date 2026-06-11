@@ -104,6 +104,18 @@ from opensandbox_server.tenants.provider import TenantProvider
 logger = logging.getLogger(__name__)
 
 
+def _is_namespace_not_found(exc: Exception) -> bool:
+    """True when a K8s ApiException indicates the target namespace does not exist."""
+    try:
+        from kubernetes.client import ApiException
+
+        if not isinstance(exc, ApiException):
+            return False
+        return exc.status == 404 and "namespace" in str(exc).lower()
+    except Exception:
+        return False
+
+
 class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionService):
     """
     Kubernetes-based implementation of SandboxService.
@@ -578,6 +590,14 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 },
             ) from e
         except Exception as e:
+            if _is_namespace_not_found(e):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": SandboxErrorCodes.INVALID_PARAMETER,
+                        "message": f"Namespace not found: {e}",
+                    },
+                ) from e
             logger.error(f"Error creating sandbox: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
