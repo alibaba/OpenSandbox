@@ -13,7 +13,10 @@
 # limitations under the License.
 
 # Build the manager binary
-FROM golang:1.24 AS builder
+# Go >=1.25.10 is required to pick up Go stdlib security fixes; the 1.24 branch is
+# EOL for them. Pinned to an explicit patch tag + digest (the digest resolves to
+# 1.25.10); dependabot keeps tag and digest in lockstep.
+FROM golang:1.25.10@sha256:c138bff780910acf4254ab3a6f7ff0f64bbd841f27bd82bfa986fe122c109538 AS builder
 ARG TARGETOS
 ARG TARGETARCH
 ARG GOFLAGS=
@@ -60,10 +63,28 @@ RUN if [ -n "${CC}" ]; then export CC; fi; \
     -ldflags "${LDFLAGS} -buildid= -B none -X main.commitID=${COMMIT_ID} -X main.buildDate=${BUILD_DATE}" \
     -o server ${PACKAGE}
 
-# Use golang image as base to ensure nsenter (util-linux) is available
-# distroless does not contain shell or nsenter
-FROM golang:1.24
+# Minimal runtime instead of the full golang toolchain image (which shipped the
+# entire Debian 13 userland + build tools -> hundreds of OS-package CVEs).
+# The task-executor needs nsenter + /bin/sh; the controller shells out to nothing.
+# distroless is unusable here because it has neither nsenter nor a shell.
+# Pinned by digest (dependabot keeps tag+digest current).
+FROM debian:13-slim@sha256:b6e2a152f22a40ff69d92cb397223c906017e1391a73c952b588e51af8883bf8
 ARG USERID=65532
+
+# Install ONLY the runtime deps that are not already in the slim base. OS security
+# fixes come from the pinned base digest (kept current by Dependabot), not from an
+# `apt-get upgrade` which would make builds non-reproducible. In Debian trixie
+# nsenter lives in util-linux-extra (util-linux merely Recommends it), so install
+# util-linux-extra explicitly.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+         util-linux-extra \
+         ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Fail the build early if the runtime deps are missing.
+RUN command -v nsenter >/dev/null && [ -x /bin/sh ]
+
 WORKDIR /workspace
 COPY --from=builder /workspace/server .
 USER $USERID
