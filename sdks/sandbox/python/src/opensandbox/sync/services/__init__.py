@@ -19,7 +19,7 @@ Synchronous service interfaces (Protocols) for the sync SDK.
 
 from opensandbox.sync.services.command import CommandsSync
 from opensandbox.sync.services.diagnostics import DiagnosticsSync
-from opensandbox.sync.services.egress import EgressSync
+from opensandbox.sync.services.egress import CredentialVaultSync, EgressSync
 from opensandbox.sync.services.filesystem import FilesystemSync
 from opensandbox.sync.services.health import HealthSync
 from opensandbox.sync.services.metrics import MetricsSync
@@ -27,6 +27,7 @@ from opensandbox.sync.services.sandbox import SandboxesSync
 
 __all__ = [
     "CommandsSync",
+    "CredentialVaultSync",
     "DiagnosticsSync",
     "EgressSync",
     "FilesystemSync",

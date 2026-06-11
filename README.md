@@ -294,6 +294,7 @@ For detailed architecture, see [docs/architecture.md](docs/architecture.md).
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md) – Overall architecture & design philosophy
+- [docs/credential-vault.md](docs/credential-vault.md) - Credential Vault credential injection guide
 - [docs/release-verification.md](docs/release-verification.md) - Release signing and artifact verification
 - [oseps/README.md](oseps/README.md) – OpenSandbox Enhancement Proposals
 - SDK

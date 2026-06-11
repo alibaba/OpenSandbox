@@ -23,7 +23,9 @@ SANDBOX_PLATFORM_OS_LABEL = "opensandbox.io/platform-os"
 SANDBOX_PLATFORM_ARCH_LABEL = "opensandbox.io/platform-arch"
 SANDBOX_SNAPSHOT_ID_LABEL = "opensandbox.io/snapshot-id"
 # Host-mapped ports recorded on containers (bridge mode).
-SANDBOX_EMBEDDING_PROXY_PORT_LABEL = "opensandbox.io/embedding-proxy-port"  # maps container 44772 -> host port
+SANDBOX_EMBEDDING_PROXY_PORT_LABEL = (
+    "opensandbox.io/embedding-proxy-port"  # maps container 44772 -> host port
+)
 SANDBOX_HTTP_PORT_LABEL = "opensandbox.io/http-port"  # maps container 8080 -> host port
 SANDBOX_OSSFS_MOUNTS_LABEL = "opensandbox.io/ossfs-mounts"
 SANDBOX_MANAGED_VOLUMES_LABEL = "opensandbox.io/volume-managed-by"
@@ -39,6 +41,9 @@ EGRESS_RULES_ENV = "OPENSANDBOX_EGRESS_RULES"
 EGRESS_MODE_ENV = "OPENSANDBOX_EGRESS_MODE"
 # Must match components/egress/pkg/constants/configuration.go EnvEgressToken
 OPENSANDBOX_EGRESS_TOKEN = "OPENSANDBOX_EGRESS_TOKEN"
+OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT = "OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT"
+OPENSANDBOX_RUNTIME_VOLUME_NAME = "opensandbox-bin"
+OPENSANDBOX_RUNTIME_MOUNT_PATH = "/opt/opensandbox"
 
 
 class SandboxErrorCodes:
@@ -64,7 +69,7 @@ class SandboxErrorCodes:
     INVALID_ENTRYPOINT = "DOCKER::INVALID_ENTRYPOINT"
     INVALID_PORT = "DOCKER::INVALID_PORT"
     NETWORK_MODE_ENDPOINT_UNAVAILABLE = "DOCKER::NETWORK_MODE_ENDPOINT_UNAVAILABLE"
-    
+
     # Kubernetes runtime error codes
     K8S_INITIALIZATION_ERROR = "KUBERNETES::INITIALIZATION_ERROR"
     K8S_SANDBOX_NOT_FOUND = "KUBERNETES::SANDBOX_NOT_FOUND"
@@ -72,7 +77,7 @@ class SandboxErrorCodes:
     K8S_POD_READY_TIMEOUT = "KUBERNETES::POD_READY_TIMEOUT"
     K8S_API_ERROR = "KUBERNETES::API_ERROR"
     K8S_POD_IP_NOT_AVAILABLE = "KUBERNETES::POD_IP_NOT_AVAILABLE"
-    
+
     # Common error codes
     UNKNOWN_ERROR = "SANDBOX::UNKNOWN_ERROR"
     API_NOT_SUPPORTED = "SANDBOX::API_NOT_SUPPORTED"
@@ -140,6 +145,9 @@ __all__ = [
     "EGRESS_RULES_ENV",
     "EGRESS_MODE_ENV",
     "OPENSANDBOX_EGRESS_TOKEN",
+    "OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT",
+    "OPENSANDBOX_RUNTIME_VOLUME_NAME",
+    "OPENSANDBOX_RUNTIME_MOUNT_PATH",
     "SandboxErrorCodes",
     "SnapshotErrorCodes",
 ]

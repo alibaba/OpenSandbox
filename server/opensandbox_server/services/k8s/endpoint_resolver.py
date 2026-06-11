@@ -49,7 +49,9 @@ def _get_annotation(workload: Any, key: str) -> Optional[str]:
     return None
 
 
-def _attach_egress_auth_headers(endpoint: Endpoint, workload: Any) -> None:
+def _attach_egress_auth_headers(endpoint: Endpoint, workload: Any, port: int) -> None:
+    if port != 18080:
+        return
     token = _get_egress_auth_token(workload)
     if not token:
         return

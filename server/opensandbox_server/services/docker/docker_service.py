@@ -83,6 +83,8 @@ from opensandbox_server.services.docker.windows_profile import (
 )
 from opensandbox_server.services.extension_service import ExtensionService
 from opensandbox_server.services.constants import (
+    OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT,
+    OPENSANDBOX_RUNTIME_MOUNT_PATH,
     SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY,
     SANDBOX_EMBEDDING_PROXY_PORT_LABEL,
     SANDBOX_EXPIRES_AT_LABEL,
@@ -783,6 +785,10 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             )
 
         sidecar_container = None
+        credential_proxy_enabled = bool(
+            request.credential_proxy and request.credential_proxy.enabled
+        )
+        runtime_volume_name: Optional[str] = None
         try:
             # For dockur/windows profile, resourceLimits are translated to
             # guest envs (RAM_SIZE/CPU_CORES/DISK_SIZE). Avoid applying
@@ -808,11 +814,34 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             container_exposed_ports: Optional[list[str]] = exposed_ports
 
             if request.network_policy:
+                if credential_proxy_enabled:
+                    runtime_volume_name = f"opensandbox-runtime-{sandbox_id}"
+                    with self._docker_operation(
+                        "create credential proxy runtime volume", sandbox_id
+                    ):
+                        self.docker_client.volumes.create(
+                            name=runtime_volume_name,
+                            labels={SANDBOX_MANAGED_VOLUMES_LABEL: "server"},
+                        )
+                    auto_created_volumes = list(auto_created_volumes or [])
+                    auto_created_volumes.append(runtime_volume_name)
+                    labels[SANDBOX_MANAGED_VOLUMES_LABEL] = json.dumps(
+                        auto_created_volumes,
+                        separators=(",", ":"),
+                    )
+                    environment = [
+                        entry
+                        for entry in environment
+                        if not entry.startswith(f"{OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT}=")
+                    ]
+                    environment.append(f"{OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT}=true")
+
                 egress_token = generate_egress_token()
                 labels[SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY] = egress_token
-                sidecar_port_bindings = allocate_port_bindings(exposed_ports)
+                sidecar_port_bindings = allocate_port_bindings([*exposed_ports, "18080"])
                 host_execd_port = sidecar_port_bindings["44772"][1]
                 host_http_port = sidecar_port_bindings["8080"][1]
+                egress_api_binding = sidecar_port_bindings.get("18080")
                 extra_sidecar_port_bindings = {
                     port: binding
                     for port, binding in sidecar_port_bindings.items()
@@ -825,6 +854,11 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                     host_execd_port=host_execd_port,
                     host_http_port=host_http_port,
                     extra_port_bindings=extra_sidecar_port_bindings,
+                    egress_api_host_port=(
+                        egress_api_binding[1] if egress_api_binding is not None else None
+                    ),
+                    runtime_volume_name=runtime_volume_name,
+                    credential_proxy_enabled=credential_proxy_enabled,
                 )
                 labels[SANDBOX_EMBEDDING_PROXY_PORT_LABEL] = str(host_execd_port)
                 labels[SANDBOX_HTTP_PORT_LABEL] = str(host_http_port)
@@ -856,6 +890,10 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                     exposed_ports = None
 
             # Inject volume bind mounts into Docker host config
+            if runtime_volume_name:
+                volume_binds.append(
+                    f"{runtime_volume_name}:{OPENSANDBOX_RUNTIME_MOUNT_PATH}:rw"
+                )
             if volume_binds:
                 host_config_kwargs["binds"] = volume_binds
             if requested_windows_profile:

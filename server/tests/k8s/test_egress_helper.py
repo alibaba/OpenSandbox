@@ -17,12 +17,21 @@ from typing import Optional
 
 from opensandbox_server.api.schema import NetworkPolicy, NetworkRule
 from opensandbox_server.config import EGRESS_MODE_DNS, EGRESS_MODE_DNS_NFT
-from opensandbox_server.services.constants import EGRESS_MODE_ENV, EGRESS_RULES_ENV, OPENSANDBOX_EGRESS_TOKEN
+from opensandbox_server.services.constants import (
+    EGRESS_MODE_ENV,
+    EGRESS_RULES_ENV,
+    OPEN_SANDBOX_EGRESS_AUTH_HEADER,
+    OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT,
+    OPENSANDBOX_EGRESS_TOKEN,
+    OPENSANDBOX_RUNTIME_MOUNT_PATH,
+    OPENSANDBOX_RUNTIME_VOLUME_NAME,
+)
 from opensandbox_server.services.k8s.egress_helper import (
     apply_egress_to_spec,
     build_security_context_for_sandbox_container,
     prep_execd_init_for_egress,
 )
+
 
 def _egress_container(
     egress_image: str,
@@ -30,6 +39,7 @@ def _egress_container(
     *,
     egress_auth_token: Optional[str] = None,
     egress_mode: str = EGRESS_MODE_DNS,
+    credential_proxy_enabled: bool = False,
 ) -> dict:
     """Sidecar dict produced by ``apply_egress_to_spec``."""
     containers: list = []
@@ -39,8 +49,10 @@ def _egress_container(
         egress_image,
         egress_auth_token=egress_auth_token,
         egress_mode=egress_mode,
+        credential_proxy_enabled=credential_proxy_enabled,
     )
     return containers[0]
+
 
 class TestEgressSidecarViaApply:
     """Egress sidecar shape (via ``apply_egress_to_spec``)."""
@@ -73,11 +85,32 @@ class TestEgressSidecarViaApply:
         container = _egress_container(egress_image, network_policy)
 
         env_vars = container["env"]
-        assert len(env_vars) == 2
-        assert env_vars[0]["name"] == EGRESS_RULES_ENV
-        assert env_vars[0]["value"] is not None
-        assert env_vars[1]["name"] == EGRESS_MODE_ENV
-        assert env_vars[1]["value"] == EGRESS_MODE_DNS
+        env_by_name = {env["name"]: env["value"] for env in env_vars}
+        assert env_by_name[EGRESS_RULES_ENV] is not None
+        assert env_by_name[EGRESS_MODE_ENV] == EGRESS_MODE_DNS
+        assert OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT not in env_by_name
+
+    def test_contains_transparent_mitm_env_when_credential_proxy_enabled(self):
+        egress_image = "opensandbox/egress:v1.0.12"
+        network_policy = NetworkPolicy(
+            default_action="deny",
+            egress=[NetworkRule(action="allow", target="example.com")],
+        )
+
+        container = _egress_container(
+            egress_image,
+            network_policy,
+            credential_proxy_enabled=True,
+        )
+
+        env_by_name = {env["name"]: env["value"] for env in container["env"]}
+        assert env_by_name[OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT] == "true"
+        assert container["volumeMounts"] == [
+            {
+                "name": OPENSANDBOX_RUNTIME_VOLUME_NAME,
+                "mountPath": OPENSANDBOX_RUNTIME_MOUNT_PATH,
+            }
+        ]
 
     def test_contains_egress_token_when_provided(self):
         egress_image = "opensandbox/egress:v1.0.12"
@@ -95,6 +128,9 @@ class TestEgressSidecarViaApply:
         env_vars = {env["name"]: env["value"] for env in container["env"]}
         assert env_vars[OPENSANDBOX_EGRESS_TOKEN] == "egress-token"
         assert env_vars[EGRESS_MODE_ENV] == EGRESS_MODE_DNS
+        assert container["readinessProbe"]["httpGet"]["httpHeaders"] == [
+            {"name": OPEN_SANDBOX_EGRESS_AUTH_HEADER, "value": "egress-token"}
+        ]
 
     def test_egress_mode_dns_nft(self):
         egress_image = "opensandbox/egress:v1.0.12"
@@ -209,6 +245,8 @@ class TestEgressSidecarViaApply:
         assert "name" in container["env"][0]
         assert "value" in container["env"][0]
         assert "command" not in container
+        assert container["ports"] == [{"name": "egress-api", "containerPort": 18080}]
+        assert container["readinessProbe"]["httpGet"]["path"] == "/healthz"
 
     def test_handles_wildcard_domains(self):
         """Test that wildcard domains in egress rules are handled correctly."""
@@ -230,8 +268,8 @@ class TestEgressSidecarViaApply:
         assert policy_dict["egress"][0]["target"] == "*.python.org"
         assert policy_dict["egress"][1]["target"] == "pypi.org"
 
-class TestBuildSecurityContextForMainContainer:
 
+class TestBuildSecurityContextForMainContainer:
     def test_returns_empty_dict_when_no_network_policy(self):
         """Test that empty dict is returned when network policy is disabled."""
         result = build_security_context_for_sandbox_container(has_network_policy=False)
@@ -245,8 +283,8 @@ class TestBuildSecurityContextForMainContainer:
         assert "drop" in result["capabilities"]
         assert "NET_ADMIN" in result["capabilities"]["drop"]
 
-class TestApplyEgressToSpec:
 
+class TestApplyEgressToSpec:
     def test_adds_egress_sidecar_container(self):
         """Test that egress sidecar container is added to containers list."""
         containers: list = []

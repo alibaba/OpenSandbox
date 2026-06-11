@@ -442,7 +442,7 @@ class TestKubernetesSandboxServiceCreate:
         assert response.platform.os == "linux"
         assert response.platform.arch == "arm64"
 
-    def test_get_endpoint_merges_egress_auth_header_from_instance_metadata(
+    def test_get_endpoint_keeps_instance_egress_auth_header_private_for_workload_ports(
         self, k8s_service
     ):
         k8s_service.workload_provider.get_workload.return_value = {
@@ -462,6 +462,28 @@ class TestKubernetesSandboxServiceCreate:
         assert endpoint.endpoint == "gateway.example.com"
         assert endpoint.headers == {
             "OpenSandbox-Ingress-To": "sbx-123-44772",
+        }
+
+    def test_get_endpoint_merges_egress_auth_header_for_egress_api_port(
+        self, k8s_service
+    ):
+        k8s_service.workload_provider.get_workload.return_value = {
+            "metadata": {
+                "annotations": {
+                    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY: "egress-token",
+                }
+            }
+        }
+        k8s_service.workload_provider.get_endpoint_info.return_value = Endpoint(
+            endpoint="gateway.example.com",
+            headers={"OpenSandbox-Ingress-To": "sbx-123-18080"},
+        )
+
+        endpoint = k8s_service.get_endpoint("sbx-123", 18080)
+
+        assert endpoint.endpoint == "gateway.example.com"
+        assert endpoint.headers == {
+            "OpenSandbox-Ingress-To": "sbx-123-18080",
             OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token",
         }
 

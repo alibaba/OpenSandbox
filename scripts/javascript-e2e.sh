@@ -19,6 +19,15 @@ TAG=${TAG:-latest}
 RUN_CODE_INTERPRETER_E2E=${RUN_CODE_INTERPRETER_E2E:-false}
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SERVER_PID=""
+
+cleanup_server() {
+  if [ -n "${SERVER_PID}" ]; then
+    kill "${SERVER_PID}" 2>/dev/null || true
+    wait "${SERVER_PID}" 2>/dev/null || true
+  fi
+}
+trap cleanup_server EXIT
 
 # build execd image locally (context must include internal/)
 docker build -f components/execd/Dockerfile -t opensandbox/execd:local "${REPO_ROOT}"
@@ -47,7 +56,9 @@ echo "-------- JAVASCRIPT E2E test logs for execd --------" > /tmp/opensandbox-e
 # setup server
 cd server
 export OPENSANDBOX_INSECURE_SERVER=YES
-uv sync && uv run python -m opensandbox_server.main > server.log 2>&1 &
+uv sync
+uv run python -m opensandbox_server.main > server.log 2>&1 &
+SERVER_PID=$!
 cd ..
 
 # wait for server

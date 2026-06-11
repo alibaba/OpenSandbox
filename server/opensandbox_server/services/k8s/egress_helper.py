@@ -27,7 +27,11 @@ from opensandbox_server.config import EGRESS_MODE_DNS
 from opensandbox_server.services.constants import (
     EGRESS_MODE_ENV,
     EGRESS_RULES_ENV,
+    OPEN_SANDBOX_EGRESS_AUTH_HEADER,
+    OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT,
     OPENSANDBOX_EGRESS_TOKEN,
+    OPENSANDBOX_RUNTIME_MOUNT_PATH,
+    OPENSANDBOX_RUNTIME_VOLUME_NAME,
 )
 
 
@@ -42,11 +46,7 @@ def prep_execd_init_for_egress(exec_install_script: str) -> tuple[str, Dict[str,
     Returns:
         ``(prefixed_shell_script, {"privileged": True})``
     """
-    script = (
-        "set -e; "
-        "echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 && "
-        f"{exec_install_script}"
-    )
+    script = f"set -e; echo 1 > /proc/sys/net/ipv6/conf/all/disable_ipv6 && {exec_install_script}"
     return script, {"privileged": True}
 
 
@@ -75,6 +75,7 @@ def apply_egress_to_spec(
     egress_image: Optional[str],
     egress_auth_token: Optional[str] = None,
     egress_mode: str = EGRESS_MODE_DNS,
+    credential_proxy_enabled: bool = False,
 ) -> None:
     """
     Append the egress sidecar to ``containers``. When ``egress.disable_ipv6`` is enabled,
@@ -83,24 +84,43 @@ def apply_egress_to_spec(
     if not network_policy or not egress_image:
         return
 
-    policy_payload = json.dumps(
-        network_policy.model_dump(by_alias=True, exclude_none=True)
-    )
+    policy_payload = json.dumps(network_policy.model_dump(by_alias=True, exclude_none=True))
 
     env: List[Dict[str, str]] = [
         {"name": EGRESS_RULES_ENV, "value": policy_payload},
         {"name": EGRESS_MODE_ENV, "value": egress_mode},
     ]
+    if credential_proxy_enabled:
+        env.append({"name": OPENSANDBOX_EGRESS_MITMPROXY_TRANSPARENT, "value": "true"})
     if egress_auth_token:
         env.append({"name": OPENSANDBOX_EGRESS_TOKEN, "value": egress_auth_token})
 
-    containers.append(
-        {
-            "name": "egress",
-            "image": egress_image,
-            "env": env,
-            "securityContext": {
-                "capabilities": {"add": ["NET_ADMIN"]},
+    sidecar: Dict[str, Any] = {
+        "name": "egress",
+        "image": egress_image,
+        "env": env,
+        "securityContext": {
+            "capabilities": {"add": ["NET_ADMIN"]},
+        },
+        "ports": [{"name": "egress-api", "containerPort": 18080}],
+        "readinessProbe": {
+            "httpGet": {
+                "path": "/healthz",
+                "port": 18080,
             },
-        }
-    )
+            "periodSeconds": 1,
+            "failureThreshold": 30,
+        },
+    }
+    if credential_proxy_enabled:
+        sidecar["volumeMounts"] = [
+            {
+                "name": OPENSANDBOX_RUNTIME_VOLUME_NAME,
+                "mountPath": OPENSANDBOX_RUNTIME_MOUNT_PATH,
+            }
+        ]
+    if egress_auth_token:
+        sidecar["readinessProbe"]["httpGet"]["httpHeaders"] = [
+            {"name": OPEN_SANDBOX_EGRESS_AUTH_HEADER, "value": egress_auth_token}
+        ]
+    containers.append(sidecar)

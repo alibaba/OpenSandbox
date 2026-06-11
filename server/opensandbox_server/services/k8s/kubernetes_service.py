@@ -464,6 +464,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 egress_image=context.egress_image,
                 egress_auth_token=context.egress_auth_token,
                 egress_mode=context.egress_mode,
+                credential_proxy_enabled=context.credential_proxy_enabled,
                 volumes=request.volumes,
                 platform=request.platform,
             )
@@ -892,7 +893,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 )
             if expires is None:
                 _attach_secure_access_headers(endpoint, workload)
-            _attach_egress_auth_headers(endpoint, workload)
+            _attach_egress_auth_headers(endpoint, workload, port)
             return endpoint
 
         except HTTPException:

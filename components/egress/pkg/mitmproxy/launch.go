@@ -136,7 +136,7 @@ func Launch(cfg Config) (*Running, error) {
 	}
 	// HOME determines mitm's confdir (~/.mitmproxy) which holds both the CA
 	// and the baked-in config.yaml.
-	cmd.Env = append(os.Environ(), "HOME="+home)
+	cmd.Env = buildMitmdumpEnv(os.Environ(), home)
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("mitmproxy: start mitmdump: %w", err)
@@ -153,4 +153,11 @@ func Launch(cfg Config) (*Running, error) {
 
 	log.Infof("[mitmproxy] mitmdump started (pid %d, transparent on %s:%d)", cmd.Process.Pid, listenHostLoopback, cfg.ListenPort)
 	return &Running{Cmd: cmd, done: done}, nil
+}
+
+func buildMitmdumpEnv(base []string, home string) []string {
+	env := make([]string, 0, len(base)+1)
+	env = append(env, base...)
+	env = append(env, "HOME="+home)
+	return env
 }

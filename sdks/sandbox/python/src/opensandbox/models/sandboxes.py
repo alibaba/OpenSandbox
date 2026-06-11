@@ -72,7 +72,11 @@ class SandboxImageSpec(BaseModel):
     )
 
     def __init__(
-        self, image: str | None = None, *, auth: SandboxImageAuth | None = None, **data: object
+        self,
+        image: str | None = None,
+        *,
+        auth: SandboxImageAuth | None = None,
+        **data: object,
     ) -> None:
         """
         Initialize SandboxImageSpec.
@@ -144,6 +148,190 @@ class NetworkPolicy(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
+class CredentialProxyConfig(BaseModel):
+    """
+    Credential Vault proxy startup settings.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable transparent MITM support required by Credential Vault injection.",
+    )
+
+
+class InlineCredentialSource(BaseModel):
+    """
+    Write-only inline credential material for Credential Vault.
+    """
+
+    value: str = Field(repr=False, description="Inline credential value.")
+    type: Literal["inline"] = Field(
+        default="inline",
+        description="Credential source type. Defaults to inline for the Python SDK.",
+    )
+
+    @field_validator("value")
+    @classmethod
+    def value_must_not_be_empty(cls, v: str) -> str:
+        if not v:
+            raise ValueError("Credential source value cannot be empty")
+        return v
+
+
+class Credential(BaseModel):
+    """Sandbox-local Credential Vault credential."""
+
+    name: str = Field(description="Sandbox-local credential name.")
+    source: InlineCredentialSource | dict[str, str] = Field(
+        description="Write-only credential source."
+    )
+
+    @field_validator("name")
+    @classmethod
+    def credential_name_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Credential name cannot be blank")
+        return v
+
+    @model_validator(mode="after")
+    def normalize_source(self) -> "Credential":
+        if isinstance(self.source, dict):
+            self.source = InlineCredentialSource.model_validate(self.source)
+        return self
+
+
+class CredentialMatch(BaseModel):
+    """Request match for a Credential Vault binding."""
+
+    schemes: list[Literal["https", "http"]] | None = Field(default=None)
+    ports: list[int] | None = Field(default=None)
+    hosts: list[str] = Field(description="Exact FQDNs or leftmost-label wildcards.")
+    methods: list[str] | None = Field(default=None)
+    paths: list[str] | None = Field(default=None)
+
+    @field_validator("hosts")
+    @classmethod
+    def hosts_must_not_be_empty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("Credential match hosts cannot be empty")
+        if any(not host.strip() for host in v):
+            raise ValueError("Credential match host cannot be blank")
+        return v
+
+
+class CustomHeaderEntry(BaseModel):
+    """Custom header injection entry."""
+
+    name: str
+    credential: str
+
+
+class CredentialAuth(BaseModel):
+    """Typed Credential Vault auth rule."""
+
+    type: Literal["bearer", "basic", "apiKey", "customHeaders"]
+    credential: str | None = None
+    name: str | None = None
+    headers: list[CustomHeaderEntry] | None = None
+
+
+class CredentialBinding(BaseModel):
+    """Sandbox-local Credential Vault binding."""
+
+    name: str
+    match: CredentialMatch | dict[str, object]
+    auth: CredentialAuth | dict[str, object]
+
+    @field_validator("name")
+    @classmethod
+    def binding_name_must_not_be_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Credential binding name cannot be blank")
+        return v
+
+    @model_validator(mode="after")
+    def normalize_nested_models(self) -> "CredentialBinding":
+        if isinstance(self.match, dict):
+            self.match = CredentialMatch.model_validate(self.match)
+        if isinstance(self.auth, dict):
+            self.auth = CredentialAuth.model_validate(self.auth)
+        return self
+
+
+class CredentialMetadata(BaseModel):
+    """Sanitized credential metadata returned by Credential Vault."""
+
+    name: str
+    source_type: str = Field(alias="sourceType")
+    revision: int
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CredentialAuthMetadata(BaseModel):
+    """Sanitized auth metadata returned for a Credential Vault binding."""
+
+    type: str
+    name: str | None = None
+
+
+class CredentialBindingMetadata(BaseModel):
+    """Sanitized binding metadata returned by Credential Vault."""
+
+    name: str
+    revision: int
+    match: CredentialMatch | None = None
+    auth: CredentialAuthMetadata | None = None
+
+
+class CredentialVaultState(BaseModel):
+    """Sanitized Credential Vault state."""
+
+    revision: int
+    credentials: list[CredentialMetadata]
+    bindings: list[CredentialBindingMetadata]
+
+
+class CredentialListResponse(BaseModel):
+    """Sanitized Credential Vault credential list response."""
+
+    revision: int
+    credentials: list[CredentialMetadata]
+
+
+class CredentialBindingListResponse(BaseModel):
+    """Sanitized Credential Vault binding list response."""
+
+    revision: int
+    bindings: list[CredentialBindingMetadata]
+
+
+class CredentialMutationSet(BaseModel):
+    """Atomic credential mutation set for Credential Vault patch."""
+
+    add: list[Credential | dict[str, object]] | None = None
+    replace: list[Credential | dict[str, object]] | None = None
+    delete: list[str] | None = None
+
+
+class CredentialBindingMutationSet(BaseModel):
+    """Atomic binding mutation set for Credential Vault patch."""
+
+    add: list[CredentialBinding | dict[str, object]] | None = None
+    replace: list[CredentialBinding | dict[str, object]] | None = None
+    delete: list[str] | None = None
+
+
+class CredentialVaultPatchRequest(BaseModel):
+    """Credential Vault patch request."""
+
+    expected_revision: int | None = Field(default=None, alias="expectedRevision")
+    credentials: CredentialMutationSet | dict[str, object] | None = None
+    bindings: CredentialBindingMutationSet | dict[str, object] | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 # ============================================================================
 # Volume Models
 # ============================================================================
@@ -151,6 +339,7 @@ class NetworkPolicy(BaseModel):
 # Matches Unix absolute paths (/…) and Windows drive-letter paths (C:\ or C:/).
 # Aligned with server-side pattern in server/opensandbox_server/api/schema.py.
 _HOST_PATH_RE = re.compile(r"^(/|[A-Za-z]:[\\/])")
+
 
 class Host(BaseModel):
     """
@@ -160,9 +349,7 @@ class Host(BaseModel):
     Only available when the runtime supports host mounts.
     """
 
-    path: str = Field(
-        description="Absolute path on the host filesystem to mount."
-    )
+    path: str = Field(description="Absolute path on the host filesystem to mount.")
 
     @field_validator("path")
     @classmethod
@@ -242,7 +429,9 @@ class OSSFS(BaseModel):
     """Alibaba Cloud OSS mount backend via ossfs."""
 
     bucket: str = Field(description="OSS bucket name.")
-    endpoint: str = Field(description="OSS endpoint (e.g., oss-cn-hangzhou.aliyuncs.com).")
+    endpoint: str = Field(
+        description="OSS endpoint (e.g., oss-cn-hangzhou.aliyuncs.com)."
+    )
     version: Literal["1.0", "2.0"] = Field(
         default="2.0",
         description="ossfs major version used by runtime mount integration.",
@@ -674,6 +863,5 @@ class SandboxState:
     def values(cls) -> set[str]:
         """Returns a set of all known state values."""
         return {
-            v for k, v in cls.__dict__.items()
-            if k.isupper() and not k.startswith("_")
+            v for k, v in cls.__dict__.items() if k.isupper() and not k.startswith("_")
         }

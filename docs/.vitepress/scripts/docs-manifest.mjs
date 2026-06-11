@@ -78,6 +78,15 @@ const manualEntries = [
     titleZh: "发布验签",
   },
   {
+    key: "guide-credential-vault",
+    sectionId: "overview",
+    slug: "overview/credential-vault",
+    enPath: "docs/credential-vault.md",
+    zhPath: "docs/credential-vault_zh.md",
+    titleEn: "Credential Vault",
+    titleZh: "Credential Vault",
+  },
+  {
     key: "guide-network",
     sectionId: "modules",
     slug: "design/single-host-network",

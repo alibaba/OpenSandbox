@@ -133,7 +133,7 @@ def test_get_endpoint_bridge_egress_port_includes_auth_header(mock_docker_servic
     assert endpoint.headers == {OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token"}
 
 
-def test_get_endpoint_bridge_non_egress_port_still_includes_instance_auth_header(
+def test_get_endpoint_bridge_non_egress_port_does_not_include_auth_header(
     mock_docker_service,
 ):
     service, mock_client = mock_docker_service
@@ -156,7 +156,7 @@ def test_get_endpoint_bridge_non_egress_port_still_includes_instance_auth_header
         endpoint = service.get_endpoint("sbx-123", 44772, resolve_internal=False)
 
     assert endpoint.endpoint == "192.168.1.100:50002/proxy/44772"
-    assert endpoint.headers == {OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token"}
+    assert endpoint.headers is None
 
 def test_get_endpoint_bridge_internal_resolution(mock_docker_service):
     service, mock_client = mock_docker_service
@@ -196,7 +196,7 @@ def test_get_endpoint_bridge_internal_resolution_with_egress_sidecar_falls_back_
     endpoint = service.get_endpoint("sbx-123", 18080, resolve_internal=True)
 
     assert endpoint.endpoint == "127.0.0.1:50002/proxy/18080"
-    assert endpoint.headers == {OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token"}
+    assert endpoint.headers is None
 
 
 def test_get_endpoint_bridge_internal_resolution_with_egress_sidecar_ignores_container_ip(
@@ -221,7 +221,7 @@ def test_get_endpoint_bridge_internal_resolution_with_egress_sidecar_ignores_con
     endpoint = service.get_endpoint("sbx-123", 18080, resolve_internal=True)
 
     assert endpoint.endpoint == "127.0.0.1:50002/proxy/18080"
-    assert endpoint.headers == {OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token"}
+    assert endpoint.headers is None
 
 
 def test_get_endpoint_bridge_internal_resolution_with_egress_sidecar_uses_proxy_host_not_eip(
@@ -248,7 +248,7 @@ def test_get_endpoint_bridge_internal_resolution_with_egress_sidecar_uses_proxy_
     endpoint = service.get_endpoint("sbx-123", 18080, resolve_internal=True)
 
     assert endpoint.endpoint == "127.0.0.1:50002/proxy/18080"
-    assert endpoint.headers == {OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token"}
+    assert endpoint.headers is None
 
 
 def test_get_endpoint_bridge_uses_docker_host_ip_when_server_in_container():

@@ -18,7 +18,8 @@ info:
 
     1. Use the Sandbox Lifecycle API to resolve the sandbox endpoint for the egress
        service port.
-    2. Send requests directly to that endpoint's `/policy` route.
+    2. Send requests directly to that endpoint's `/policy` or
+       `/credential-vault` route.
 
     ## Authentication
 
@@ -31,6 +32,8 @@ servers:
 tags:
   - name: Policy
     description: Inspect and mutate sandbox egress policy at runtime
+  - name: CredentialVault
+    description: Manage sandbox-local Credential Vault bindings at runtime
 paths:
   /policy:
     get:
@@ -151,6 +154,157 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+  /credential-vault:
+    post:
+      tags: [CredentialVault]
+      summary: Create a sandbox-local Credential Vault
+      description: |
+        Create the initial sandbox-local Credential Vault revision and activate it
+        in Credential Proxy. Inline credential values are write-only and are never
+        returned by this API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialVaultCreateRequest'
+      responses:
+        '201':
+          description: Credential Vault created and acknowledged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialVaultState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+    get:
+      tags: [CredentialVault]
+      summary: Get sanitized Credential Vault state
+      responses:
+        '200':
+          description: Sanitized Credential Vault state.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialVaultState'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [CredentialVault]
+      summary: Atomically mutate sandbox-local credentials and bindings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialVaultMutationRequest'
+      responses:
+        '200':
+          description: Mutation applied and acknowledged.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialVaultState'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+    delete:
+      tags: [CredentialVault]
+      summary: Delete the sandbox-local Credential Vault
+      responses:
+        '204':
+          description: Credential Vault deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /credential-vault/credentials:
+    get:
+      tags: [CredentialVault]
+      summary: List sanitized credential metadata
+      responses:
+        '200':
+          description: Sanitized credential metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /credential-vault/credentials/{credential_name}:
+    get:
+      tags: [CredentialVault]
+      summary: Get sanitized metadata for one credential
+      parameters:
+        - name: credential_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Sanitized credential metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialMetadata'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /credential-vault/bindings:
+    get:
+      tags: [CredentialVault]
+      summary: List sanitized credential binding metadata
+      responses:
+        '200':
+          description: Sanitized binding metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialBindingListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /credential-vault/bindings/{binding_name}:
+    get:
+      tags: [CredentialVault]
+      summary: Get sanitized metadata for one binding
+      parameters:
+        - name: binding_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Sanitized binding metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CredentialBindingMetadata'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
 components:
   responses:
     BadRequest:
@@ -161,6 +315,24 @@ components:
             type: string
     Unauthorized:
       description: Authentication failed for the egress sidecar.
+      content:
+        text/plain:
+          schema:
+            type: string
+    NotFound:
+      description: The requested Credential Vault resource was not found.
+      content:
+        text/plain:
+          schema:
+            type: string
+    Conflict:
+      description: The request conflicts with the current Credential Vault revision.
+      content:
+        text/plain:
+          schema:
+            type: string
+    PreconditionFailed:
+      description: Credential Proxy prerequisites are not ready.
       content:
         text/plain:
           schema:
@@ -223,4 +395,261 @@ components:
             FQDN or wildcard domain (e.g., "example.com", "*.example.com").
             IP/CIDR not yet supported in the egress MVP.
       required: [action, target]
+      additionalProperties: false
+    CredentialVaultCreateRequest:
+      type: object
+      required: [credentials, bindings]
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/Credential'
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialBinding'
+      additionalProperties: false
+    CredentialVaultMutationRequest:
+      type: object
+      properties:
+        expectedRevision:
+          type: integer
+          description: Optional optimistic concurrency guard.
+        credentials:
+          $ref: '#/components/schemas/CredentialMutationSet'
+        bindings:
+          $ref: '#/components/schemas/CredentialBindingMutationSet'
+      additionalProperties: false
+    CredentialMutationSet:
+      type: object
+      properties:
+        add:
+          type: array
+          items:
+            $ref: '#/components/schemas/Credential'
+        replace:
+          type: array
+          items:
+            $ref: '#/components/schemas/Credential'
+        delete:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    CredentialBindingMutationSet:
+      type: object
+      properties:
+        add:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialBinding'
+        replace:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialBinding'
+        delete:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    CredentialVaultState:
+      type: object
+      required: [revision, credentials, bindings]
+      properties:
+        revision:
+          type: integer
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialMetadata'
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialBindingMetadata'
+      additionalProperties: false
+    CredentialListResponse:
+      type: object
+      required: [revision, credentials]
+      properties:
+        revision:
+          type: integer
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialMetadata'
+      additionalProperties: false
+    CredentialBindingListResponse:
+      type: object
+      required: [revision, bindings]
+      properties:
+        revision:
+          type: integer
+        bindings:
+          type: array
+          items:
+            $ref: '#/components/schemas/CredentialBindingMetadata'
+      additionalProperties: false
+    CredentialMetadata:
+      type: object
+      required: [name, sourceType, revision]
+      properties:
+        name:
+          type: string
+        sourceType:
+          type: string
+        revision:
+          type: integer
+      additionalProperties: false
+    CredentialBindingMetadata:
+      type: object
+      required: [name, revision]
+      properties:
+        name:
+          type: string
+        revision:
+          type: integer
+        match:
+          $ref: '#/components/schemas/CredentialMatch'
+        auth:
+          $ref: '#/components/schemas/CredentialAuthMetadata'
+      additionalProperties: false
+    Credential:
+      type: object
+      required: [name, source]
+      properties:
+        name:
+          type: string
+        source:
+          $ref: '#/components/schemas/InlineCredentialSource'
+      additionalProperties: false
+    InlineCredentialSource:
+      type: object
+      required: [type, value]
+      properties:
+        type:
+          type: string
+          enum: [inline]
+        value:
+          type: string
+          writeOnly: true
+      additionalProperties: false
+    CredentialBinding:
+      type: object
+      required: [name, match, auth]
+      properties:
+        name:
+          type: string
+        match:
+          $ref: '#/components/schemas/CredentialMatch'
+        auth:
+          $ref: '#/components/schemas/CredentialAuth'
+      additionalProperties: false
+    CredentialMatch:
+      type: object
+      required: [hosts]
+      properties:
+        schemes:
+          type: array
+          items:
+            type: string
+            enum: [https, http]
+          default: [https]
+        ports:
+          type: array
+          items:
+            type: integer
+          default: [443]
+        hosts:
+          type: array
+          items:
+            type: string
+        methods:
+          type: array
+          items:
+            type: string
+          default: [GET, POST, PUT, PATCH, DELETE]
+        paths:
+          type: array
+          items:
+            type: string
+          default: ["/*"]
+      additionalProperties: false
+    CredentialAuth:
+      oneOf:
+        - $ref: '#/components/schemas/BearerCredentialAuth'
+        - $ref: '#/components/schemas/BasicCredentialAuth'
+        - $ref: '#/components/schemas/ApiKeyCredentialAuth'
+        - $ref: '#/components/schemas/CustomHeadersCredentialAuth'
+      discriminator:
+        propertyName: type
+        mapping:
+          bearer: '#/components/schemas/BearerCredentialAuth'
+          basic: '#/components/schemas/BasicCredentialAuth'
+          apiKey: '#/components/schemas/ApiKeyCredentialAuth'
+          customHeaders: '#/components/schemas/CustomHeadersCredentialAuth'
+    BearerCredentialAuth:
+      type: object
+      required: [type, credential]
+      properties:
+        type:
+          type: string
+          enum: [bearer]
+        credential:
+          type: string
+      additionalProperties: false
+    BasicCredentialAuth:
+      type: object
+      required: [type, credential]
+      properties:
+        type:
+          type: string
+          enum: [basic]
+        credential:
+          type: string
+          description: Credential containing pre-encoded base64(username:password).
+      additionalProperties: false
+    ApiKeyCredentialAuth:
+      type: object
+      required: [type, name, credential]
+      properties:
+        type:
+          type: string
+          enum: [apiKey]
+        name:
+          type: string
+          pattern: '^[A-Za-z0-9!#$%&''*+\-.^_`|~]+$'
+        credential:
+          type: string
+      additionalProperties: false
+    CustomHeadersCredentialAuth:
+      type: object
+      required: [type, headers]
+      properties:
+        type:
+          type: string
+          enum: [customHeaders]
+        headers:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CustomHeaderEntry'
+      additionalProperties: false
+    CustomHeaderEntry:
+      type: object
+      required: [name, credential]
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z0-9!#$%&''*+\-.^_`|~]+$'
+        credential:
+          type: string
+      additionalProperties: false
+    CredentialAuthMetadata:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+        name:
+          type: string
       additionalProperties: false
