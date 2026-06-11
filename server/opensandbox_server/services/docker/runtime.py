@@ -112,6 +112,11 @@ class DockerRuntimeMixin:
                 with self._docker_operation("execd cache read archive", "execd-cache"):
                     stream, _ = container.get_archive("/execd")
                     data = b"".join(stream)
+                # Also cache the full bootstrap.sh while the container is running.
+                if cache_key not in self._bootstrap_script_cache:
+                    with self._docker_operation("execd cache read bootstrap", "execd-cache"):
+                        bs_stream, _ = container.get_archive("/bootstrap.sh")
+                        self._bootstrap_script_cache[cache_key] = b"".join(bs_stream)
             except DockerException as exc:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -183,43 +188,36 @@ class DockerRuntimeMixin:
                 },
             ) from exc
 
-    def _install_bootstrap_script(self, container, sandbox_id: str) -> None:
-        """Install the bootstrap launcher that starts execd then chains to user command."""
-        script_path = BOOTSTRAP_PATH
-        script_dir = posixpath.dirname(script_path)
-        self._ensure_directory(container, script_dir, sandbox_id)
-        execd_binary = EXECED_INSTALL_PATH
-        script_content = "\n".join(
-            [
-                "#!/bin/sh",
-                "set -e",
-                'if [ -z "${EXECD_ENVS:-}" ]; then',
-                f'  EXECD_ENVS="{DEFAULT_EXECD_ENVS_PATH}"',
-                "fi",
-                'if ! mkdir -p "$(dirname "$EXECD_ENVS")" 2>/dev/null; then',
-                '  echo "warning: failed to create dir for EXECD_ENVS=$EXECD_ENVS" >&2',
-                "fi",
-                'if ! touch "$EXECD_ENVS" 2>/dev/null; then',
-                '  echo "warning: failed to touch EXECD_ENVS=$EXECD_ENVS" >&2',
-                "fi",
-                "export EXECD_ENVS",
-                f"{execd_binary} >/tmp/execd.log 2>&1 &",
-                'exec "$@"',
-                "",
-            ]
-        ).encode("utf-8")
+    def _install_bootstrap_script(
+        self,
+        container,
+        sandbox_id: str,
+        platform: Optional[PlatformSpec] = None,
+    ) -> None:
+        """Install the full bootstrap.sh from the execd image into the sandbox.
 
-        tar_stream = io.BytesIO()
-        with tarfile.open(fileobj=tar_stream, mode="w") as tar:
-            info = tarfile.TarInfo(name=script_path.lstrip("/"))
-            info.mode = 0o755
-            info.size = len(script_content)
-            info.mtime = int(time.time())
-            tar.addfile(info, io.BytesIO(script_content))
-        tar_stream.seek(0)
+        Uses the same execd container that _copy_execd_to_container already
+        created, so there is no extra container lifecycle overhead.
+        """
+        cache_key = self._normalize_platform_key(platform)
+        # _copy_execd_to_container is called first and ensures both the execd
+        # archive and the bootstrap script are already in the caches.
+        archive = self._bootstrap_script_cache.get(cache_key)
+        if archive is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": SandboxErrorCodes.BOOTSTRAP_INSTALL_FAILED,
+                    "message": "bootstrap.sh not found in execd image cache",
+                },
+            )
+
+        script_dir = posixpath.dirname(BOOTSTRAP_PATH)
+        self._ensure_directory(container, script_dir, sandbox_id)
+
         try:
             with self._docker_operation("install bootstrap script", sandbox_id):
-                container.put_archive(path="/", data=tar_stream.getvalue())
+                container.put_archive(path=script_dir, data=archive)
         except DockerException as exc:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -237,4 +235,4 @@ class DockerRuntimeMixin:
     ) -> None:
         """Copy execd artifacts and bootstrap launcher into the sandbox container."""
         self._copy_execd_to_container(container, sandbox_id, platform)
-        self._install_bootstrap_script(container, sandbox_id)
+        self._install_bootstrap_script(container, sandbox_id, platform)

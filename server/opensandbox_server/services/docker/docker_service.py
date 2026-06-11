@@ -154,6 +154,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         self.execd_image = runtime_config.execd_image
         self.network_mode = (self.app_config.docker.network_mode or HOST_NETWORK_MODE).lower()
         self._execd_archive_cache: Dict[str, bytes] = {}
+        self._bootstrap_script_cache: Dict[str, bytes] = {}
         self._windows_profile_cache: Dict[str, bytes] = {}
         self._daemon_platform: Optional[PlatformSpec] = None
         self._metadata_store = DockerMetadataStore()
@@ -198,6 +199,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             )
         self._expiration_lock = Lock()
         self._execd_archive_lock = Lock()
+        self._bootstrap_script_lock = Lock()
         self._sandbox_expirations: Dict[str, datetime] = {}
         self._expiration_timers: Dict[str, Timer] = {}
         self._pending_sandboxes: Dict[str, PendingSandbox] = {}
