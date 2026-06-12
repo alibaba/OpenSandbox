@@ -41,6 +41,26 @@ func (s *DefaultTaskSchedulingStrategy) NeedTaskScheduling() bool {
 	return s.Spec.TaskTemplate != nil
 }
 
+// ValidateShardTaskPatches checks that every shardTaskPatch can be successfully
+// merged into a zero-value TaskTemplateSpec. It returns the first error encountered,
+// including the patch index and the raw patch bytes to aid diagnosis.
+func (s *DefaultTaskSchedulingStrategy) ValidateShardTaskPatches() error {
+	if len(s.Spec.ShardTaskPatches) == 0 {
+		return nil
+	}
+	zeroBytes, _ := json.Marshal(&sandboxv1alpha1.TaskTemplateSpec{})
+	for i, patch := range s.Spec.ShardTaskPatches {
+		modified, err := strategicpatch.StrategicMergePatch(zeroBytes, patch.Raw, &sandboxv1alpha1.TaskTemplateSpec{})
+		if err != nil {
+			return fmt.Errorf("batchsandbox: shardTaskPatches[%d] failed schema validation: patch %s, err %w", i, patch.Raw, err)
+		}
+		if err = json.Unmarshal(modified, &sandboxv1alpha1.TaskTemplateSpec{}); err != nil {
+			return fmt.Errorf("batchsandbox: shardTaskPatches[%d] produced invalid TaskTemplateSpec: patch %s, err %w", i, patch.Raw, err)
+		}
+	}
+	return nil
+}
+
 // GenerateTaskSpecs generates task specifications for all replicas.
 func (s *DefaultTaskSchedulingStrategy) GenerateTaskSpecs() ([]*api.Task, error) {
 	ret := make([]*api.Task, *s.Spec.Replicas)
