@@ -70,6 +70,57 @@ func TestSearchFileMetadata(t *testing.T) {
 	require.False(t, ok, "expected no match")
 }
 
+func TestMakeDirCreatesNewDirectory(t *testing.T) {
+	tmp := t.TempDir()
+	newDir := filepath.Join(tmp, "newdir")
+
+	require.NoError(t, MakeDir(newDir, model.Permission{Mode: 755}))
+
+	info, err := os.Stat(newDir)
+	require.NoError(t, err)
+	require.True(t, info.IsDir())
+}
+
+func TestMakeDirIsIdempotentOnExistingDirectory(t *testing.T) {
+	// MakeDir on a pre-existing directory must not return an error and must
+	// not attempt to chmod/chown the directory (which would fail for system
+	// dirs like /tmp that the process does not own).
+	tmp := t.TempDir()
+	existing := filepath.Join(tmp, "existing")
+	require.NoError(t, os.Mkdir(existing, 0o755))
+
+	// Record perms before calling MakeDir to verify they are unchanged.
+	before, err := os.Stat(existing)
+	require.NoError(t, err)
+
+	require.NoError(t, MakeDir(existing, model.Permission{Mode: 700}))
+
+	after, err := os.Stat(existing)
+	require.NoError(t, err)
+	require.Equal(t, before.Mode(), after.Mode(), "MakeDir must not chmod a pre-existing directory")
+}
+
+func TestMakeDirCreatesNestedDirectoriesWithoutChmodingParents(t *testing.T) {
+	// When creating /parent/child and /parent already exists, only /parent/child
+	// should receive chmod — /parent must be left untouched.
+	tmp := t.TempDir()
+	parent := filepath.Join(tmp, "parent")
+	child := filepath.Join(parent, "child")
+	require.NoError(t, os.Mkdir(parent, 0o755))
+
+	beforeParent, err := os.Stat(parent)
+	require.NoError(t, err)
+
+	require.NoError(t, MakeDir(child, model.Permission{Mode: 755}))
+
+	afterParent, err := os.Stat(parent)
+	require.NoError(t, err)
+	require.Equal(t, beforeParent.Mode(), afterParent.Mode(), "MakeDir must not chmod the pre-existing parent")
+
+	_, err = os.Stat(child)
+	require.NoError(t, err, "child directory must exist")
+}
+
 func TestParseRange(t *testing.T) {
 	tests := []struct {
 		name      string

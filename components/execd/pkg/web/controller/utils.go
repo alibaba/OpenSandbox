@@ -155,9 +155,19 @@ func MakeDir(dir string, perm model.Permission) error {
 	if err != nil {
 		return err
 	}
-	err = os.MkdirAll(abs, os.ModePerm)
-	if err != nil {
+
+	// Record whether the target directory already exists before MkdirAll so
+	// we can skip chmod/chown on pre-existing directories (including system
+	// dirs like /tmp that the sandbox user does not own).
+	_, statErr := os.Stat(abs)
+	alreadyExisted := statErr == nil
+
+	if err = os.MkdirAll(abs, os.ModePerm); err != nil {
 		return err
+	}
+
+	if alreadyExisted {
+		return nil
 	}
 
 	return ChmodFile(abs, perm)
