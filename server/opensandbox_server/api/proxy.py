@@ -192,6 +192,10 @@ async def _proxy_http_request(
         if request.client and "x-forwarded-for" not in existing_lower:
             headers["X-Forwarded-For"] = request.client.host
 
+        # Normalize header keys to lowercase so subsequent lookups are
+        # case-insensitive regardless of what the upstream client sent.
+        headers = {k.lower(): v for k, v in headers.items()}
+
         stream_body = request.method in ("POST", "PUT", "PATCH", "DELETE")
         if stream_body:
             # Strip content-length when streaming: the body is forwarded as an
@@ -200,7 +204,6 @@ async def _proxy_http_request(
             # backend (Go net/http reads exactly Content-Length bytes and discards
             # the rest), which silently truncates large uploads (> ~18 KB).
             headers.pop("content-length", None)
-            headers.pop("Content-Length", None)
         req = client.build_request(
             method=request.method,
             url=target_url,

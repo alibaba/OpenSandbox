@@ -727,6 +727,18 @@ def test_proxy_active_credential_vault_returns_sidecar_forbidden(
     assert fake_client.built["url"] == "http://10.57.1.91:18080/credential-vault/_active"
 
 
+class _StubServiceSimple:
+    """Minimal sandbox service stub that returns a fixed endpoint.
+
+    Shared by the content-length stripping/preservation tests so that the
+    identical three-line inner class is not repeated in each test body.
+    """
+
+    @staticmethod
+    def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+        return Endpoint(endpoint="10.57.1.91:40109")
+
+
 def test_proxy_strips_content_length_for_streaming_post(
     client: TestClient,
     auth_headers: dict,
@@ -740,13 +752,7 @@ def test_proxy_strips_content_length_for_streaming_post(
     causing uploads > ~18 KB to appear successful (HTTP 200) while the file is
     never fully written.
     """
-
-    class StubService:
-        @staticmethod
-        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
-            return Endpoint(endpoint="10.57.1.91:40109")
-
-    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    monkeypatch.setattr(lifecycle, "sandbox_service", _StubServiceSimple())
 
     fake_client = _FakeAsyncClient()
     fake_client.response = _FakeStreamingResponse(status_code=200, chunks=[b"ok"])
@@ -776,13 +782,7 @@ def test_proxy_strips_content_length_for_streaming_delete(
     monkeypatch,
 ) -> None:
     """DELETE with a body is also streamed; content-length must be stripped."""
-
-    class StubService:
-        @staticmethod
-        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
-            return Endpoint(endpoint="10.57.1.91:40109")
-
-    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    monkeypatch.setattr(lifecycle, "sandbox_service", _StubServiceSimple())
 
     fake_client = _FakeAsyncClient()
     fake_client.response = _FakeStreamingResponse(status_code=200, chunks=[b"deleted"])
@@ -810,13 +810,7 @@ def test_proxy_preserves_content_length_for_get(
     monkeypatch,
 ) -> None:
     """GET requests are not streamed; content-length (if any) must be forwarded as-is."""
-
-    class StubService:
-        @staticmethod
-        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
-            return Endpoint(endpoint="10.57.1.91:40109")
-
-    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    monkeypatch.setattr(lifecycle, "sandbox_service", _StubServiceSimple())
 
     fake_client = _FakeAsyncClient()
     fake_client.response = _FakeStreamingResponse(status_code=200, chunks=[b"data"])
@@ -830,3 +824,7 @@ def test_proxy_preserves_content_length_for_get(
     assert response.status_code == 200
     assert fake_client.built is not None
     assert fake_client.built["content"] is None
+    lowered = {k.lower(): v for k, v in fake_client.built["headers"].items()}
+    assert "content-length" in lowered, (
+        "GET: content-length must be forwarded as-is (not streamed)"
+    )
