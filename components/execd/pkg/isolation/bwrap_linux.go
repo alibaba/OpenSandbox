@@ -62,12 +62,12 @@ func findBwrap() string {
 // bwrapImpl is the Linux bwrap Isolator.
 type bwrapImpl struct{}
 
-// NewBwrap returns a bwrap Isolator for Linux.
-func NewBwrap() Isolator {
+// NewBwrap returns a bwrap Isolator for Linux, configured by cfg.
+func NewBwrap(cfg Config) Isolator {
 	bwrapPath = findBwrap()
 
 	// Pre-generate seccomp BPF once at startup.
-	if bpf, err := generateSeccompDenyBPF(); err != nil {
+	if bpf, err := generateSeccompDenyBPF(cfg.Seccomp); err != nil {
 		log.Warning("seccomp: failed to generate BPF: %v", err)
 	} else {
 		seccompBPF = bpf

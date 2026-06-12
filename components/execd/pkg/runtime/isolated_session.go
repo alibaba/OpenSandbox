@@ -44,10 +44,12 @@ type IsolatedSessionOptions struct {
 type isolatedSession struct {
 	id        string
 	mu        sync.RWMutex
+	runMu     sync.Mutex // serializes concurrent Run calls
 	opts      *IsolatedSessionOptions
 	cmd       *exec.Cmd
 	stdin     io.WriteCloser
 	stdout    io.ReadCloser
+	upperID   string // key in UpperManager, used for Release/Remove
 	upperDir  string
 	workDir   string
 	createdAt time.Time
@@ -99,6 +101,8 @@ func (s *isolatedSession) start() error {
 	wrapOpts.EnvPassthrough.Keys = s.opts.EnvPassthroughKeys
 	wrapOpts.Uid = s.opts.Uid
 	wrapOpts.Gid = s.opts.Gid
+	wrapOpts.UpperDir = s.upperDir
+	wrapOpts.WorkDir = s.workDir
 
 	if err := s.isolator.Wrap(cmd, wrapOpts); err != nil {
 		return err
@@ -136,13 +140,9 @@ func (s *isolatedSession) stop() error {
 		s.stdout.Close()
 	}
 	if s.cmd != nil && s.cmd.Process != nil {
-		if err := syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL); err != nil {
-			return err
-		}
-		// Wait reaps the zombie, releases kernel resources (namespaces, fds).
-		if _, err := s.cmd.Process.Wait(); err != nil {
-			return err
-		}
+		_ = syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
+		// cmd.Wait reaps the zombie AND cleans up pipe goroutines from Start().
+		_ = s.cmd.Wait()
 	}
 	return nil
 }

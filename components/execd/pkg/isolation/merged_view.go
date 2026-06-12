@@ -22,10 +22,23 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/alibaba/opensandbox/execd/pkg/vfs"
 )
 
-// MergedView provides an overlay filesystem view: reads check upper first
-// then fall through to lower; writes always go to upper.
+// MergedView provides a userspace overlay filesystem view: reads check upper
+// first then fall through to lower; writes always go to upper.
+//
+// Limitation (overlay mode): MergedView writes to the upper directory on the
+// host are NOT visible inside a running bwrap overlayfs mount. The kernel VFS
+// caches directory entries at mount time; direct modifications to the upper
+// directory bypass the overlay and are invisible to processes inside the
+// namespace. Only the Run→API direction works (process writes go through the
+// overlay to upper, MergedView reads upper on host). For bidirectional
+// file exchange, use workspace mode "rw" instead of "overlay".
+// Compile-time check: MergedView satisfies vfs.FS.
+var _ vfs.FS = (*MergedView)(nil)
+
 type MergedView struct {
 	LowerDir string
 	UpperDir string
@@ -85,44 +98,35 @@ func (m *MergedView) ReadDir(path string) ([]os.DirEntry, error) {
 		return nil, err
 	}
 
-	seen := make(map[string]bool)
-	var entries []os.DirEntry
+	entryMap := make(map[string]os.DirEntry)
 
 	// Lower first.
 	lowerEntries, _ := os.ReadDir(m.resolveLower(rel))
 	for _, e := range lowerEntries {
-		seen[e.Name()] = true
-		entries = append(entries, e)
+		entryMap[e.Name()] = e
 	}
 
-	// Upper overlays.
+	// Upper overlays — takes precedence over lower.
 	if m.UpperDir != "" {
 		upperEntries, _ := os.ReadDir(m.resolveUpper(rel))
 		for _, e := range upperEntries {
-			// Whiteout hides lower entry.
 			if strings.HasPrefix(e.Name(), ".wh.") {
 				origName := strings.TrimPrefix(e.Name(), ".wh.")
-				delete(seen, origName)
+				delete(entryMap, origName)
 				continue
 			}
-			if !seen[e.Name()] {
-				seen[e.Name()] = true
-				entries = append(entries, e)
-			}
+			entryMap[e.Name()] = e
 		}
 	}
 
-	// Filter out whiteout-hidden entries from the result.
-	filtered := entries[:0]
-	for _, e := range entries {
-		if seen[e.Name()] {
-			filtered = append(filtered, e)
-		}
+	entries := make([]os.DirEntry, 0, len(entryMap))
+	for _, e := range entryMap {
+		entries = append(entries, e)
 	}
-	sort.Slice(filtered, func(i, j int) bool {
-		return filtered[i].Name() < filtered[j].Name()
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Name() < entries[j].Name()
 	})
-	return filtered, nil
+	return entries, nil
 }
 
 // Open opens a file for reading. Checks upper first, then lower.
@@ -156,6 +160,8 @@ func (m *MergedView) ReadFile(path string) ([]byte, error) {
 }
 
 // WriteFile writes data to upper directory.
+// In overlay mode, files written here are visible to subsequent MergedView
+// reads but NOT to processes inside the bwrap namespace (see MergedView doc).
 func (m *MergedView) WriteFile(path string, data []byte, perm os.FileMode) error {
 	if m.Mode == WorkspaceRO {
 		return fmt.Errorf("write denied: workspace is read-only")

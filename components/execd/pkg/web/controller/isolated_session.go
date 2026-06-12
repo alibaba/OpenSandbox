@@ -65,16 +65,16 @@ func (c *IsolatedSessionController) Create() {
 	}
 
 	opts := &runtime.IsolatedSessionOptions{
-		Profile:            req.Isolation.Profile,
-		WorkspacePath:      req.Isolation.Workspace.Path,
-		WorkspaceMode:      req.Isolation.Workspace.Mode,
-		ExtraWritable:      req.Isolation.ExtraWritable,
-		ShareNet:           req.Isolation.ShareNet,
-		EnvPassthroughMode: req.Isolation.EnvPassthrough.Mode,
-		EnvPassthroughKeys: req.Isolation.EnvPassthrough.Keys,
-		Uid:                req.Isolation.Uid,
-		Gid:                req.Isolation.Gid,
-		IdleTimeoutSeconds: req.Isolation.IdleTimeoutSeconds,
+		Profile:            req.Profile,
+		WorkspacePath:      req.Workspace.Path,
+		WorkspaceMode:      req.Workspace.Mode,
+		ExtraWritable:      req.ExtraWritable,
+		ShareNet:           req.ShareNet,
+		EnvPassthroughMode: req.EnvPassthrough.Mode,
+		EnvPassthroughKeys: req.EnvPassthrough.Keys,
+		Uid:                req.Uid,
+		Gid:                req.Gid,
+		IdleTimeoutSeconds: req.IdleTimeoutSeconds,
 	}
 
 	sessionID, err := isolatedRunner.CreateIsolatedSession(opts)
@@ -86,7 +86,6 @@ func (c *IsolatedSessionController) Create() {
 	c.RespondSuccess(model.IsolatedCreateSessionResponse{
 		SessionID: sessionID,
 		CreatedAt: time.Now(),
-		Isolation: req.Isolation,
 	})
 }
 
@@ -148,7 +147,7 @@ func (c *IsolatedSessionController) Run() {
 	}
 
 	startTime := time.Now()
-	err := isolatedRunner.RunInIsolatedSession(ctx, sessionID, req.Code, onStdout)
+	err := isolatedRunner.RunInIsolatedSession(ctx, sessionID, req.Code, req.Envs, onStdout)
 	durationMs := float64(time.Since(startTime)) / float64(time.Millisecond)
 
 	if err != nil {

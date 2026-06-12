@@ -29,7 +29,7 @@ func findBwrap() string { return "" }
 type bwrapStub struct{}
 
 // NewBwrap returns a stub on non-Linux platforms.
-func NewBwrap() Isolator {
+func NewBwrap(_ Config) Isolator {
 	return &bwrapStub{}
 }
 

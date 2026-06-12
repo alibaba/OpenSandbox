@@ -50,7 +50,7 @@ func TestEnvBlacklist(t *testing.T) {
 	defer cancel()
 
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "echo TOKEN=${BWRAP_TEST_SECRET_TOKEN:-NOT_SET}", func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, "echo TOKEN=${BWRAP_TEST_SECRET_TOKEN:-NOT_SET}", nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestEnvAllowMode(t *testing.T) {
 	defer cancel()
 
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "echo ALLOWED=${BWRAP_ALLOWED_VAR:-MISSING} BLOCKED=${BWRAP_BLOCKED_VAR:-MISSING}", func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, "echo ALLOWED=${BWRAP_ALLOWED_VAR:-MISSING} BLOCKED=${BWRAP_BLOCKED_VAR:-MISSING}", nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)
@@ -108,7 +108,7 @@ func TestNetworkIsolation(t *testing.T) {
 
 	// With --unshare-net, only loopback should be visible.
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "ip addr show 2>/dev/null | grep -c 'LOOPBACK' || echo lo_visible", func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, "ip addr show 2>/dev/null | grep -c 'LOOPBACK' || echo lo_visible", nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)
@@ -138,7 +138,7 @@ func TestCustomUID(t *testing.T) {
 	defer cancel()
 
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "id -u; id -g", func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, "id -u; id -g", nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)
@@ -165,7 +165,7 @@ func TestBalancedProfile(t *testing.T) {
 
 	// Balanced shares host /tmp.
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "echo balanced-test > /tmp/bwrap-balanced-test.txt", func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, "echo balanced-test > /tmp/bwrap-balanced-test.txt", nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)

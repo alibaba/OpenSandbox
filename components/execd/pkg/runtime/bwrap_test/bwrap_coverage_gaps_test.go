@@ -47,7 +47,7 @@ func TestStderrIsCaptured(t *testing.T) {
 	// bash sends error messages to stderr. Without Stderr=Stdout, we'd see nothing.
 	var lines []string
 	err = r.RunInIsolatedSession(ctx, id,
-		`echo stdout-line && echo stderr-line >&2`,
+		`echo stdout-line && echo stderr-line >&2`, nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 	assert.Contains(t, lines, "stdout-line")
@@ -71,23 +71,23 @@ func TestRecoverAfterFailedRun(t *testing.T) {
 
 	// Run 1: fail with non-zero exit. Use bash -c so the parent bash (the
 	// persistent session) doesn't exit — exit is a shell builtin.
-	err = r.RunInIsolatedSession(ctx, id, "bash -c 'exit 42'", nil)
+	err = r.RunInIsolatedSession(ctx, id, "bash -c 'exit 42'", nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "42")
 
 	// Run 2: must still work.
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "echo recovered",
+	err = r.RunInIsolatedSession(ctx, id, "echo recovered", nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"recovered"}, lines)
 
 	// Run 3: fail again, then recover again.
-	err = r.RunInIsolatedSession(ctx, id, "false", nil)
+	err = r.RunInIsolatedSession(ctx, id, "false", nil, nil)
 	require.Error(t, err)
 
 	lines = nil
-	err = r.RunInIsolatedSession(ctx, id, "echo alive-again",
+	err = r.RunInIsolatedSession(ctx, id, "echo alive-again", nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"alive-again"}, lines)
@@ -109,7 +109,7 @@ func TestContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 
-	err = r.RunInIsolatedSession(ctx, id, "sleep 10", nil)
+	err = r.RunInIsolatedSession(ctx, id, "sleep 10", nil, nil)
 	assert.Error(t, err, "should return error on context cancellation")
 	assert.True(t, strings.Contains(err.Error(), "deadline") || strings.Contains(err.Error(), "canceled"),
 		"error should be context-related, got: %v", err)
@@ -131,7 +131,7 @@ func TestContextNotCancelledOnNormalExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err = r.RunInIsolatedSession(ctx, id, "echo fast", nil)
+	err = r.RunInIsolatedSession(ctx, id, "echo fast", nil, nil)
 	require.NoError(t, err)
 }
 
@@ -158,7 +158,7 @@ func TestStrictNetworkIsolation(t *testing.T) {
 	// info — `ip link show` should show only lo (loopback).
 	var lines []string
 	err = r.RunInIsolatedSession(ctx, id,
-		`ip link show 2>/dev/null | wc -l; echo DONE`,
+		`ip link show 2>/dev/null | wc -l; echo DONE`, nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 
@@ -190,7 +190,7 @@ func TestManyConsecutiveRuns(t *testing.T) {
 	defer cancel()
 
 	for i := 0; i < 100; i++ {
-		err := r.RunInIsolatedSession(ctx, id, "true", nil)
+		err := r.RunInIsolatedSession(ctx, id, "true", nil, nil)
 		require.NoError(t, err, "run %d failed", i)
 	}
 }
@@ -213,7 +213,7 @@ func TestDeleteThenRecreate(t *testing.T) {
 		require.NoError(t, err, "create %d", i)
 
 		var lines []string
-		err = r.RunInIsolatedSession(ctx, id, "echo session-"+string(rune('0'+i)),
+		err = r.RunInIsolatedSession(ctx, id, "echo session-"+string(rune('0'+i)), nil,
 			func(line string) { lines = append(lines, line) })
 		require.NoError(t, err, "run %d", i)
 
@@ -256,7 +256,7 @@ func TestBashBuiltinsAndFunctions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var lines []string
-			err := r.RunInIsolatedSession(ctx, id, tt.code,
+			err := r.RunInIsolatedSession(ctx, id, tt.code, nil,
 				func(line string) { lines = append(lines, line) })
 			require.NoError(t, err)
 			require.NotEmpty(t, lines)
@@ -285,7 +285,7 @@ func TestLargeFileWrite(t *testing.T) {
 	// Write a moderately large file inside the sandbox.
 	script := `dd if=/dev/zero of=/tmp/largefile bs=1M count=5 2>&1 && echo "WRITE_OK"`
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, script,
+	err = r.RunInIsolatedSession(ctx, id, script, nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 
@@ -317,9 +317,9 @@ func TestSessionSubprocessCleanup(t *testing.T) {
 
 	// Each run forks a subprocess. Run several short-lived commands.
 	for i := 0; i < 5; i++ {
-		require.NoError(t, r.RunInIsolatedSession(ctx, id, "sleep 0.1 && true", nil))
+		require.NoError(t, r.RunInIsolatedSession(ctx, id, "sleep 0.1 && true", nil, nil))
 	}
-	require.NoError(t, r.RunInIsolatedSession(ctx, id, "echo processes: $(ps aux | wc -l)", nil))
+	require.NoError(t, r.RunInIsolatedSession(ctx, id, "echo processes: $(ps aux | wc -l)", nil, nil))
 }
 
 // TestBorderlineBufferSize exercises the scanner buffer with output
@@ -340,7 +340,7 @@ func TestBorderlineBufferSize(t *testing.T) {
 	// Generate ~60000+ lines to stress the scanner buffer.
 	script := `for i in $(seq 60000); do echo "line-$i"; done && echo "DONE"`
 	var lineCount int
-	err = r.RunInIsolatedSession(ctx, id, script,
+	err = r.RunInIsolatedSession(ctx, id, script, nil,
 		func(line string) {
 			if strings.HasPrefix(line, "line-") {
 				lineCount++
@@ -372,7 +372,7 @@ func TestWorkspaceIsolationAcrossSessions(t *testing.T) {
 	defer cancel()
 
 	require.NoError(t, r.RunInIsolatedSession(ctx, id1,
-		`echo "modified-by-s1" > `+ws+`/shared.txt`, nil))
+		`echo "modified-by-s1" > `+ws+`/shared.txt`, nil, nil))
 
 	// Session 2: overlay mode — reads see original workspace content.
 	opts2 := &runtime.IsolatedSessionOptions{
@@ -384,7 +384,7 @@ func TestWorkspaceIsolationAcrossSessions(t *testing.T) {
 
 	var lines []string
 	require.NoError(t, r.RunInIsolatedSession(ctx, id2,
-		`cat `+ws+`/shared.txt`,
+		`cat `+ws+`/shared.txt`, nil,
 		func(line string) { lines = append(lines, line) }))
 	// overlay mode: should see the original or modified content depending
 	// on whether the modification was to the workspace (it was) and whether

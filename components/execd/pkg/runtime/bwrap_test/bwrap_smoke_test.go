@@ -44,7 +44,7 @@ func TestPIDIsolation(t *testing.T) {
 	defer cancel()
 
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "echo $$", func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, "echo $$", nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)
@@ -64,7 +64,7 @@ func TestEchoOutput(t *testing.T) {
 	defer cancel()
 
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "echo hello-world-from-bwrap", func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, "echo hello-world-from-bwrap", nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)
@@ -82,10 +82,10 @@ func TestEnvPersistence(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	require.NoError(t, r.RunInIsolatedSession(ctx, id, "export MY_VAR=persisted_42", nil))
+	require.NoError(t, r.RunInIsolatedSession(ctx, id, "export MY_VAR=persisted_42", nil, nil))
 
 	var lines []string
-	require.NoError(t, r.RunInIsolatedSession(ctx, id, "echo $MY_VAR", func(line string) {
+	require.NoError(t, r.RunInIsolatedSession(ctx, id, "echo $MY_VAR", nil, func(line string) {
 		lines = append(lines, line)
 	}))
 	assert.Equal(t, []string{"persisted_42"}, lines)
@@ -102,7 +102,7 @@ func TestNonZeroExit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err = r.RunInIsolatedSession(ctx, id, "bash -c 'exit 13'", nil)
+	err = r.RunInIsolatedSession(ctx, id, "bash -c 'exit 13'", nil, nil)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "13")
 }
@@ -121,7 +121,7 @@ func TestMultipleRuns(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		expected := fmt.Sprintf("run-%d", i)
 		var lines []string
-		require.NoError(t, r.RunInIsolatedSession(ctx, id, "echo "+expected, func(line string) {
+		require.NoError(t, r.RunInIsolatedSession(ctx, id, "echo "+expected, nil, func(line string) {
 			lines = append(lines, line)
 		}), "run %d", i)
 		assert.Equal(t, []string{expected}, lines, "run %d output", i)
@@ -141,7 +141,7 @@ func TestStdinStreaming(t *testing.T) {
 
 	script := `for i in $(seq 1 50); do echo "line-$i"; done`
 	var lines []string
-	require.NoError(t, r.RunInIsolatedSession(ctx, id, script, func(line string) {
+	require.NoError(t, r.RunInIsolatedSession(ctx, id, script, nil, func(line string) {
 		lines = append(lines, line)
 	}))
 
@@ -164,7 +164,7 @@ func TestLargeOutput(t *testing.T) {
 
 	script := `for i in $(seq 1 1000); do echo "line-$i"; done`
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, script, func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, script, nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestEmptyCode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	err = r.RunInIsolatedSession(ctx, id, "", nil)
+	err = r.RunInIsolatedSession(ctx, id, "", nil, nil)
 	require.NoError(t, err, "empty code should not error")
 }
 
@@ -203,7 +203,7 @@ func TestSessionState(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	require.NoError(t, r.RunInIsolatedSession(ctx, id, "true", nil))
+	require.NoError(t, r.RunInIsolatedSession(ctx, id, "true", nil, nil))
 
 	state2, err := r.GetIsolatedSession(id)
 	require.NoError(t, err)
@@ -232,7 +232,7 @@ func TestSessionCleanup(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = r.RunInIsolatedSession(ctx, id, "true", nil)
+	_ = r.RunInIsolatedSession(ctx, id, "true", nil, nil)
 
 	require.NoError(t, r.DeleteIsolatedSession(id))
 	time.Sleep(200 * time.Millisecond)
@@ -256,7 +256,7 @@ func TestIdleGC(t *testing.T) {
 	// Run a command to set lastRunAt.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	require.NoError(t, r.RunInIsolatedSession(ctx, id, "true", nil))
+	require.NoError(t, r.RunInIsolatedSession(ctx, id, "true", nil, nil))
 
 	// Session should exist immediately after run.
 	_, err = r.GetIsolatedSession(id)
@@ -315,10 +315,10 @@ func TestTmpIsolation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	require.NoError(t, r.RunInIsolatedSession(ctx, id, "echo secret > /tmp/bwrap-test-file.txt", nil))
+	require.NoError(t, r.RunInIsolatedSession(ctx, id, "echo secret > /tmp/bwrap-test-file.txt", nil, nil))
 
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "cat /tmp/bwrap-test-file.txt", func(line string) {
+	err = r.RunInIsolatedSession(ctx, id, "cat /tmp/bwrap-test-file.txt", nil, func(line string) {
 		lines = append(lines, line)
 	})
 	require.NoError(t, err)

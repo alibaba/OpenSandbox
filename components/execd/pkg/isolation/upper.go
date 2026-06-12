@@ -117,8 +117,8 @@ func (m *UpperManager) Collect() []string {
 			upperParent := filepath.Dir(e.UpperDir)
 			if err := os.RemoveAll(upperParent); err == nil {
 				freed = append(freed, id)
+				delete(m.entries, id)
 			}
-			delete(m.entries, id)
 		}
 	}
 	return freed

@@ -48,7 +48,7 @@ func TestWorkspaceRW(t *testing.T) {
 	defer cancel()
 
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "echo hello && echo world",
+	err = r.RunInIsolatedSession(ctx, id, "echo hello && echo world", nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"hello", "world"}, lines)
@@ -73,7 +73,7 @@ func TestWorkspaceReadOnly(t *testing.T) {
 	defer cancel()
 
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "echo hello-ro",
+	err = r.RunInIsolatedSession(ctx, id, "echo hello-ro", nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"hello-ro"}, lines)
@@ -101,7 +101,7 @@ func TestWorkspaceOverlay(t *testing.T) {
 	newFile := filepath.Join(wsDir, "upper-only.txt")
 	var lines []string
 	err = r.RunInIsolatedSession(ctx, id,
-		"echo overlay-read && echo upper-data > "+newFile,
+		"echo overlay-read && echo upper-data > "+newFile, nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"overlay-read"}, lines)
@@ -134,8 +134,8 @@ func TestConcurrentSessions(t *testing.T) {
 	defer cancel()
 
 	var out1, out2 []string
-	require.NoError(t, r.RunInIsolatedSession(ctx, id1, "echo one", func(l string) { out1 = append(out1, l) }))
-	require.NoError(t, r.RunInIsolatedSession(ctx, id2, "echo two", func(l string) { out2 = append(out2, l) }))
+	require.NoError(t, r.RunInIsolatedSession(ctx, id1, "echo one", nil, func(l string) { out1 = append(out1, l) }))
+	require.NoError(t, r.RunInIsolatedSession(ctx, id2, "echo two", nil, func(l string) { out2 = append(out2, l) }))
 	assert.Equal(t, "one", out1[0])
 	assert.Equal(t, "two", out2[0])
 }

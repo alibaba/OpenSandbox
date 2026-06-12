@@ -30,29 +30,32 @@ import (
 	"github.com/alibaba/opensandbox/execd/pkg/isolation"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 	"github.com/alibaba/opensandbox/execd/pkg/telemetry"
+	"github.com/alibaba/opensandbox/execd/pkg/vfs"
 )
 
 const isolatedRunEndMarker = "__ISOLATED_RUN_END__"
 
 // IsolatedRunner is the concrete isolated session runner.
 type IsolatedRunner struct {
-	ctrl     *Controller
-	isolator isolation.Isolator
-	upperMgr *isolation.UpperManager
-	stopGC   chan struct{}
+	ctrl            *Controller
+	isolator        isolation.Isolator
+	upperMgr        *isolation.UpperManager
+	allowedWritable []string
+	stopGC          chan struct{}
 }
 
 // NewIsolatedRunner creates the isolated session runner.
-func NewIsolatedRunner(ctrl *Controller, iso isolation.Isolator, upperRoot string, upperMaxBytes int64) (*IsolatedRunner, error) {
-	mgr, err := isolation.NewUpperManager(upperRoot, upperMaxBytes)
+func NewIsolatedRunner(ctrl *Controller, iso isolation.Isolator, cfg isolation.Config) (*IsolatedRunner, error) {
+	mgr, err := isolation.NewUpperManager(cfg.UpperRoot, cfg.UpperMaxBytes)
 	if err != nil {
 		return nil, fmt.Errorf("isolated runner: upper manager: %w", err)
 	}
 	r := &IsolatedRunner{
-		ctrl:     ctrl,
-		isolator: iso,
-		upperMgr: mgr,
-		stopGC:   make(chan struct{}),
+		ctrl:            ctrl,
+		isolator:        iso,
+		upperMgr:        mgr,
+		allowedWritable: cfg.AllowedWritable,
+		stopGC:          make(chan struct{}),
 	}
 	go r.gcLoop()
 
@@ -127,6 +130,10 @@ func (r *IsolatedRunner) Available() bool {
 
 // CreateIsolatedSession starts a new bwrap + bash session.
 func (r *IsolatedRunner) CreateIsolatedSession(opts *IsolatedSessionOptions) (string, error) {
+	if err := r.validateExtraWritable(opts.ExtraWritable); err != nil {
+		return "", err
+	}
+
 	id := uuid.New().String()
 	session := newIsolatedSession(id, opts, r.isolator)
 
@@ -136,14 +143,14 @@ func (r *IsolatedRunner) CreateIsolatedSession(opts *IsolatedSessionOptions) (st
 		if err != nil {
 			return "", fmt.Errorf("allocate upper: %w", err)
 		}
+		session.upperID = upperID
 		session.upperDir = upperDir
 		session.workDir = workDir
-		_ = upperID // gc key
 	}
 
 	if err := session.start(); err != nil {
-		if session.upperDir != "" {
-			r.upperMgr.Release(id)
+		if session.upperID != "" {
+			r.upperMgr.Release(session.upperID)
 		}
 		return "", fmt.Errorf("start bwrap: %w", err)
 	}
@@ -192,11 +199,17 @@ type IsolatedSessionState struct {
 type StdoutCallback func(line string)
 
 // RunInIsolatedSession executes code in the session.
-func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, code string, onStdout StdoutCallback) error {
+// Runs are serialized per session via s.runMu.
+// envs are exported in the bash session before code runs.
+func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, code string, envs map[string]string, onStdout StdoutCallback) error {
 	s := r.lookup(id)
 	if s == nil {
 		return ErrContextNotFound
 	}
+
+	// Serialize concurrent runs on the same session.
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
 
 	s.mu.RLock()
 	stdin := s.stdin
@@ -207,25 +220,53 @@ func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, co
 		return fmt.Errorf("session not started")
 	}
 
-	// Build the command to execute. Write a marker after the command so we
-	// know when output ends.
-	script := code
+	// Prepend env exports before user code.
+	var script string
+	for k, v := range envs {
+		script += fmt.Sprintf("export %s=%s\n", shellescape(k), shellescape(v))
+	}
+	script += code
 	if !strings.HasSuffix(script, "\n") {
 		script += "\n"
 	}
 	script += fmt.Sprintf("echo %s $?\n", isolatedRunEndMarker)
 
-	// Close stdin on context cancellation so blocked writes unblock.
+	// Close stdin only if context is cancelled during the run.
+	// The done channel prevents the goroutine from closing stdin
+	// after a normal return (which would kill the persistent session).
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-ctx.Done()
-		stdin.Close()
+		select {
+		case <-ctx.Done():
+			stdin.Close()
+		case <-done:
+		}
 	}()
 
 	if _, err := io.WriteString(stdin, script); err != nil {
 		return fmt.Errorf("write stdin: %w", err)
 	}
 
-	// Read output until marker.
+	exitCode, err := scanUntilMarker(ctx, stdout, onStdout)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.lastRunAt = time.Now()
+	s.mu.Unlock()
+
+	if exitCode != 0 {
+		return fmt.Errorf("command exited with code %d", exitCode)
+	}
+
+	return nil
+}
+
+// scanUntilMarker reads stdout lines until the end marker is found.
+// Returns the exit code from the marker line.
+func scanUntilMarker(ctx context.Context, stdout io.ReadCloser, onStdout StdoutCallback) (int, error) {
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
@@ -235,8 +276,15 @@ func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, co
 		defer close(scanDone)
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.HasPrefix(line, isolatedRunEndMarker) {
-				parts := strings.Fields(line)
+			// The marker may appear mid-line if the previous command's
+			// output didn't end with a newline (e.g. cat of a file
+			// without trailing newline).
+			if idx := strings.Index(line, isolatedRunEndMarker); idx >= 0 {
+				if idx > 0 && onStdout != nil {
+					onStdout(line[:idx])
+				}
+				markerPart := line[idx:]
+				parts := strings.Fields(markerPart)
 				if len(parts) >= 2 {
 					if code, convErr := strconv.Atoi(parts[1]); convErr == nil {
 						exitCode = code
@@ -253,23 +301,13 @@ func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, co
 	select {
 	case <-scanDone:
 	case <-ctx.Done():
-		return ctx.Err()
+		return 0, ctx.Err()
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read stdout: %w", err)
+		return 0, fmt.Errorf("read stdout: %w", err)
 	}
-
-	// Update lastRunAt.
-	s.mu.Lock()
-	s.lastRunAt = time.Now()
-	s.mu.Unlock()
-
-	if exitCode != 0 {
-		return fmt.Errorf("command exited with code %d", exitCode)
-	}
-
-	return nil
+	return exitCode, nil
 }
 
 // DeleteIsolatedSession destroys the session.
@@ -286,8 +324,8 @@ func (r *IsolatedRunner) DeleteIsolatedSession(id string) error {
 		log.Warning("stop isolated session %s: %v", id, err)
 	}
 
-	if s.upperDir != "" {
-		r.upperMgr.Release(id)
+	if s.upperID != "" {
+		r.upperMgr.Release(s.upperID)
 	}
 
 	r.ctrl.isolatedSessionMap.Delete(id)
@@ -305,8 +343,8 @@ func (r *IsolatedRunner) CommitUpper(id string) error {
 	return fmt.Errorf("commit not implemented yet")
 }
 
-// GetMergedView returns a filesystem view for the session.
-func (r *IsolatedRunner) GetMergedView(id string) (*isolation.MergedView, error) {
+// GetMergedView returns a VFS for the session's filesystem.
+func (r *IsolatedRunner) GetMergedView(id string) (vfs.FS, error) {
 	s := r.lookup(id)
 	if s == nil {
 		return nil, ErrContextNotFound
@@ -351,4 +389,31 @@ func (r *IsolatedRunner) lookup(id string) *isolatedSession {
 		return nil
 	}
 	return s
+}
+
+func (r *IsolatedRunner) validateExtraWritable(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if len(r.allowedWritable) == 0 {
+		return fmt.Errorf("extra_writable not allowed: no paths in allowlist")
+	}
+	for _, p := range paths {
+		found := false
+		for _, allowed := range r.allowedWritable {
+			if strings.HasPrefix(p, allowed) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("extra_writable path %q not in allowlist", p)
+		}
+	}
+	return nil
+}
+
+// shellescape wraps s in single quotes, escaping embedded single quotes.
+func shellescape(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

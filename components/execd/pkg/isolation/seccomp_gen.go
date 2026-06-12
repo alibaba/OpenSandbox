@@ -73,14 +73,22 @@ var denylistSyscalls = []string{
 // generateSeccompDenyBPF returns BPF bytecode for a default-allow,
 // deny-listed syscall filter. The returned bytes are in struct sock_filter
 // format (8 bytes per instruction, native endian).
-func generateSeccompDenyBPF() ([]byte, error) {
+//
+// When override is nil the built-in denylistSyscalls is used. When non-nil,
+// override.Deny completely replaces the built-in list.
+func generateSeccompDenyBPF(override *SeccompOverride) ([]byte, error) {
 	archInfo, err := arch.GetInfo("")
 	if err != nil {
 		return nil, fmt.Errorf("seccomp: detect arch: %w", err)
 	}
 
+	denylist := denylistSyscalls
+	if override != nil {
+		denylist = override.Deny
+	}
+
 	// Filter denylist to syscalls that exist on this architecture.
-	names := filterKnownSyscalls(archInfo, denylistSyscalls)
+	names := filterKnownSyscalls(archInfo, denylist)
 	if len(names) == 0 {
 		return nil, nil
 	}

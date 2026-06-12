@@ -43,10 +43,17 @@ func main() {
 
 	flag.InitFlags()
 
+	// Load isolation config.
+	isoCfg, err := isolation.LoadConfig(flag.IsolationConfigPath)
+	if err != nil {
+		log.Error("isolation: config: %v", err)
+		os.Exit(1)
+	}
+
 	// Probe isolation runtime capabilities.
 	isolationProbe := isolation.Probe(isolation.ProbeConfig{
-		UpperRoot:     flag.IsolationUpperRoot,
-		UpperMaxBytes: flag.IsolationUpperMaxBytes,
+		UpperRoot:     isoCfg.UpperRoot,
+		UpperMaxBytes: isoCfg.UpperMaxBytes,
 	})
 	log.Info("isolation: available=%v isolator=%s version=%s",
 		isolationProbe.Available, isolationProbe.Isolator, isolationProbe.Version)
@@ -57,13 +64,13 @@ func main() {
 
 	// Init isolation runner if probe succeeded.
 	if isolationProbe.Available {
-		iso := isolation.NewBwrap()
-		runner, err := runtime.NewIsolatedRunner(ctrl, iso, flag.IsolationUpperRoot, flag.IsolationUpperMaxBytes)
+		iso := isolation.NewBwrap(isoCfg)
+		runner, err := runtime.NewIsolatedRunner(ctrl, iso, isoCfg)
 		if err != nil {
 			log.Warn("isolation: runner init failed (continuing without isolation): %v", err)
 		} else {
 			controller.InitIsolatedRunner(runner)
-			log.Info("isolation: runner ready, upper_root=%s", flag.IsolationUpperRoot)
+			log.Info("isolation: runner ready, upper_root=%s", isoCfg.UpperRoot)
 		}
 	}
 	if clone3Compat {
@@ -82,7 +89,6 @@ func main() {
 		}()
 	}
 
-	controller.InitCodeRunner()
 	engine := web.NewRouter(flag.ServerAccessToken)
 	addr := fmt.Sprintf(":%d", flag.ServerPort)
 	listener, err := net.Listen("tcp4", addr)

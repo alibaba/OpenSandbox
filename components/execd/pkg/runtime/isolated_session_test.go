@@ -190,7 +190,7 @@ func TestRunInIsolatedSession_HappyPath(t *testing.T) {
 	defer cancel()
 
 	// echo should succeed (exit 0).
-	err = runner.RunInIsolatedSession(ctx, id, "echo hello", nil)
+	err = runner.RunInIsolatedSession(ctx, id, "echo hello", nil, nil)
 	if err != nil {
 		t.Errorf("RunInIsolatedSession: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestRunInIsolatedSession_HappyPath(t *testing.T) {
 func TestRunInIsolatedSession_NotFound(t *testing.T) {
 	runner := newTestRunner(t)
 	ctx := context.Background()
-	err := runner.RunInIsolatedSession(ctx, "nonexistent", "echo hi", nil)
+	err := runner.RunInIsolatedSession(ctx, "nonexistent", "echo hi", nil, nil)
 	if err != ErrContextNotFound {
 		t.Errorf("expected ErrContextNotFound, got %v", err)
 	}
@@ -232,7 +232,7 @@ func TestRunInIsolatedSession_ExitCode(t *testing.T) {
 	defer cancel()
 
 	// bash -c 'exit 42' produces exit code 42 without killing the session.
-	err = runner.RunInIsolatedSession(ctx, id, "bash -c 'exit 42'", nil)
+	err = runner.RunInIsolatedSession(ctx, id, "bash -c 'exit 42'", nil, nil)
 	if err == nil {
 		t.Error("expected error for non-zero exit code")
 	}
@@ -286,7 +286,7 @@ func TestRunInIsolatedSession_StdoutCallback(t *testing.T) {
 		lines = append(lines, line)
 	}
 
-	err = runner.RunInIsolatedSession(ctx, id, "echo hello", onStdout)
+	err = runner.RunInIsolatedSession(ctx, id, "echo hello", nil, onStdout)
 	if err != nil {
 		t.Fatalf("RunInIsolatedSession: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestRunInIsolatedSession_MultiLine(t *testing.T) {
 	}
 
 	code := "echo one\necho two\necho three"
-	err = runner.RunInIsolatedSession(ctx, id, code, onStdout)
+	err = runner.RunInIsolatedSession(ctx, id, code, nil, onStdout)
 	if err != nil {
 		t.Fatalf("RunInIsolatedSession: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestRunInIsolatedSession_EnvPersistence(t *testing.T) {
 	defer cancel()
 
 	// Run 1: set env var in bash session.
-	err = runner.RunInIsolatedSession(ctx, id, "export MY_VAR=hello_from_session", nil)
+	err = runner.RunInIsolatedSession(ctx, id, "export MY_VAR=hello_from_session", nil, nil)
 	if err != nil {
 		t.Fatalf("run 1: %v", err)
 	}
@@ -362,7 +362,7 @@ func TestRunInIsolatedSession_EnvPersistence(t *testing.T) {
 	onStdout := func(line string) {
 		lines = append(lines, line)
 	}
-	err = runner.RunInIsolatedSession(ctx, id, "echo $MY_VAR", onStdout)
+	err = runner.RunInIsolatedSession(ctx, id, "echo $MY_VAR", nil, onStdout)
 	if err != nil {
 		t.Fatalf("run 2: %v", err)
 	}
@@ -396,13 +396,13 @@ func TestRunInIsolatedSession_ConcurrentSessions(t *testing.T) {
 	defer cancel()
 
 	// Set different env vars in each session.
-	runner.RunInIsolatedSession(ctx, id1, "export SESSION=one", nil)
-	runner.RunInIsolatedSession(ctx, id2, "export SESSION=two", nil)
+	runner.RunInIsolatedSession(ctx, id1, "export SESSION=one", nil, nil)
+	runner.RunInIsolatedSession(ctx, id2, "export SESSION=two", nil, nil)
 
 	// Read back — each session should have its own value.
 	var out1, out2 []string
-	runner.RunInIsolatedSession(ctx, id1, "echo $SESSION", func(l string) { out1 = append(out1, l) })
-	runner.RunInIsolatedSession(ctx, id2, "echo $SESSION", func(l string) { out2 = append(out2, l) })
+	runner.RunInIsolatedSession(ctx, id1, "echo $SESSION", nil, func(l string) { out1 = append(out1, l) })
+	runner.RunInIsolatedSession(ctx, id2, "echo $SESSION", nil, func(l string) { out2 = append(out2, l) })
 
 	if len(out1) != 1 || out1[0] != "one" {
 		t.Errorf("session 1: expected [one], got %v", out1)

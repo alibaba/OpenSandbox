@@ -49,7 +49,7 @@ docker run --rm \
   --entrypoint "" \
   -v "${SMOKE_DIR}:/out" \
   "${IMAGE}" \
-  sh -c 'cp /execd /bwrap /out/ && chmod +x /out/execd /out/bwrap'
+  sh -c 'cp /execd /usr/local/bin/bwrap /out/ && chmod +x /out/execd /out/bwrap'
 
 echo ">> Extracted:"
 ls -lh "${SMOKE_DIR}/execd" "${SMOKE_DIR}/bwrap"
@@ -105,10 +105,16 @@ BWRAP_DIR="${SMOKE_DIR}"
 export PATH="${BWRAP_DIR}:${PATH}"
 
 # Start execd in background, capture output.
+# Write a minimal isolation config for the smoke test.
+SMOKE_ISO_CONFIG="${SMOKE_DIR}/isolation.toml"
+cat > "${SMOKE_ISO_CONFIG}" <<'TOML'
+upper_root = "/tmp/execd-smoke-isolation"
+TOML
+
 "${EXECD}" \
   --port 44773 \
   --access-token "" \
-  --isolation-upper-root /tmp/execd-smoke-isolation \
+  --isolation-config "${SMOKE_ISO_CONFIG}" \
   --log-level 7 \
   &
 EXECD_PID=$!

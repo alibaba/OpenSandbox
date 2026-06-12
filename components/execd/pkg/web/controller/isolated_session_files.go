@@ -22,13 +22,13 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/alibaba/opensandbox/execd/pkg/isolation"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
+	"github.com/alibaba/opensandbox/execd/pkg/vfs"
 	"github.com/alibaba/opensandbox/execd/pkg/web/model"
 )
 
-func (c *IsolatedSessionController) getMergedView() (*isolation.MergedView, error) {
+func (c *IsolatedSessionController) getMergedView() (vfs.FS, error) {
 	sessionID := c.ctx.Param("sessionId")
 	mv, err := isolatedRunner.GetMergedView(sessionID)
 	if err != nil {

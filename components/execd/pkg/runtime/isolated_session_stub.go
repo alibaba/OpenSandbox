@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/alibaba/opensandbox/execd/pkg/isolation"
+	"github.com/alibaba/opensandbox/execd/pkg/vfs"
 )
 
 // IsolatedSessionOptions bundles creation parameters (Windows stub).
@@ -45,7 +46,7 @@ type StdoutCallback func(line string)
 type IsolatedRunner struct{}
 
 // NewIsolatedRunner returns nil on Windows (isolation not supported).
-func NewIsolatedRunner(_ *Controller, _ isolation.Isolator, _ string, _ int64) (*IsolatedRunner, error) {
+func NewIsolatedRunner(_ *Controller, _ isolation.Isolator, _ isolation.Config) (*IsolatedRunner, error) {
 	return &IsolatedRunner{}, nil
 }
 
@@ -66,7 +67,7 @@ func (r *IsolatedRunner) GetIsolatedSession(_ string) (*IsolatedSessionState, er
 }
 
 // RunInIsolatedSession returns an error on Windows.
-func (r *IsolatedRunner) RunInIsolatedSession(_ context.Context, _ string, _ string, _ StdoutCallback) error {
+func (r *IsolatedRunner) RunInIsolatedSession(_ context.Context, _ string, _ string, _ map[string]string, _ StdoutCallback) error {
 	return ErrContextNotFound
 }
 
@@ -86,7 +87,7 @@ func (r *IsolatedRunner) CommitUpper(_ string) error {
 }
 
 // GetMergedView returns an error on Windows.
-func (r *IsolatedRunner) GetMergedView(_ string) (*isolation.MergedView, error) {
+func (r *IsolatedRunner) GetMergedView(_ string) (vfs.FS, error) {
 	return nil, ErrContextNotFound
 }
 

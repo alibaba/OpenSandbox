@@ -18,6 +18,8 @@ package bwrap_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/alibaba/opensandbox/execd/pkg/isolation"
 	"github.com/alibaba/opensandbox/execd/pkg/runtime"
 )
 
@@ -47,7 +50,7 @@ func TestSeccompFilterActive(t *testing.T) {
 	// Check /proc/self/status for seccomp mode. Mode 2 = SECCOMP_MODE_FILTER.
 	var lines []string
 	err = r.RunInIsolatedSession(ctx, id,
-		`grep Seccomp: /proc/self/status`,
+		`grep Seccomp: /proc/self/status`, nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 	require.NotEmpty(t, lines, "should have Seccomp line in /proc/self/status")
@@ -91,7 +94,7 @@ func TestSeccompAllowsNormalSyscalls(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var lines []string
-			err := r.RunInIsolatedSession(ctx, id, tt.code,
+			err := r.RunInIsolatedSession(ctx, id, tt.code, nil,
 				func(line string) { lines = append(lines, line) })
 			require.NoError(t, err, "command should succeed: %s", tt.code)
 			if tt.want != "" {
@@ -128,7 +131,7 @@ func TestSeccompBlocksPtrace(t *testing.T) {
 	// If strace isn't installed, we skip with a clear message.
 	var lines []string
 	err = r.RunInIsolatedSession(ctx, id,
-		`if command -v strace >/dev/null 2>&1; then strace -p 1 2>&1 | head -1; else echo 'strace-not-installed'; fi`,
+		`if command -v strace >/dev/null 2>&1; then strace -p 1 2>&1 | head -1; else echo 'strace-not-installed'; fi`, nil,
 		func(line string) { lines = append(lines, line) })
 
 	if len(lines) > 0 && lines[0] == "strace-not-installed" {
@@ -169,7 +172,7 @@ func TestSeccompBlocksMount(t *testing.T) {
 	// capabilities inside the non-user namespace, so mount would succeed
 	// if seccomp didn't block it at the syscall level with EACCES.
 	err = r.RunInIsolatedSession(ctx, id,
-		`mkdir -p /tmp/mnt && mount -t tmpfs tmpfs /tmp/mnt 2>&1`,
+		`mkdir -p /tmp/mnt && mount -t tmpfs tmpfs /tmp/mnt 2>&1`, nil,
 		nil)
 	require.Error(t, err, "mount should be blocked by seccomp")
 	t.Logf("mount error: %v", err)
@@ -194,7 +197,7 @@ func TestSeccompPersistsAcrossRuns(t *testing.T) {
 	// Run 1: check seccomp is active.
 	var lines []string
 	require.NoError(t, r.RunInIsolatedSession(ctx, id,
-		`grep Seccomp: /proc/self/status`,
+		`grep Seccomp: /proc/self/status`, nil,
 		func(line string) { lines = append(lines, line) }))
 	require.NotEmpty(t, lines)
 	assert.Contains(t, strings.TrimSpace(lines[0]), "2", "first run: seccomp should be mode 2")
@@ -202,8 +205,91 @@ func TestSeccompPersistsAcrossRuns(t *testing.T) {
 	// Run 2: seccomp should still be active (not a one-shot).
 	lines = nil
 	require.NoError(t, r.RunInIsolatedSession(ctx, id,
-		`grep Seccomp: /proc/self/status`,
+		`grep Seccomp: /proc/self/status`, nil,
 		func(line string) { lines = append(lines, line) }))
 	require.NotEmpty(t, lines)
 	assert.Contains(t, strings.TrimSpace(lines[0]), "2", "second run: seccomp should still be mode 2")
+}
+
+// TestSeccompConfigOverride_E2E verifies the full path:
+// TOML config → LoadConfig → NewBwrap(cfg) → generateSeccompDenyBPF → bwrap session.
+// Uses a custom denylist that blocks "unshare" but does NOT block "mount",
+// then verifies mount succeeds (it would fail with the default denylist).
+func TestSeccompConfigOverride_E2E(t *testing.T) {
+	// Write a TOML config with a custom seccomp denylist.
+	cfgPath := filepath.Join(t.TempDir(), "isolation.toml")
+	tomlContent := `
+upper_root = "` + t.TempDir() + `"
+upper_max_bytes = 1073741824
+allowed_writable = ["/tmp"]
+
+[seccomp]
+# Only block unshare — notably does NOT block mount.
+deny = ["unshare"]
+`
+	require.NoError(t, os.WriteFile(cfgPath, []byte(tomlContent), 0o644))
+
+	cfg, err := isolation.LoadConfig(cfgPath)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Seccomp, "config should have seccomp override")
+	assert.Equal(t, []string{"unshare"}, cfg.Seccomp.Deny)
+
+	r := newRunnerWithConfig(t, cfg)
+
+	opts := &runtime.IsolatedSessionOptions{
+		Profile:       "strict",
+		WorkspacePath: t.TempDir(),
+		WorkspaceMode: "rw",
+	}
+	id, err := r.CreateIsolatedSession(opts)
+	require.NoError(t, err)
+	defer r.DeleteIsolatedSession(id)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Seccomp should still be active (mode 2).
+	var lines []string
+	require.NoError(t, r.RunInIsolatedSession(ctx, id,
+		`grep Seccomp: /proc/self/status`, nil,
+		func(line string) { lines = append(lines, line) }))
+	require.NotEmpty(t, lines)
+	assert.Contains(t, strings.TrimSpace(lines[0]), "2")
+
+	// mount should succeed — it's NOT in our custom denylist.
+	err = r.RunInIsolatedSession(ctx, id,
+		`mkdir -p /tmp/test-mnt && mount -t tmpfs tmpfs /tmp/test-mnt && echo mount-ok && umount /tmp/test-mnt`, nil,
+		func(line string) { lines = append(lines, line) })
+	require.NoError(t, err, "mount should succeed with custom seccomp that doesn't block it")
+}
+
+// TestSeccompConfigDefault_E2E verifies that nil Seccomp (no [seccomp]
+// section) uses the built-in denylist — mount is blocked.
+func TestSeccompConfigDefault_E2E(t *testing.T) {
+	cfg := isolation.Config{
+		UpperRoot:       t.TempDir(),
+		UpperMaxBytes:   1 << 30,
+		AllowedWritable: []string{"/tmp"},
+		Seccomp:         nil, // use built-in denylist
+	}
+
+	r := newRunnerWithConfig(t, cfg)
+
+	opts := &runtime.IsolatedSessionOptions{
+		Profile:       "strict",
+		WorkspacePath: t.TempDir(),
+		WorkspaceMode: "rw",
+	}
+	id, err := r.CreateIsolatedSession(opts)
+	require.NoError(t, err)
+	defer r.DeleteIsolatedSession(id)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// mount should fail — blocked by built-in seccomp denylist.
+	err = r.RunInIsolatedSession(ctx, id,
+		`mkdir -p /tmp/mnt2 && mount -t tmpfs tmpfs /tmp/mnt2 2>&1`, nil,
+		nil)
+	require.Error(t, err, "mount should be blocked by default seccomp denylist")
 }

@@ -24,8 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGenerateSeccompDenyBPF(t *testing.T) {
-	bpf, err := generateSeccompDenyBPF()
+func TestGenerateSeccompDenyBPF_Default(t *testing.T) {
+	bpf, err := generateSeccompDenyBPF(nil)
 	require.NoError(t, err, "BPF generation should succeed on Linux")
 	require.NotEmpty(t, bpf, "BPF bytecode should not be empty")
 
@@ -40,10 +40,28 @@ func TestGenerateSeccompDenyBPF(t *testing.T) {
 	assert.Equal(t, uint16(0x20), op, "first instruction Op should be BPF_LD|BPF_W|BPF_ABS (0x20), got 0x%04x", op)
 }
 
+func TestGenerateSeccompDenyBPF_Override(t *testing.T) {
+	override := &SeccompOverride{Deny: []string{"mount", "ptrace"}}
+	bpf, err := generateSeccompDenyBPF(override)
+	require.NoError(t, err)
+	require.NotEmpty(t, bpf)
+	assert.Equal(t, 0, len(bpf)%8)
+
+	// Override with fewer syscalls should produce smaller BPF than default.
+	defaultBPF, err := generateSeccompDenyBPF(nil)
+	require.NoError(t, err)
+	assert.Less(t, len(bpf), len(defaultBPF), "override with 2 syscalls should produce smaller BPF than default")
+}
+
+func TestGenerateSeccompDenyBPF_EmptyOverride(t *testing.T) {
+	override := &SeccompOverride{Deny: []string{}}
+	bpf, err := generateSeccompDenyBPF(override)
+	require.NoError(t, err)
+	assert.Nil(t, bpf, "empty deny list should produce nil BPF")
+}
+
 func TestGenerateSeccompDenyBPF_ArchSpecific(t *testing.T) {
-	// Verify that all syscalls in denylist resolve on the current arch.
-	// generateSeccompDenyBPF filters unknown syscalls, so this should never fail.
-	bpf, err := generateSeccompDenyBPF()
+	bpf, err := generateSeccompDenyBPF(nil)
 	require.NoError(t, err)
 	t.Logf("generated %d BPF instructions (%d bytes)", len(bpf)/8, len(bpf))
 }

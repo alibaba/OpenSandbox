@@ -47,7 +47,7 @@ func TestDeleteSession_NotFound(t *testing.T) {
 
 func TestRun_SessionNotFound(t *testing.T) {
 	r := newRunner(t)
-	err := r.RunInIsolatedSession(context.Background(), "nonexistent", "true", nil)
+	err := r.RunInIsolatedSession(context.Background(), "nonexistent", "true", nil, nil)
 	assert.Error(t, err)
 }
 
@@ -71,7 +71,7 @@ func TestRun_AfterDelete(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, r.DeleteIsolatedSession(id))
 
-	err = r.RunInIsolatedSession(context.Background(), id, "true", nil)
+	err = r.RunInIsolatedSession(context.Background(), id, "true", nil, nil)
 	assert.Error(t, err, "should not be able to run on deleted session")
 }
 
@@ -88,7 +88,7 @@ func TestRun_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err = r.RunInIsolatedSession(ctx, id, "sleep 1", nil)
+	err = r.RunInIsolatedSession(ctx, id, "sleep 1", nil, nil)
 	require.NoError(t, err, "sleep 1 should complete within timeout")
 }
 

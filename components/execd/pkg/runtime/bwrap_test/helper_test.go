@@ -33,14 +33,23 @@ func boolPtr(b bool) *bool { return &b }
 
 func newRunner(t *testing.T) *runtime.IsolatedRunner {
 	t.Helper()
+	return newRunnerWithConfig(t, isolation.Config{
+		UpperRoot:       t.TempDir(),
+		UpperMaxBytes:   1 << 30,
+		AllowedWritable: []string{"/tmp"},
+	})
+}
+
+func newRunnerWithConfig(t *testing.T, cfg isolation.Config) *runtime.IsolatedRunner {
+	t.Helper()
 
 	ctrl := runtime.NewController("", "")
-	iso := isolation.NewBwrap()
+	iso := isolation.NewBwrap(cfg)
 	if !iso.Available() {
 		t.Skip("bwrap not available")
 	}
 
-	r, err := runtime.NewIsolatedRunner(ctrl, iso, t.TempDir(), 1<<30)
+	r, err := runtime.NewIsolatedRunner(ctrl, iso, cfg)
 	require.NoError(t, err)
 	return r
 }

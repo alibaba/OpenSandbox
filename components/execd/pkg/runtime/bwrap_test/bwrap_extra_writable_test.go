@@ -52,7 +52,7 @@ func TestExtraWritable_WriteFile(t *testing.T) {
 
 	testFile := filepath.Join(extraDir, "written-from-sandbox.txt")
 	code := "echo 'extra-writable-data' > " + testFile
-	err = r.RunInIsolatedSession(ctx, id, code, nil)
+	err = r.RunInIsolatedSession(ctx, id, code, nil, nil)
 	require.NoError(t, err, "writing to ExtraWritable path should succeed")
 
 	// Verify the file exists on the host (since ExtraWritable is bind-mounted).
@@ -85,12 +85,12 @@ func TestExtraWritable_ReadWriteRoundTrip(t *testing.T) {
 	testFile := filepath.Join(extraDir, "roundtrip.txt")
 
 	// Write.
-	err = r.RunInIsolatedSession(ctx, id, "echo 'roundtrip-value' > "+testFile, nil)
+	err = r.RunInIsolatedSession(ctx, id, "echo 'roundtrip-value' > "+testFile, nil, nil)
 	require.NoError(t, err)
 
 	// Read back.
 	var lines []string
-	err = r.RunInIsolatedSession(ctx, id, "cat "+testFile,
+	err = r.RunInIsolatedSession(ctx, id, "cat "+testFile, nil,
 		func(line string) { lines = append(lines, line) })
 	require.NoError(t, err)
 	assert.Equal(t, []string{"roundtrip-value"}, lines)
@@ -130,11 +130,11 @@ func TestExtraWritable_MultipleWrites(t *testing.T) {
 
 	// Session 1 writes to dir1, must not appear in dir2.
 	require.NoError(t, r.RunInIsolatedSession(ctx, id1,
-		"echo 's1-data' > "+filepath.Join(dir1, "s1.txt"), nil))
+		"echo 's1-data' > "+filepath.Join(dir1, "s1.txt"), nil, nil))
 
 	// Session 2 writes to dir2, must not appear in dir1.
 	require.NoError(t, r.RunInIsolatedSession(ctx, id2,
-		"echo 's2-data' > "+filepath.Join(dir2, "s2.txt"), nil))
+		"echo 's2-data' > "+filepath.Join(dir2, "s2.txt"), nil, nil))
 
 	// Verify host visibility.
 	data, err := os.ReadFile(filepath.Join(dir1, "s1.txt"))
