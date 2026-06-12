@@ -460,7 +460,8 @@ export interface paths {
          * Download file from sandbox
          * @description Downloads a file from the specified path within the sandbox. Supports HTTP
          *     range requests for resumable downloads and partial content retrieval.
-         *     Returns file as octet-stream with appropriate headers.
+         *     Also supports line-based reading with offset and limit parameters.
+         *     Returns file as octet-stream or plain text with appropriate headers.
          */
         get: operations["downloadFile"];
         put?: never;
@@ -1687,10 +1688,20 @@ export interface operations {
                  * @example /workspace/data.csv
                  */
                 path: string;
+                /**
+                 * @description Starting line number (1-based). When provided with limit, enables line-based reading.
+                 * @example 100
+                 */
+                offset?: number;
+                /**
+                 * @description Number of lines to return. Requires offset to be specified.
+                 * @example 20
+                 */
+                limit?: number;
             };
             header?: {
                 /**
-                 * @description HTTP Range header for partial content requests
+                 * @description HTTP Range header for partial content requests (byte range)
                  * @example bytes=0-1023
                  */
                 Range?: string;
@@ -1711,6 +1722,7 @@ export interface operations {
                 };
                 content: {
                     "application/octet-stream": string;
+                    "text/plain": string;
                 };
             };
             /** @description Partial file content (when Range header is provided) */

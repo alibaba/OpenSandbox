@@ -30,6 +30,8 @@ def _get_kwargs(
     *,
     path: str,
     range_: str | Unset = UNSET,
+    offset: int | Unset = UNSET,
+    limit: int | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     if not isinstance(range_, Unset):
@@ -38,6 +40,12 @@ def _get_kwargs(
     params: dict[str, Any] = {}
 
     params["path"] = path
+    
+    if not isinstance(offset, Unset):
+        params["offset"] = offset
+    
+    if not isinstance(limit, Unset):
+        params["limit"] = limit
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
@@ -104,16 +112,20 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     path: str,
     range_: str | Unset = UNSET,
+    offset: int | Unset = UNSET,
+    limit: int | Unset = UNSET,
 ) -> Response[ErrorResponse | File]:
     """Download file from sandbox
 
      Downloads a file from the specified path within the sandbox. Supports HTTP
     range requests for resumable downloads and partial content retrieval.
-    Returns file as octet-stream with appropriate headers.
+    Also supports line-based reading with offset and limit parameters.
 
     Args:
-        path (str):
-        range_ (str | Unset):
+        path (str): File path to download
+        range_ (str | Unset): HTTP Range header for byte ranges
+        offset (int | Unset): Starting line number (1-based)
+        limit (int | Unset): Number of lines to return
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -126,6 +138,8 @@ def sync_detailed(
     kwargs = _get_kwargs(
         path=path,
         range_=range_,
+        offset=offset,
+        limit=limit,
     )
 
     response = client.get_httpx_client().request(
@@ -140,16 +154,20 @@ def sync(
     client: AuthenticatedClient | Client,
     path: str,
     range_: str | Unset = UNSET,
+    offset: int | Unset = UNSET,
+    limit: int | Unset = UNSET,
 ) -> ErrorResponse | File | None:
     """Download file from sandbox
 
      Downloads a file from the specified path within the sandbox. Supports HTTP
     range requests for resumable downloads and partial content retrieval.
-    Returns file as octet-stream with appropriate headers.
+    Also supports line-based reading with offset and limit parameters.
 
     Args:
-        path (str):
-        range_ (str | Unset):
+        path (str): File path to download
+        range_ (str | Unset): HTTP Range header for byte ranges
+        offset (int | Unset): Starting line number (1-based)
+        limit (int | Unset): Number of lines to return
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -163,6 +181,8 @@ def sync(
         client=client,
         path=path,
         range_=range_,
+        offset=offset,
+        limit=limit,
     ).parsed
 
 
@@ -171,16 +191,20 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     path: str,
     range_: str | Unset = UNSET,
+    offset: int | Unset = UNSET,
+    limit: int | Unset = UNSET,
 ) -> Response[ErrorResponse | File]:
     """Download file from sandbox
 
      Downloads a file from the specified path within the sandbox. Supports HTTP
     range requests for resumable downloads and partial content retrieval.
-    Returns file as octet-stream with appropriate headers.
+    Also supports line-based reading with offset and limit parameters.
 
     Args:
-        path (str):
-        range_ (str | Unset):
+        path (str): File path to download
+        range_ (str | Unset): HTTP Range header for byte ranges
+        offset (int | Unset): Starting line number (1-based)
+        limit (int | Unset): Number of lines to return
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -193,6 +217,8 @@ async def asyncio_detailed(
     kwargs = _get_kwargs(
         path=path,
         range_=range_,
+        offset=offset,
+        limit=limit,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -205,16 +231,20 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     path: str,
     range_: str | Unset = UNSET,
+    offset: int | Unset = UNSET,
+    limit: int | Unset = UNSET,
 ) -> ErrorResponse | File | None:
     """Download file from sandbox
 
      Downloads a file from the specified path within the sandbox. Supports HTTP
     range requests for resumable downloads and partial content retrieval.
-    Returns file as octet-stream with appropriate headers.
+    Also supports line-based reading with offset and limit parameters.
 
     Args:
-        path (str):
-        range_ (str | Unset):
+        path (str): File path to download
+        range_ (str | Unset): HTTP Range header for byte ranges
+        offset (int | Unset): Starting line number (1-based)
+        limit (int | Unset): Number of lines to return
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -229,5 +259,7 @@ async def asyncio(
             client=client,
             path=path,
             range_=range_,
+            offset=offset,
+            limit=limit,
         )
     ).parsed

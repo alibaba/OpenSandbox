@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,6 +42,7 @@ func (c *FilesystemController) DownloadFile() {
 		)
 		return
 	}
+
 	resolvedFilePath, err := pathutil.ExpandPath(filePath)
 	if err != nil {
 		c.RespondError(
@@ -48,6 +50,47 @@ func (c *FilesystemController) DownloadFile() {
 			model.ErrorCodeRuntimeError,
 			fmt.Sprintf("error resolving file path: %s. %v", filePath, err),
 		)
+		return
+	}
+
+	// Check for line-based reading parameters
+	offsetStr := c.ctx.Query("offset")
+	limitStr := c.ctx.Query("limit")
+
+	// Reject empty string values (e.g., ?offset=&limit=)
+	if offsetStr == "" && limitStr == "" {
+		// Both empty, continue to normal download
+	} else if offsetStr == "" || limitStr == "" {
+		c.RespondError(
+			http.StatusBadRequest,
+			model.ErrorCodeInvalidRequest,
+			"both offset and limit must be provided together for line-based reading",
+		)
+		return
+	}
+
+	if offsetStr != "" && limitStr != "" {
+		offset, err := strconv.Atoi(offsetStr)
+		if err != nil || offset < 1 {
+			c.RespondError(
+				http.StatusBadRequest,
+				model.ErrorCodeInvalidRequest,
+				"offset must be a positive integer (1-based)",
+			)
+			return
+		}
+
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil || limit < 1 {
+			c.RespondError(
+				http.StatusBadRequest,
+				model.ErrorCodeInvalidRequest,
+				"limit must be a positive integer",
+			)
+			return
+		}
+
+		c.serveLineRange(resolvedFilePath, offset, limit, rec)
 		return
 	}
 
@@ -96,6 +139,58 @@ func (c *FilesystemController) DownloadFile() {
 
 	rec.MarkSuccess()
 	http.ServeContent(c.ctx.Writer, c.ctx.Request, filepath.Base(resolvedFilePath), fileInfo.ModTime(), file)
+}
+
+// serveLineRange serves a specific range of lines from a file
+func (c *FilesystemController) serveLineRange(filePath string, offset, limit int, rec *filesystemMetricRecorder) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		c.handleFileError(err)
+		return
+	}
+	defer file.Close()
+
+	reader := bufio.NewReader(file)
+	currentLine := 1
+	linesWritten := 0
+
+	c.ctx.Header("Content-Type", "text/plain")
+
+	for linesWritten < limit {
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			if err == io.EOF {
+				// If we have partial line without newline, process it
+				if len(line) > 0 && currentLine >= offset {
+					_, writeErr := c.ctx.Writer.Write(line)
+					if writeErr != nil {
+						// Client disconnected, stop reading
+						return
+					}
+					linesWritten++
+				}
+				break
+			}
+			c.RespondError(
+				http.StatusInternalServerError,
+				model.ErrorCodeRuntimeError,
+				fmt.Sprintf("error reading file: %v", err),
+			)
+			return
+		}
+
+		if currentLine >= offset {
+			_, writeErr := c.ctx.Writer.Write(line)
+			if writeErr != nil {
+				// Client disconnected, stop reading
+				return
+			}
+			linesWritten++
+		}
+		currentLine++
+	}
+
+	rec.MarkSuccess()
 }
 
 // formatContentDisposition formats the Content-Disposition header value with proper
