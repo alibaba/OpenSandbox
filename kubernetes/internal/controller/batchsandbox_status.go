@@ -288,7 +288,9 @@ func (r *BatchSandboxReconciler) persistRuntimeView(
 	// safety net in case a Pod Ready event is missed or delayed.  This ensures the
 	// BatchSandbox transitions to Succeed within a few seconds of the pod becoming
 	// Ready even under high load (#969).
-	if view.status.Phase == sandboxv1alpha1.BatchSandboxPhasePending && view.status.Replicas > 0 {
+	// Only requeue when pods exist but none are ready yet; avoids unnecessary churn
+	// before scheduling starts or when the sandbox is intentionally empty.
+	if view.status.Phase == sandboxv1alpha1.BatchSandboxPhasePending && view.status.Replicas > 0 && view.status.Ready == 0 {
 		return 5 * time.Second, aggErrors
 	}
 	return 0, aggErrors

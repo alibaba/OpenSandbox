@@ -147,19 +147,6 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// handle finalizers
 	if batchSbx.DeletionTimestamp == nil {
 		if taskStrategy.NeedTaskScheduling() {
-			// Validate shardTaskPatches early so that a type-mismatch is surfaced
-			// immediately as a status condition rather than causing a silent merge
-			// failure deep in the reconcile loop.
-			if patchErr := taskStrategy.ValidateShardTaskPatches(); patchErr != nil {
-				log.Error(patchErr, "invalid shardTaskPatches detected, updating status condition")
-				statusCopy := batchSbx.Status.DeepCopy()
-				setConditionInStatus(statusCopy, sandboxv1alpha1.BatchSandboxConditionInvalidShardPatch,
-					sandboxv1alpha1.ConditionTrue, "InvalidShardPatch", patchErr.Error())
-				_ = r.updateStatus(ctx, batchSbx, statusCopy)
-				// Return without error so the controller does not keep requeueing;
-				// the resource must be corrected by the user.
-				return ctrl.Result{}, nil
-			}
 			if !controllerutil.ContainsFinalizer(batchSbx, FinalizerTaskCleanup) {
 				err := utils.UpdateFinalizer(r.Client, batchSbx, utils.AddFinalizerOpType, FinalizerTaskCleanup)
 				if err != nil {
@@ -172,27 +159,6 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 	} else {
 		if !taskStrategy.NeedTaskScheduling() {
-			return ctrl.Result{}, nil
-		}
-		// If shardTaskPatches are invalid we cannot build task specs, but we must
-		// not leave the resource stuck in Terminating. Clear the finalizer now and
-		// record the error in status so the deletion can proceed.
-		if patchErr := taskStrategy.ValidateShardTaskPatches(); patchErr != nil {
-			log.Error(patchErr, "invalid shardTaskPatches on deletion path, clearing finalizer to unblock termination")
-			statusCopy := batchSbx.Status.DeepCopy()
-			setConditionInStatus(statusCopy, sandboxv1alpha1.BatchSandboxConditionInvalidShardPatch,
-				sandboxv1alpha1.ConditionTrue, "InvalidShardPatch", patchErr.Error())
-			_ = r.updateStatus(ctx, batchSbx, statusCopy)
-			if controllerutil.ContainsFinalizer(batchSbx, FinalizerTaskCleanup) {
-				if err := utils.UpdateFinalizer(r.Client, batchSbx, utils.RemoveFinalizerOpType, FinalizerTaskCleanup); err != nil {
-					if !errors.IsNotFound(err) {
-						log.Error(err, "failed to remove finalizer during invalid-patch deletion", "finalizer", FinalizerTaskCleanup)
-						return ctrl.Result{}, err
-					}
-				}
-				r.deleteTaskScheduler(ctx, batchSbx)
-				log.Info("removed finalizer due to invalid shardTaskPatches, resource can now be deleted")
-			}
 			return ctrl.Result{}, nil
 		}
 	}
@@ -668,7 +634,7 @@ func (r *BatchSandboxReconciler) SetupWithManager(mgr ctrl.Manager, maxConcurren
 		Owns(&sandboxv1alpha1.SandboxSnapshot{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: maxConcurrentReconciles,
-			RateLimiter:             workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](5*time.Millisecond, 5*time.Second),
+			RateLimiter:             workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](100*time.Millisecond, 5*time.Second),
 		}).
 		Complete(r)
 }
