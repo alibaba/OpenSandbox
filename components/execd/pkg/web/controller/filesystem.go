@@ -18,7 +18,9 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,7 +44,7 @@ func NewFilesystemController(ctx *gin.Context) *FilesystemController {
 }
 
 func (c *FilesystemController) handleFileError(err error) {
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		c.RespondError(
 			http.StatusNotFound,
 			model.ErrorCodeFileNotFound,

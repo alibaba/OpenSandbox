@@ -214,7 +214,7 @@ func GetFileInfo(filePath string) (model.FileInfo, error) {
 	fileInfo, err := os.Lstat(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return model.FileInfo{}, fmt.Errorf("file not found: %s", filePath)
+			return model.FileInfo{}, fmt.Errorf("file not found: %s: %w", filePath, err)
 		}
 		return model.FileInfo{}, fmt.Errorf("error accessing file %s: %w", filePath, err)
 	}

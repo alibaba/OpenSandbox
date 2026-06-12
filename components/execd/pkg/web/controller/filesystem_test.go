@@ -77,6 +77,19 @@ func TestFilesystemControllerGetFilesInfoReportsSymlink(t *testing.T) {
 	require.Equal(t, "symlink", info.Type)
 }
 
+func TestFilesystemControllerGetFilesInfoReturnsNotFoundForMissingPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "definitely-does-not-exist.txt")
+	query := fmt.Sprintf("/files/info?path=%s", url.QueryEscape(missing))
+	ctrl, rec := newFilesystemController(t, http.MethodGet, query, nil)
+
+	ctrl.GetFilesInfo()
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	var resp model.ErrorResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Equal(t, model.ErrorCodeFileNotFound, resp.Code)
+}
+
 func TestFilesystemControllerSearchFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 	a := filepath.Join(tmpDir, "alpha.txt")
