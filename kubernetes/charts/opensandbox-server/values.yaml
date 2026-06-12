@@ -100,3 +100,12 @@ configToml: |
   [egress]
   image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/egress:v1.0.12"
   mode = "dns+nft"
+
+# Optional: multi-tenant tenants.toml content.
+# When set, a separate ConfigMap is created and mounted at /etc/opensandbox/tenants.toml.
+# tenantsToml: |
+#   [[tenants]]
+#   name = "team-a"
+#   namespace = "sandbox-team-a"
+#   api_keys = ["sk-a-1"]
+tenantsToml: ""

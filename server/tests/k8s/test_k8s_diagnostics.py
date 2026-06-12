@@ -140,14 +140,18 @@ def test_get_sandbox_logs_returns_placeholder_for_empty_output() -> None:
 
 def test_get_sandbox_inspect_formats_runtime_statuses_and_resources() -> None:
     running_status = _status(running=SimpleNamespace(started_at="2026-01-01T00:00:01Z"))
-    waiting_status = _status(waiting=SimpleNamespace(reason="ImagePullBackOff", message="pull failed"))
+    waiting_status = _status(
+        waiting=SimpleNamespace(reason="ImagePullBackOff", message="pull failed")
+    )
     terminated_status = _status(
         terminated=SimpleNamespace(exit_code=1, reason="Error", message="boom"),
         last_terminated=SimpleNamespace(exit_code=2, reason="PreviousError"),
     )
     init_status = _status(terminated=SimpleNamespace(exit_code=0, reason="Completed"))
     waiting_init = _status(waiting=SimpleNamespace(reason="PodInitializing"))
-    condition = SimpleNamespace(type="Ready", status="False", reason="ContainersNotReady", message="not ready")
+    condition = SimpleNamespace(
+        type="Ready", status="False", reason="ContainersNotReady", message="not ready"
+    )
     service = _DiagnosticsService(
         [
             _pod(

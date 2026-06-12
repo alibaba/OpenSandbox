@@ -134,9 +134,7 @@ class RenewIntentRedisConfig(BaseModel):
     @model_validator(mode="after")
     def require_dsn_when_redis_enabled(self) -> "RenewIntentRedisConfig":
         if self.enabled and (self.dsn is None or not str(self.dsn).strip()):
-            raise ValueError(
-                "[renew_intent] redis.dsn must be set when redis.enabled is true."
-            )
+            raise ValueError("[renew_intent] redis.dsn must be set when redis.enabled is true.")
         return self
 
 
@@ -203,9 +201,7 @@ class SecureAccessKey(BaseModel):
     @classmethod
     def validate_key_id_char(cls, v: str) -> str:
         if not _KEY_ID_RE.match(v):
-            raise ValueError(
-                f"key_id must be exactly one character [0-9a-z], got {v!r}"
-            )
+            raise ValueError(f"key_id must be exactly one character [0-9a-z], got {v!r}")
         return v
 
     @field_validator("key")
@@ -246,9 +242,7 @@ class SecureAccessConfig(BaseModel):
     @classmethod
     def validate_active_key_char(cls, v: str) -> str:
         if not _KEY_ID_RE.match(v):
-            raise ValueError(
-                f"active_key must be exactly one character [0-9a-z], got {v!r}"
-            )
+            raise ValueError(f"active_key must be exactly one character [0-9a-z], got {v!r}")
         return v
 
     @model_validator(mode="after")
@@ -257,8 +251,7 @@ class SecureAccessConfig(BaseModel):
         for k in self.keys:
             if k.key_id in seen:
                 raise ValueError(
-                    f"duplicate secure_access key_id {k.key_id!r}; "
-                    "each key_id must be unique"
+                    f"duplicate secure_access key_id {k.key_id!r}; each key_id must be unique"
                 )
             seen.add(k.key_id)
         if self.active_key not in seen:
@@ -272,9 +265,7 @@ class SecureAccessConfig(BaseModel):
         for k in self.keys:
             if k.key_id == self.active_key:
                 return k.get_secret_bytes()
-        raise RuntimeError(
-            f"active_key {self.active_key!r} not in keys list"
-        )
+        raise RuntimeError(f"active_key {self.active_key!r} not in keys list")
 
 
 class GatewayRouteModeConfig(BaseModel):
@@ -336,16 +327,16 @@ class IngressConfig(BaseModel):
             raise ValueError("gateway block must be omitted unless ingress.mode = 'gateway'.")
 
         if self.secure_access is not None and self.mode != INGRESS_MODE_GATEWAY:
-            raise ValueError(
-                "secure_access block requires ingress.mode = 'gateway'."
-            )
+            raise ValueError("secure_access block requires ingress.mode = 'gateway'.")
 
         if self.mode == INGRESS_MODE_GATEWAY and self.gateway:
             route_mode = self.gateway.route.mode
             address_raw = self.gateway.address
             hostport = address_raw
             if "://" in address_raw:
-                raise ValueError("ingress.gateway.address must not include a scheme; clients choose http/https.")
+                raise ValueError(
+                    "ingress.gateway.address must not include a scheme; clients choose http/https."
+                )
 
             if route_mode == GATEWAY_ROUTE_MODE_WILDCARD:
                 if not _is_wildcard_domain(hostport):
@@ -416,7 +407,9 @@ class LogConfig(BaseModel):
     # Default paths when file_enabled=true and user paths are not set.
     # Uses ~/logs/opensandbox/ which is writable for non-root users.
     DEFAULT_FILE_PATH: ClassVar[str] = str(Path.home() / "logs" / "opensandbox" / "server.log")
-    DEFAULT_ACCESS_FILE_PATH: ClassVar[str] = str(Path.home() / "logs" / "opensandbox" / "access.log")
+    DEFAULT_ACCESS_FILE_PATH: ClassVar[str] = str(
+        Path.home() / "logs" / "opensandbox" / "access.log"
+    )
 
     def resolved_file_path(self) -> Optional[str]:
         """Return the effective file path, using default if file_enabled and not overridden."""
@@ -470,6 +463,7 @@ class ServerConfig(BaseModel):
         # no concurrency cap. TOML has no null literal, so 0 is the only way
         # to disable the limit from the config file.
         return None if value == 0 else value
+
     backlog: int = Field(
         default=2048,
         ge=1,
@@ -495,8 +489,7 @@ class ServerConfig(BaseModel):
     http: Literal["auto", "httptools", "h11"] = Field(
         default="auto",
         description=(
-            "HTTP protocol parser. 'auto' uses httptools when available and "
-            "falls back to h11."
+            "HTTP protocol parser. 'auto' uses httptools when available and falls back to h11."
         ),
     )
     api_key: Optional[str] = Field(
@@ -542,9 +535,7 @@ class KubernetesRuntimeConfig(BaseModel):
     informer_watch_timeout_seconds: int = Field(
         default=60,
         ge=1,
-        description=(
-            "[Beta] Watch timeout (seconds) before restarting the informer stream."
-        ),
+        description=("[Beta] Watch timeout (seconds) before restarting the informer stream."),
     )
     read_qps: float = Field(
         default=0.0,
@@ -558,8 +549,7 @@ class KubernetesRuntimeConfig(BaseModel):
         default=0,
         ge=0,
         description=(
-            "Burst size for the read rate limiter. "
-            "0 means use read_qps as burst (minimum 1)."
+            "Burst size for the read rate limiter. 0 means use read_qps as burst (minimum 1)."
         ),
     )
     write_qps: float = Field(
@@ -574,8 +564,7 @@ class KubernetesRuntimeConfig(BaseModel):
         default=0,
         ge=0,
         description=(
-            "Burst size for the write rate limiter. "
-            "0 means use write_qps as burst (minimum 1)."
+            "Burst size for the write rate limiter. 0 means use write_qps as burst (minimum 1)."
         ),
     )
     namespace: Optional[str] = Field(
@@ -686,7 +675,9 @@ class StorageConfig(BaseModel):
         ),
     )
 
+
 DEFAULT_EGRESS_DISABLE_IPV6 = True
+
 
 class EgressConfig(BaseModel):
     """Egress sidecar configuration."""
@@ -855,6 +846,43 @@ class StoreConfig(BaseModel):
     )
 
 
+class TenantsConfig(BaseModel):
+    """Multi-tenant provider configuration."""
+
+    provider: Literal["file", "http"] = Field(
+        default="file",
+        description="Tenant provider type: 'file' (tenants.toml) or 'http' (remote endpoint).",
+    )
+    endpoint: Optional[str] = Field(
+        default=None,
+        description="HTTP tenant provider endpoint URL. Required when provider='http'.",
+    )
+    max_stale_seconds: float = Field(
+        default=300.0,
+        ge=0,
+        description="Maximum seconds to serve stale cache when HTTP endpoint is unreachable.",
+    )
+    timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description="HTTP request timeout in seconds.",
+    )
+    auth_header: Optional[str] = Field(
+        default=None,
+        description="Optional header name for provider-level authentication to HTTP endpoint.",
+    )
+    auth_token: Optional[str] = Field(
+        default=None,
+        description="Optional token value for provider-level authentication to HTTP endpoint.",
+    )
+
+    @model_validator(mode="after")
+    def require_endpoint_for_http(self) -> "TenantsConfig":
+        if self.provider == "http" and not self.endpoint:
+            raise ValueError("[tenants] endpoint must be set when provider='http'.")
+        return self
+
+
 class AppConfig(BaseModel):
     """Root application configuration model."""
 
@@ -862,6 +890,10 @@ class AppConfig(BaseModel):
     log: LogConfig = Field(
         default_factory=LogConfig,
         description="Logging configuration (level, file output, rotation).",
+    )
+    tenants: Optional[TenantsConfig] = Field(
+        default=None,
+        description="Multi-tenant configuration. When present, enables multi-tenant mode.",
     )
     renew_intent: RenewIntentConfig = Field(
         default_factory=RenewIntentConfig,
@@ -882,17 +914,22 @@ class AppConfig(BaseModel):
         default=None,
         description="Secure container runtime configuration (gVisor, Kata, Firecracker).",
     )
+
     @model_validator(mode="after")
     def validate_runtime_blocks(self) -> "AppConfig":
         if self.runtime.type == "docker":
             if self.kubernetes is not None:
                 raise ValueError("Kubernetes block must be omitted when runtime.type = 'docker'.")
             if self.agent_sandbox is not None:
-                raise ValueError("agent_sandbox block must be omitted when runtime.type = 'docker'.")
+                raise ValueError(
+                    "agent_sandbox block must be omitted when runtime.type = 'docker'."
+                )
             if self.ingress is not None and self.ingress.mode != INGRESS_MODE_DIRECT:
                 raise ValueError("ingress.mode must be 'direct' when runtime.type = 'docker'.")
             if self.secure_runtime is not None and self.secure_runtime.type == "firecracker":
-                raise ValueError( "secure_runtime.type 'firecracker' is only compatible with runtime.type='kubernetes'.")
+                raise ValueError(
+                    "secure_runtime.type 'firecracker' is only compatible with runtime.type='kubernetes'."
+                )
         elif self.runtime.type == "kubernetes":
             if self.kubernetes is None:
                 self.kubernetes = KubernetesRuntimeConfig()

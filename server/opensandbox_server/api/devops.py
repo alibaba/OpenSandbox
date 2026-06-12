@@ -151,7 +151,10 @@ def get_sandbox_events(
     status_code=status.HTTP_200_OK,
     deprecated=True,
     responses={
-        200: {"description": "Combined diagnostics summary as plain text", "content": {"text/plain": {}}},
+        200: {
+            "description": "Combined diagnostics summary as plain text",
+            "content": {"text/plain": {}},
+        },
         404: {"description": "Sandbox not found"},
     },
 )

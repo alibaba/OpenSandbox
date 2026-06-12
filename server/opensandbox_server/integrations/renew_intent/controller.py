@@ -117,7 +117,9 @@ class AccessRenewController:
         logger.info(f"renew_intent {line}", extra=ex)
         return True
 
-    def attempt_renew_sync(self, sandbox_id: str, *, source: str = RENEW_SOURCE_SERVER_PROXY) -> bool:
+    def attempt_renew_sync(
+        self, sandbox_id: str, *, source: str = RENEW_SOURCE_SERVER_PROXY
+    ) -> bool:
         """Run gates + renew (sync)."""
         return self._try_renew_sync(sandbox_id, source=source)
 

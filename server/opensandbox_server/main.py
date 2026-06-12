@@ -21,6 +21,7 @@ and configuration for the sandbox lifecycle management service.
 
 import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -34,15 +35,51 @@ from opensandbox_server.config import load_config
 from opensandbox_server.integrations.renew_intent import start_renew_intent_consumer
 from opensandbox_server.logging_config import configure_logging
 from opensandbox_server.startup_guard import api_key_confirm
+from opensandbox_server.tenants import (
+    FileTenantProvider,
+    HTTPTenantProvider,
+    HTTPTenantProviderConfig,
+    TenantProvider,
+    resolve_tenants_path,
+    validate_tenant_config,
+)
 
 # Load configuration before initializing routers/middleware
 app_config = load_config()
 _log_config = configure_logging(app_config.log)
 
+# --- Multi-tenant provider initialization ---
+_tenant_provider: TenantProvider | None = None
+
+if app_config.tenants is not None:
+    try:
+        validate_tenant_config(app_config.runtime.type, app_config.server.api_key)
+    except ValueError as e:
+        sys.exit(f"FATAL: {e}")
+
+    _tenants_cfg = app_config.tenants
+    if _tenants_cfg.provider == "file":
+        _tenants_path = resolve_tenants_path()
+        _tenant_provider = FileTenantProvider(_tenants_path)
+        _tenant_provider.start()
+    elif _tenants_cfg.provider == "http":
+        _tenant_provider = HTTPTenantProvider(
+            HTTPTenantProviderConfig(
+                endpoint=_tenants_cfg.endpoint,
+                max_stale_seconds=_tenants_cfg.max_stale_seconds,
+                timeout_seconds=_tenants_cfg.timeout_seconds,
+                auth_header=_tenants_cfg.auth_header,
+                auth_token=_tenants_cfg.auth_token,
+            )
+        )
+        _tenant_provider.start()
+
 from opensandbox_server.api.devops import router as devops_router  # noqa: E402
 from opensandbox_server.api.pool import router as pool_router  # noqa: E402
 from opensandbox_server.api.lifecycle import router, sandbox_service, snapshot_service  # noqa: E402
 from opensandbox_server.api.proxy import router as proxy_router  # noqa: E402
+
+sandbox_service.set_tenant_provider(_tenant_provider)
 from opensandbox_server.integrations.renew_intent.proxy_renew import ProxyRenewCoordinator  # noqa: E402
 from opensandbox_server.middleware.auth import AuthMiddleware  # noqa: E402
 from opensandbox_server.middleware.request_id import RequestIdMiddleware  # noqa: E402
@@ -53,13 +90,15 @@ from opensandbox_server.services.runtime_resolver import (  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        api_key_confirm(configured_api_key=app_config.server.api_key)
-    except Exception as exc:
-        logger.error("API key startup confirmation failed: %s", exc)
-        os._exit(1)
+    if _tenant_provider is None:
+        try:
+            api_key_confirm(configured_api_key=app_config.server.api_key)
+        except Exception as exc:
+            logger.error("API key startup confirmation failed: %s", exc)
+            os._exit(1)
 
     from anyio.to_thread import current_default_thread_limiter
 
@@ -114,6 +153,8 @@ async def lifespan(app: FastAPI):
     if consumer is not None:
         await consumer.stop()
     snapshot_service.close()
+    if _tenant_provider is not None:
+        _tenant_provider.close()
     await app.state.http_client.aclose()
 
 
@@ -122,7 +163,7 @@ app = FastAPI(
     title="OpenSandbox Lifecycle API",
     version="0.1.0",
     description="The Sandbox Lifecycle API coordinates how untrusted workloads are created, "
-                "executed, paused, resumed, and finally disposed.",
+    "executed, paused, resumed, and finally disposed.",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -133,7 +174,7 @@ app.state.config = app_config
 
 # Middleware run in reverse order of addition: last added = first to run (outermost).
 # Add auth and CORS first so they run after RequestIdMiddleware.
-app.add_middleware(AuthMiddleware, config=app_config)
+app.add_middleware(AuthMiddleware, config=app_config, tenant_provider=_tenant_provider)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

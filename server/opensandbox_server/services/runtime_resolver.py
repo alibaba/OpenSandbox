@@ -66,17 +66,12 @@ class SecureRuntimeResolver:
         Args:
             config: Application configuration containing secure_runtime settings
         """
-        self.secure_runtime: Optional[SecureRuntimeConfig] = getattr(
-            config, "secure_runtime", None
-        )
+        self.secure_runtime: Optional[SecureRuntimeConfig] = getattr(config, "secure_runtime", None)
         self.runtime_mode = config.runtime.type  # "docker" or "kubernetes"
 
     def is_enabled(self) -> bool:
         """Check if secure runtime is configured and enabled."""
-        return (
-            self.secure_runtime is not None
-            and self.secure_runtime.type != ""
-        )
+        return self.secure_runtime is not None and self.secure_runtime.type != ""
 
     def get_docker_runtime(self) -> Optional[str]:
         """

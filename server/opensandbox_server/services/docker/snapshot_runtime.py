@@ -56,22 +56,30 @@ class DockerSnapshotRuntime:
         self,
         snapshot_id: str,
         sandbox_id: str,
+        *,
+        namespace: str = "default",
     ) -> Optional[SnapshotRuntimeStatus]:
         return self._create_snapshot(snapshot_id, sandbox_id)
 
     def get_snapshot_status(self, snapshot_id: str) -> Optional[SnapshotRuntimeStatus]:
         return None
 
-    def delete_snapshot(self, snapshot_id: str, image: Optional[str] = None) -> None:
+    def delete_snapshot(
+        self, snapshot_id: str, image: Optional[str] = None, *, namespace: str = "default"
+    ) -> None:
         image_ref = image or build_snapshot_image_ref(snapshot_id)
         try:
             self._docker_client.images.remove(image=image_ref)
         except ImageNotFound:
-            logger.info("Docker snapshot image %s already absent for snapshot %s", image_ref, snapshot_id)
+            logger.info(
+                "Docker snapshot image %s already absent for snapshot %s", image_ref, snapshot_id
+            )
             return
         except APIError as exc:
             if getattr(exc, "status_code", None) == status.HTTP_409_CONFLICT:
-                logger.info("Docker snapshot image %s cannot be deleted due to conflict: %s", image_ref, exc)
+                logger.info(
+                    "Docker snapshot image %s cannot be deleted due to conflict: %s", image_ref, exc
+                )
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
@@ -89,7 +97,9 @@ class DockerSnapshotRuntime:
                 f"Failed to delete snapshot image {image_ref}: {exc}"
             ) from exc
 
-    def inspect_snapshot(self, snapshot_id: str, image: Optional[str] = None) -> SnapshotRuntimeStatus:
+    def inspect_snapshot(
+        self, snapshot_id: str, image: Optional[str] = None
+    ) -> SnapshotRuntimeStatus:
         image_ref = image or build_snapshot_image_ref(snapshot_id)
         try:
             self._docker_client.images.get(image_ref)
@@ -157,8 +167,16 @@ class DockerSnapshotRuntime:
                 sandbox_id,
                 exc,
             )
-            reason = "snapshot_runtime_timeout" if self._is_timeout_error(exc) else "snapshot_runtime_failed"
-            message = self._format_timeout_message(exc) if reason == "snapshot_runtime_timeout" else str(exc)
+            reason = (
+                "snapshot_runtime_timeout"
+                if self._is_timeout_error(exc)
+                else "snapshot_runtime_failed"
+            )
+            message = (
+                self._format_timeout_message(exc)
+                if reason == "snapshot_runtime_timeout"
+                else str(exc)
+            )
             return SnapshotRuntimeStatus(
                 state=SnapshotState.FAILED,
                 reason=reason,

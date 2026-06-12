@@ -34,9 +34,7 @@ Op = Literal["exists", "eq"]
 Term = Tuple[str, Op, Optional[str]]
 
 
-_LABEL_KEY_CHARS = set(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./"
-)
+_LABEL_KEY_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./")
 
 
 def _is_valid_key(key: str) -> bool:

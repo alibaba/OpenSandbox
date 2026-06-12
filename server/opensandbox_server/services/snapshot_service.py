@@ -57,6 +57,7 @@ from opensandbox_server.services.snapshot_repository import (
     SnapshotListQuery,
     SnapshotRepository,
 )
+from opensandbox_server.tenants.context import get_current_tenant
 
 logger = logging.getLogger(__name__)
 SNAPSHOT_RECOVERY_PAGE_SIZE = 200
@@ -127,10 +128,17 @@ class PersistedSnapshotService(SnapshotService):
                 },
             )
 
+        tenant = get_current_tenant()
+        namespace = (
+            tenant.namespace
+            if tenant
+            else getattr(self._sandbox_service, "namespace", "default")
+        )
         now = datetime.now(timezone.utc)
         record = SnapshotRecord(
             id=str(uuid4()),
             source_sandbox_id=sandbox_id,
+            namespace=namespace,
             name=request.name,
             restore_config=self._default_restore_config(),
             status=SnapshotStatusRecord(
@@ -151,6 +159,8 @@ class PersistedSnapshotService(SnapshotService):
         return self._to_snapshot_response(record)
 
     def list_snapshots(self, request: ListSnapshotsRequest) -> ListSnapshotsResponse:
+        tenant = get_current_tenant()
+        namespace = tenant.namespace if tenant else None
         pagination = request.pagination or self._default_pagination()
         result = self._snapshot_repository.list(
             SnapshotListQuery(
@@ -158,10 +168,13 @@ class PersistedSnapshotService(SnapshotService):
                 page_size=pagination.page_size,
                 source_sandbox_id=request.filter.sandbox_id,
                 states=request.filter.state or [],
+                namespace=namespace,
             )
         )
 
-        total_pages = ceil(result.total_items / pagination.page_size) if result.total_items > 0 else 0
+        total_pages = (
+            ceil(result.total_items / pagination.page_size) if result.total_items > 0 else 0
+        )
         return ListSnapshotsResponse(
             items=[self._to_snapshot_response(item) for item in result.items],
             pagination=PaginationInfo(
@@ -183,6 +196,7 @@ class PersistedSnapshotService(SnapshotService):
                     "message": f"Snapshot {snapshot_id} not found",
                 },
             )
+        self._verify_tenant_access(record)
         return self._to_snapshot_response(record)
 
     def delete_snapshot(self, snapshot_id: str) -> None:
@@ -195,6 +209,7 @@ class PersistedSnapshotService(SnapshotService):
                     "message": f"Snapshot {snapshot_id} not found",
                 },
             )
+        self._verify_tenant_access(record)
 
         if record.status.state == SnapshotState.CREATING:
             raise HTTPException(
@@ -213,6 +228,7 @@ class PersistedSnapshotService(SnapshotService):
         self._snapshot_runtime.delete_snapshot(
             snapshot_id,
             image=record.restore_config.image,
+            namespace=record.namespace,
         )
         self._snapshot_repository.delete(snapshot_id)
 
@@ -237,6 +253,7 @@ class PersistedSnapshotService(SnapshotService):
         deleting_record = SnapshotRecord(
             id=record.id,
             source_sandbox_id=record.source_sandbox_id,
+            namespace=record.namespace,
             name=record.name,
             description=record.description,
             restore_config=record.restore_config,
@@ -274,6 +291,7 @@ class PersistedSnapshotService(SnapshotService):
             runtime_status = self._snapshot_runtime.create_snapshot(
                 record.id,
                 record.source_sandbox_id,
+                namespace=record.namespace,
             )
         except Exception as exc:  # noqa: BLE001
             logger.exception(
@@ -414,6 +432,7 @@ class PersistedSnapshotService(SnapshotService):
                 return SnapshotRecord(
                     id=record.id,
                     source_sandbox_id=record.source_sandbox_id,
+                    namespace=record.namespace,
                     name=record.name,
                     description=record.description,
                     restore_config=record.restore_config,
@@ -430,6 +449,7 @@ class PersistedSnapshotService(SnapshotService):
             return SnapshotRecord(
                 id=record.id,
                 source_sandbox_id=record.source_sandbox_id,
+                namespace=record.namespace,
                 name=record.name,
                 description=record.description,
                 restore_config=SnapshotRestoreConfig(image=runtime_status.image),
@@ -447,6 +467,7 @@ class PersistedSnapshotService(SnapshotService):
             return SnapshotRecord(
                 id=record.id,
                 source_sandbox_id=record.source_sandbox_id,
+                namespace=record.namespace,
                 name=record.name,
                 description=record.description,
                 restore_config=record.restore_config,
@@ -474,6 +495,25 @@ class PersistedSnapshotService(SnapshotService):
                 snapshot_id,
                 exc,
                 exc_info=True,
+            )
+
+    @staticmethod
+    def _verify_tenant_access(record: SnapshotRecord) -> None:
+        """Verify the current tenant is allowed to access a snapshot record.
+
+        Returns normally if access is granted; raises 404 if the snapshot
+        belongs to a different tenant namespace.
+        """
+        tenant = get_current_tenant()
+        if tenant is None:
+            return  # single-tenant mode, no restriction
+        if record.namespace and record.namespace != tenant.namespace:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "SNAPSHOT::NOT_FOUND",
+                    "message": "Snapshot not found",
+                },
             )
 
     @staticmethod

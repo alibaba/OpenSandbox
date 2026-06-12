@@ -1,4 +1,4 @@
-# Copyright 2026 Alibaba Group Holding Ltd.
+# Copyright 2025 Alibaba Group Holding Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,19 +14,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from dataclasses import dataclass, field
+from typing import Tuple
 
 
-def _normalize_create_status(status_info: Dict[str, Any]) -> Dict[str, Any]:
-    if status_info.get("state") != "Allocated":
-        return status_info
-    return {
-        **status_info,
-        "state": "Running",
-        "message": "Pod has IP assigned and sandbox is ready for requests",
-    }
-
-
-def _is_unschedulable_status(status_info: Dict[str, Any]) -> bool:
-    reason = str(status_info.get("reason") or "")
-    return reason == "POD_PLATFORM_UNSCHEDULABLE"
+@dataclass(frozen=True)
+class TenantEntry:
+    name: str
+    namespace: str
+    api_keys: Tuple[str, ...] = field(default_factory=tuple)

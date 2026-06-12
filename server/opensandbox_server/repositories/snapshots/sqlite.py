@@ -57,6 +57,7 @@ class SQLiteSnapshotRepository:
                 INSERT INTO snapshots (
                     id,
                     source_sandbox_id,
+                    namespace,
                     name,
                     description,
                     restore_config,
@@ -66,7 +67,7 @@ class SQLiteSnapshotRepository:
                     last_transition_at,
                     created_at,
                     updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 self._to_db_tuple(record),
             )
@@ -79,6 +80,7 @@ class SQLiteSnapshotRepository:
                 SELECT
                     id,
                     source_sandbox_id,
+                    namespace,
                     name,
                     description,
                     restore_config,
@@ -99,14 +101,16 @@ class SQLiteSnapshotRepository:
         clauses: list[str] = []
         params: list[object] = []
 
+        if query.namespace:
+            clauses.append("namespace = ?")
+            params.append(query.namespace)
+
         if query.source_sandbox_id:
             clauses.append("source_sandbox_id = ?")
             params.append(query.source_sandbox_id)
 
         if query.states:
-            clauses.append(
-                f"state IN ({', '.join('?' for _ in query.states)})"
-            )
+            clauses.append(f"state IN ({', '.join('?' for _ in query.states)})")
             params.extend(query.states)
 
         where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
@@ -124,6 +128,7 @@ class SQLiteSnapshotRepository:
                 SELECT
                     id,
                     source_sandbox_id,
+                    namespace,
                     name,
                     description,
                     restore_config,
@@ -153,6 +158,7 @@ class SQLiteSnapshotRepository:
                 UPDATE snapshots
                 SET
                     source_sandbox_id = ?,
+                    namespace = ?,
                     name = ?,
                     description = ?,
                     restore_config = ?,
@@ -166,6 +172,7 @@ class SQLiteSnapshotRepository:
                 """,
                 (
                     record.source_sandbox_id,
+                    record.namespace,
                     record.name,
                     record.description,
                     json.dumps(self._restore_config_to_dict(record.restore_config), sort_keys=True),
@@ -191,6 +198,7 @@ class SQLiteSnapshotRepository:
                 UPDATE snapshots
                 SET
                     source_sandbox_id = ?,
+                    namespace = ?,
                     name = ?,
                     description = ?,
                     restore_config = ?,
@@ -204,6 +212,7 @@ class SQLiteSnapshotRepository:
                 """,
                 (
                     record.source_sandbox_id,
+                    record.namespace,
                     record.name,
                     record.description,
                     json.dumps(self._restore_config_to_dict(record.restore_config), sort_keys=True),
@@ -230,6 +239,7 @@ class SQLiteSnapshotRepository:
                 CREATE TABLE IF NOT EXISTS snapshots (
                     id TEXT PRIMARY KEY,
                     source_sandbox_id TEXT NOT NULL,
+                    namespace TEXT NOT NULL DEFAULT 'default',
                     name TEXT,
                     description TEXT,
                     restore_config TEXT NOT NULL,
@@ -251,6 +261,17 @@ class SQLiteSnapshotRepository:
                     ON snapshots(created_at DESC);
                 """
             )
+            self._migrate_add_namespace(conn)
+
+    @staticmethod
+    def _migrate_add_namespace(conn: sqlite3.Connection) -> None:
+        """Add namespace column if missing (added for multi-tenant isolation)."""
+        rows = conn.execute("PRAGMA table_info(snapshots)").fetchall()
+        columns = {row["name"] for row in rows}
+        if "namespace" not in columns:
+            conn.execute(
+                "ALTER TABLE snapshots ADD COLUMN namespace TEXT NOT NULL DEFAULT 'default'"
+            )
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -263,6 +284,7 @@ class SQLiteSnapshotRepository:
         return (
             record.id,
             record.source_sandbox_id,
+            record.namespace,
             record.name,
             record.description,
             json.dumps(self._restore_config_to_dict(record.restore_config), sort_keys=True),
@@ -290,6 +312,7 @@ class SQLiteSnapshotRepository:
         return SnapshotRecord(
             id=row["id"],
             source_sandbox_id=row["source_sandbox_id"],
+            namespace=row["namespace"],
             name=row["name"],
             description=row["description"],
             restore_config=SnapshotRestoreConfig(
@@ -299,7 +322,9 @@ class SQLiteSnapshotRepository:
                 state=SnapshotState(row["state"]),
                 reason=row["reason"],
                 message=row["message"],
-                last_transition_at=SQLiteSnapshotRepository._str_to_datetime(row["last_transition_at"]),
+                last_transition_at=SQLiteSnapshotRepository._str_to_datetime(
+                    row["last_transition_at"]
+                ),
             ),
             created_at=SQLiteSnapshotRepository._str_to_datetime(row["created_at"]),
             updated_at=SQLiteSnapshotRepository._str_to_datetime(row["updated_at"]),

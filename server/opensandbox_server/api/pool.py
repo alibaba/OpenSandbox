@@ -74,6 +74,7 @@ def _get_pool_service():
 # Pool CRUD Endpoints
 # ============================================================================
 
+
 @router.post(
     "/pools",
     response_model=PoolResponse,
@@ -82,9 +83,15 @@ def _get_pool_service():
     responses={
         201: {"description": "Pool created successfully"},
         400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
         409: {"model": ErrorResponse, "description": "A pool with the same name already exists"},
-        501: {"model": ErrorResponse, "description": "Pool management is not supported in this runtime"},
+        501: {
+            "model": ErrorResponse,
+            "description": "Pool management is not supported in this runtime",
+        },
         500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
     },
 )
@@ -116,8 +123,14 @@ def create_pool(
     response_model_exclude_none=True,
     responses={
         200: {"description": "List of pools"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        501: {"model": ErrorResponse, "description": "Pool management is not supported in this runtime"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        501: {
+            "model": ErrorResponse,
+            "description": "Pool management is not supported in this runtime",
+        },
         500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
     },
 )
@@ -145,9 +158,15 @@ def list_pools(
     response_model_exclude_none=True,
     responses={
         200: {"description": "Pool retrieved successfully"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
         404: {"model": ErrorResponse, "description": "The requested pool does not exist"},
-        501: {"model": ErrorResponse, "description": "Pool management is not supported in this runtime"},
+        501: {
+            "model": ErrorResponse,
+            "description": "Pool management is not supported in this runtime",
+        },
         500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
     },
 )
@@ -176,9 +195,15 @@ def get_pool(
     responses={
         200: {"description": "Pool capacity updated successfully"},
         400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
         404: {"model": ErrorResponse, "description": "The requested pool does not exist"},
-        501: {"model": ErrorResponse, "description": "Pool management is not supported in this runtime"},
+        501: {
+            "model": ErrorResponse,
+            "description": "Pool management is not supported in this runtime",
+        },
         500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
     },
 )
@@ -211,9 +236,15 @@ def update_pool(
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         204: {"description": "Pool deleted successfully"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
         404: {"model": ErrorResponse, "description": "The requested pool does not exist"},
-        501: {"model": ErrorResponse, "description": "Pool management is not supported in this runtime"},
+        501: {
+            "model": ErrorResponse,
+            "description": "Pool management is not supported in this runtime",
+        },
         500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
     },
 )

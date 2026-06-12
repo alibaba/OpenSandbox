@@ -73,10 +73,11 @@ class DockerNetworkingMixin:
 
     def _is_user_defined_network(self) -> bool:
         """Return True when network_mode is a named user-defined network (not host/bridge/none/container:*)."""
-        return (
-            self.network_mode not in {HOST_NETWORK_MODE, BRIDGE_NETWORK_MODE, "none"}
-            and not self.network_mode.startswith("container:")
-        )
+        return self.network_mode not in {
+            HOST_NETWORK_MODE,
+            BRIDGE_NETWORK_MODE,
+            "none",
+        } and not self.network_mode.startswith("container:")
 
     def _validate_network_exists(self) -> None:
         """Verify the configured user-defined Docker network exists before creating a sandbox."""
@@ -156,8 +157,13 @@ class DockerNetworkingMixin:
             },
         )
 
-    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False,
-                     expires: Optional[int] = None) -> Endpoint:
+    def get_endpoint(
+        self,
+        sandbox_id: str,
+        port: int,
+        resolve_internal: bool = False,
+        expires: Optional[int] = None,
+    ) -> Endpoint:
         """
         Get sandbox access endpoint.
 
@@ -383,7 +389,9 @@ class DockerNetworkingMixin:
         self._ensure_image_available(egress_image, None, sandbox_id)
 
         policy_payload = json.dumps(network_policy.model_dump(by_alias=True, exclude_none=True))
-        assert self.app_config.egress is not None  # validated by ensure_egress_configured with networkPolicy
+        assert (
+            self.app_config.egress is not None
+        )  # validated by ensure_egress_configured with networkPolicy
         egress_mode = self.app_config.egress.mode
         sidecar_env = [
             f"{EGRESS_RULES_ENV}={policy_payload}",

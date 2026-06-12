@@ -80,8 +80,7 @@ def validate_windows_runtime_prerequisites() -> None:
         detail={
             "code": SandboxErrorCodes.INVALID_PARAMETER,
             "message": (
-                "Windows profile requires host devices to be present: "
-                f"{', '.join(missing)}."
+                f"Windows profile requires host devices to be present: {', '.join(missing)}."
             ),
         },
     )
@@ -184,7 +183,9 @@ def fetch_execd_install_bat(
         finally:
             if container is not None:
                 try:
-                    with docker_operation("execd install.bat cache cleanup container", "execd-cache"):
+                    with docker_operation(
+                        "execd install.bat cache cleanup container", "execd-cache"
+                    ):
                         container.remove(force=True)
                 except DockerException as cleanup_exc:
                     logger.warning(

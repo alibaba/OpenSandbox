@@ -65,6 +65,6 @@ def apply_extensions_to_annotations(
     for key, value in extensions.items():
         if key.startswith(EXTENSIONS_ANNOTATION_PREFIX):
             # Extract the suffix after the prefix
-            suffix = key[len(EXTENSIONS_ANNOTATION_PREFIX):]
+            suffix = key[len(EXTENSIONS_ANNOTATION_PREFIX) :]
             annotation_key = ANNOTATION_METADATA_PREFIX + suffix
             annotations[annotation_key] = value

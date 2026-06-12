@@ -37,7 +37,9 @@ def test_snapshot_restore_resolves_effective_image(monkeypatch, tmp_path) -> Non
         SnapshotRecord(
             id="snap-001",
             source_sandbox_id="sbx-001",
-            restore_config=SnapshotRestoreConfig(image="registry.example.com/snapshots/snap-001:latest"),
+            restore_config=SnapshotRestoreConfig(
+                image="registry.example.com/snapshots/snap-001:latest"
+            ),
             status=SnapshotStatusRecord(
                 state=SnapshotState.READY,
                 last_transition_at=datetime.now(timezone.utc),
@@ -67,7 +69,9 @@ def test_snapshot_restore_preserves_explicit_entrypoint(monkeypatch, tmp_path) -
         SnapshotRecord(
             id="snap-003",
             source_sandbox_id="sbx-001",
-            restore_config=SnapshotRestoreConfig(image="registry.example.com/snapshots/snap-003:latest"),
+            restore_config=SnapshotRestoreConfig(
+                image="registry.example.com/snapshots/snap-003:latest"
+            ),
             status=SnapshotStatusRecord(
                 state=SnapshotState.READY,
                 last_transition_at=datetime.now(timezone.utc),
@@ -98,7 +102,9 @@ def test_snapshot_restore_rejects_unready_snapshot(monkeypatch, tmp_path) -> Non
         SnapshotRecord(
             id="snap-002",
             source_sandbox_id="sbx-001",
-            restore_config=SnapshotRestoreConfig(image="registry.example.com/snapshots/snap-002:latest"),
+            restore_config=SnapshotRestoreConfig(
+                image="registry.example.com/snapshots/snap-002:latest"
+            ),
             status=SnapshotStatusRecord(
                 state=SnapshotState.CREATING,
                 last_transition_at=datetime.now(timezone.utc),

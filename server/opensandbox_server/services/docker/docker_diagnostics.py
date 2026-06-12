@@ -105,7 +105,9 @@ class DockerDiagnosticsMixin:
             for port_key, bindings in (ports or {}).items():
                 if bindings:
                     for b in bindings:
-                        lines.append(f"  {port_key} -> {b.get('HostIp', '')}:{b.get('HostPort', '')}")
+                        lines.append(
+                            f"  {port_key} -> {b.get('HostIp', '')}:{b.get('HostPort', '')}"
+                        )
                 else:
                     lines.append(f"  {port_key} (not bound)")
 

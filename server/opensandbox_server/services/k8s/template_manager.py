@@ -99,9 +99,7 @@ class BaseSandboxTemplateManager:
             if key not in result:
                 result[key] = BaseSandboxTemplateManager._deep_copy(override_value)
             elif isinstance(result[key], dict) and isinstance(override_value, dict):
-                result[key] = BaseSandboxTemplateManager._deep_merge(
-                    result[key], override_value
-                )
+                result[key] = BaseSandboxTemplateManager._deep_merge(result[key], override_value)
             else:
                 result[key] = BaseSandboxTemplateManager._deep_copy(override_value)
 

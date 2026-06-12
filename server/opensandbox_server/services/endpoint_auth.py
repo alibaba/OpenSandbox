@@ -18,7 +18,10 @@ from __future__ import annotations
 
 import secrets
 
-from opensandbox_server.services.constants import OPEN_SANDBOX_EGRESS_AUTH_HEADER, OPEN_SANDBOX_SECURE_ACCESS_HEADER
+from opensandbox_server.services.constants import (
+    OPEN_SANDBOX_EGRESS_AUTH_HEADER,
+    OPEN_SANDBOX_SECURE_ACCESS_HEADER,
+)
 
 EGRESS_AUTH_TOKEN_BYTES = 24
 SECURE_ACCESS_TOKEN_BYTES = 24

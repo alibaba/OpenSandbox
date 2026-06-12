@@ -24,7 +24,6 @@ from opensandbox_server.services.k8s.image_pull_secret_helper import (
 
 
 class TestBuildImagePullSecretName:
-
     def test_returns_deterministic_name(self):
         assert build_image_pull_secret_name("abc123") == f"{IMAGE_AUTH_SECRET_PREFIX}-abc123"
 
@@ -33,7 +32,6 @@ class TestBuildImagePullSecretName:
 
 
 class TestBuildImagePullSecret:
-
     def _auth(self, username="user", password="pass") -> ImageAuth:
         return ImageAuth(username=username, password=password)
 

@@ -20,8 +20,8 @@ import pytest
 
 from opensandbox_server.services.k8s.rate_limiter import TokenBucketRateLimiter
 
-class TestTokenBucketRateLimiter:
 
+class TestTokenBucketRateLimiter:
     def test_invalid_qps_raises_value_error(self):
         """qps <= 0 must raise ValueError."""
         with pytest.raises(ValueError, match="qps must be > 0"):
@@ -136,7 +136,10 @@ class TestTokenBucketRateLimiter:
         fixed_time = limiter._last_refill
 
         def worker():
-            with patch("opensandbox_server.services.k8s.rate_limiter.time.monotonic", return_value=fixed_time):
+            with patch(
+                "opensandbox_server.services.k8s.rate_limiter.time.monotonic",
+                return_value=fixed_time,
+            ):
                 if limiter.try_acquire():
                     with lock:
                         successes.append(1)

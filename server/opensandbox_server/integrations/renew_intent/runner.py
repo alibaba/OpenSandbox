@@ -34,6 +34,4 @@ async def start_renew_intent_runner(
     sandbox_service: SandboxService | None = None,
     extension_service: ExtensionService | None = None,
 ) -> Optional[RenewIntentConsumer]:
-    return await start_renew_intent_consumer(
-        app_config, sandbox_service, extension_service
-    )
+    return await start_renew_intent_consumer(app_config, sandbox_service, extension_service)

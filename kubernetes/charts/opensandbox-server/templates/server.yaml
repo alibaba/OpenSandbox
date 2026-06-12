@@ -68,6 +68,19 @@ data:
   config.toml: |
 {{ .Values.configToml | indent 4 }}
 {{ include "opensandbox-server.ingressConfigToml" . | indent 4 }}
+{{- if .Values.tenantsToml }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "opensandbox-server.fullname" . }}-tenants
+  namespace: {{ include "opensandbox-server.namespace" . }}
+  labels:
+    {{- include "opensandbox-server.labels" . | nindent 4 }}
+data:
+  tenants.toml: |
+{{ .Values.tenantsToml | indent 4 }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -106,6 +119,10 @@ spec:
           env:
             - name: SANDBOX_CONFIG_PATH
               value: "/etc/opensandbox/config.toml"
+            {{- if .Values.tenantsToml }}
+            - name: SANDBOX_TENANTS_CONFIG_PATH
+              value: "/etc/opensandbox/tenants-config/tenants.toml"
+            {{- end }}
             {{- with .Values.server.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -114,6 +131,11 @@ spec:
               mountPath: /etc/opensandbox/config.toml
               subPath: config.toml
               readOnly: true
+            {{- if .Values.tenantsToml }}
+            - name: tenants
+              mountPath: /etc/opensandbox/tenants-config
+              readOnly: true
+            {{- end }}
             {{- with .Values.server.volumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -137,6 +159,11 @@ spec:
         - name: config
           configMap:
             name: {{ include "opensandbox-server.fullname" . }}-config
+        {{- if .Values.tenantsToml }}
+        - name: tenants
+          configMap:
+            name: {{ include "opensandbox-server.fullname" . }}-tenants
+        {{- end }}
         {{- with .Values.server.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

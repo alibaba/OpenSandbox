@@ -125,7 +125,6 @@ class DockerContainerOpsMixin:
         self._daemon_platform = PlatformSpec(os=normalized_os, arch=normalized_arch)
         return self._daemon_platform
 
-
     @staticmethod
     def _platform_from_labels(labels: Dict[str, str]) -> Optional[PlatformSpec]:
         os_value = labels.get(SANDBOX_PLATFORM_OS_LABEL)
@@ -156,13 +155,17 @@ class DockerContainerOpsMixin:
             else:
                 os_value = None
                 arch_value = None
-            if isinstance(os_value, str) and isinstance(arch_value, str) and os_value and arch_value:
+            if (
+                isinstance(os_value, str)
+                and isinstance(arch_value, str)
+                and os_value
+                and arch_value
+            ):
                 normalized_os = self._normalize_os(os_value)
                 normalized_arch = self._normalize_arch(arch_value)
                 if normalized_os and normalized_arch:
                     return PlatformSpec(os=normalized_os, arch=normalized_arch)
         return self._platform_from_labels(labels)
-
 
     def _update_container_labels(self, container, labels: Dict[str, str]) -> None:
         """
@@ -176,7 +179,6 @@ class DockerContainerOpsMixin:
             data = {"Labels": labels}
             self.docker_client.api._post_json(url, data=data)  # noqa: SLF001
         container.reload()
-
 
     def _pull_image(
         self,
@@ -239,13 +241,13 @@ class DockerContainerOpsMixin:
                 image_attrs = getattr(image, "attrs", {}) or {}
                 image_os = (image_attrs.get("Os") or image_attrs.get("os") or "").lower()
                 image_arch = (
-                    image_attrs.get("Architecture")
-                    or image_attrs.get("architecture")
-                    or ""
+                    image_attrs.get("Architecture") or image_attrs.get("architecture") or ""
                 ).lower()
                 image_os = self._normalize_os(image_os) or image_os
                 image_arch = self._normalize_arch(image_arch) or image_arch
-                requested_os = self._normalize_os(expected_platform.os) or expected_platform.os.lower()
+                requested_os = (
+                    self._normalize_os(expected_platform.os) or expected_platform.os.lower()
+                )
                 requested_arch = (
                     self._normalize_arch(expected_platform.arch) or expected_platform.arch.lower()
                 )
@@ -282,7 +284,6 @@ class DockerContainerOpsMixin:
                     "message": f"Failed to inspect image {image_uri}: {str(exc)}",
                 },
             ) from exc
-
 
     def _build_labels_and_env(
         self,

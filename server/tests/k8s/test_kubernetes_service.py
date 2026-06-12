@@ -26,7 +26,12 @@ from opensandbox_server.services.constants import (
     SANDBOX_MANUAL_CLEANUP_LABEL,
     SandboxErrorCodes,
 )
-from opensandbox_server.api.schema import ImageAuth, ListSandboxesRequest, NetworkPolicy, PlatformSpec
+from opensandbox_server.api.schema import (
+    ImageAuth,
+    ListSandboxesRequest,
+    NetworkPolicy,
+    PlatformSpec,
+)
 from opensandbox_server.config import (
     EGRESS_MODE_DNS,
     EGRESS_MODE_DNS_NFT,
@@ -39,48 +44,55 @@ from opensandbox_server.config import (
 )
 from opensandbox_server.api.schema import Endpoint
 
+
 class TestKubernetesSandboxServiceInit:
-    
     def test_init_with_valid_config_succeeds(self, k8s_app_config):
-        with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client, \
-             patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
-            
+        with (
+            patch(
+                "opensandbox_server.services.k8s.kubernetes_service.K8sClient"
+            ) as mock_k8s_client,
+            patch(
+                "opensandbox_server.services.k8s.kubernetes_service.create_workload_provider"
+            ) as mock_create_provider,
+        ):
             mock_provider = MagicMock()
             mock_create_provider.return_value = mock_provider
-            
+
             service = KubernetesSandboxService(k8s_app_config)
-            
+
             assert service.namespace == k8s_app_config.kubernetes.namespace
             assert service.execd_image == k8s_app_config.runtime.execd_image
             mock_k8s_client.assert_called_once_with(k8s_app_config.kubernetes)
             mock_create_provider.assert_called_once()
-    
+
     def test_init_without_kubernetes_config_raises_error(self, app_config_no_k8s):
         # app_config_no_k8s still has kubernetes config, just without kubeconfig
         # This will cause K8sClient initialization to fail and raise HTTPException
         with pytest.raises(HTTPException) as exc_info:
             KubernetesSandboxService(app_config_no_k8s)
-        
+
         assert exc_info.value.status_code == 503
         assert exc_info.value.detail["code"] == SandboxErrorCodes.K8S_INITIALIZATION_ERROR
-    
+
     def test_init_with_wrong_runtime_type_raises_error(self, app_config_docker):
         with pytest.raises(ValueError, match="requires runtime.type = 'kubernetes'"):
             KubernetesSandboxService(app_config_docker)
-    
+
     def test_init_with_k8s_client_failure_raises_http_exception(self, k8s_app_config):
-        with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client:
+        with patch(
+            "opensandbox_server.services.k8s.kubernetes_service.K8sClient"
+        ) as mock_k8s_client:
             mock_k8s_client.side_effect = Exception("Failed to load kubeconfig")
-            
+
             with pytest.raises(HTTPException) as exc_info:
                 KubernetesSandboxService(k8s_app_config)
-            
+
             assert exc_info.value.status_code == 503
             assert "code" in exc_info.value.detail
             assert exc_info.value.detail["code"] == SandboxErrorCodes.K8S_INITIALIZATION_ERROR
 
+
 class TestKubernetesSandboxServiceCreate:
-    
     @pytest.mark.asyncio
     async def test_create_sandbox_with_valid_request_succeeds(
         self, k8s_service, create_sandbox_request, mock_workload
@@ -98,10 +110,12 @@ class TestKubernetesSandboxServiceCreate:
             "last_transition_at": datetime.now(timezone.utc),
         }
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.244.0.5:8080"
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
-        
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
+
         response = await k8s_service.create_sandbox(create_sandbox_request)
-        
+
         # CreateSandboxResponse uses 'id' field
         assert response.id is not None
         assert response.status.state == "Running"
@@ -133,7 +147,6 @@ class TestKubernetesSandboxServiceCreate:
     async def test_create_sandbox_uses_configured_timeout_and_poll_interval(
         self, k8s_service, create_sandbox_request, mock_workload
     ):
-
         k8s_service.workload_provider.create_workload.return_value = {
             "name": "test-sandbox-123",
             "uid": "abc-123",
@@ -150,7 +163,9 @@ class TestKubernetesSandboxServiceCreate:
         k8s_service.app_config.kubernetes.sandbox_create_timeout_seconds = 120
         k8s_service.app_config.kubernetes.sandbox_create_poll_interval_seconds = 0.5
 
-        with patch.object(k8s_service, "_wait_for_sandbox_ready", wraps=k8s_service._wait_for_sandbox_ready) as mock_wait:
+        with patch.object(
+            k8s_service, "_wait_for_sandbox_ready", wraps=k8s_service._wait_for_sandbox_ready
+        ) as mock_wait:
             await k8s_service.create_sandbox(create_sandbox_request)
 
         mock_wait.assert_called_once()
@@ -185,11 +200,14 @@ class TestKubernetesSandboxServiceCreate:
             password="registry-pass",
         )
         k8s_service.workload_provider.create_workload.return_value = {
-            "name": "test-id", "uid": "uid-1"
+            "name": "test-id",
+            "uid": "uid-1",
         }
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
         k8s_service.workload_provider.get_status.return_value = {
-            "state": "Running", "reason": "", "message": "",
+            "state": "Running",
+            "reason": "",
+            "message": "",
             "last_transition_at": datetime.now(timezone.utc),
         }
 
@@ -204,11 +222,14 @@ class TestKubernetesSandboxServiceCreate:
         """When timeout is None (manual cleanup), provider receives expires_at=None and manual-cleanup label."""
         create_sandbox_request.timeout = None
         k8s_service.workload_provider.create_workload.return_value = {
-            "name": "test-id", "uid": "uid-1"
+            "name": "test-id",
+            "uid": "uid-1",
         }
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
         k8s_service.workload_provider.get_status.return_value = {
-            "state": "Running", "reason": "", "message": "",
+            "state": "Running",
+            "reason": "",
+            "message": "",
             "last_transition_at": datetime.now(timezone.utc),
         }
 
@@ -226,11 +247,14 @@ class TestKubernetesSandboxServiceCreate:
         create_sandbox_request.network_policy = NetworkPolicy(default_action="deny", egress=[])
         k8s_service.app_config.egress = EgressConfig(image="opensandbox/egress:v1.0.12")
         k8s_service.workload_provider.create_workload.return_value = {
-            "name": "test-id", "uid": "uid-1"
+            "name": "test-id",
+            "uid": "uid-1",
         }
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
         k8s_service.workload_provider.get_status.return_value = {
-            "state": "Running", "reason": "", "message": "",
+            "state": "Running",
+            "reason": "",
+            "message": "",
             "last_transition_at": datetime.now(timezone.utc),
         }
 
@@ -259,11 +283,14 @@ class TestKubernetesSandboxServiceCreate:
         )
         k8s_service.ingress_config = k8s_service.app_config.ingress
         k8s_service.workload_provider.create_workload.return_value = {
-            "name": "test-id", "uid": "uid-1"
+            "name": "test-id",
+            "uid": "uid-1",
         }
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
         k8s_service.workload_provider.get_status.return_value = {
-            "state": "Running", "reason": "", "message": "",
+            "state": "Running",
+            "reason": "",
+            "message": "",
             "last_transition_at": datetime.now(timezone.utc),
         }
 
@@ -302,11 +329,14 @@ class TestKubernetesSandboxServiceCreate:
             mode=EGRESS_MODE_DNS_NFT,
         )
         k8s_service.workload_provider.create_workload.return_value = {
-            "name": "test-id", "uid": "uid-1"
+            "name": "test-id",
+            "uid": "uid-1",
         }
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
         k8s_service.workload_provider.get_status.return_value = {
-            "state": "Running", "reason": "", "message": "",
+            "state": "Running",
+            "reason": "",
+            "message": "",
             "last_transition_at": datetime.now(timezone.utc),
         }
 
@@ -325,7 +355,8 @@ class TestKubernetesSandboxServiceCreate:
     ):
         create_sandbox_request.platform = PlatformSpec(os="linux", arch="arm64")
         k8s_service.workload_provider.create_workload.return_value = {
-            "name": "test-id", "uid": "uid-1"
+            "name": "test-id",
+            "uid": "uid-1",
         }
         k8s_service.workload_provider.get_workload.return_value = {
             "spec": {
@@ -340,7 +371,9 @@ class TestKubernetesSandboxServiceCreate:
             }
         }
         k8s_service.workload_provider.get_status.return_value = {
-            "state": "Running", "reason": "", "message": "",
+            "state": "Running",
+            "reason": "",
+            "message": "",
             "last_transition_at": datetime.now(timezone.utc),
         }
 
@@ -353,7 +386,9 @@ class TestKubernetesSandboxServiceCreate:
         assert response.platform.arch == "arm64"
 
     @pytest.mark.asyncio
-    async def test_create_sandbox_rejects_unsupported_platform(self, k8s_service, create_sandbox_request):
+    async def test_create_sandbox_rejects_unsupported_platform(
+        self, k8s_service, create_sandbox_request
+    ):
         create_sandbox_request.platform = PlatformSpec(os="darwin", arch="arm64")
 
         with pytest.raises(HTTPException) as exc_info:
@@ -369,7 +404,8 @@ class TestKubernetesSandboxServiceCreate:
     ):
         create_sandbox_request.platform = None
         k8s_service.workload_provider.create_workload.return_value = {
-            "name": "test-id", "uid": "uid-1"
+            "name": "test-id",
+            "uid": "uid-1",
         }
         k8s_service.workload_provider.get_workload.return_value = {
             "spec": {
@@ -402,7 +438,9 @@ class TestKubernetesSandboxServiceCreate:
             }
         }
         k8s_service.workload_provider.get_status.return_value = {
-            "state": "Running", "reason": "", "message": "",
+            "state": "Running",
+            "reason": "",
+            "message": "",
             "last_transition_at": datetime.now(timezone.utc),
         }
 
@@ -418,7 +456,8 @@ class TestKubernetesSandboxServiceCreate:
     ):
         create_sandbox_request.platform = PlatformSpec(os="linux", arch="arm64")
         k8s_service.workload_provider.create_workload.return_value = {
-            "name": "test-id", "uid": "uid-1"
+            "name": "test-id",
+            "uid": "uid-1",
         }
         k8s_service.workload_provider.get_workload.return_value = {
             "spec": {
@@ -433,7 +472,9 @@ class TestKubernetesSandboxServiceCreate:
             }
         }
         k8s_service.workload_provider.get_status.return_value = {
-            "state": "Running", "reason": "", "message": "",
+            "state": "Running",
+            "reason": "",
+            "message": "",
             "last_transition_at": datetime.now(timezone.utc),
         }
         response = await k8s_service.create_sandbox(create_sandbox_request)
@@ -442,9 +483,7 @@ class TestKubernetesSandboxServiceCreate:
         assert response.platform.os == "linux"
         assert response.platform.arch == "arm64"
 
-    def test_get_endpoint_keeps_instance_egress_auth_header_private_for_workload_ports(
-        self, k8s_service
-    ):
+    def test_get_endpoint_merges_egress_auth_header_from_instance_metadata(self, k8s_service):
         k8s_service.workload_provider.get_workload.return_value = {
             "metadata": {
                 "annotations": {
@@ -462,28 +501,6 @@ class TestKubernetesSandboxServiceCreate:
         assert endpoint.endpoint == "gateway.example.com"
         assert endpoint.headers == {
             "OpenSandbox-Ingress-To": "sbx-123-44772",
-        }
-
-    def test_get_endpoint_merges_egress_auth_header_for_egress_api_port(
-        self, k8s_service
-    ):
-        k8s_service.workload_provider.get_workload.return_value = {
-            "metadata": {
-                "annotations": {
-                    SANDBOX_EGRESS_AUTH_TOKEN_METADATA_KEY: "egress-token",
-                }
-            }
-        }
-        k8s_service.workload_provider.get_endpoint_info.return_value = Endpoint(
-            endpoint="gateway.example.com",
-            headers={"OpenSandbox-Ingress-To": "sbx-123-18080"},
-        )
-
-        endpoint = k8s_service.get_endpoint("sbx-123", 18080)
-
-        assert endpoint.endpoint == "gateway.example.com"
-        assert endpoint.headers == {
-            "OpenSandbox-Ingress-To": "sbx-123-18080",
             OPEN_SANDBOX_EGRESS_AUTH_HEADER: "egress-token",
         }
 
@@ -510,9 +527,7 @@ class TestKubernetesSandboxServiceCreate:
             OPEN_SANDBOX_SECURE_ACCESS_HEADER: "secure-token",
         }
 
-    def test_get_user_endpoint_also_merges_secure_access_header(
-        self, k8s_service
-    ):
+    def test_get_user_endpoint_also_merges_secure_access_header(self, k8s_service):
         k8s_service.workload_provider.get_workload.return_value = {
             "metadata": {
                 "annotations": {
@@ -570,7 +585,9 @@ class TestKubernetesSandboxServiceCreate:
             "last_transition_at": datetime.now(timezone.utc),
         }
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.244.0.5:8080"
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
 
         response = await k8s_service.create_sandbox(pool_request)
 
@@ -602,15 +619,18 @@ class TestKubernetesSandboxServiceCreate:
             "last_transition_at": datetime.now(timezone.utc),
         }
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.244.0.6:8080"
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
 
         # Should not raise AttributeError on None.auth
         response = await k8s_service.create_sandbox(pool_request)
         assert response.id is not None
 
+
 class TestWaitForSandboxReady:
     """_wait_for_sandbox_ready method tests"""
-    
+
     @pytest.mark.asyncio
     async def test_wait_for_running_pod_succeeds(self, k8s_service, mock_workload):
         k8s_service.workload_provider.get_workload.return_value = mock_workload
@@ -620,28 +640,45 @@ class TestWaitForSandboxReady:
             "message": "Pod is running",
             "last_transition_at": datetime.now(timezone.utc),
         }
-        
+
         result = await k8s_service._wait_for_sandbox_ready("test-sandbox-id", timeout_seconds=10)
-        
+
         assert result == mock_workload
-    
+
     @pytest.mark.asyncio
     async def test_wait_for_pending_then_running_succeeds(self, k8s_service, mock_workload):
         # Mock state transition: Pending -> Allocated -> Running
         status_sequence = [
-            {"state": "Pending", "reason": "", "message": "Pending", "last_transition_at": datetime.now(timezone.utc)},
-            {"state": "Allocated", "reason": "IP_ASSIGNED", "message": "IP assigned", "last_transition_at": datetime.now(timezone.utc)},
-            {"state": "Running", "reason": "", "message": "Running", "last_transition_at": datetime.now(timezone.utc)},
+            {
+                "state": "Pending",
+                "reason": "",
+                "message": "Pending",
+                "last_transition_at": datetime.now(timezone.utc),
+            },
+            {
+                "state": "Allocated",
+                "reason": "IP_ASSIGNED",
+                "message": "IP assigned",
+                "last_transition_at": datetime.now(timezone.utc),
+            },
+            {
+                "state": "Running",
+                "reason": "",
+                "message": "Running",
+                "last_transition_at": datetime.now(timezone.utc),
+            },
         ]
-        
+
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.get_status.side_effect = status_sequence
-        
-        result = await k8s_service._wait_for_sandbox_ready("test-sandbox-id", timeout_seconds=10, poll_interval_seconds=0.1)
-        
+
+        result = await k8s_service._wait_for_sandbox_ready(
+            "test-sandbox-id", timeout_seconds=10, poll_interval_seconds=0.1
+        )
+
         assert result == mock_workload
         assert k8s_service.workload_provider.get_status.call_count == 2
-    
+
     @pytest.mark.asyncio
     async def test_wait_for_allocated_pod_returns_immediately(self, k8s_service, mock_workload):
         k8s_service.workload_provider.get_workload.return_value = mock_workload
@@ -651,11 +688,11 @@ class TestWaitForSandboxReady:
             "message": "Pod has IP assigned",
             "last_transition_at": datetime.now(timezone.utc),
         }
-        
+
         result = await k8s_service._wait_for_sandbox_ready("test-sandbox-id", timeout_seconds=10)
-        
+
         assert result == mock_workload
-    
+
     @pytest.mark.asyncio
     async def test_wait_timeout_raises_exception(self, k8s_service, mock_workload):
         k8s_service.workload_provider.get_workload.return_value = mock_workload
@@ -665,15 +702,19 @@ class TestWaitForSandboxReady:
             "message": "Still pending",
             "last_transition_at": datetime.now(timezone.utc),
         }
-        
+
         with pytest.raises(HTTPException) as exc_info:
-            await k8s_service._wait_for_sandbox_ready("test-sandbox-id", timeout_seconds=1, poll_interval_seconds=0.5)
-        
+            await k8s_service._wait_for_sandbox_ready(
+                "test-sandbox-id", timeout_seconds=1, poll_interval_seconds=0.5
+            )
+
         assert exc_info.value.status_code == 504  # Gateway Timeout
         assert "timeout" in exc_info.value.detail["message"].lower()
 
     @pytest.mark.asyncio
-    async def test_wait_returns_400_when_scheduler_marks_platform_unschedulable(self, k8s_service, mock_workload):
+    async def test_wait_returns_400_when_scheduler_marks_platform_unschedulable(
+        self, k8s_service, mock_workload
+    ):
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.get_status.return_value = {
             "state": "Failed",
@@ -694,7 +735,9 @@ class TestWaitForSandboxReady:
         assert "unschedulable" in exc_info.value.detail["message"].lower()
 
     @pytest.mark.asyncio
-    async def test_wait_keeps_polling_for_generic_failed_scheduling(self, k8s_service, mock_workload):
+    async def test_wait_keeps_polling_for_generic_failed_scheduling(
+        self, k8s_service, mock_workload
+    ):
         status_sequence = [
             {
                 "state": "Pending",
@@ -720,6 +763,7 @@ class TestWaitForSandboxReady:
 
         assert result == mock_workload
 
+
 class TestKubernetesSandboxServiceRenew:
     def test_renew_expiration_rejects_manual_cleanup_sandbox(self, k8s_service):
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
@@ -736,9 +780,10 @@ class TestKubernetesSandboxServiceRenew:
             == "Sandbox test-sandbox-id does not have automatic expiration enabled."
         )
 
+
 class TestGetSandbox:
     """get_sandbox method tests"""
-    
+
     def test_get_existing_sandbox_succeeds(self, k8s_service, mock_workload):
         mock_workload["spec"] = {
             "template": {
@@ -758,24 +803,26 @@ class TestGetSandbox:
             "last_transition_at": datetime.now(timezone.utc),
         }
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.0.0.1:8080"
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
-        
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
+
         # Use sandbox_id from mock_workload
         sandbox = k8s_service.get_sandbox("test-sandbox-123")
-        
+
         # Sandbox uses 'id' field
         assert sandbox.id == "test-sandbox-123"
         assert sandbox.status.state == "Running"
         assert sandbox.platform is not None
         assert sandbox.platform.os == "linux"
         assert sandbox.platform.arch == "amd64"
-    
+
     def test_get_nonexistent_sandbox_raises_404(self, k8s_service):
         k8s_service.workload_provider.get_workload.return_value = None
-        
+
         with pytest.raises(HTTPException) as exc_info:
             k8s_service.get_sandbox("nonexistent-id")
-        
+
         assert exc_info.value.status_code == 404
         assert "not found" in exc_info.value.detail["message"].lower()
 
@@ -815,7 +862,9 @@ class TestGetSandbox:
             "message": "Running",
             "last_transition_at": datetime.now(timezone.utc),
         }
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
 
         sandbox = k8s_service.get_sandbox("test-sandbox-123")
 
@@ -841,14 +890,18 @@ class TestGetSandbox:
             "message": "Running",
             "last_transition_at": datetime.now(timezone.utc),
         }
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
         sandbox = k8s_service.get_sandbox("test-sandbox-123")
 
         assert sandbox.platform is not None
         assert sandbox.platform.os == "linux"
         assert sandbox.platform.arch == "arm64"
 
-    def test_get_sandbox_merges_selector_and_affinity_platform_constraints(self, k8s_service, mock_workload):
+    def test_get_sandbox_merges_selector_and_affinity_platform_constraints(
+        self, k8s_service, mock_workload
+    ):
         mock_workload["spec"] = {
             "template": {
                 "spec": {
@@ -882,14 +935,18 @@ class TestGetSandbox:
             "message": "Running",
             "last_transition_at": datetime.now(timezone.utc),
         }
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
         sandbox = k8s_service.get_sandbox("test-sandbox-123")
 
         assert sandbox.platform is not None
         assert sandbox.platform.os == "linux"
         assert sandbox.platform.arch == "arm64"
 
-    def test_get_sandbox_returns_null_platform_for_default_scheduling(self, k8s_service, mock_workload):
+    def test_get_sandbox_returns_null_platform_for_default_scheduling(
+        self, k8s_service, mock_workload
+    ):
         mock_workload["spec"] = {
             "template": {
                 "spec": {
@@ -904,37 +961,40 @@ class TestGetSandbox:
             "message": "Running",
             "last_transition_at": datetime.now(timezone.utc),
         }
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
         sandbox = k8s_service.get_sandbox("test-sandbox-123")
 
         assert sandbox.platform is None
 
+
 class TestDeleteSandbox:
     """delete_sandbox method tests"""
-    
+
     def test_delete_existing_sandbox_succeeds(self, k8s_service, mock_workload):
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.delete_workload.return_value = None
 
         k8s_service.delete_sandbox("test-sandbox-id")
-        
+
         k8s_service.workload_provider.delete_workload.assert_called_once_with(
-            sandbox_id="test-sandbox-id",
-            namespace=k8s_service.namespace
+            sandbox_id="test-sandbox-id", namespace=k8s_service.namespace
         )
-    
+
     def test_delete_nonexistent_sandbox_raises_404(self, k8s_service):
         # Mock delete_workload to raise exception containing "not found"
         k8s_service.workload_provider.delete_workload.side_effect = Exception("Sandbox not found")
 
         with pytest.raises(HTTPException) as exc_info:
             k8s_service.delete_sandbox("nonexistent-id")
-        
+
         assert exc_info.value.status_code == 404
+
 
 class TestListSandboxes:
     """list_sandboxes method tests"""
-    
+
     def test_list_all_sandboxes_succeeds(self, k8s_service, mock_workload):
         k8s_service.workload_provider.list_workloads.return_value = [mock_workload]
         k8s_service.workload_provider.get_status.return_value = {
@@ -944,17 +1004,20 @@ class TestListSandboxes:
             "last_transition_at": datetime.now(timezone.utc),
         }
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.0.0.1:8080"
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
-        
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
+
         from opensandbox_server.api.schema import PaginationRequest
+
         request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=20))
         response = k8s_service.list_sandboxes(request)
-        
+
         # Sandbox in items uses 'id' field
         assert len(response.items) == 1
         assert response.items[0].id == "test-sandbox-123"
         assert response.pagination.total_items == 1
-    
+
     def test_list_sandboxes_with_pagination(self, k8s_service, mock_workload):
         # Create multiple mock workloads using mock_workload as template
         workloads = []
@@ -973,7 +1036,7 @@ class TestListSandboxes:
                 "status": {},
             }
             workloads.append(workload)
-        
+
         k8s_service.workload_provider.list_workloads.return_value = workloads
         k8s_service.workload_provider.get_status.return_value = {
             "state": "Running",
@@ -982,23 +1045,26 @@ class TestListSandboxes:
             "last_transition_at": datetime.now(timezone.utc),
         }
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.0.0.1:8080"
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
-        
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
+
         from opensandbox_server.api.schema import PaginationRequest
+
         request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=5))
         response = k8s_service.list_sandboxes(request)
-        
+
         assert len(response.items) == 5
         assert response.pagination.page == 1
         assert response.pagination.page_size == 5
         assert response.pagination.total_items == 10
         assert response.pagination.total_pages == 2
-    
+
     def test_list_sandboxes_sorted_by_creation_time(self, k8s_service, mock_workload):
         # Create workloads with different creation times
         base_time = datetime.now(timezone.utc)
         workloads = []
-        
+
         # Create sandboxes with specific creation times
         # We'll create them in random order to verify sorting works
         creation_times = [
@@ -1008,7 +1074,7 @@ class TestListSandboxes:
             base_time - timedelta(minutes=30),
             base_time,  # Newest
         ]
-        
+
         for i, created_at in enumerate(creation_times):
             workload = {
                 "metadata": {
@@ -1024,7 +1090,7 @@ class TestListSandboxes:
                 "status": {},
             }
             workloads.append(workload)
-        
+
         k8s_service.workload_provider.list_workloads.return_value = workloads
         k8s_service.workload_provider.get_status.return_value = {
             "state": "Running",
@@ -1033,15 +1099,18 @@ class TestListSandboxes:
             "last_transition_at": datetime.now(timezone.utc),
         }
         k8s_service.workload_provider.get_endpoint_info.return_value = "10.0.0.1:8080"
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
-        
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
+
         from opensandbox_server.api.schema import PaginationRequest
+
         request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=10))
         response = k8s_service.list_sandboxes(request)
-        
+
         # Verify all items are returned
         assert len(response.items) == 5
-        
+
         # Verify they are sorted by creation time (newest first)
         # The order should be: index 4 (newest), 3, 2, 1, 0 (oldest)
         assert response.items[0].id == "sandbox-4"  # Newest
@@ -1049,7 +1118,7 @@ class TestListSandboxes:
         assert response.items[2].id == "sandbox-2"
         assert response.items[3].id == "sandbox-1"
         assert response.items[4].id == "sandbox-0"  # Oldest
-        
+
         # Also verify the creation times are in descending order
         for i in range(len(response.items) - 1):
             assert response.items[i].created_at >= response.items[i + 1].created_at
@@ -1081,47 +1150,51 @@ class TestListSandboxes:
             "message": "Running",
             "last_transition_at": datetime.now(timezone.utc),
         }
-        k8s_service.workload_provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+        k8s_service.workload_provider.get_expiration.return_value = datetime.now(
+            timezone.utc
+        ) + timedelta(hours=1)
         from opensandbox_server.api.schema import PaginationRequest
+
         request = ListSandboxesRequest(pagination=PaginationRequest(page=1, page_size=10))
         response = k8s_service.list_sandboxes(request)
 
         assert len(response.items) == 1
         assert response.items[0].platform is None
 
+
 class TestRenewExpiration:
     """renew_sandbox_expiration method tests"""
-    
+
     def test_renew_expiration_succeeds(self, k8s_service, mock_workload):
         new_expiration = datetime.now(timezone.utc) + timedelta(hours=2)
-        
+
         k8s_service.workload_provider.get_workload.return_value = mock_workload
         k8s_service.workload_provider.update_expiration.return_value = None
         k8s_service.workload_provider.get_expiration.return_value = new_expiration
-        
+
         from opensandbox_server.api.schema import RenewSandboxExpirationRequest
+
         request = RenewSandboxExpirationRequest(expires_at=new_expiration)
-        
+
         response = k8s_service.renew_expiration("test-sandbox-id", request)
-        
+
         assert response.expires_at == new_expiration
         k8s_service.workload_provider.update_expiration.assert_called_once_with(
-            sandbox_id="test-sandbox-id",
-            namespace=k8s_service.namespace,
-            expires_at=new_expiration
+            sandbox_id="test-sandbox-id", namespace=k8s_service.namespace, expires_at=new_expiration
         )
-    
+
     def test_renew_with_past_time_raises_error(self, k8s_service, mock_workload):
         past_time = datetime.now(timezone.utc) - timedelta(hours=1)
-        
+
         k8s_service.workload_provider.get_workload.return_value = mock_workload
-        
+
         from opensandbox_server.api.schema import RenewSandboxExpirationRequest
+
         request = RenewSandboxExpirationRequest(expires_at=past_time)
-        
+
         with pytest.raises(HTTPException) as exc_info:
             k8s_service.renew_expiration("test-sandbox-id", request)
-        
+
         assert exc_info.value.status_code == 400
 
     def test_renew_returns_409_when_sandbox_has_no_expiration(self, k8s_service):
@@ -1129,6 +1202,7 @@ class TestRenewExpiration:
         k8s_service.workload_provider.get_workload.return_value = MagicMock()
         k8s_service.workload_provider.get_expiration.return_value = None
         from opensandbox_server.api.schema import RenewSandboxExpirationRequest
+
         request = RenewSandboxExpirationRequest(
             expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
         )
@@ -1148,7 +1222,9 @@ class TestSignedEndpoint:
 
     def _setup_gateway_with_secure_access(self, k8s_service, route_mode="wildcard"):
         """Helper to configure ingress gateway with secure_access on the service."""
-        address = "*.sandbox.example.com" if route_mode == "wildcard" else "gateway.sandbox.example.com"
+        address = (
+            "*.sandbox.example.com" if route_mode == "wildcard" else "gateway.sandbox.example.com"
+        )
         k8s_service.ingress_config = IngressConfig(
             mode="gateway",
             gateway=GatewayConfig(

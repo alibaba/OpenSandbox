@@ -22,7 +22,7 @@ from opensandbox_server.extensions import (
     ACCESS_RENEW_EXTEND_SECONDS_MIN,
     apply_access_renew_extend_seconds_to_mapping,
     apply_extensions_to_annotations,
-    validate_extensions
+    validate_extensions,
 )
 
 
@@ -36,14 +36,20 @@ class TestValidateCreateSandboxExtensionsAccessRenewExtendSeconds:
         assert validate_extensions({"other": "x"}) is None
 
     def test_boundary_min_ok(self):
-        assert validate_extensions(
-            {ACCESS_RENEW_EXTEND_SECONDS_KEY: str(ACCESS_RENEW_EXTEND_SECONDS_MIN)}
-        ) is None
+        assert (
+            validate_extensions(
+                {ACCESS_RENEW_EXTEND_SECONDS_KEY: str(ACCESS_RENEW_EXTEND_SECONDS_MIN)}
+            )
+            is None
+        )
 
     def test_boundary_max_ok(self):
-        assert validate_extensions(
-            {ACCESS_RENEW_EXTEND_SECONDS_KEY: str(ACCESS_RENEW_EXTEND_SECONDS_MAX)}
-        ) is None
+        assert (
+            validate_extensions(
+                {ACCESS_RENEW_EXTEND_SECONDS_KEY: str(ACCESS_RENEW_EXTEND_SECONDS_MAX)}
+            )
+            is None
+        )
 
     def test_typical_value_ok(self):
         assert validate_extensions({ACCESS_RENEW_EXTEND_SECONDS_KEY: "1800"}) is None
@@ -87,9 +93,7 @@ class TestAccessRenewExtendSecondsStorage:
 
     def test_apply_to_mapping_sets_default_key(self):
         m: dict[str, str] = {}
-        apply_access_renew_extend_seconds_to_mapping(
-            m, {ACCESS_RENEW_EXTEND_SECONDS_KEY: "1200"}
-        )
+        apply_access_renew_extend_seconds_to_mapping(m, {ACCESS_RENEW_EXTEND_SECONDS_KEY: "1200"})
         assert m == {ACCESS_RENEW_EXTEND_SECONDS_METADATA_KEY: "1200"}
 
     def test_apply_to_mapping_noop_when_key_absent(self):

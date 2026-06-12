@@ -88,14 +88,10 @@ def decode_expires_b36(s: str) -> int:
     if not s:
         raise ValueError("expires_b36 string must not be empty")
     if len(s) > MAX_EXPIRES_B36_LEN:
-        raise ValueError(
-            f"expires_b36 string too long: {len(s)} > {MAX_EXPIRES_B36_LEN}"
-        )
+        raise ValueError(f"expires_b36 string too long: {len(s)} > {MAX_EXPIRES_B36_LEN}")
     if not _is_valid_base36(s):
         invalid = [c for c in s if c not in _BASE36_CHAR_SET]
-        raise ValueError(
-            f"expires_b36 contains invalid characters: {invalid!r}"
-        )
+        raise ValueError(f"expires_b36 contains invalid characters: {invalid!r}")
     if len(s) > 1 and s[0] == "0":
         raise ValueError(f"expires_b36 must not have leading zeros: {s!r}")
 
@@ -151,12 +147,7 @@ def compute_hex8(secret_bytes: bytes, canonical_bytes: bytes) -> str:
     Returns:
         First 8 lowercase hex characters of the digest.
     """
-    inner = (
-        _be32(len(secret_bytes))
-        + secret_bytes
-        + _be32(len(canonical_bytes))
-        + canonical_bytes
-    )
+    inner = _be32(len(secret_bytes)) + secret_bytes + _be32(len(canonical_bytes)) + canonical_bytes
     digest = hashlib.sha256(inner).digest()
     return digest.hex()[:8]
 

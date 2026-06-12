@@ -13,6 +13,7 @@ on:
       - '.github/workflows/kubernetes-nightly-build.yml'
       - 'scripts/python-k8s-e2e.sh'
       - 'scripts/python-k8s-e2e-ingress.sh'
+      - 'scripts/python-k8s-e2e-multi-tenant.sh'
       - 'scripts/common/kubernetes-e2e.sh'
       - 'kubernetes/charts/**'
 
@@ -37,6 +38,14 @@ jobs:
           - variant: ingress-uri
             script: scripts/python-k8s-e2e-ingress.sh
             e2e_gateway_route_mode: uri
+          - variant: multi-tenant-file
+            script: scripts/python-k8s-e2e-multi-tenant.sh
+            e2e_gateway_route_mode: ""
+            e2e_tenant_provider: file
+          - variant: multi-tenant-http
+            script: scripts/python-k8s-e2e-multi-tenant.sh
+            e2e_gateway_route_mode: ""
+            e2e_tenant_provider: http
     env:
       KIND_CLUSTER: opensandbox-e2e
       KIND_K8S_VERSION: v1.30.4
@@ -75,6 +84,7 @@ jobs:
       - name: Run Kubernetes runtime E2E
         env:
           E2E_GATEWAY_ROUTE_MODE: ${{ matrix.e2e_gateway_route_mode }}
+          TENANT_PROVIDER: ${{ matrix.e2e_tenant_provider }}
         run: bash "./${{ matrix.script }}"
 
       - name: Dump kind diagnostics

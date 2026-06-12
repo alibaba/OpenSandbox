@@ -15,6 +15,7 @@
 """
 Shared fixtures for Kubernetes runtime tests.
 """
+
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock
 from typing import Dict, Any
@@ -38,7 +39,9 @@ def mock_k8s_client():
     client.custom_api = mock_custom_api
     client.core_api = mock_core_api
     # Unified resource operation methods
-    client.create_custom_object = MagicMock(return_value={"metadata": {"name": "test", "uid": "uid"}})
+    client.create_custom_object = MagicMock(
+        return_value={"metadata": {"name": "test", "uid": "uid"}}
+    )
     client.get_custom_object = MagicMock(return_value=None)
     client.list_custom_objects = MagicMock(return_value=[])
     client.delete_custom_object = MagicMock()
@@ -100,31 +103,25 @@ def valid_batchsandbox_template() -> Dict[str, Any]:
     """Provide valid BatchSandbox template"""
     return {
         "metadata": {
-            "annotations": {
-                "managed-by": "opensandbox",
-                "template-source": "test-template"
-            }
+            "annotations": {"managed-by": "opensandbox", "template-source": "test-template"}
         },
         "spec": {
             "template": {
                 "spec": {
                     "restartPolicy": "Never",
-                    "nodeSelector": {
-                        "workload": "sandbox",
-                        "environment": "test"
-                    },
+                    "nodeSelector": {"workload": "sandbox", "environment": "test"},
                     "tolerations": [
                         {
                             "key": "sandbox",
                             "operator": "Equal",
                             "value": "true",
-                            "effect": "NoSchedule"
+                            "effect": "NoSchedule",
                         }
                     ],
-                    "priorityClassName": "sandbox-default"
+                    "priorityClassName": "sandbox-default",
                 }
             }
-        }
+        },
     }
 
 
@@ -137,7 +134,7 @@ def sample_create_request():
         timeout=3600,
         resourceLimits=ResourceLimits(root={"cpu": "1", "memory": "1Gi"}),
         env={"ENV": "test", "DEBUG": "true"},
-        metadata={"team": "platform", "project": "test"}
+        metadata={"team": "platform", "project": "test"},
     )
 
 
@@ -152,26 +149,13 @@ def mock_batchsandbox_response():
             "namespace": "test-namespace",
             "creationTimestamp": "2025-12-24T10:00:00Z",
             "uid": "test-uid-12345",
-            "annotations": {
-                "sandbox.opensandbox.io/endpoints": '["10.0.0.1"]'
-            },
-            "labels": {
-                "opensandbox.io/id": "test-id"
-            }
+            "annotations": {"sandbox.opensandbox.io/endpoints": '["10.0.0.1"]'},
+            "labels": {"opensandbox.io/id": "test-id"},
         },
         "spec": {
             "replicas": 1,
             "expireTime": "2025-12-24T11:00:00+00:00",
-            "template": {
-                "spec": {
-                    "containers": [
-                        {
-                            "name": "sandbox",
-                            "image": "python:3.11"
-                        }
-                    ]
-                }
-            }
+            "template": {"spec": {"containers": [{"name": "sandbox", "image": "python:3.11"}]}},
         },
         "status": {
             "replicas": 1,
@@ -181,8 +165,8 @@ def mock_batchsandbox_response():
             "taskPending": 0,
             "taskRunning": 0,
             "taskSucceed": 0,
-            "taskUnknown": 0
-        }
+            "taskUnknown": 0,
+        },
     }
 
 
@@ -192,7 +176,7 @@ def mock_batchsandbox_list_response(mock_batchsandbox_response):
     return {
         "apiVersion": "sandbox.opensandbox.io/v1alpha1",
         "kind": "BatchSandboxList",
-        "items": [mock_batchsandbox_response]
+        "items": [mock_batchsandbox_response],
     }
 
 
@@ -206,7 +190,7 @@ def fixed_datetime():
 def k8s_app_config(k8s_runtime_config):
     """Provide complete app configuration (Kubernetes type)"""
     from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig
-    
+
     return AppConfig(
         server=ServerConfig(
             host="0.0.0.0",
@@ -224,7 +208,12 @@ def k8s_app_config(k8s_runtime_config):
 @pytest.fixture
 def agent_sandbox_app_config(agent_sandbox_runtime_config):
     """Provide complete app configuration (kubernetes + agent-sandbox provider)"""
-    from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig, AgentSandboxRuntimeConfig
+    from opensandbox_server.config import (
+        AppConfig,
+        RuntimeConfig,
+        ServerConfig,
+        AgentSandboxRuntimeConfig,
+    )
 
     return AppConfig(
         server=ServerConfig(
@@ -249,7 +238,7 @@ def agent_sandbox_app_config(agent_sandbox_runtime_config):
 def app_config_no_k8s():
     """Provide app configuration without Kubernetes config"""
     from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig
-    
+
     return AppConfig(
         server=ServerConfig(
             host="0.0.0.0",
@@ -268,7 +257,7 @@ def app_config_no_k8s():
 def app_config_docker():
     """Provide Docker type app configuration"""
     from opensandbox_server.config import AppConfig, RuntimeConfig, ServerConfig
-    
+
     return AppConfig(
         server=ServerConfig(
             host="0.0.0.0",
@@ -287,21 +276,27 @@ def app_config_docker():
 def k8s_service(k8s_app_config):
     """Provide mocked KubernetesSandboxService"""
     from unittest.mock import patch, MagicMock
-    
-    with patch('opensandbox_server.services.k8s.kubernetes_service.K8sClient') as mock_k8s_client_cls, \
-         patch('opensandbox_server.services.k8s.kubernetes_service.create_workload_provider') as mock_create_provider:
 
+    with (
+        patch(
+            "opensandbox_server.services.k8s.kubernetes_service.K8sClient"
+        ) as mock_k8s_client_cls,
+        patch(
+            "opensandbox_server.services.k8s.kubernetes_service.create_workload_provider"
+        ) as mock_create_provider,
+    ):
         # Mock K8sClient instance
         mock_k8s_client = MagicMock()
         mock_k8s_client_cls.return_value = mock_k8s_client
-        
+
         # Mock WorkloadProvider instance
         mock_provider = MagicMock()
         mock_create_provider.return_value = mock_provider
 
         from opensandbox_server.services.k8s.kubernetes_service import KubernetesSandboxService
+
         service = KubernetesSandboxService(k8s_app_config)
-        
+
         # Save mock objects for access in tests
         service.k8s_client = mock_k8s_client
         service.workload_provider = mock_provider
@@ -313,7 +308,7 @@ def k8s_service(k8s_app_config):
 def create_sandbox_request():
     """Provide standard sandbox creation request"""
     from opensandbox_server.api.schema import ResourceLimits
-    
+
     return CreateSandboxRequest(
         image=ImageSpec(uri="python:3.9"),
         entrypoint=["/bin/bash", "-c", "sleep infinity"],
@@ -336,7 +331,9 @@ def mock_workload():
             },
             "annotations": {
                 "opensandbox.io/created-at": datetime.now(timezone.utc).isoformat(),
-                "opensandbox.io/expires-at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+                "opensandbox.io/expires-at": (
+                    datetime.now(timezone.utc) + timedelta(hours=1)
+                ).isoformat(),
                 "opensandbox.io/image": '{"uri": "python:3.9"}',
                 "opensandbox.io/entrypoint": '["/bin/bash", "-c", "sleep infinity"]',
             },

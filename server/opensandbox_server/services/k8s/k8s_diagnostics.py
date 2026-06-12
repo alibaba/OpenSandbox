@@ -117,19 +117,25 @@ class K8sDiagnosticsMixin:
                 lines.append(f"    Image:          {cs.image}")
                 if cs.state:
                     if cs.state.running:
-                        lines.append(f"    State:          Running (since {cs.state.running.started_at})")
+                        lines.append(
+                            f"    State:          Running (since {cs.state.running.started_at})"
+                        )
                     elif cs.state.waiting:
                         lines.append(f"    State:          Waiting ({cs.state.waiting.reason})")
                         if cs.state.waiting.message:
                             lines.append(f"    Message:        {cs.state.waiting.message}")
                     elif cs.state.terminated:
                         t = cs.state.terminated
-                        lines.append(f"    State:          Terminated (exit={t.exit_code}, reason={t.reason})")
+                        lines.append(
+                            f"    State:          Terminated (exit={t.exit_code}, reason={t.reason})"
+                        )
                         if t.message:
                             lines.append(f"    Message:        {t.message}")
                 if cs.last_state and cs.last_state.terminated:
                     t = cs.last_state.terminated
-                    lines.append(f"    Last State:     Terminated (exit={t.exit_code}, reason={t.reason})")
+                    lines.append(
+                        f"    Last State:     Terminated (exit={t.exit_code}, reason={t.reason})"
+                    )
 
         # Init container statuses
         if pod_status and pod_status.init_container_statuses:
@@ -141,7 +147,9 @@ class K8sDiagnosticsMixin:
                 if cs.state:
                     if cs.state.terminated:
                         t = cs.state.terminated
-                        lines.append(f"    State:          Terminated (exit={t.exit_code}, reason={t.reason})")
+                        lines.append(
+                            f"    State:          Terminated (exit={t.exit_code}, reason={t.reason})"
+                        )
                     elif cs.state.waiting:
                         lines.append(f"    State:          Waiting ({cs.state.waiting.reason})")
 
@@ -192,7 +200,5 @@ class K8sDiagnosticsMixin:
         lines: list[str] = []
         for ev in events_resp.items:
             ts = ev.last_timestamp or ev.event_time or ev.first_timestamp or "N/A"
-            lines.append(
-                f"[{ts}] {ev.type:8s} {ev.reason or 'N/A':20s} {ev.message or ''}"
-            )
+            lines.append(f"[{ts}] {ev.type:8s} {ev.reason or 'N/A':20s} {ev.message or ''}")
         return "\n".join(lines)

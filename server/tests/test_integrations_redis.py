@@ -16,7 +16,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from opensandbox_server.config import AppConfig, RenewIntentConfig, RenewIntentRedisConfig, RuntimeConfig, ServerConfig
+from opensandbox_server.config import (
+    AppConfig,
+    RenewIntentConfig,
+    RenewIntentRedisConfig,
+    RuntimeConfig,
+    ServerConfig,
+)
 from opensandbox_server.integrations.renew_intent.redis_client import (
     close_renew_intent_redis_client,
     connect_renew_intent_redis_from_config,

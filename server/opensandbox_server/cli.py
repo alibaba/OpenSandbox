@@ -59,6 +59,7 @@ def _is_basemodel_type(annotation: Any) -> bool:
     inner = _strip_optional(annotation)
     return isinstance(inner, type) and issubclass(inner, BaseModel)
 
+
 EXAMPLE_FILE_MAP = {
     "docker": "example.config.toml",
     "docker-zh": "example.config.zh.toml",
@@ -130,7 +131,9 @@ def copy_example_config(
     dest_path = Path(destination or DEFAULT_CONFIG_PATH).expanduser()
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     if dest_path.exists() and not force:
-        raise FileExistsError(f"Config file already exists at {dest_path}. Use --force to overwrite.")
+        raise FileExistsError(
+            f"Config file already exists at {dest_path}. Use --force to overwrite."
+        )
 
     example_resource = resources.files("opensandbox_server.examples").joinpath(filename)
     if not example_resource.is_file():
@@ -226,7 +229,9 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
     dest_path = Path(destination or DEFAULT_CONFIG_PATH).expanduser()
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     if dest_path.exists() and not force:
-        raise FileExistsError(f"Config file already exists at {dest_path}. Use --force to overwrite.")
+        raise FileExistsError(
+            f"Config file already exists at {dest_path}. Use --force to overwrite."
+        )
 
     sections = [
         "# Generated from OpenSandbox config schema. Remove sections you do not use.",
@@ -245,17 +250,19 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
         _render_section(
             "egress",
             EgressConfig,
-            extra_comments=["Used when networkPolicy is provided. Requires docker.network_mode = \"bridge\"."],
+            extra_comments=[
+                'Used when networkPolicy is provided. Requires docker.network_mode = "bridge".'
+            ],
         ),
         _render_section(
             "kubernetes",
             KubernetesRuntimeConfig,
-            extra_comments=["Only used when runtime.type = \"kubernetes\""],
+            extra_comments=['Only used when runtime.type = "kubernetes"'],
         ),
         _render_section(
             "agent_sandbox",
             AgentSandboxRuntimeConfig,
-            extra_comments=["Requires kubernetes.workload_provider = \"agent-sandbox\""],
+            extra_comments=['Requires kubernetes.workload_provider = "agent-sandbox"'],
         ),
         _render_section("ingress", IngressConfig),
         _render_section("storage", StorageConfig),

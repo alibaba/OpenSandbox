@@ -780,7 +780,9 @@ def test_secure_runtime_gvisor_without_any_runtime_raises_error():
             docker_runtime=None,
             k8s_runtime_class=None,
         )
-    assert "docker_runtime" in str(exc.value).lower() or "k8s_runtime_class" in str(exc.value).lower()
+    assert (
+        "docker_runtime" in str(exc.value).lower() or "k8s_runtime_class" in str(exc.value).lower()
+    )
 
 
 def test_secure_runtime_kata_without_any_runtime_raises_error():
@@ -791,7 +793,9 @@ def test_secure_runtime_kata_without_any_runtime_raises_error():
             docker_runtime=None,
             k8s_runtime_class=None,
         )
-    assert "docker_runtime" in str(exc.value).lower() or "k8s_runtime_class" in str(exc.value).lower()
+    assert (
+        "docker_runtime" in str(exc.value).lower() or "k8s_runtime_class" in str(exc.value).lower()
+    )
 
 
 def test_secure_runtime_invalid_type_raises_error():
@@ -963,9 +967,7 @@ def test_log_config_file_backup_count_validation():
 
 def test_app_config_log_defaults():
     """AppConfig should include default LogConfig."""
-    cfg = AppConfig(
-        runtime=RuntimeConfig(type="docker", execd_image="test:latest")
-    )
+    cfg = AppConfig(runtime=RuntimeConfig(type="docker", execd_image="test:latest"))
     assert cfg.log is not None
     assert cfg.log.level == "INFO"
     assert cfg.log.file_path is None
@@ -1247,7 +1249,9 @@ class TestSecureAccessInIngressConfig:
 
         keys = [SecureAccessKey(key_id="a", key=base64.b64encode(b"secret").decode())]
         secure = SecureAccessConfig(active_key="a", keys=keys)
-        with pytest.raises(ValueError, match="secure_access block requires ingress.mode = 'gateway'"):
+        with pytest.raises(
+            ValueError, match="secure_access block requires ingress.mode = 'gateway'"
+        ):
             IngressConfig(mode="direct", secure_access=secure)
 
     def test_gateway_with_secure_access_is_valid(self) -> None:
@@ -1417,4 +1421,3 @@ class TestSecureAccessTomlLoading:
 
         with pytest.raises(ValidationError, match="not found in secure_access.keys"):
             config_module.load_config(config_path)
-

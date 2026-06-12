@@ -1,4 +1,4 @@
-# Copyright 2026 Alibaba Group Holding Ltd.
+# Copyright 2025 Alibaba Group Holding Ltd.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,19 +14,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from contextvars import ContextVar
+from typing import Optional
+
+from opensandbox_server.tenants.models import TenantEntry
+
+_current_tenant: ContextVar[Optional[TenantEntry]] = ContextVar("current_tenant", default=None)
 
 
-def _normalize_create_status(status_info: Dict[str, Any]) -> Dict[str, Any]:
-    if status_info.get("state") != "Allocated":
-        return status_info
-    return {
-        **status_info,
-        "state": "Running",
-        "message": "Pod has IP assigned and sandbox is ready for requests",
-    }
+def get_current_tenant() -> Optional[TenantEntry]:
+    return _current_tenant.get()
 
 
-def _is_unschedulable_status(status_info: Dict[str, Any]) -> bool:
-    reason = str(status_info.get("reason") or "")
-    return reason == "POD_PLATFORM_UNSCHEDULABLE"
+def set_current_tenant(tenant: Optional[TenantEntry]) -> None:
+    _current_tenant.set(tenant)

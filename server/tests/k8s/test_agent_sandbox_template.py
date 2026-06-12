@@ -17,8 +17,8 @@ import yaml
 
 from opensandbox_server.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 
-class TestAgentSandboxTemplateManager:
 
+class TestAgentSandboxTemplateManager:
     def test_load_valid_yaml_template_successfully(self, tmp_path):
         template_file = tmp_path / "valid_template.yaml"
         template_content = {

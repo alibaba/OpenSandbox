@@ -58,7 +58,6 @@ class TestExtractUserLabels:
 
 
 class TestDockerMetadataStore:
-
     @staticmethod
     def _make_store(tmp_path: Path):
         return DockerMetadataStore(root=tmp_path / "metadata")

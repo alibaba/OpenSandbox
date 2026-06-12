@@ -67,9 +67,7 @@ def build_image_pull_secret(
     else:
         registry = "https://index.docker.io/v1/"
 
-    auth_str = base64.b64encode(
-        f"{auth.username}:{auth.password}".encode()
-    ).decode()
+    auth_str = base64.b64encode(f"{auth.username}:{auth.password}".encode()).decode()
     docker_config = {
         "auths": {
             registry: {
@@ -79,9 +77,7 @@ def build_image_pull_secret(
             }
         }
     }
-    docker_config_b64 = base64.b64encode(
-        json.dumps(docker_config).encode()
-    ).decode()
+    docker_config_b64 = base64.b64encode(json.dumps(docker_config).encode()).decode()
 
     return V1Secret(
         api_version="v1",

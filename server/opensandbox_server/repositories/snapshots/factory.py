@@ -38,9 +38,7 @@ def create_snapshot_repository(
     if store_config.type == "sqlite":
         return SQLiteSnapshotRepository(store_config.path)
 
-    raise ValueError(
-        f"Unsupported snapshot store type: {store_config.type}"
-    )
+    raise ValueError(f"Unsupported snapshot store type: {store_config.type}")
 
 
 __all__ = [
