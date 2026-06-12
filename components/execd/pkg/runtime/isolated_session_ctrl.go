@@ -1,0 +1,419 @@
+// Copyright 2026 Alibaba Group Holding Ltd.
+
+//go:build !windows
+
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package runtime
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"io"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/alibaba/opensandbox/execd/pkg/isolation"
+	"github.com/alibaba/opensandbox/execd/pkg/log"
+	"github.com/alibaba/opensandbox/execd/pkg/telemetry"
+	"github.com/alibaba/opensandbox/execd/pkg/vfs"
+)
+
+const isolatedRunEndMarker = "__ISOLATED_RUN_END__"
+
+// IsolatedRunner is the concrete isolated session runner.
+type IsolatedRunner struct {
+	ctrl            *Controller
+	isolator        isolation.Isolator
+	upperMgr        *isolation.UpperManager
+	allowedWritable []string
+	stopGC          chan struct{}
+}
+
+// NewIsolatedRunner creates the isolated session runner.
+func NewIsolatedRunner(ctrl *Controller, iso isolation.Isolator, cfg isolation.Config) (*IsolatedRunner, error) {
+	mgr, err := isolation.NewUpperManager(cfg.UpperRoot, cfg.UpperMaxBytes)
+	if err != nil {
+		return nil, fmt.Errorf("isolated runner: upper manager: %w", err)
+	}
+	r := &IsolatedRunner{
+		ctrl:            ctrl,
+		isolator:        iso,
+		upperMgr:        mgr,
+		allowedWritable: cfg.AllowedWritable,
+		stopGC:          make(chan struct{}),
+	}
+	go r.gcLoop()
+
+	// Register with telemetry so gauges can read session/upper stats.
+	telemetry.SetIsolationStatsProvider(r.statsSnapshot)
+
+	return r, nil
+}
+
+// statsSnapshot returns current isolation stats for telemetry gauges.
+func (r *IsolatedRunner) statsSnapshot() telemetry.IsolationStats {
+	sessionCount := int64(0)
+	r.ctrl.isolatedSessionMap.Range(func(_, _ any) bool {
+		sessionCount++
+		return true
+	})
+	usage, _ := r.upperMgr.Usage()
+	return telemetry.IsolationStats{
+		ActiveSessions:  sessionCount,
+		UpperUsageBytes: usage,
+	}
+}
+
+// startGC begins periodic idle session cleanup.
+func (r *IsolatedRunner) gcLoop() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.stopGC:
+			return
+		case <-ticker.C:
+			r.CollectIdle()
+		}
+	}
+}
+
+// CollectIdle scans sessions and deletes those past their idle timeout.
+func (r *IsolatedRunner) CollectIdle() {
+	now := time.Now()
+	r.ctrl.isolatedSessionMap.Range(func(key, value any) bool {
+		s, ok := value.(*isolatedSession)
+		if !ok {
+			return true
+		}
+
+		s.mu.RLock()
+		timeout := time.Duration(s.opts.IdleTimeoutSeconds) * time.Second
+		idle := now.Sub(s.lastRunAt)
+		sessionID := s.id
+		s.mu.RUnlock()
+
+		if timeout > 0 && idle > timeout {
+			log.Info("idle GC: deleting session %s (idle %v > timeout %v)", sessionID, idle, timeout)
+			if err := r.DeleteIsolatedSession(sessionID); err != nil {
+				log.Warning("idle GC: delete session %s: %v", sessionID, err)
+			}
+		}
+		return true
+	})
+}
+
+// StopGC stops the background GC goroutine.
+func (r *IsolatedRunner) StopGC() {
+	close(r.stopGC)
+}
+
+// Available reports whether the isolator is ready.
+func (r *IsolatedRunner) Available() bool {
+	return r.isolator.Available()
+}
+
+// CreateIsolatedSession starts a new bwrap + bash session.
+func (r *IsolatedRunner) CreateIsolatedSession(opts *IsolatedSessionOptions) (string, error) {
+	if err := r.validateExtraWritable(opts.ExtraWritable); err != nil {
+		return "", err
+	}
+
+	id := uuid.New().String()
+	session := newIsolatedSession(id, opts, r.isolator)
+
+	// Allocate upper directory for overlay mode.
+	if opts.WorkspaceMode == "overlay" || opts.WorkspaceMode == "" {
+		upperID, upperDir, workDir, err := r.upperMgr.Allocate()
+		if err != nil {
+			return "", fmt.Errorf("allocate upper: %w", err)
+		}
+		session.upperID = upperID
+		session.upperDir = upperDir
+		session.workDir = workDir
+	}
+
+	if err := session.start(); err != nil {
+		if session.upperID != "" {
+			r.upperMgr.Release(session.upperID)
+		}
+		return "", fmt.Errorf("start bwrap: %w", err)
+	}
+
+	r.ctrl.isolatedSessionMap.Store(id, session)
+	log.Info("created isolated session %s (profile=%s, mode=%s)", id, opts.Profile, opts.WorkspaceMode)
+	return id, nil
+}
+
+// GetIsolatedSession returns session state.
+func (r *IsolatedRunner) GetIsolatedSession(id string) (*IsolatedSessionState, error) {
+	s := r.lookup(id)
+	if s == nil {
+		return nil, ErrContextNotFound
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	state := &IsolatedSessionState{
+		Status:    "active",
+		CreatedAt: s.createdAt,
+		LastRunAt: s.lastRunAt,
+	}
+
+	if s.opts.IdleTimeoutSeconds > 0 {
+		remaining := s.opts.IdleTimeoutSeconds - int(time.Since(s.lastRunAt).Seconds())
+		if remaining < 0 {
+			remaining = 0
+		}
+		state.IdleRemainingSeconds = &remaining
+	}
+
+	return state, nil
+}
+
+// IsolatedSessionState is returned by GetIsolatedSession.
+type IsolatedSessionState struct {
+	Status               string
+	CreatedAt            time.Time
+	LastRunAt            time.Time
+	IdleRemainingSeconds *int
+}
+
+// StdoutCallback is called for each line of stdout output during Run.
+type StdoutCallback func(line string)
+
+// RunInIsolatedSession executes code in the session.
+// Runs are serialized per session via s.runMu.
+// envs are exported in the bash session before code runs.
+func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, code string, envs map[string]string, onStdout StdoutCallback) error {
+	s := r.lookup(id)
+	if s == nil {
+		return ErrContextNotFound
+	}
+
+	// Serialize concurrent runs on the same session.
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+
+	s.mu.RLock()
+	stdin := s.stdin
+	stdout := s.stdout
+	s.mu.RUnlock()
+
+	if stdin == nil || stdout == nil {
+		return fmt.Errorf("session not started")
+	}
+
+	// Prepend env exports before user code.
+	var script string
+	for k, v := range envs {
+		script += fmt.Sprintf("export %s=%s\n", shellescape(k), shellescape(v))
+	}
+	script += code
+	if !strings.HasSuffix(script, "\n") {
+		script += "\n"
+	}
+	script += fmt.Sprintf("echo %s $?\n", isolatedRunEndMarker)
+
+	// Close stdin only if context is cancelled during the run.
+	// The done channel prevents the goroutine from closing stdin
+	// after a normal return (which would kill the persistent session).
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			stdin.Close()
+		case <-done:
+		}
+	}()
+
+	if _, err := io.WriteString(stdin, script); err != nil {
+		return fmt.Errorf("write stdin: %w", err)
+	}
+
+	exitCode, err := scanUntilMarker(ctx, stdout, onStdout)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	s.lastRunAt = time.Now()
+	s.mu.Unlock()
+
+	if exitCode != 0 {
+		return fmt.Errorf("command exited with code %d", exitCode)
+	}
+
+	return nil
+}
+
+// scanUntilMarker reads stdout lines until the end marker is found.
+// Returns the exit code from the marker line.
+func scanUntilMarker(ctx context.Context, stdout io.ReadCloser, onStdout StdoutCallback) (int, error) {
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+
+	var exitCode int
+	scanDone := make(chan struct{})
+	go func() {
+		defer close(scanDone)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// The marker may appear mid-line if the previous command's
+			// output didn't end with a newline (e.g. cat of a file
+			// without trailing newline).
+			if idx := strings.Index(line, isolatedRunEndMarker); idx >= 0 {
+				if idx > 0 && onStdout != nil {
+					onStdout(line[:idx])
+				}
+				markerPart := line[idx:]
+				parts := strings.Fields(markerPart)
+				if len(parts) >= 2 {
+					if code, convErr := strconv.Atoi(parts[1]); convErr == nil {
+						exitCode = code
+					}
+				}
+				return
+			}
+			if onStdout != nil {
+				onStdout(line)
+			}
+		}
+	}()
+
+	select {
+	case <-scanDone:
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("read stdout: %w", err)
+	}
+	return exitCode, nil
+}
+
+// DeleteIsolatedSession destroys the session.
+func (r *IsolatedRunner) DeleteIsolatedSession(id string) error {
+	s := r.lookup(id)
+	if s == nil {
+		return ErrContextNotFound
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.stop(); err != nil {
+		log.Warning("stop isolated session %s: %v", id, err)
+	}
+
+	if s.upperID != "" {
+		r.upperMgr.Release(s.upperID)
+	}
+
+	r.ctrl.isolatedSessionMap.Delete(id)
+	log.Info("deleted isolated session %s", id)
+	return nil
+}
+
+// DiffUpper returns an error (Phase 2).
+func (r *IsolatedRunner) DiffUpper(id string, w io.Writer) error {
+	return fmt.Errorf("diff not implemented yet")
+}
+
+// CommitUpper returns an error (Phase 2).
+func (r *IsolatedRunner) CommitUpper(id string) error {
+	return fmt.Errorf("commit not implemented yet")
+}
+
+// GetMergedView returns a VFS for the session's filesystem.
+func (r *IsolatedRunner) GetMergedView(id string) (vfs.FS, error) {
+	s := r.lookup(id)
+	if s == nil {
+		return nil, ErrContextNotFound
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var uid, gid uint32
+	if s.opts.Uid != nil {
+		uid = *s.opts.Uid
+	}
+	if s.opts.Gid != nil {
+		gid = *s.opts.Gid
+	}
+
+	mode := isolation.WorkspaceOverlay
+	upper := s.upperDir
+	switch s.opts.WorkspaceMode {
+	case "rw":
+		mode = isolation.WorkspaceRW
+		upper = s.opts.WorkspacePath // writes go directly to workspace
+	case "ro":
+		mode = isolation.WorkspaceRO
+	}
+
+	return isolation.NewMergedView(s.opts.WorkspacePath, upper, mode, uid, gid), nil
+}
+
+// Capabilities returns the current isolator capabilities.
+func (r *IsolatedRunner) Capabilities() isolation.Capabilities {
+	return r.isolator.Capabilities()
+}
+
+func (r *IsolatedRunner) lookup(id string) *isolatedSession {
+	v, ok := r.ctrl.isolatedSessionMap.Load(id)
+	if !ok {
+		return nil
+	}
+	s, ok := v.(*isolatedSession)
+	if !ok {
+		return nil
+	}
+	return s
+}
+
+func (r *IsolatedRunner) validateExtraWritable(paths []string) error {
+	if len(paths) == 0 {
+		return nil
+	}
+	if len(r.allowedWritable) == 0 {
+		return fmt.Errorf("extra_writable not allowed: no paths in allowlist")
+	}
+	for _, p := range paths {
+		found := false
+		for _, allowed := range r.allowedWritable {
+			if strings.HasPrefix(p, allowed) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("extra_writable path %q not in allowlist", p)
+		}
+	}
+	return nil
+}
+
+// shellescape wraps s in single quotes, escaping embedded single quotes.
+func shellescape(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}

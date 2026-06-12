@@ -43,6 +43,8 @@ tags:
     description: File and directory operations
   - name: Metric
     description: System resource monitoring and metrics
+  - name: IsolatedExecution
+    description: Per-session namespace isolation, code execution, and filesystem proxy
 
 paths:
   /ping:
@@ -1080,6 +1082,446 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /v1/isolated/session:
+    post:
+      summary: Create an isolated bash session
+      operationId: createIsolatedSession
+      tags:
+        - IsolatedExecution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIsolatedSessionRequest"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IsolatedCreateSessionResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/capabilities:
+    get:
+      summary: Get isolator capabilities
+      operationId: isolatedCapabilities
+      tags:
+        - IsolatedExecution
+      responses:
+        "200":
+          description: Isolator capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilitiesResponse"
+
+  /v1/isolated/session/{sessionId}:
+    get:
+      summary: Get isolated session state
+      operationId: getIsolatedSession
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Session state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionState"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      summary: Delete an isolated session
+      operationId: deleteIsolatedSession
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Session deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/run:
+    post:
+      summary: Run code in an isolated session (SSE streaming)
+      operationId: runInIsolatedSession
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IsolatedRunRequest"
+      responses:
+        "200":
+          description: SSE stream of execution output
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/ServerStreamEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/diff:
+    get:
+      summary: Download upper directory diff (stub)
+      operationId: isolatedSessionDiff
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/commit:
+    post:
+      summary: Commit upper changes to workspace (stub)
+      operationId: isolatedSessionCommit
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/files/info:
+    get:
+      summary: Get file information
+      operationId: isolatedGetFilesInfo
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/FileInfo"
+      responses:
+        "200":
+          description: File metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/FileInfo"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/files/download:
+    get:
+      summary: Download a file
+      operationId: isolatedDownloadFile
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File content
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/files/upload:
+    post:
+      summary: Upload a file
+      operationId: isolatedUploadFile
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                metadata:
+                  type: string
+                  description: JSON-encoded file metadata
+                file:
+                  type: string
+                  format: binary
+                  description: File to upload
+      responses:
+        "200":
+          description: File uploaded
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/files:
+    delete:
+      summary: Remove files
+      operationId: isolatedRemoveFiles
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/FileInfo"
+      responses:
+        "200":
+          description: Files removed
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/files/mv:
+    post:
+      summary: Rename or move files
+      operationId: isolatedRenameFiles
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/RenameFileItem"
+      responses:
+        "200":
+          description: Files renamed
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/files/permissions:
+    post:
+      summary: Change file permissions
+      operationId: isolatedChmodFiles
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/Permission"
+      responses:
+        "200":
+          description: Permissions changed
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/files/replace:
+    post:
+      summary: Replace file content
+      operationId: isolatedReplaceContent
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/ReplaceFileContentItem"
+      responses:
+        "200":
+          description: Content replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/ReplaceFileContentResult"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/files/search:
+    get:
+      summary: Search files
+      operationId: isolatedSearchFiles
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: pattern
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Matched files
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileInfo"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /v1/isolated/session/{sessionId}/directories:
+    post:
+      summary: Create directories
+      operationId: isolatedMakeDirs
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/Permission"
+      responses:
+        "200":
+          description: Directories created
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    delete:
+      summary: Remove directories
+      operationId: isolatedRemoveDirs
+      tags:
+        - IsolatedExecution
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/FileInfo"
+      responses:
+        "200":
+          description: Directories removed
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
 components:
   securitySchemes:
     AccessToken:
@@ -1488,7 +1930,118 @@ components:
           example: "error parsing request, MAYBE invalid body format"
       required: [code, message]
 
+    CreateIsolatedSessionRequest:
+      type: object
+      required:
+        - workspace
+      properties:
+        profile:
+          type: string
+          enum: ["strict", "balanced"]
+        workspace:
+          $ref: "#/components/schemas/IsolatedWorkspaceSpec"
+        extra_writable:
+          type: array
+          items:
+            type: string
+        share_net:
+          type: boolean
+        env_passthrough:
+          $ref: "#/components/schemas/EnvPassthroughSpec"
+        uid:
+          type: integer
+          format: uint32
+        gid:
+          type: integer
+          format: uint32
+        idle_timeout_seconds:
+          type: integer
+
+    IsolatedWorkspaceSpec:
+      type: object
+      required:
+        - path
+      properties:
+        path:
+          type: string
+        mode:
+          type: string
+          enum: ["rw", "overlay", "ro"]
+
+    EnvPassthroughSpec:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: ["allow", "deny"]
+        keys:
+          type: array
+          items:
+            type: string
+
+    IsolatedCreateSessionResponse:
+      type: object
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    IsolatedRunRequest:
+      type: object
+      required:
+        - code
+      properties:
+        code:
+          type: string
+        envs:
+          type: object
+          additionalProperties:
+            type: string
+        timeout_seconds:
+          type: integer
+          minimum: 0
+
+    SessionState:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: ["active", "destroyed"]
+        created_at:
+          type: string
+          format: date-time
+        last_run_at:
+          type: string
+          format: date-time
+        idle_remaining_seconds:
+          type: integer
+          nullable: true
+
+    CapabilitiesResponse:
+      type: object
+      properties:
+        available:
+          type: boolean
+        isolator:
+          type: string
+        version:
+          type: string
+        commit_supported:
+          type: boolean
+        diff_supported:
+          type: boolean
+
   responses:
+    ServiceUnavailable:
+      description: Isolation subsystem is not available
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
     BadRequest:
       description: Invalid request body format or missing required fields
       content:
