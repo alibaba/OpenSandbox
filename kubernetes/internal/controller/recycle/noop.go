@@ -38,10 +38,18 @@ func NewNoopRecycler() *NoopRecycler {
 // When the pod is already gone, it returns Succeeded.
 // A nil pod is considered succeeded since there is nothing to do.
 func (n *NoopRecycler) TryRecycle(ctx context.Context, pool *sandboxv1alpha1.Pool, pod *corev1.Pod, spec *Spec) (*Status, error) {
-	if pod == nil || pod.DeletionTimestamp != nil {
+	if pod == nil {
 		return &Status{
 			State:   StateSucceeded,
-			Message: "noop recycler: pod is deleted",
+			Message: "noop recycler: pod is gone",
+		}, nil
+	}
+	// Pod still exists but deletion has been requested; wait for it to disappear
+	// before reporting success so the pool does not re-allocate a terminating pod.
+	if pod.DeletionTimestamp != nil {
+		return &Status{
+			State:   StateRecycling,
+			Message: "noop recycler: waiting for pod termination",
 		}, nil
 	}
 	return &Status{

@@ -43,9 +43,11 @@ func TestNoopRecycler(t *testing.T) {
 			wantNeedDelete: false,
 		},
 		{
-			name:           "PodWithDeletionTimestamp_Succeeded",
+			// Pod is terminating but not yet gone; report Recycling so the pool
+			// does not re-allocate it before it fully disappears.
+			name:           "PodWithDeletionTimestamp_Recycling",
 			pod:            &corev1.Pod{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &now}},
-			wantState:      StateSucceeded,
+			wantState:      StateRecycling,
 			wantNeedDelete: false,
 		},
 		{
