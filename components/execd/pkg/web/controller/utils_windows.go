@@ -119,12 +119,19 @@ func MakeDir(dir string, perm model.Permission) error {
 	if err != nil {
 		return err
 	}
+
+	_, statErr := os.Stat(abs)
+	existed := statErr == nil
+
 	err = os.MkdirAll(abs, os.ModePerm)
 	if err != nil {
 		return err
 	}
 
-	return ChmodFile(abs, perm)
+	if !existed {
+		return ChmodFile(abs, perm)
+	}
+	return nil
 }
 
 func fileType(fileInfo os.FileInfo) string {
