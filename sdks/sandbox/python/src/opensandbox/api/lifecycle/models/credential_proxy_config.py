@@ -20,7 +20,6 @@ from collections.abc import Mapping
 from typing import Any, TypeVar
 
 from attrs import define as _attrs_define
-from attrs import field as _attrs_field
 
 from ..types import UNSET, Unset
 
@@ -29,20 +28,24 @@ T = TypeVar("T", bound="CredentialProxyConfig")
 
 @_attrs_define
 class CredentialProxyConfig:
-    """Credential Vault proxy startup settings.
+    """Credential Vault proxy startup settings. This is an explicit opt-in for
+    transparent MITM support used by credential injection; plain egress
+    network policy remains DNS/FQDN policy enforcement only.
 
-    Attributes:
-        enabled (bool | Unset): Enable transparent MITM support required by Credential Vault injection. Default: False.
+        Attributes:
+            enabled (bool | Unset): When true, the server starts the egress sidecar with transparent
+                MITM enabled and installs the runtime-managed MITM CA bundle into
+                the sandbox container. Requires `networkPolicy`.
+                 Default: False.
     """
 
     enabled: bool | Unset = False
-    additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         enabled = self.enabled
 
         field_dict: dict[str, Any] = {}
-        field_dict.update(self.additional_properties)
+
         field_dict.update({})
         if enabled is not UNSET:
             field_dict["enabled"] = enabled
@@ -58,24 +61,4 @@ class CredentialProxyConfig:
             enabled=enabled,
         )
 
-        credential_proxy_config.additional_properties = d
         return credential_proxy_config
-
-    @property
-    def additional_keys(self) -> list[str]:
-        return list(self.additional_properties.keys())
-
-    def __getitem__(self, key: str) -> Any:
-        return self.additional_properties[key]
-
-    def __setitem__(self, key: str, value: Any) -> None:
-        self.additional_properties[key] = value
-
-    def __delitem__(self, key: str) -> None:
-        del self.additional_properties[key]
-
-    def __contains__(self, key: str) -> bool:
-        return key in self.additional_properties
-
-    def get(self, key: str, default: Any | None = None) -> Any:
-        return self.additional_properties.get(key, default)

@@ -1443,6 +1443,38 @@ public class SandboxE2ETest extends BaseE2ETest {
     }
 
     @Test
+    @Order(5)
+    @DisplayName("Line-based file reading with offset and limit")
+    @Timeout(value = 1, unit = TimeUnit.MINUTES)
+    void testLineBasedFileReading() throws Exception {
+        assertNotNull(sandbox);
+
+        String testPath = "/tmp/line-read-e2e.txt";
+        String content = "line1\nline2\nline3\nline4\nline5";
+        sandbox.files()
+                .write(
+                        List.of(
+                                WriteEntry.builder()
+                                        .path(testPath)
+                                        .data(content)
+                                        .build()));
+
+        // offset=2, limit=2 → lines 2-3
+        String result1 = sandbox.files().readFile(testPath, "UTF-8", null, 2, 2);
+        assertEquals("line2\nline3", result1);
+
+        // offset=4, no limit → lines 4-5
+        String result2 = sandbox.files().readFile(testPath, "UTF-8", null, 4, null);
+        assertEquals("line4\nline5", result2);
+
+        // limit=2, no offset → lines 1-2
+        String result3 = sandbox.files().readFile(testPath, "UTF-8", null, null, 2);
+        assertEquals("line1\nline2", result3);
+
+        sandbox.files().deleteFiles(List.of(testPath));
+    }
+
+    @Test
     @Order(6)
     @DisplayName("Interrupt command")
     @Timeout(value = 2, unit = TimeUnit.MINUTES)

@@ -206,3 +206,36 @@ func TestFilesystem_ReplaceInFiles(t *testing.T) {
 	})
 	require.NoError(t, err)
 }
+
+func TestFilesystem_DownloadFileLineReading(t *testing.T) {
+	ctx, sb := createTestSandbox(t)
+
+	remotePath := "/tmp/line-read-e2e.txt"
+	_, err := sb.RunCommand(ctx, `printf "line1\nline2\nline3\nline4\nline5" > `+remotePath, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sb.DeleteFiles(context.Background(), []string{remotePath}) })
+
+	// offset=2, limit=2 → lines 2-3
+	rc, err := sb.DownloadFile(ctx, remotePath, "", opensandbox.DownloadFileOptions{Offset: 2, Limit: 2})
+	require.NoError(t, err)
+	data, err := io.ReadAll(rc)
+	rc.Close()
+	require.NoError(t, err)
+	require.Equal(t, "line2\nline3", string(data))
+
+	// offset=4, no limit → lines 4-5
+	rc, err = sb.DownloadFile(ctx, remotePath, "", opensandbox.DownloadFileOptions{Offset: 4})
+	require.NoError(t, err)
+	data, err = io.ReadAll(rc)
+	rc.Close()
+	require.NoError(t, err)
+	require.Equal(t, "line4\nline5", string(data))
+
+	// limit=2, no offset → lines 1-2
+	rc, err = sb.DownloadFile(ctx, remotePath, "", opensandbox.DownloadFileOptions{Limit: 2})
+	require.NoError(t, err)
+	data, err = io.ReadAll(rc)
+	rc.Close()
+	require.NoError(t, err)
+	require.Equal(t, "line1\nline2", string(data))
+}

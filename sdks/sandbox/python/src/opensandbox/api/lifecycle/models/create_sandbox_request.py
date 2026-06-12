@@ -26,9 +26,7 @@ from ..types import UNSET, Unset
 
 if TYPE_CHECKING:
     from ..models.create_sandbox_request_env import CreateSandboxRequestEnv
-    from ..models.create_sandbox_request_extensions import (
-        CreateSandboxRequestExtensions,
-    )
+    from ..models.create_sandbox_request_extensions import CreateSandboxRequestExtensions
     from ..models.create_sandbox_request_metadata import CreateSandboxRequestMetadata
     from ..models.credential_proxy_config import CredentialProxyConfig
     from ..models.image_spec import ImageSpec
@@ -121,7 +119,10 @@ class CreateSandboxRequest:
             network_policy (NetworkPolicy | Unset): Egress network policy matching the sidecar `/policy` request body.
                 If `defaultAction` is omitted, the sidecar defaults to "deny"; passing an empty
                 object or null results in allow-all behavior at startup.
-            credential_proxy (CredentialProxyConfig | Unset): Credential Vault proxy startup settings.
+            credential_proxy (CredentialProxyConfig | Unset): Credential Vault proxy startup settings. This is an explicit
+                opt-in for
+                transparent MITM support used by credential injection; plain egress
+                network policy remains DNS/FQDN policy enforcement only.
             secure_access (bool | Unset): Opts the sandbox into secured access for endpoint access.
                 This is currently supported only for Kubernetes sandboxes exposed
                 through ingress gateway mode. When enabled, the server provisions
@@ -256,12 +257,8 @@ class CreateSandboxRequest:
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
         from ..models.create_sandbox_request_env import CreateSandboxRequestEnv
-        from ..models.create_sandbox_request_extensions import (
-            CreateSandboxRequestExtensions,
-        )
-        from ..models.create_sandbox_request_metadata import (
-            CreateSandboxRequestMetadata,
-        )
+        from ..models.create_sandbox_request_extensions import CreateSandboxRequestExtensions
+        from ..models.create_sandbox_request_metadata import CreateSandboxRequestMetadata
         from ..models.credential_proxy_config import CredentialProxyConfig
         from ..models.image_spec import ImageSpec
         from ..models.network_policy import NetworkPolicy

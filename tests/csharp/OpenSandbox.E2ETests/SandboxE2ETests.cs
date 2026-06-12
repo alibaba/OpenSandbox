@@ -937,6 +937,36 @@ public class SandboxE2ETests : IClassFixture<SandboxE2ETestFixture>
         Assert.Equal("OK", verify.Logs.Stdout[0].Text);
     }
 
+    [Fact(Timeout = 60 * 1000)]
+    public async Task Filesystem_LineBasedReading()
+    {
+        var sandbox = _fixture.Sandbox;
+
+        var testPath = "/tmp/line-read-e2e.txt";
+        var content = "line1\nline2\nline3\nline4\nline5";
+        await sandbox.Files.WriteFilesAsync(new[]
+        {
+            new WriteEntry { Path = testPath, Data = content }
+        });
+
+        // offset=2, limit=2 → lines 2-3
+        var result1 = await sandbox.Files.ReadFileAsync(
+            testPath, new ReadFileOptions { Offset = 2, Limit = 2 });
+        Assert.Equal("line2\nline3", result1);
+
+        // offset=4, no limit → lines 4-5
+        var result2 = await sandbox.Files.ReadFileAsync(
+            testPath, new ReadFileOptions { Offset = 4 });
+        Assert.Equal("line4\nline5", result2);
+
+        // limit=2, no offset → lines 1-2
+        var result3 = await sandbox.Files.ReadFileAsync(
+            testPath, new ReadFileOptions { Limit = 2 });
+        Assert.Equal("line1\nline2", result3);
+
+        await sandbox.Files.DeleteFilesAsync(new[] { testPath });
+    }
+
     [Fact(Timeout = 2 * 60 * 1000)]
     public async Task Command_Interrupt()
     {

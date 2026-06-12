@@ -22,7 +22,6 @@ import logging
 from collections.abc import Iterator
 from io import IOBase, TextIOBase
 from typing import TypedDict
-from urllib.parse import quote
 
 import httpx
 
@@ -55,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 class _DownloadRequest(TypedDict):
     url: str
-    params: dict[str, str] | None
+    params: dict[str, str]
     headers: dict[str, str]
 
 
@@ -92,13 +91,24 @@ class FilesystemAdapterSync(FilesystemSync):
     def _get_execd_url(self, path: str) -> str:
         return f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}{path}"
 
-    def _build_download_request(self, path: str, range_header: str | None = None) -> _DownloadRequest:
-        encoded_path = quote(path, safe="/")
-        url = f"{self._get_execd_url(self.FILESYSTEM_DOWNLOAD_PATH)}?path={encoded_path}"
+    def _build_download_request(
+        self,
+        path: str,
+        range_header: str | None = None,
+        *,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> _DownloadRequest:
+        url = self._get_execd_url(self.FILESYSTEM_DOWNLOAD_PATH)
         headers: dict[str, str] = {}
+        params: dict[str, str] = {"path": path}
         if range_header:
             headers["Range"] = range_header
-        return {"url": url, "params": None, "headers": headers}
+        if offset is not None:
+            params["offset"] = str(offset)
+        if limit is not None:
+            params["limit"] = str(limit)
+        return {"url": url, "params": params, "headers": headers}
 
     def read_file(
         self,
@@ -106,25 +116,28 @@ class FilesystemAdapterSync(FilesystemSync):
         *,
         encoding: str = "utf-8",
         range_header: str | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
     ) -> str:
-        content = self.read_bytes(path, range_header=range_header)
+        content = self.read_bytes(path, range_header=range_header, offset=offset, limit=limit)
         return content.decode(encoding)
 
-    def read_bytes(self, path: str, *, range_header: str | None = None) -> bytes:
+    def read_bytes(
+        self,
+        path: str,
+        *,
+        range_header: str | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
+    ) -> bytes:
         logger.debug("Reading file as bytes: %s", path)
         try:
-            request_data = self._build_download_request(path, range_header)
-            if request_data["params"] is None:
-                response = self._httpx_client.get(
-                    request_data["url"],
-                    headers=request_data["headers"],
-                )
-            else:
-                response = self._httpx_client.get(
-                    request_data["url"],
-                    headers=request_data["headers"],
-                    params=request_data["params"],
-                )
+            request_data = self._build_download_request(path, range_header, offset=offset, limit=limit)
+            response = self._httpx_client.get(
+                request_data["url"],
+                headers=request_data["headers"],
+                params=request_data["params"],
+            )
             response.raise_for_status()
             return response.content
         except Exception as e:
@@ -132,23 +145,26 @@ class FilesystemAdapterSync(FilesystemSync):
             raise ExceptionConverter.to_sandbox_exception(e) from e
 
     def read_bytes_stream(
-        self, path: str, *, chunk_size: int = 64 * 1024, range_header: str | None = None
+        self,
+        path: str,
+        *,
+        chunk_size: int = 64 * 1024,
+        range_header: str | None = None,
+        offset: int | None = None,
+        limit: int | None = None,
     ) -> Iterator[bytes]:
         logger.debug("Streaming file as bytes: %s (chunk_size=%s)", path, chunk_size)
-        request_data = self._build_download_request(path, range_header)
+        request_data = self._build_download_request(path, range_header, offset=offset, limit=limit)
         url = request_data["url"]
         params = request_data["params"]
         headers = request_data["headers"]
 
-        if params is None:
-            request = self._httpx_client.build_request("GET", url, headers=headers)
-        else:
-            request = self._httpx_client.build_request(
-                "GET",
-                url,
-                headers=headers,
-                params=params,
-            )
+        request = self._httpx_client.build_request(
+            "GET",
+            url,
+            headers=headers,
+            params=params,
+        )
         response = self._httpx_client.send(request, stream=True)
 
         if response.status_code >= 300:

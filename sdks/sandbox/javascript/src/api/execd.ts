@@ -461,6 +461,10 @@ export interface paths {
          * @description Downloads a file from the specified path within the sandbox. Supports HTTP
          *     range requests for resumable downloads and partial content retrieval.
          *     Returns file as octet-stream with appropriate headers.
+         *
+         *     When offset/limit query parameters are provided, the endpoint performs
+         *     line-based reading and returns text/plain content instead. Line-based
+         *     parameters are mutually exclusive with the Range header.
          */
         get: operations["downloadFile"];
         put?: never;
@@ -484,6 +488,17 @@ export interface paths {
          *     only immediate children are returned (`depth=1`). Set `depth` to a larger
          *     value to include descendants up to that many levels below `path`. The
          *     root directory itself is not included in the response.
+         *
+         *     Symbolic links are reported with `type=symlink` and are not traversed:
+         *     the listing never descends into a link target, even when `depth` would
+         *     otherwise allow it. For the same reason, when `path` itself resolves to
+         *     a symbolic link the request is rejected with `400`; callers must pass
+         *     the real directory path they want listed.
+         *
+         *     Entries are returned in lexical order by entry name within each
+         *     directory. Descendants reported via `depth>1` follow their parent in
+         *     the same lexical order, so a depth-2 listing yields stable, predictable
+         *     output for file-browser style clients.
          */
         get: operations["listDirectory"];
         put?: never;
@@ -1687,10 +1702,20 @@ export interface operations {
                  * @example /workspace/data.csv
                  */
                 path: string;
+                /**
+                 * @description Starting line number (1-based) for line-based reading. Mutually exclusive with the Range header.
+                 * @example 100
+                 */
+                offset?: number;
+                /**
+                 * @description Number of lines to return for line-based reading. Mutually exclusive with the Range header.
+                 * @example 20
+                 */
+                limit?: number;
             };
             header?: {
                 /**
-                 * @description HTTP Range header for partial content requests
+                 * @description HTTP Range header for partial content requests. Mutually exclusive with offset/limit.
                  * @example bytes=0-1023
                  */
                 Range?: string;
@@ -1700,17 +1725,21 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description File content */
+            /**
+             * @description File content. Returns application/octet-stream for full or byte-range
+             *     downloads, or text/plain for line-based reads (when offset/limit are provided).
+             */
             200: {
                 headers: {
-                    /** @description Attachment header with filename */
+                    /** @description Attachment header with filename (byte-range mode only) */
                     "Content-Disposition"?: string;
-                    /** @description File size in bytes */
+                    /** @description File size in bytes (byte-range mode only) */
                     "Content-Length"?: number;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/octet-stream": string;
+                    "text/plain": string;
                 };
             };
             /** @description Partial file content (when Range header is provided) */

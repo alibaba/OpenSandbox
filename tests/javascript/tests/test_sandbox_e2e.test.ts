@@ -987,6 +987,28 @@ test("03 filesystem operations: CRUD + replace/move/delete + range + stream", as
   expect(verify.logs.stdout[0]?.text).toBe("OK");
 });
 
+test("03a line-based file reading with offset and limit", async () => {
+  if (!sandbox) throw new Error("sandbox not created");
+
+  const testPath = "/tmp/line-read-e2e.txt";
+  const content = "line1\nline2\nline3\nline4\nline5";
+  await sandbox.files.writeFiles([{ path: testPath, data: content }]);
+
+  // offset=2, limit=2 → lines 2-3
+  const result1 = await sandbox.files.readFile(testPath, { offset: 2, limit: 2 });
+  expect(result1).toBe("line2\nline3");
+
+  // offset=4, no limit → lines 4-5
+  const result2 = await sandbox.files.readFile(testPath, { offset: 4 });
+  expect(result2).toBe("line4\nline5");
+
+  // limit=2, no offset → lines 1-2
+  const result3 = await sandbox.files.readFile(testPath, { limit: 2 });
+  expect(result3).toBe("line1\nline2");
+
+  await sandbox.files.deleteFiles([testPath]);
+});
+
 test("04 interrupt command", async () => {
   if (!sandbox) throw new Error("sandbox not created");
 

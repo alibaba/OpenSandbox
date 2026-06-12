@@ -1586,6 +1586,32 @@ class TestSandboxE2E:
 
         logger.info("TEST 3 PASSED: Basic filesystem operations test completed successfully")
 
+    @pytest.mark.timeout(60)
+    @pytest.mark.order(4)
+    async def test_03a_line_based_file_reading(self):
+        """Test line-based file reading with offset and limit."""
+        await self._ensure_sandbox_created()
+        sandbox = TestSandboxE2E.sandbox
+
+        test_path = "/tmp/line-read-e2e.txt"
+        content = "line1\nline2\nline3\nline4\nline5"
+        sandbox_files = sandbox.files
+        await sandbox_files.write_files([WriteEntry(path=test_path, data=content)])
+
+        # offset=2, limit=2 → lines 2-3
+        result = await sandbox_files.read_file(test_path, offset=2, limit=2)
+        assert result == "line2\nline3"
+
+        # offset=4, no limit → lines 4-5
+        result = await sandbox_files.read_file(test_path, offset=4)
+        assert result == "line4\nline5"
+
+        # limit=2, no offset → lines 1-2
+        result = await sandbox_files.read_file(test_path, limit=2)
+        assert result == "line1\nline2"
+
+        await sandbox.files.delete_files([test_path])
+
     @pytest.mark.timeout(120)
     @pytest.mark.order(5)
     async def test_04_interrupt_command(self):

@@ -841,6 +841,10 @@ paths:
         Downloads a file from the specified path within the sandbox. Supports HTTP
         range requests for resumable downloads and partial content retrieval.
         Returns file as octet-stream with appropriate headers.
+
+        When offset/limit query parameters are provided, the endpoint performs
+        line-based reading and returns text/plain content instead. Line-based
+        parameters are mutually exclusive with the Range header.
       operationId: downloadFile
       tags:
         - Filesystem
@@ -852,30 +856,56 @@ paths:
           schema:
             type: string
           example: /workspace/data.csv
+        - name: offset
+          in: query
+          required: false
+          description: >
+            Starting line number (1-based) for line-based reading.
+            Mutually exclusive with the Range header.
+          schema:
+            type: integer
+            minimum: 1
+          example: 100
+        - name: limit
+          in: query
+          required: false
+          description: >
+            Number of lines to return for line-based reading.
+            Mutually exclusive with the Range header.
+          schema:
+            type: integer
+            minimum: 1
+          example: 20
         - name: Range
           in: header
           required: false
-          description: HTTP Range header for partial content requests
+          description: HTTP Range header for partial content requests. Mutually exclusive with offset/limit.
           schema:
             type: string
           example: "bytes=0-1023"
       responses:
         "200":
-          description: File content
+          description: |
+            File content. Returns application/octet-stream for full or byte-range
+            downloads, or text/plain for line-based reads (when offset/limit are provided).
           content:
             application/octet-stream:
               schema:
                 type: string
                 format: binary
+            text/plain:
+              schema:
+                type: string
+                description: Line-based content returned when offset/limit parameters are used
           headers:
             Content-Disposition:
               schema:
                 type: string
-              description: Attachment header with filename
+              description: Attachment header with filename (byte-range mode only)
             Content-Length:
               schema:
                 type: integer
-              description: File size in bytes
+              description: File size in bytes (byte-range mode only)
         "206":
           description: Partial file content (when Range header is provided)
           content:
