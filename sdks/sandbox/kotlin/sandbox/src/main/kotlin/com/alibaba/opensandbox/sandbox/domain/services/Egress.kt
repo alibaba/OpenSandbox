@@ -70,7 +70,7 @@ interface CredentialVault {
     fun getBinding(name: String): CredentialBindingMetadata
 }
 
-interface Egress : CredentialVault {
+interface Egress {
     fun getPolicy(): NetworkPolicy
 
     fun patchRules(rules: List<NetworkRule>)

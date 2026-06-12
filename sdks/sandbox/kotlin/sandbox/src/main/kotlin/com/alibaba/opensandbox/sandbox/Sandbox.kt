@@ -93,6 +93,7 @@ class Sandbox internal constructor(
     private val healthService: Health,
     private val metricsService: Metrics,
     private val egressService: Egress,
+    private val credentialVaultService: CredentialVault,
     private val customHealthCheck: ((sandbox: Sandbox) -> Boolean)? = null,
     private val httpClientProvider: HttpClientProvider,
     private val diagnosticsService: Diagnostics,
@@ -132,7 +133,7 @@ class Sandbox internal constructor(
      * Credential Vault writes go directly to the sandbox egress sidecar and
      * preserve endpoint routing/auth headers resolved for this sandbox.
      */
-    fun credentialVault(): CredentialVault = egressService
+    fun credentialVault(): CredentialVault = credentialVaultService
 
     /**
      * Provides access to sandbox diagnostic log and event descriptors.
@@ -232,7 +233,7 @@ class Sandbox internal constructor(
                         DEFAULT_EGRESS_PORT,
                         connectionConfig.useServerProxy,
                     )
-                val egressService = factory.createEgress(egressEndpoint)
+                val egressStack = factory.createEgressStack(egressEndpoint)
                 val diagnosticsService = factory.createDiagnostics()
 
                 val sandbox =
@@ -243,7 +244,8 @@ class Sandbox internal constructor(
                         commandService = commandService,
                         metricsService = metricsService,
                         healthService = healthService,
-                        egressService = egressService,
+                        egressService = egressStack.egress,
+                        credentialVaultService = egressStack.credentialVault,
                         customHealthCheck = healthCheck,
                         httpClientProvider = httpClientProvider,
                         diagnosticsService = diagnosticsService,

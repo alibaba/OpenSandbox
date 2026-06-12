@@ -40,6 +40,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.InlineCredentialS
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
+import com.alibaba.opensandbox.sandbox.domain.services.CredentialVault
 import com.alibaba.opensandbox.sandbox.domain.services.Egress
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toApiEgressNetworkRule
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.SandboxModelConverter.toDomainEgressNetworkPolicy
@@ -67,7 +68,7 @@ import org.slf4j.LoggerFactory
 internal class EgressAdapter(
     private val httpClientProvider: HttpClientProvider,
     private val egressEndpoint: SandboxEndpoint,
-) : Egress {
+) : Egress, CredentialVault {
     companion object {
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }

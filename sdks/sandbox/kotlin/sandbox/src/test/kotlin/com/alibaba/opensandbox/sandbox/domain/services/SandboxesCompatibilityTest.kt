@@ -18,6 +18,7 @@ package com.alibaba.opensandbox.sandbox.domain.services
 
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.CredentialProxyConfig
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSnapshotInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
@@ -80,6 +81,13 @@ class SandboxesCompatibilityTest {
             }
 
         assertTrue(error.message!!.contains("Credential Vault proxy is not supported"))
+    }
+
+    @Test
+    fun `custom egress implementation can stay policy only`() {
+        val egress: Egress = PolicyOnlyEgress()
+
+        assertEquals(NetworkPolicy.DefaultAction.DENY, egress.getPolicy().defaultAction)
     }
 
     private class LegacySandboxes : Sandboxes {
@@ -148,5 +156,15 @@ class SandboxesCompatibilityTest {
         override fun killSandbox(sandboxId: String) = unsupported()
 
         private fun unsupported(): Nothing = throw UnsupportedOperationException("not used")
+    }
+
+    private class PolicyOnlyEgress : Egress {
+        override fun getPolicy(): NetworkPolicy = NetworkPolicy.builder().build()
+
+        override fun patchRules(rules: List<NetworkRule>) {
+        }
+
+        override fun deleteRules(targets: List<String>) {
+        }
     }
 }
