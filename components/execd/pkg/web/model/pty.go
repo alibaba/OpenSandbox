@@ -16,7 +16,8 @@ package model
 
 // CreatePTYSessionRequest is the request body for POST /pty.
 type CreatePTYSessionRequest struct {
-	Cwd string `json:"cwd,omitempty"`
+	Cwd     string `json:"cwd,omitempty"`
+	Command string `json:"command,omitempty"`
 }
 
 // CreatePTYSessionResponse is the response for POST /pty.

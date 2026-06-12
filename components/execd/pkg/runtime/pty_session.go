@@ -73,8 +73,9 @@ func NewPTYSessionID() string {
 //  4. The bash process exits → Done() closes → exit frame sent.
 //  5. Call close() to terminate an early session and release resources.
 type ptySession struct {
-	id  string
-	cwd string
+	id      string
+	cwd     string
+	command string // optional custom command; defaults to bash if empty
 
 	mu      sync.Mutex
 	closing bool
@@ -113,10 +114,11 @@ type ptySession struct {
 	stderrW *io.PipeWriter // nil in PTY mode
 }
 
-func newPTYSession(id, cwd string) *ptySession {
+func newPTYSession(id, cwd, command string) *ptySession {
 	return &ptySession{
 		id:           id,
 		cwd:          cwd,
+		command:      command,
 		replay:       newReplayBuffer(),
 		lastExitCode: -1,
 	}
@@ -230,7 +232,11 @@ func (s *ptySession) StartPTY() error {
 		return errors.New("pty session is closing")
 	}
 
-	cmd := exec.Command("bash", "--norc", "--noprofile")
+	cmdArgs := []string{"--norc", "--noprofile"}
+	if s.command != "" {
+		cmdArgs = append(cmdArgs, "-c", s.command)
+	}
+	cmd := exec.Command("bash", cmdArgs...)
 	cmd.Env = os.Environ()
 	if s.cwd != "" {
 		cmd.Dir = s.cwd
@@ -287,7 +293,11 @@ func (s *ptySession) StartPipe() error {
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
 
-	cmd := exec.Command("bash", "--norc", "--noprofile")
+	cmdArgs := []string{"--norc", "--noprofile"}
+	if s.command != "" {
+		cmdArgs = append(cmdArgs, "-c", s.command)
+	}
+	cmd := exec.Command("bash", cmdArgs...)
 	cmd.Env = os.Environ()
 	if s.cwd != "" {
 		cmd.Dir = s.cwd
@@ -608,7 +618,7 @@ func (s *ptySession) close() {
 }
 
 // CreatePTYSession creates a new PTY session and stores it in the map.
-func (c *Controller) CreatePTYSession(id, cwd string) (PTYSession, error) {
+func (c *Controller) CreatePTYSession(id, cwd, command string) (PTYSession, error) {
 	resolvedCwd, err := pathutil.ExpandPath(cwd)
 	if err != nil {
 		return nil, fmt.Errorf("error resolving PTY session work directory: %w", err)
@@ -619,7 +629,7 @@ func (c *Controller) CreatePTYSession(id, cwd string) (PTYSession, error) {
 			return nil, fmt.Errorf("error creating PTY session work directory: %w", err)
 		}
 	}
-	s := newPTYSession(id, resolvedCwd)
+	s := newPTYSession(id, resolvedCwd, command)
 	c.ptySessionMap.Store(id, s)
 	log.Info("created pty session %s", id)
 	return s, nil

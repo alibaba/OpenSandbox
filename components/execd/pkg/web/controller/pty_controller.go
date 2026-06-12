@@ -59,7 +59,7 @@ func (c *PTYController) CreatePTYSession() {
 	}
 
 	id := runtime.NewPTYSessionID()
-	_, err := codeRunner.CreatePTYSession(id, req.Cwd)
+	_, err := codeRunner.CreatePTYSession(id, req.Cwd, req.Command)
 	if err != nil {
 		c.RespondError(
 			http.StatusInternalServerError,

@@ -58,7 +58,7 @@ func IsPTYSessionSupported() bool { return false }
 func NewPTYSessionID() string { return "" }
 
 // CreatePTYSession is not supported on Windows.
-func (c *Controller) CreatePTYSession(id, cwd string) (PTYSession, error) { return nil, nil } //nolint:revive
+func (c *Controller) CreatePTYSession(id, cwd, command string) (PTYSession, error) { return nil, nil } //nolint:revive
 
 // GetPTYSession is not supported on Windows.
 func (c *Controller) GetPTYSession(id string) PTYSession { return nil } //nolint:revive

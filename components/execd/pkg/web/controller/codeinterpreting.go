@@ -59,7 +59,7 @@ type codeExecutionRunner interface {
 	SeekBackgroundCommandOutput(session string, cursor int64) ([]byte, int64, error)
 	DeleteBashSession(sessionID string) error
 	Interrupt(sessionID string) error
-	CreatePTYSession(id, cwd string) (runtime.PTYSession, error)
+	CreatePTYSession(id, cwd, command string) (runtime.PTYSession, error)
 	GetPTYSession(id string) runtime.PTYSession
 	DeletePTYSession(id string) error
 	GetPTYSessionStatus(id string) (bool, int64, error)

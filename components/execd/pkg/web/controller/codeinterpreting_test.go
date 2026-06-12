@@ -90,7 +90,7 @@ func (f *fakeCodeRunner) Interrupt(_ string) error {
 	return nil
 }
 
-func (f *fakeCodeRunner) CreatePTYSession(_ string, _ string) (runtime.PTYSession, error) {
+func (f *fakeCodeRunner) CreatePTYSession(_ string, _ string, _ string) (runtime.PTYSession, error) {
 	return nil, nil
 }
 func (f *fakeCodeRunner) GetPTYSession(_ string) runtime.PTYSession         { return nil }

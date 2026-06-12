@@ -50,7 +50,7 @@ func TestPTYSession_BasicExecution(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.NoError(t, s.StartPTY())
 	t.Cleanup(func() { s.close() })
 
@@ -70,7 +70,7 @@ func TestPTYSession_IsRunning(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.False(t, s.IsRunning())
 	require.NoError(t, s.StartPTY())
 	t.Cleanup(func() { s.close() })
@@ -82,7 +82,7 @@ func TestPTYSession_ResizeWinsize(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.NoError(t, s.StartPTY())
 	t.Cleanup(func() { s.close() })
 
@@ -109,7 +109,7 @@ func TestPTYSession_ANSISequences(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.NoError(t, s.StartPTY())
 	t.Cleanup(func() { s.close() })
 
@@ -135,7 +135,7 @@ func TestPTYSession_PipeMode(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.NoError(t, s.StartPipe())
 	t.Cleanup(func() { s.close() })
 
@@ -175,7 +175,7 @@ func TestPTYSession_ReconnectReplay(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.NoError(t, s.StartPTY())
 	t.Cleanup(func() { s.close() })
 
@@ -224,7 +224,7 @@ func TestPTYSession_SendSIGINT(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.NoError(t, s.StartPTY())
 	t.Cleanup(func() { s.close() })
 
@@ -251,7 +251,7 @@ func TestPTYSession_CloseTerminatesProcess(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.NoError(t, s.StartPTY())
 
 	require.True(t, s.IsRunning())
@@ -272,7 +272,7 @@ func TestPTYSession_ExitCode(t *testing.T) {
 		t.Skip("bash not found")
 	}
 
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.NoError(t, s.StartPTY())
 
 	stdoutR, _, detach := s.AttachOutput()
@@ -293,7 +293,7 @@ func TestPTYSession_ExitCode(t *testing.T) {
 }
 
 func TestPTYSession_LockWS(t *testing.T) {
-	s := newPTYSession(uuidString(), "")
+	s := newPTYSession(uuidString(), "", "")
 	require.True(t, s.LockWS(), "first lock should succeed")
 	require.False(t, s.LockWS(), "second lock should fail")
 	s.UnlockWS()
@@ -301,11 +301,41 @@ func TestPTYSession_LockWS(t *testing.T) {
 	s.UnlockWS()
 }
 
+func TestPTYSession_CustomCommand(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not found")
+	}
+
+	s := newPTYSession(uuidString(), "", "echo hello_command")
+	require.NoError(t, s.StartPipe())
+	t.Cleanup(func() { s.close() })
+
+	stdoutR, stderrR, detach := s.AttachOutput()
+	defer detach()
+	require.NotNil(t, stderrR)
+
+	stdoutCh := make(chan string, 32)
+	safego.Go(func() {
+		sc := bufio.NewScanner(stdoutR)
+		for sc.Scan() {
+			stdoutCh <- sc.Text()
+		}
+	})
+
+	require.True(t, waitForLine(stdoutCh, "hello_command", 5*time.Second),
+		"expected 'hello_command' from custom command on stdout")
+
+	// After the command exits, the session should no longer be running.
+	require.Eventually(t, func() bool {
+		return !s.IsRunning()
+	}, 3*time.Second, 50*time.Millisecond, "session should exit after custom command completes")
+}
+
 func TestPTYSession_ControllerCRUD(t *testing.T) {
 	c := NewController("", "")
 	id := uuidString()
 
-	sess, _ := c.CreatePTYSession(id, "")
+	sess, _ := c.CreatePTYSession(id, "", "")
 	require.NotNil(t, sess)
 
 	got := c.GetPTYSession(id)
