@@ -516,6 +516,7 @@ class PersistedSnapshotService(SnapshotService):
                 lastTransitionAt=record.status.last_transition_at,
             ),
             createdAt=record.created_at,
+            imageUri=record.restore_config.image,
         )
 
 
