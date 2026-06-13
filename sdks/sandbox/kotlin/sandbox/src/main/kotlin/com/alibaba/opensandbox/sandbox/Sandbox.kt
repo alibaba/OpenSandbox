@@ -98,9 +98,17 @@ class Sandbox internal constructor(
     private val customHealthCheck: ((sandbox: Sandbox) -> Boolean)? = null,
     private val httpClientProvider: HttpClientProvider,
     private val diagnosticsService: Diagnostics,
-    private val ptyService: Pty,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(Sandbox::class.java)
+
+    // Wired by the factory immediately after construction via [bindPtyService] so the PTY service
+    // shares this sandbox's resolved execd endpoint, without changing this constructor's
+    // JVM-visible signature (which already-compiled consumers may depend on).
+    private lateinit var ptyService: Pty
+
+    internal fun bindPtyService(pty: Pty) {
+        ptyService = pty
+    }
 
     /**
      * Provides access to file system operations within the sandbox.
@@ -262,8 +270,8 @@ class Sandbox internal constructor(
                         customHealthCheck = healthCheck,
                         httpClientProvider = httpClientProvider,
                         diagnosticsService = diagnosticsService,
-                        ptyService = ptyService,
                     )
+                sandbox.bindPtyService(ptyService)
 
                 if (!skipHealthCheck) {
                     sandbox.checkReady(timeout, healthCheckPollingInterval)

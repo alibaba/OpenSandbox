@@ -171,4 +171,50 @@ class PtyAdapterTest {
         assertEquals("value-1", recorded.getHeader("X-Test-Header"))
         assertFalse(recorded.getHeader("X-Test-Header").isNullOrEmpty())
     }
+
+    @Test
+    fun `webSocket should merge configured headers with endpoint headers taking precedence`() {
+        val config =
+            ConnectionConfig.builder()
+                .domain(endpoint.endpoint)
+                .protocol("http")
+                .headers(mapOf("X-Gateway" to "gw", "X-Shared" to "from-config"))
+                .build()
+        val endpointHeaders = mapOf("X-Route" to "r1", "X-Shared" to "from-endpoint")
+        val adapter = PtyAdapter(HttpClientProvider(config), SandboxEndpoint(endpoint.endpoint, endpointHeaders))
+
+        val target = adapter.webSocket("sess-123")
+
+        assertEquals("gw", target.headers["X-Gateway"])
+        assertEquals("r1", target.headers["X-Route"])
+        // endpoint headers win on conflicts
+        assertEquals("from-endpoint", target.headers["X-Shared"])
+    }
+
+    @Test
+    fun `webSocket should use wss when the domain carries an https scheme`() {
+        val config = ConnectionConfig.builder().domain("https://${endpoint.endpoint}").build()
+        val adapter = PtyAdapter(HttpClientProvider(config), endpoint)
+
+        assertTrue(adapter.webSocket("sess-123").url.startsWith("wss://"))
+    }
+
+    @Test
+    fun `createSession should map structured execd errors with code and request id`() {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(404)
+                .setHeader("X-Request-ID", "req-789")
+                .setBody("""{"code":"CONTEXT_NOT_FOUND","message":"no such session"}"""),
+        )
+
+        val ex =
+            assertThrows(SandboxApiException::class.java) {
+                ptyAdapter.getSession("sess-404")
+            }
+
+        assertEquals(404, ex.statusCode)
+        assertEquals("CONTEXT_NOT_FOUND", ex.error.code)
+        assertEquals("req-789", ex.requestId)
+    }
 }

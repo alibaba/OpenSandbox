@@ -109,8 +109,8 @@ class SandboxTest {
                 customHealthCheck = null,
                 httpClientProvider = httpClientProvider,
                 diagnosticsService = diagnosticsService,
-                ptyService = ptyService,
             )
+        sandbox.bindPtyService(ptyService)
     }
 
     @Test

@@ -18,6 +18,7 @@ package com.alibaba.opensandbox.sandbox.infrastructure.adapters.service
 
 import com.alibaba.opensandbox.sandbox.HttpClientProvider
 import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxApiException
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxError
 import com.alibaba.opensandbox.sandbox.domain.models.execd.pty.PtyMode
 import com.alibaba.opensandbox.sandbox.domain.models.execd.pty.PtySession
 import com.alibaba.opensandbox.sandbox.domain.models.execd.pty.PtySessionStatus
@@ -25,6 +26,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.execd.pty.PtyWebSocket
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.services.Pty
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.jsonParser
+import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.parseSandboxError
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.toSandboxException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -32,14 +34,15 @@ import okhttp3.Headers.Companion.toHeaders
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.slf4j.LoggerFactory
 
 /**
  * Implementation of [Pty] backed by execd's PTY HTTP endpoints.
  *
- * execd's PTY routes are not part of the OpenAPI specs (the interactive channel is a
- * WebSocket), so this adapter is handwritten transport over the shared OkHttp client,
- * following the same endpoint/header wiring as the other execd adapters.
+ * execd's interactive PTY channel is a WebSocket and cannot be modelled by the OpenAPI
+ * generator, so this adapter is handwritten transport over the shared OkHttp client, following
+ * the same endpoint/header wiring, scheme resolution and error mapping as the other execd adapters.
  */
 internal class PtyAdapter(
     private val httpClientProvider: HttpClientProvider,
@@ -47,11 +50,16 @@ internal class PtyAdapter(
 ) : Pty {
     companion object {
         private const val PTY_PATH = "/pty"
+        private const val REQUEST_ID_HEADER = "X-Request-ID"
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }
 
     private val logger = LoggerFactory.getLogger(PtyAdapter::class.java)
-    private val execdBaseUrl = "${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}"
+
+    // Honor an https domain even when `protocol` is left at its default, matching how the
+    // lifecycle base URL is resolved, so secured/server-proxy deployments use the right scheme.
+    private val httpScheme = resolveHttpScheme()
+    private val execdBaseUrl = "$httpScheme://${execdEndpoint.endpoint}"
     private val execdApiClient =
         httpClientProvider.httpClient.newBuilder()
             .addInterceptor { chain ->
@@ -78,10 +86,7 @@ internal class PtyAdapter(
             execdApiClient.newCall(request).execute().use { response ->
                 val payload = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    throw SandboxApiException(
-                        message = "Failed to create PTY session. Status code: ${response.code}, Body: $payload",
-                        statusCode = response.code,
-                    )
+                    throw apiException("Failed to create PTY session", response, payload)
                 }
                 val parsed = jsonParser.decodeFromString<CreatePtySessionResponse>(payload)
                 return PtySession(parsed.sessionId)
@@ -103,10 +108,7 @@ internal class PtyAdapter(
             execdApiClient.newCall(request).execute().use { response ->
                 val payload = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
-                    throw SandboxApiException(
-                        message = "Failed to get PTY session $sessionId. Status code: ${response.code}, Body: $payload",
-                        statusCode = response.code,
-                    )
+                    throw apiException("Failed to get PTY session $sessionId", response, payload)
                 }
                 val parsed = jsonParser.decodeFromString<PtySessionStatusResponse>(payload)
                 return PtySessionStatus(parsed.sessionId, parsed.running, parsed.outputOffset)
@@ -128,10 +130,7 @@ internal class PtyAdapter(
             execdApiClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     val payload = response.body?.string().orEmpty()
-                    throw SandboxApiException(
-                        message = "Failed to delete PTY session $sessionId. Status code: ${response.code}, Body: $payload",
-                        statusCode = response.code,
-                    )
+                    throw apiException("Failed to delete PTY session $sessionId", response, payload)
                 }
             }
         } catch (e: Exception) {
@@ -146,7 +145,7 @@ internal class PtyAdapter(
         since: Long?,
         takeover: Boolean,
     ): PtyWebSocket {
-        val scheme = if (httpClientProvider.config.protocol.equals("https", ignoreCase = true)) "wss" else "ws"
+        val scheme = if (httpScheme == "https") "wss" else "ws"
         val params =
             buildList {
                 if (mode == PtyMode.PIPE) add("pty=0")
@@ -155,10 +154,33 @@ internal class PtyAdapter(
             }
         val query = if (params.isEmpty()) "" else "?" + params.joinToString("&")
         val url = "$scheme://${execdEndpoint.endpoint}$PTY_PATH/$sessionId/ws$query"
-        // Carry the same routing/auth headers the REST calls send so callers can complete the
-        // WebSocket handshake against header-mode ingress or secure-access endpoints.
-        return PtyWebSocket(url, execdEndpoint.headers)
+        // Send the same headers the REST/HTTP calls send on the handshake: the user-configured
+        // ConnectionConfig.headers (applied by HttpClientProvider) plus the endpoint routing/auth
+        // headers, with endpoint headers taking precedence on conflicts.
+        val headers = httpClientProvider.config.headers + execdEndpoint.headers
+        return PtyWebSocket(url, headers)
     }
+
+    private fun resolveHttpScheme(): String {
+        val domain = httpClientProvider.config.getDomain()
+        return when {
+            domain.startsWith("https://", ignoreCase = true) -> "https"
+            domain.startsWith("http://", ignoreCase = true) -> "http"
+            else -> httpClientProvider.config.protocol
+        }
+    }
+
+    private fun apiException(
+        action: String,
+        response: Response,
+        payload: String,
+    ): SandboxApiException =
+        SandboxApiException(
+            message = "$action. Status code: ${response.code}, Body: $payload",
+            statusCode = response.code,
+            error = parseSandboxError(payload) ?: SandboxError(SandboxError.UNEXPECTED_RESPONSE),
+            requestId = response.header(REQUEST_ID_HEADER),
+        )
 
     @Serializable
     private data class CreatePtySessionRequest(
