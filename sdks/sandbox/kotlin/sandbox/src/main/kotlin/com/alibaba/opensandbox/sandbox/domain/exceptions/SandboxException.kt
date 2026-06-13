@@ -93,6 +93,18 @@ class SandboxReadyTimeoutException(
     )
 
 /**
+ * Thrown when a snapshot reaches the `Failed` state while waiting for it to become ready.
+ */
+class SnapshotFailedException(
+    message: String? = null,
+    cause: Throwable? = null,
+) : SandboxException(
+        message = message,
+        cause = cause,
+        error = SandboxError(SandboxError.SNAPSHOT_FAILED, message),
+    )
+
+/**
  * Thrown when an invalid argument is provided to an SDK method.
  * Similar to [IllegalArgumentException] but within the SDK's exception hierarchy.
  */
@@ -179,6 +191,9 @@ data class SandboxError(
         const val UNHEALTHY = "UNHEALTHY"
         const val INVALID_ARGUMENT = "INVALID_ARGUMENT"
         const val UNEXPECTED_RESPONSE = "UNEXPECTED_RESPONSE"
+
+        /** A snapshot reached the `Failed` state while waiting for it to become ready. */
+        const val SNAPSHOT_FAILED = "SNAPSHOT_FAILED"
 
         /** The requested file or directory does not exist (server responds with HTTP 404). */
         const val FILE_NOT_FOUND = "FILE_NOT_FOUND"

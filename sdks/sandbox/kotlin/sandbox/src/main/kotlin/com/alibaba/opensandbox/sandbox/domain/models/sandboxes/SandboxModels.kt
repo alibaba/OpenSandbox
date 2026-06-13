@@ -753,6 +753,30 @@ class SandboxCreateResponse(
     val platform: PlatformSpec? = null,
 )
 
+/**
+ * Lifecycle state of a snapshot.
+ *
+ * Common state values:
+ * - Creating: Snapshot is being captured from the sandbox
+ * - Ready: Snapshot has been captured and can be used to restore a sandbox
+ * - Failed: Snapshot capture encountered a critical error
+ * - Deleting: Snapshot is being deleted
+ *
+ * State transitions:
+ * - Creating → Ready (capture completes successfully)
+ * - Creating → Failed (on error)
+ *
+ * Note: New state values may be added in future versions.
+ * Clients should handle unknown state values gracefully.
+ */
+object SnapshotState {
+    const val CREATING = "Creating"
+    const val READY = "Ready"
+    const val FAILED = "Failed"
+    const val DELETING = "Deleting"
+    const val UNKNOWN = "Unknown"
+}
+
 class SnapshotStatus(
     val state: String,
     val reason: String?,
