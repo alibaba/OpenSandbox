@@ -148,6 +148,31 @@ class PtyAdapterTest {
     }
 
     @Test
+    fun `webSocket should inherit https from the domain for server-proxy endpoints`() {
+        val config =
+            ConnectionConfig.builder()
+                .domain("https://${endpoint.endpoint}")
+                .useServerProxy(true)
+                .build()
+        val adapter = PtyAdapter(HttpClientProvider(config), endpoint)
+
+        assertTrue(adapter.webSocket("sess-123").url.startsWith("wss://"))
+    }
+
+    @Test
+    fun `webSocket should stay ws for direct endpoints even with an https domain`() {
+        // Direct (non server-proxy) raw endpoints serve plain HTTP regardless of the lifecycle domain.
+        val config =
+            ConnectionConfig.builder()
+                .domain("https://${endpoint.endpoint}")
+                .useServerProxy(false)
+                .build()
+        val adapter = PtyAdapter(HttpClientProvider(config), endpoint)
+
+        assertTrue(adapter.webSocket("sess-123").url.startsWith("ws://"))
+    }
+
+    @Test
     fun `webSocket should carry the endpoint routing and auth headers`() {
         val headers = mapOf("OpenSandbox-Ingress-To" to "sandbox-1-44772", "X-Auth" to "token")
         val adapter = PtyAdapter(httpClientProvider, SandboxEndpoint(endpoint.endpoint, headers))

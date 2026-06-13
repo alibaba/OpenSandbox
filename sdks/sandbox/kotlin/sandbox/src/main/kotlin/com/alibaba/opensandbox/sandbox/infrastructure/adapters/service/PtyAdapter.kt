@@ -56,10 +56,13 @@ internal class PtyAdapter(
 
     private val logger = LoggerFactory.getLogger(PtyAdapter::class.java)
 
-    // Use the configured protocol for the resolved execd endpoint, consistent with the other execd
-    // adapters (e.g. CommandsAdapter): a raw direct endpoint such as a pod IP / host-mapped port
-    // serves plain HTTP and must not be forced to https from the lifecycle domain scheme.
-    private val execdBaseUrl = "${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}"
+    // Scheme for the resolved execd endpoint:
+    // - server-proxy endpoints are reached back through the lifecycle server, so they inherit its
+    //   scheme (honoring an https domain even when `protocol` is left at its default);
+    // - direct raw endpoints (pod IP / host-mapped port) serve plain HTTP, like the other execd
+    //   adapters (e.g. CommandsAdapter), and must not be forced to https from the lifecycle domain.
+    private val httpScheme = resolveHttpScheme()
+    private val execdBaseUrl = "$httpScheme://${execdEndpoint.endpoint}"
     private val execdApiClient =
         httpClientProvider.httpClient.newBuilder()
             .addInterceptor { chain ->
@@ -145,7 +148,7 @@ internal class PtyAdapter(
         since: Long?,
         takeover: Boolean,
     ): PtyWebSocket {
-        val scheme = if (httpClientProvider.config.protocol.equals("https", ignoreCase = true)) "wss" else "ws"
+        val scheme = if (httpScheme == "https") "wss" else "ws"
         val params =
             buildList {
                 if (mode == PtyMode.PIPE) add("pty=0")
@@ -159,6 +162,18 @@ internal class PtyAdapter(
         // headers, with endpoint headers taking precedence on conflicts.
         val headers = httpClientProvider.config.headers + execdEndpoint.headers
         return PtyWebSocket(url, headers)
+    }
+
+    private fun resolveHttpScheme(): String {
+        val config = httpClientProvider.config
+        // Direct raw endpoints serve plain HTTP; only proxied endpoints inherit the lifecycle scheme.
+        if (!config.useServerProxy) return config.protocol
+        val domain = config.getDomain()
+        return when {
+            domain.startsWith("https://", ignoreCase = true) -> "https"
+            domain.startsWith("http://", ignoreCase = true) -> "http"
+            else -> config.protocol
+        }
     }
 
     private fun apiException(
