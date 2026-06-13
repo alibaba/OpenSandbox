@@ -42,6 +42,7 @@ import com.alibaba.opensandbox.sandbox.domain.services.Egress
 import com.alibaba.opensandbox.sandbox.domain.services.Filesystem
 import com.alibaba.opensandbox.sandbox.domain.services.Health
 import com.alibaba.opensandbox.sandbox.domain.services.Metrics
+import com.alibaba.opensandbox.sandbox.domain.services.Pty
 import com.alibaba.opensandbox.sandbox.domain.services.Sandboxes
 import com.alibaba.opensandbox.sandbox.infrastructure.factory.AdapterFactory
 import org.slf4j.LoggerFactory
@@ -97,6 +98,7 @@ class Sandbox internal constructor(
     private val customHealthCheck: ((sandbox: Sandbox) -> Boolean)? = null,
     private val httpClientProvider: HttpClientProvider,
     private val diagnosticsService: Diagnostics,
+    private val ptyService: Pty,
 ) : AutoCloseable {
     private val logger = LoggerFactory.getLogger(Sandbox::class.java)
 
@@ -117,6 +119,16 @@ class Sandbox internal constructor(
      * @return Service for command execution
      */
     fun commands() = commandService
+
+    /**
+     * Provides access to interactive PTY (pseudo-terminal) session operations.
+     *
+     * Manages the lifecycle of long-lived shell sessions and builds the WebSocket URL
+     * used to stream them. PTY is only supported on Unix-like platforms.
+     *
+     * @return Service for PTY session management
+     */
+    fun pty() = ptyService
 
     /**
      * Provides access to sandbox metrics and monitoring.
@@ -225,6 +237,7 @@ class Sandbox internal constructor(
                     )
                 val fileSystemService = factory.createFilesystem(execdEndpoint)
                 val commandService = factory.createCommands(execdEndpoint)
+                val ptyService = factory.createPty(execdEndpoint)
                 val metricsService = factory.createMetrics(execdEndpoint)
                 val healthService = factory.createHealth(execdEndpoint)
                 val egressEndpoint =
@@ -249,6 +262,7 @@ class Sandbox internal constructor(
                         customHealthCheck = healthCheck,
                         httpClientProvider = httpClientProvider,
                         diagnosticsService = diagnosticsService,
+                        ptyService = ptyService,
                     )
 
                 if (!skipHealthCheck) {
