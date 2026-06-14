@@ -65,6 +65,11 @@ public sealed class Sandbox : IAsyncDisposable
     public IExecdMetrics Metrics { get; }
 
     /// <summary>
+    /// Gets the interactive PTY (pseudo-terminal) session service.
+    /// </summary>
+    public IExecdPty Pty { get; }
+
+    /// <summary>
     /// Gets the sandbox-scoped Credential Vault service.
     /// </summary>
     public ICredentialVault CredentialVault { get; }
@@ -96,6 +101,7 @@ public sealed class Sandbox : IAsyncDisposable
         ISandboxFiles files,
         IExecdHealth health,
         IExecdMetrics metrics,
+        IExecdPty pty,
         IEgress egress,
         ICredentialVault? credentialVault)
     {
@@ -112,6 +118,7 @@ public sealed class Sandbox : IAsyncDisposable
         Files = files;
         Health = health;
         Metrics = metrics;
+        Pty = pty;
         _egress = egress;
         CredentialVault = credentialVault
             ?? egress as ICredentialVault
@@ -255,6 +262,7 @@ public sealed class Sandbox : IAsyncDisposable
                 execdStack.Files,
                 execdStack.Health,
                 execdStack.Metrics,
+                execdStack.Pty,
                 egressStack.Egress,
                 egressStack.CredentialVault);
 
@@ -380,6 +388,7 @@ public sealed class Sandbox : IAsyncDisposable
                 execdStack.Files,
                 execdStack.Health,
                 execdStack.Metrics,
+                execdStack.Pty,
                 egressStack.Egress,
                 egressStack.CredentialVault);
 

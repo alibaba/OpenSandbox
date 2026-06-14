@@ -112,6 +112,11 @@ public class ExecdStack
     /// Gets the metrics service.
     /// </summary>
     public required IExecdMetrics Metrics { get; init; }
+
+    /// <summary>
+    /// Gets the interactive PTY session service.
+    /// </summary>
+    public required IExecdPty Pty { get; init; }
 }
 
 public class CreateEgressStackOptions

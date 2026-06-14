@@ -248,7 +248,8 @@ public class SandboxEgressLifecycleTests
                 Commands = new Mock<IExecdCommands>(MockBehavior.Strict).Object,
                 Files = new StubFiles(),
                 Health = new StubHealth(),
-                Metrics = new StubMetrics()
+                Metrics = new StubMetrics(),
+                Pty = new Mock<IExecdPty>(MockBehavior.Strict).Object
             };
         }
 
