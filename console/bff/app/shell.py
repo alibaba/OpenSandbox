@@ -43,6 +43,21 @@ class ShellError(Exception):
         self.message = message
 
 
+def shell_endpoint_mode(settings: Settings) -> str:
+    mode = settings.bff_shell_endpoint_mode.strip().lower() or "server"
+    if mode not in {"server", "gateway"}:
+        raise ShellError(
+            "SHELL_ENDPOINT_MODE",
+            "BFF_SHELL_ENDPOINT_MODE must be server or gateway",
+        )
+    return mode
+
+
+def server_proxy_endpoint(settings: Settings, sandbox_id: str) -> str:
+    base = settings.lifecycle_api_base.strip().rstrip("/")
+    return f"{base}/sandboxes/{quote(sandbox_id, safe='')}/proxy/{EXECD_PORT}"
+
+
 def execd_protocol(settings: Settings) -> str:
     configured = settings.bff_execd_protocol.strip().lower()
     if configured in {"http", "https"}:
@@ -209,6 +224,8 @@ async def serve_shell(websocket: WebSocket, *, api_key: str, sandbox_id: str) ->
         raw_headers = body.get("headers") or {}
         if not isinstance(raw_headers, dict):
             raw_headers = {}
+        if shell_endpoint_mode(settings) == "server":
+            endpoint = server_proxy_endpoint(settings, sandbox_id)
         headers = execd_request_headers(endpoint, raw_headers, api_key)
         http_base = execd_http_base(endpoint, execd_protocol(settings))
         session_id = await create_pty_session(http_base, headers)

@@ -78,7 +78,7 @@ Aggregates per-tenant lists; optional `tenant=` filter. Pagination includes `ten
 
 Query **`tenant`** required for `{id}` read/write, diagnostics, and shell.
 
-`WS /api/admin/sandboxes/{id}/shell/ws?tenant=` opens the same execd PTY bridge with that tenant's API key. The browser session cookie is the only credential on the WebSocket. Direct execd calls forward endpoint headers and do not send the tenant API key. Server-proxy endpoints (path contains `/sandboxes/` and `/proxy/`) also send `OPEN-SANDBOX-API-KEY`. Closing the socket deletes the PTY session.
+`WS /api/admin/sandboxes/{id}/shell/ws?tenant=` opens the same execd PTY bridge with that tenant's API key. The browser session cookie is the only credential on the WebSocket. `BFF_SHELL_ENDPOINT_MODE=server` (default) dials the in-cluster lifecycle proxy and sends `OPEN-SANDBOX-API-KEY`. `gateway` dials the public ingress endpoint and forwards endpoint headers without the tenant API key. Closing the socket deletes the PTY session.
 
 ### Admin snapshots
 

@@ -25,11 +25,14 @@ from fastapi.testclient import TestClient
 from app.config import Settings, get_settings
 from app.session import admin_session, encode_session, tenant_session
 from app.shell import (
+    ShellError,
     execd_http_base,
     execd_protocol,
     execd_request_headers,
     execd_ws_url,
     is_server_proxy_endpoint,
+    server_proxy_endpoint,
+    shell_endpoint_mode,
 )
 
 
@@ -65,6 +68,23 @@ def test_execd_urls_follow_protocol_unless_the_endpoint_has_a_scheme():
     assert execd_ws_url("https://edge.example/proxy/44772", "pty-1") == (
         "wss://edge.example/proxy/44772/pty/pty-1/ws"
     )
+
+
+def test_shell_endpoint_mode_defaults_to_the_lifecycle_server_proxy():
+    settings = Settings(
+        lifecycle_api_base="http://lifecycle.test/v1/",
+        tenants_toml_path="/tmp/tenants.toml",
+        bff_session_secret="x" * 32,
+        bff_admin_token="admin",
+    )
+
+    assert shell_endpoint_mode(settings) == "server"
+    assert server_proxy_endpoint(settings, "sbx-1") == (
+        "http://lifecycle.test/v1/sandboxes/sbx-1/proxy/44772"
+    )
+    assert shell_endpoint_mode(settings.model_copy(update={"bff_shell_endpoint_mode": "gateway"})) == "gateway"
+    with pytest.raises(ShellError, match="server or gateway"):
+        shell_endpoint_mode(settings.model_copy(update={"bff_shell_endpoint_mode": "pod"}))
 
 
 def test_execd_protocol_override_and_lifecycle_default():
@@ -200,12 +220,29 @@ def test_tenant_shell_bridges_frames_and_deletes_the_pty(shell_client: TestClien
 
     assert shell_client.lifecycle_calls == [("tenant-key", "GET", "/sandboxes/sbx-1/endpoints/44772")]
     assert shell_client.created == [
-        ("http://10.0.0.8:44772", {"X-EXECD-ACCESS-TOKEN": "execd-tok"}),
+        (
+            "http://lifecycle.test/v1/sandboxes/sbx-1/proxy/44772",
+            {"X-EXECD-ACCESS-TOKEN": "execd-tok", "OPEN-SANDBOX-API-KEY": "tenant-key"},
+        ),
     ]
-    assert "OPEN-SANDBOX-API-KEY" not in shell_client.connect_headers[0]
-    assert shell_client.connect_urls == ["ws://10.0.0.8:44772/pty/pty-1/ws"]
+    assert shell_client.connect_headers[0]["OPEN-SANDBOX-API-KEY"] == "tenant-key"
+    assert shell_client.connect_urls == [
+        "ws://lifecycle.test/v1/sandboxes/sbx-1/proxy/44772/pty/pty-1/ws"
+    ]
     assert shell_client.sockets[0].sent == [b"\x00ls\n"]
     assert shell_client.deleted == ["pty-1"]
+
+
+def test_gateway_mode_dials_the_ingress_endpoint(shell_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("BFF_SHELL_ENDPOINT_MODE", "gateway")
+    get_settings.cache_clear()
+    cookies = _cookie(tenant_session("acme", "acme-ns"))
+    with shell_client.websocket_connect("/api/sandboxes/sbx-1/shell/ws", cookies=cookies) as ws:
+        assert ws.receive_bytes() == b"\x01hi"
+
+    assert shell_client.created[-1][0] == "http://10.0.0.8:44772"
+    assert "OPEN-SANDBOX-API-KEY" not in shell_client.created[-1][1]
+    assert shell_client.connect_urls[-1] == "ws://10.0.0.8:44772/pty/pty-1/ws"
 
 
 def test_admin_shell_uses_the_selected_tenant_key(shell_client: TestClient):
