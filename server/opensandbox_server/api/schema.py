@@ -24,6 +24,12 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
 
+from opensandbox_server.constants import (
+    IDLE_TIMEOUT_MAX_SECONDS,
+    IDLE_TIMEOUT_MIN_SECONDS,
+    PROBE_TIMEOUT_MAX_SECONDS,
+    PROBE_TIMEOUT_MIN_SECONDS,
+)
 from opensandbox_server.constants import OPENSANDBOX_LIFECYCLE
 
 # ============================================================================
@@ -190,7 +196,12 @@ class ActivityProbe(BaseModel):
 
     port: int = Field(..., ge=1, le=65535)
     path: str = Field(..., min_length=1, max_length=512)
-    timeout_seconds: Optional[int] = Field(None, alias="timeoutSeconds", ge=1, le=10)
+    timeout_seconds: Optional[int] = Field(
+        None,
+        alias="timeoutSeconds",
+        ge=PROBE_TIMEOUT_MIN_SECONDS,
+        le=PROBE_TIMEOUT_MAX_SECONDS,
+    )
 
     @model_validator(mode="after")
     def validate_path(self) -> "ActivityProbe":
@@ -218,8 +229,8 @@ class IdlePolicy(BaseModel):
     idle_timeout_seconds: Optional[int] = Field(
         None,
         alias="idleTimeoutSeconds",
-        ge=30,
-        le=86400,
+        ge=IDLE_TIMEOUT_MIN_SECONDS,
+        le=IDLE_TIMEOUT_MAX_SECONDS,
         description="Idle threshold X in seconds. Absent means a wake-only policy.",
     )
     on_idle: Optional[Literal["pause"]] = Field(
@@ -244,6 +255,11 @@ class IdlePolicy(BaseModel):
                 raise ValueError(
                     "idlePolicy.onIdle must be omitted when idleTimeoutSeconds is omitted "
                     "(a policy without a timeout is wake-only)."
+                )
+            if self.active_probe is not None:
+                raise ValueError(
+                    "idlePolicy.activeProbe requires idleTimeoutSeconds; the probe "
+                    "governs auto-pause and a wake-only policy is never probed."
                 )
         elif self.on_idle is None:
             raise ValueError(

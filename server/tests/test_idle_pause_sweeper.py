@@ -17,11 +17,21 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
+import threading
+import time
+from types import SimpleNamespace
 from typing import Optional
 
 import pytest
 from redis.exceptions import RedisError
 
+from opensandbox_server.config import (
+    GatewayConfig,
+    GatewayRouteModeConfig,
+    IngressConfig,
+    SecureAccessConfig,
+    SecureAccessKey,
+)
 from opensandbox_server.integrations.idle_pause.activity import (
     ActivityRegistry,
     unknown_tombstone_key,
@@ -39,7 +49,10 @@ from opensandbox_server.integrations.idle_pause.probe import (
     PROBE_OUTCOME_ERROR,
     PROBE_OUTCOME_NOT_ACTIVE,
 )
-from opensandbox_server.integrations.idle_pause.sweeper import IdlePauseSweeper
+from opensandbox_server.integrations.idle_pause.sweeper import (
+    IdlePauseSweeper,
+    _build_activity_prober,
+)
 from tests.test_idle_pause_activity import FakeAsyncRedis
 
 NOW_MS = 1_000_000_000_000
@@ -833,3 +846,127 @@ async def test_executor_without_state_read_skips_latency_tracking(monkeypatch):
 
     assert stats.paused == 1
     assert samples == []
+
+
+def _ingress(route_mode: str) -> IngressConfig:
+    address = "*.gw.example.com" if route_mode == "wildcard" else "gw.example.com"
+    return IngressConfig(
+        mode="gateway",
+        gateway=GatewayConfig(
+            address=address,
+            route=GatewayRouteModeConfig(mode=route_mode),
+        ),
+        secure_access=SecureAccessConfig(
+            active_key="a",
+            keys=[SecureAccessKey(key_id="a", key="c2VjcmV0")],
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("route_mode", "expected"),
+    [
+        ("header", True),
+        ("uri", True),
+        # wildcard is a legal gateway mode but build_endpoint cannot route
+        # probes there; the prober must stay unbuilt so declared-probe
+        # candidates keep the pause-unavailable exemption.
+        ("wildcard", False),
+    ],
+)
+def test_prober_build_follows_gateway_route_mode(route_mode, expected):
+    app_config = SimpleNamespace(ingress=_ingress(route_mode))
+    prober = _build_activity_prober(app_config)  # type: ignore[arg-type]
+    assert (prober is not None) is expected
+
+
+@pytest.mark.asyncio
+async def test_stop_leaves_injected_prober_open():
+    class _OwnedTrackingProber(_StubProber):
+        def __init__(self):
+            super().__init__([(PROBE_OUTCOME_NOT_ACTIVE, None)])
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    redis = FakeAsyncRedis()
+    candidate = _probe_candidate()
+    executor = FakeExecutor()
+    await ActivityRegistry(redis, activity_ttl_seconds=1800).record(  # type: ignore[arg-type]
+        candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000
+    )
+    prober = _OwnedTrackingProber()
+    sweeper = _sweeper([candidate], redis, executor, prober=prober)
+
+    await sweeper.sweep_once()
+    await sweeper.stop()
+
+    assert len(executor.calls) == 1
+    assert prober.closed is False  # injected probers stay their caller's
+
+
+class _SlowStateExecutor(FakeExecutor):
+    """Blocks in state() until released; records peak concurrency."""
+
+    def __init__(self):
+        super().__init__()
+        self._lock = threading.Lock()
+        self._active = 0
+        self.max_active = 0
+        self._release = threading.Event()
+
+    def release(self) -> None:
+        self._release.set()
+
+    def state(self, namespace: str, sandbox_id: str) -> Optional[str]:
+        with self._lock:
+            self._active += 1
+            self.max_active = max(self.max_active, self._active)
+        self._release.wait(timeout=5)
+        time.sleep(0.01)
+        with self._lock:
+            self._active -= 1
+        return "paused"
+
+
+@pytest.mark.asyncio
+async def test_pause_latency_trackers_are_capped(monkeypatch):
+    samples: list[float] = []
+    monkeypatch.setattr(
+        "opensandbox_server.integrations.idle_pause.sweeper.record_pause_latency",
+        lambda *, seconds: samples.append(seconds),
+    )
+    redis = FakeAsyncRedis()
+    registry = ActivityRegistry(redis, activity_ttl_seconds=1800)  # type: ignore[arg-type]
+    executor = _SlowStateExecutor()
+    candidates = [
+        _candidate(sandbox_id=f"fsb_{i}", policy=_policy()) for i in range(8)
+    ]
+    for candidate in candidates:
+        await registry.record(candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000)
+    sweeper = IdlePauseSweeper(
+        namespace_resolver=lambda: ["ns"],
+        inventory=FakeInventory(candidates),
+        activity=registry,  # type: ignore[arg-type]
+        locks=PauseLockManager(redis, lock_ttl_seconds=30),  # type: ignore[arg-type]
+        executor=executor,  # type: ignore[arg-type]
+        sweep_interval_seconds=15,
+        clock=lambda: NOW_MS,
+        pause_latency_poll_seconds=0.01,
+        pause_latency_max_trackers=2,
+    )
+
+    stats = await sweeper.sweep_once()
+    assert stats.paused == 8
+    # First two trackers block in state() holding both slots; the rest skip.
+    await asyncio.sleep(0.05)
+    executor.release()
+    for _ in range(200):
+        if not sweeper._latency_tasks:
+            break
+        await asyncio.sleep(0.01)
+    await sweeper.stop()
+
+    assert executor.max_active <= 2
+    assert len(samples) <= 2

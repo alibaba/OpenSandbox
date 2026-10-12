@@ -84,6 +84,8 @@ def test_probe_timeout_stays_optional_in_the_api_model():
     [
         # onIdle without a timeout is not a valid wake-only spelling.
         {"onIdle": "pause"},
+        # A probe without a timeout never runs: auto-pause is what probes.
+        {"activeProbe": {"port": 8080, "path": "/active"}},
         # Unknown action; only "pause" exists.
         {"idleTimeoutSeconds": 300, "onIdle": "terminate"},
         {"idleTimeoutSeconds": 300},

@@ -14,6 +14,27 @@
 
 """OSEP-0024 idle-pause constants (shared with the ingress, not a config knob)."""
 
+from opensandbox_server.constants import (
+    DEFAULT_PROBE_TIMEOUT_SECONDS,
+    IDLE_TIMEOUT_MAX_SECONDS,
+    IDLE_TIMEOUT_MIN_SECONDS,
+    PROBE_TIMEOUT_MAX_SECONDS,
+    PROBE_TIMEOUT_MIN_SECONDS,
+)
+
+__all__ = [
+    "ACTIVITY_KEY_PREFIX",
+    "DEFAULT_PROBE_TIMEOUT_SECONDS",
+    "IDLE_PAUSE_REQUEST_ID_PREFIX",
+    "IDLE_TIMEOUT_MAX_SECONDS",
+    "IDLE_TIMEOUT_MIN_SECONDS",
+    "LOCK_PREFIX",
+    "ON_IDLE_ACTION_PAUSE",
+    "PROBE_TIMEOUT_MAX_SECONDS",
+    "PROBE_TIMEOUT_MIN_SECONDS",
+    "UNKNOWN_TOMBSTONE_PREFIX",
+]
+
 # Value is Unix millis of the last observation (monotonic max, EX activity_ttl).
 ACTIVITY_KEY_PREFIX = "opensandbox:activity"
 
@@ -21,15 +42,6 @@ ACTIVITY_KEY_PREFIX = "opensandbox:activity"
 UNKNOWN_TOMBSTONE_PREFIX = "opensandbox:idlep:unknown"
 
 LOCK_PREFIX = "opensandbox:idlep:lock"
-
-# idlePolicy.idleTimeoutSeconds (X) bounds, enforced at create time.
-IDLE_TIMEOUT_MIN_SECONDS = 30
-IDLE_TIMEOUT_MAX_SECONDS = 86400
-
-# idlePolicy.activeProbe.timeoutSeconds bounds.
-PROBE_TIMEOUT_MIN_SECONDS = 1
-PROBE_TIMEOUT_MAX_SECONDS = 10
-DEFAULT_PROBE_TIMEOUT_SECONDS = 2
 
 # Only action in this revision; the field exists so future actions stay additive.
 ON_IDLE_ACTION_PAUSE = "pause"
