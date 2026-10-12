@@ -27,6 +27,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Optional
 
 from fastapi import HTTPException
@@ -130,6 +131,7 @@ class FastSandboxService(SandboxService, ExtensionService):
         )
         self._tenant_provider = None  # type: ignore[assignment]
         self._k8s_client = k8s_client
+        self._k8s_client_lock = Lock()
         self._cr_reader = SandboxCRReader(self._k8s, k8s_client)
         self._template_service = template_service
         self._activity_recorder: Optional[ActivityRecorder] = None
@@ -231,9 +233,13 @@ class FastSandboxService(SandboxService, ExtensionService):
             self._cr_reader.invalidate(namespace)
 
     def _kubernetes_client(self) -> K8sClient:
-        if self._k8s_client is None:
-            self._k8s_client = K8sClient(self._k8s)
-        return self._k8s_client
+        # create_sandbox runs in worker threads; the lazy init must not race
+        # into a double K8sClient construction (K8sClient._load_config mutates
+        # process-global k8s configuration). Same pattern as SandboxCRReader.
+        with self._k8s_client_lock:
+            if self._k8s_client is None:
+                self._k8s_client = K8sClient(self._k8s)
+            return self._k8s_client
 
     def close(self) -> None:
         self._cr_reader.close()

@@ -67,6 +67,20 @@ class ProbeVerdict:
         return "probe=not_active"
 
 
+def _probe_target_url(endpoint: Endpoint, path: str) -> str:
+    """Join the gateway endpoint and the probe path into an absolute URL.
+
+    ``ingress.gateway.address`` is configured without a scheme (the config
+    rejects one), so default to plain ``http://`` — the same way the server
+    proxy path targets the gateway; route authenticity comes from the signed
+    scope, not transport TLS.
+    """
+    base = endpoint.endpoint.rstrip("/")
+    if not base.startswith(("http://", "https://")):
+        base = f"http://{base}"
+    return base + path
+
+
 class ActivityProber:
     """Issues the app-declared activity probe through the ingress gateway."""
 
@@ -88,7 +102,7 @@ class ActivityProber:
             endpoint = self._endpoint_builder(
                 candidate.namespace, candidate.sandbox_id, probe.port
             )
-            url = endpoint.endpoint.rstrip("/") + probe.path
+            url = _probe_target_url(endpoint, probe.path)
             headers = dict(endpoint.headers or {})
             headers[SKIP_ACTIVITY_HEADER] = SKIP_ACTIVITY_VALUE
             response = await self._client.get(

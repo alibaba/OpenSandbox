@@ -109,6 +109,40 @@ async def test_uri_mode_joins_scope_and_probe_path():
 
 
 @pytest.mark.asyncio
+async def test_scheme_less_gateway_address_defaults_to_http():
+    """`ingress.gateway.address` rejects a scheme in config; the probe must
+    still produce an absolute URL (httpx rejects scheme-less targets)."""
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={"active": True})
+
+    prober = _prober(handler, Endpoint(endpoint="gateway.example.com"))
+    try:
+        verdict = await prober.probe(_candidate())
+    finally:
+        await prober.aclose()
+
+    assert verdict.outcome == PROBE_OUTCOME_ACTIVE
+    assert seen["url"] == "http://gateway.example.com/active"
+
+
+@pytest.mark.asyncio
+async def test_uri_mode_scheme_less_address_defaults_to_http():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"active": False})
+
+    prober = _prober(handler, Endpoint(endpoint="gateway.example.com/f1.scope"))
+    try:
+        verdict = await prober.probe(_candidate())
+    finally:
+        await prober.aclose()
+
+    assert verdict.outcome == PROBE_OUTCOME_NOT_ACTIVE
+
+
+@pytest.mark.asyncio
 async def test_not_active_carries_capped_message():
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"active": False, "message": "m" * 400})

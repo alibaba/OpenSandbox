@@ -83,11 +83,11 @@ from opensandbox_server.services.fast_sandbox.service import FastSandboxService
 
 logger = logging.getLogger(__name__)
 
-# Pause-latency observation: poll cadence and total observe window. A pause
-# still not Paused after the window is recorded as no sample, never an error.
+# Pause-latency observation defaults: poll cadence and total observe window.
+# A pause still not Paused after the window is recorded as no sample, never
+# an error.
 _PAUSE_LATENCY_POLL_SECONDS = 1.0
 _PAUSE_LATENCY_OBSERVE_TIMEOUT_MS = 300_000
-_PAUSE_LATENCY_TASKS: set[asyncio.Task[None]] = set()
 
 
 def _default_clock() -> int:
@@ -139,6 +139,9 @@ class IdlePauseSweeper:
         # None keeps probe-declared candidates pause-exempt (probe pipeline
         # unavailable, e.g. no ingress gateway routing).
         self._prober = prober
+        # Instance-scoped: one sweeper's stop() must not cancel another
+        # instance's in-flight latency trackers.
+        self._latency_tasks: set[asyncio.Task[None]] = set()
         # Set only when this sweeper created the client; caller-supplied
         # clients stay the caller's to close.
         self._owned_redis = owned_redis
@@ -159,9 +162,9 @@ class IdlePauseSweeper:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
             self._task = None
-        for task in list(_PAUSE_LATENCY_TASKS):
+        for task in list(self._latency_tasks):
             task.cancel()
-        await asyncio.gather(*_PAUSE_LATENCY_TASKS, return_exceptions=True)
+        await asyncio.gather(*self._latency_tasks, return_exceptions=True)
         if self._prober is not None:
             try:
                 await self._prober.aclose()
@@ -561,8 +564,10 @@ class IdlePauseSweeper:
         deadline_ms = started_ms + self._pause_latency_observe_timeout_ms
 
         async def _track() -> None:
-            while self._clock() < deadline_ms:
-                await asyncio.sleep(poll_seconds)
+            while True:
+                # Read first, sleep after: sampling before waiting keeps
+                # sub-second checkpoints out of the floor set by the poll
+                # interval.
                 state = await asyncio.to_thread(
                     state_reader, candidate.namespace, candidate.sandbox_id
                 )
@@ -571,12 +576,13 @@ class IdlePauseSweeper:
                         seconds=max(0.0, (self._clock() - started_ms) / 1000)
                     )
                     return
-                if state is None:
-                    return  # gone or unreadable; no sample
+                if state is None or self._clock() >= deadline_ms:
+                    return  # gone, unreadable, or observe window elapsed
+                await asyncio.sleep(poll_seconds)
 
         task = asyncio.create_task(_track(), name=f"idlep_pause_latency_{candidate.sandbox_id}")
-        _PAUSE_LATENCY_TASKS.add(task)
-        task.add_done_callback(_PAUSE_LATENCY_TASKS.discard)
+        self._latency_tasks.add(task)
+        task.add_done_callback(self._latency_tasks.discard)
 
 
 async def start_idle_pause_sweeper(

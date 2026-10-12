@@ -661,7 +661,9 @@ class CreateSandboxRequest(BaseModel):
             "exclusive with image and snapshotId; in template mode the workload "
             "shape is fixed by the template's golden image, so entrypoint, env, "
             "resourceLimits, resourceRequests, volumes, platform, credentialProxy, "
-            "secureAccess and lifecycle are rejected. timeout is required."
+            "secureAccess and lifecycle hooks are rejected. lifecycle.idlePolicy "
+            "is allowed (control-plane state, not workload shape). timeout is "
+            "required."
         ),
     )
 
@@ -710,7 +712,8 @@ class CreateSandboxRequest(BaseModel):
             if self.lifecycle is not None and self.lifecycle.has_hooks:
                 raise ValueError(
                     "lifecycle hooks cannot be used together with poolRef; "
-                    "lifecycle.idlePolicy is allowed."
+                    "lifecycle.idlePolicy is not a hook and is allowed where "
+                    "the backend supports it."
                 )
             # Reject conflicting fields that would be ignored in pool mode
             if bool((self.snapshot_id or "").strip()):
