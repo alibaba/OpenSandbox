@@ -161,12 +161,13 @@ class RetryPolicy:
     Bare ``503`` responses are never affected by this knob.
     """
 
-    wake_overall_deadline: timedelta = timedelta(seconds=60)
+    wake_overall_deadline: timedelta | None = timedelta(seconds=60)
     """
     Wall-clock cap spanning all wake cycles of one logical request:
     waits, retries, and request time. Wake retries never reset it; a
     next ``Retry-After`` that does not fit the remaining budget ends
     the wake retry with a typed ``SandboxWakeTimeoutException``.
+    ``None`` removes the time bound (attempt count still applies).
     """
 
     wake_max_attempts: int = 5

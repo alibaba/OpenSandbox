@@ -130,8 +130,12 @@ class RetrySyncTransport(httpx.BaseTransport):
                 and is_wake_timeout_response(response)
             ):
                 wake_attempts_used += 1
-                retry_after = parse_retry_after(
-                    response.headers.get("Retry-After")
+                # Cap before falling back: the same pathological-header
+                # ceiling as the general path; without it a marked 503
+                # carrying Retry-After: 86400 would park this attempt
+                # for a day in a single sleep.
+                retry_after = apply_retry_after_cap(
+                    parse_retry_after(response.headers.get("Retry-After"))
                 )
                 if retry_after is None:
                     retry_after = WAKE_DEFAULT_RETRY_AFTER
@@ -186,8 +190,12 @@ class RetrySyncTransport(httpx.BaseTransport):
                     )
                 self._emit_wake_retry(
                     request=request,
-                    event=wake_attempts_used,
+                    # Global attempt numbering: the upcoming attempt is
+                    # one past every consumed cycle, general and wake
+                    # alike, so interleaved paths never regress.
+                    event=retries_used + wake_attempts_used,
                     sleep_for=retry_after,
+                    request_id=response.headers.get("X-Request-ID"),
                 )
                 try:
                     response.close()
@@ -241,8 +249,8 @@ class RetrySyncTransport(httpx.BaseTransport):
             )
             status_code = response.status_code if response is not None else None
             event = RetryEvent(
-                attempt=retries_used + 2,
-                retries_used=retries_used,
+                attempt=retries_used + wake_attempts_used + 2,
+                retries_used=retries_used + wake_attempts_used,
                 method=method,
                 url=str(request.url),
                 cause=outcome.cause,
@@ -284,15 +292,17 @@ class RetrySyncTransport(httpx.BaseTransport):
         request: httpx.Request,
         event: int,
         sleep_for: timedelta,
+        request_id: str | None,
     ) -> None:
         logger.warning(
-            "retrying %s %s: attempt=%d cause=%s status=%s backoff=%.3fs",
+            "retrying %s %s: attempt=%d cause=%s status=%s backoff=%.3fs request_id=%s",
             request.method,
             request.url,
             event + 1,
             RetryCause.WAKE_TIMEOUT.value,
             503,
             sleep_for.total_seconds(),
+            request_id,
         )
         if self._policy.on_retry is not None:
             try:
@@ -305,7 +315,7 @@ class RetrySyncTransport(httpx.BaseTransport):
                         cause=RetryCause.WAKE_TIMEOUT,
                         status_code=503,
                         backoff=sleep_for,
-                        request_id=None,
+                        request_id=request_id,
                         exception=None,
                     )
                 )

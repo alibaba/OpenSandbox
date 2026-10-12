@@ -337,3 +337,158 @@ class TestBudgetBoundaries:
     def test_disabled_disables_wake(self) -> None:
         policy = RetryPolicy.disabled()
         assert policy.wake_retry_enabled is False
+
+
+class TestRetryAfterCeilingAndEventFields:
+    def test_pathological_retry_after_capped_sync(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Retry-After: 3600 must clamp to the 60s ceiling exactly like
+        # the general path; observe via on_retry instead of sleeping.
+        import opensandbox.transport._sync_retry as sync_retry_mod
+
+        events: list[RetryEvent] = []
+        sleeps: list[float] = []
+        monkeypatch.setattr(sync_retry_mod.time, "sleep", sleeps.append)
+        inner = _ScriptSync(
+            [_wake_503(retry_after="3600"), httpx.Response(200)]
+        )
+        rt = RetrySyncTransport(
+            inner,
+            _wake_policy(
+                # Budget wide enough that the capped 60s wait fits, so
+                # the capped value is observable on the retry event.
+                wake_overall_deadline=timedelta(seconds=120),
+                wake_max_attempts=2,
+                on_retry=events.append,
+            ),
+            rng=random.Random(0),
+        )
+        with httpx.Client(transport=rt, base_url="http://x") as client:
+            resp = client.post("/", json={})
+        assert resp.status_code == 200
+        assert inner.calls == 2
+        assert events[0].backoff == timedelta(seconds=60)
+        assert sleeps == [60.0]
+
+    @pytest.mark.asyncio
+    async def test_pathological_retry_after_capped_async(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import opensandbox.transport._async_retry as async_retry_mod
+
+        events: list[RetryEvent] = []
+        sleeps: list[float] = []
+
+        async def _no_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+
+        monkeypatch.setattr(async_retry_mod.asyncio, "sleep", _no_sleep)
+        inner = _ScriptAsync(
+            [_wake_503(retry_after="3600"), httpx.Response(200)]
+        )
+        rt = RetryAsyncTransport(
+            inner,
+            _wake_policy(
+                # Budget wide enough that the capped 60s wait fits, so
+                # the capped value is observable on the retry event.
+                wake_overall_deadline=timedelta(seconds=120),
+                wake_max_attempts=2,
+                on_retry=events.append,
+            ),
+            rng=random.Random(0),
+        )
+        async with httpx.AsyncClient(
+            transport=rt, base_url="http://x"
+        ) as client:
+            resp = await client.post("/", json={})
+        assert resp.status_code == 200
+        assert inner.calls == 2
+        assert events[0].backoff == timedelta(seconds=60)
+        assert sleeps == [60.0]
+
+    def test_no_deadline_relies_on_cap_and_attempt_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # wake_overall_deadline=None is valid: the per-sleep 60s cap
+        # plus wake_max_attempts keep every wait bounded.
+        import opensandbox.transport._sync_retry as sync_retry_mod
+
+        monkeypatch.setattr(sync_retry_mod.time, "sleep", lambda s: None)
+        inner = _ScriptSync(
+            [_wake_503(), _wake_503(), httpx.Response(200)]
+        )
+        rt = RetrySyncTransport(
+            inner,
+            _wake_policy(wake_overall_deadline=None, wake_max_attempts=3),
+            rng=random.Random(0),
+        )
+        with httpx.Client(transport=rt, base_url="http://x") as client:
+            resp = client.post("/", json={})
+        assert resp.status_code == 200
+        assert inner.calls == 3
+
+    def test_wake_event_carries_request_id(self) -> None:
+        events: list[RetryEvent] = []
+        marked = httpx.Response(
+            503,
+            headers={
+                "OpenSandbox-Wake": "expired",
+                "Retry-After": "1",
+                "X-Request-ID": "req-42",
+            },
+            content=_WAKE_BODY,
+        )
+        inner = _ScriptSync([marked, httpx.Response(200)])
+        rt = RetrySyncTransport(
+            inner,
+            _wake_policy(wake_max_attempts=2, on_retry=events.append),
+            rng=random.Random(0),
+        )
+        with httpx.Client(transport=rt, base_url="http://x") as client:
+            client.post("/", json={})
+        assert events[0].request_id == "req-42"
+
+    def test_attempt_numbering_monotonic_across_interleaved_retries(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # wake 503 -> bare 503 (general retry) -> wake 503 -> 200:
+        # attempt numbers must never regress and retries_used must
+        # count every consumed cycle.
+        from dataclasses import replace as _replace
+        from http import HTTPStatus as _HS
+
+        import opensandbox.transport._sync_retry as sync_retry_mod
+
+        monkeypatch.setattr(sync_retry_mod.time, "sleep", lambda s: None)
+        events: list[RetryEvent] = []
+        inner = _ScriptSync(
+            [
+                _wake_503(),
+                _bare_503(),
+                _wake_503(),
+                httpx.Response(200),
+            ]
+        )
+        policy = _replace(
+            _wake_policy(
+                max_retries=1,
+                wake_max_attempts=3,
+                on_retry=events.append,
+            ),
+            retryable_status_codes_idempotent=frozenset(
+                {_HS.SERVICE_UNAVAILABLE}
+            ),
+        )
+        rt = RetrySyncTransport(inner, policy, rng=random.Random(0))
+        with httpx.Client(transport=rt, base_url="http://x") as client:
+            resp = client.get("/")
+        assert resp.status_code == 200
+        assert inner.calls == 4
+        assert [e.attempt for e in events] == [2, 3, 4]
+        assert [e.retries_used for e in events] == [1, 1, 3]
+        assert [e.cause for e in events] == [
+            RetryCause.WAKE_TIMEOUT,
+            RetryCause.STATUS_503,
+            RetryCause.WAKE_TIMEOUT,
+        ]
