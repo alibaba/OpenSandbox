@@ -12,10 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-# OSEP-0024 idle-pause profile: ephemeral Redis for per-sandbox activity
-# keys and pause locks. Integration-only: no auth, no persistence, no
-# PDB — the fail-safe direction of the feature is "no pauses" when Redis
-# is unreachable, which this deployment exercises by existing at all.
+# OSEP-0024 profile: ephemeral Redis for activity keys and pause locks.
 # Applied into the opensandbox-system namespace by integration-env.sh.
 apiVersion: apps/v1
 kind: Deployment
@@ -36,8 +33,6 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine
-          # Ephemeral by design: activity keys carry their own TTL and a
-          # flush may only delay pauses (missing-key tombstones).
           args: ["--save", "", "--appendonly", "no"]
           ports:
             - containerPort: 6379

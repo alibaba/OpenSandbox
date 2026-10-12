@@ -116,7 +116,7 @@ class SandboxesSync(Protocol):
 
         Template mode fixes the workload shape on the server: only metadata,
         network policy, extensions and the control-plane ``idle_policy``
-        (OSEP-0024) may accompany the template id, and the timeout is required.
+        may accompany the template id, and the timeout is required.
         """
         ...
 

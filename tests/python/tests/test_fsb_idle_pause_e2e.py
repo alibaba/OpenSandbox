@@ -13,29 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-"""OSEP-0024 idle-pause / wake-on-access E2E for the fsb integration env.
+"""OSEP-0024 idle-pause / wake-on-access E2E (fsb integration env).
 
-Requires the fast-sandbox integration stack brought up with the
-idle-pause profile (``IDLE_PAUSE=1 integration-env.sh up``) plus the
-golden-image template id:
-
-    IDLE_PAUSE=1 ./scripts/fast-sandbox-env/integration-env.sh up
-    cd tests/python
-    OPENSANDBOX_TEST_IDLE_PAUSE=1 \
-    OPENSANDBOX_TEST_FSB_TEMPLATE_ID="$(cat "$WORK/template-id")" \
-        uv run pytest tests/test_fsb_idle_pause_e2e.py
-
-(or ``integration-env.sh idle-e2e``, which exports the variables).
-
-Covers the OSEP-0024 integration contract on the live stack:
-auto-pause of an opted-in sandbox after X idle seconds, wake-on-access
-through the SDK's wake retry contract, the no-idlePolicy compatibility
-invariant (traffic never wakes a policy-less paused sandbox), and the
-wake-only policy (declared policy without a timeout).
-
-The whole module is skipped unless ``OPENSANDBOX_TEST_IDLE_PAUSE=1`` and
-``OPENSANDBOX_TEST_FSB_TEMPLATE_ID`` are set; it is excluded from the
-default ``make test`` run.
+Requires ``IDLE_PAUSE=1 integration-env.sh up`` plus
+``OPENSANDBOX_TEST_FSB_TEMPLATE_ID``; ``integration-env.sh idle-e2e``
+exports both. Skipped otherwise and excluded from ``make test``.
 """
 
 import asyncio
@@ -58,8 +40,7 @@ IDLE_PAUSE_ENABLED = os.getenv("OPENSANDBOX_TEST_IDLE_PAUSE", "") == "1"
 FSB_DOMAIN = os.getenv("OPENSANDBOX_TEST_DOMAIN", "127.0.0.1:18080")
 FSB_PROTOCOL = os.getenv("OPENSANDBOX_TEST_PROTOCOL", "http")
 FSB_API_KEY = os.getenv("OPENSANDBOX_TEST_API_KEY", "fast-sandbox-env")
-# Idle threshold X. The env profile runs the sweeper at 5s; the server
-# rejects X < 30, so 30 is the fastest workable value.
+# The server rejects X < 30, so 30 is the fastest workable value.
 IDLE_TIMEOUT = int(os.getenv("OPENSANDBOX_TEST_IDLE_TIMEOUT", "30"))
 
 pytestmark = pytest.mark.skipif(
@@ -68,10 +49,7 @@ pytestmark = pytest.mark.skipif(
     "(OPENSANDBOX_TEST_FSB_TEMPLATE_ID + OPENSANDBOX_TEST_IDLE_PAUSE)",
 )
 
-# X + sweep interval + checkpoint duration + informer/state lag.
 PAUSE_BUDGET = timedelta(seconds=IDLE_TIMEOUT + 210)
-# Local-node restore is fast; the budget mainly covers park retries, the
-# marked-503 retry path, and per-attempt endpoint/state propagation lag.
 WAKE_BUDGET = timedelta(seconds=120)
 
 
@@ -138,14 +116,7 @@ async def _wake_and_run(
     connection_config: ConnectionConfig,
     marker: str,
 ) -> None:
-    """Drive traffic at a paused sandbox until the wake serves it.
-
-    No resume API call is made anywhere: the gateway request itself must
-    trigger the resume, park while the restore completes, and forward.
-    The SDK's wake retry contract rides the marked 503 whenever the park
-    budget is exceeded; transient endpoint-resolution 503s surface as
-    SandboxApiException and are retried here within the wake budget.
-    """
+    """Drive traffic at a paused sandbox until the wake serves it (no resume API call)."""
     deadline = time.monotonic() + WAKE_BUDGET.total_seconds()
     started = time.monotonic()
     last = "no attempt"
@@ -200,14 +171,10 @@ class TestFsbIdlePauseE2E:
         try:
             assert sandbox.origin == SandboxOrigin.TEMPLATE
 
-            # Create/readiness traffic records activity; one command marks
-            # the last observation before the idle window opens.
             result = await sandbox.commands.run("echo pre-idle")
             assert result.error is None
             assert "pre-idle" in result.logs.stdout[0].text
 
-            # Zero traffic: the sweeper must pause the sandbox within
-            # X + sweep interval + checkpoint duration.
             t0 = time.monotonic()
             await _wait_until(
                 lambda: _state_is(manager, sandbox.id, "Paused"),
@@ -252,10 +219,6 @@ class TestFsbIdlePauseE2E:
                 "manually Paused",
             )
 
-            # Traffic must not wake it: the gateway keeps today's bare 503
-            # (no marker) and the SDK never auto-retries a POST on it.
-            # Whichever layer answers first (endpoint resolution or the
-            # gateway), the attempt fails with an API exception.
             with pytest.raises(SandboxException):
                 attached = await Sandbox.connect(
                     sandbox.id,
@@ -264,14 +227,12 @@ class TestFsbIdlePauseE2E:
                 )
                 await attached.commands.run("echo should-not-run")
 
-            # Give a mis-wake time to surface, then assert still Paused.
             await asyncio.sleep(10)
             assert await _state_is(manager, sandbox.id, "Paused"), (
                 "policy-less paused sandbox was woken by traffic — "
                 "compatibility invariant violated"
             )
 
-            # Only the manual resume API restores it.
             await manager.resume_sandbox(sandbox.id)
             await _wait_until(
                 lambda: _state_is(manager, sandbox.id, "Running"),
@@ -291,8 +252,7 @@ class TestFsbIdlePauseE2E:
     async def test_03_wake_only_policy_wakes_on_traffic(
         self, manager: SandboxManager, connection_config
     ) -> None:
-        # A declared policy without idleTimeoutSeconds is wake-only: never
-        # auto-paused, but a (manually) paused sandbox wakes on access.
+        # Wake-only: never auto-paused, but a paused sandbox wakes on access.
         sandbox = await Sandbox.create_from_template(
             FSB_TEMPLATE_ID,
             timeout=timedelta(hours=1),
@@ -312,7 +272,6 @@ class TestFsbIdlePauseE2E:
                 "manually Paused",
             )
 
-            # Traffic alone restores it — no resume API call.
             await _wake_and_run(sandbox.id, connection_config, "wake-only-ok")
             await _wait_until(
                 lambda: _state_is(manager, sandbox.id, "Running"),

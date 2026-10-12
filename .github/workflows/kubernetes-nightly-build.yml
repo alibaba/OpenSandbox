@@ -356,12 +356,8 @@ jobs:
         run: |
           kind delete cluster --name "${KIND_CLUSTER}" || true
 
-  # OSEP-0024 idle-pause / wake-on-access integration environment: the
-  # fast-sandbox env brought up with IDLE_PAUSE=1 (Redis, server [idle_pause]
-  # sweeper, gateway activity+wake flags) plus the idle-pause shell verify
-  # stage and the SDK e2e suite. Needs KVM passthrough, so it runs on the
-  # same self-hosted runner as fast-sandbox-test.yml; nightly/dispatch only
-  # (PRs cover the base env there).
+  # OSEP-0024 idle-pause/wake e2e on the same KVM runner as
+  # fast-sandbox-test.yml; nightly/dispatch only.
   fsb-idle-pause-e2e:
     name: Fast Sandbox Idle-Pause/Wake E2E (OSEP-0024)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

@@ -151,10 +151,7 @@ IMG_INGRESS="${INGRESS_IMAGE:-docker.io/opensandbox/ingress:env}"
 FASTPATH_ENDPOINT="fast-sandbox-fastpath.opensandbox-system.svc:9090"
 SERVER_API_KEY="fast-sandbox-env"
 
-# OSEP-0024 idle-pause/wake profile: IDLE_PAUSE=1 deploys Redis, enables the
-# server [idle_pause] sweeper and the gateway's --activity-enabled +
-# --wake-enabled, and runs the idle-pause verify stage. Sandboxes without
-# lifecycle.idlePolicy are never auto-paused or auto-woken regardless.
+# OSEP-0024 profile: Redis + server [idle_pause] + gateway activity/wake flags.
 IDLE_PAUSE="${IDLE_PAUSE:-0}"
 REDIS_IMAGE="${REDIS_IMAGE:-redis:7-alpine}"
 REDIS_RELEASE="idle-pause-redis"
@@ -1239,8 +1236,7 @@ dart_source_counters() { # pod -> "<source> <value>" lines
 # --- stage: idle-pause Redis (OSEP-0024 profile) --------------------------------
 
 redis_up() {
-	# Deployed before the server: the sweeper connects to Redis at startup
-	# and stays dead if it is unreachable at that moment.
+	# The sweeper connects at startup, so Redis must precede the server.
 	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping Redis"; return 0; }
 	kubectl apply -n "$OSB_NS" -f "$MANIFESTS_DIR/idle-pause/redis.yaml" >/dev/null
 	wait_for "idle-pause Redis deployment ready" 120 \
@@ -1296,9 +1292,7 @@ fastpath_wait_ready_seconds = 30.0
 template_s3_publish_secret = "sandbox-oss-credentials"
 TOML
 	if [[ "$IDLE_PAUSE" == "1" ]]; then
-		# OSEP-0024 auto-pause: dotted keys nest the [idle_pause.redis] table.
-		# sweep_interval_seconds=5 keeps the verify stage's pause detection
-		# tight; activity_ttl_seconds stays the 1800 default (>= any accepted X).
+		# Dotted keys nest the [idle_pause.redis] table.
 		cat >> "$GEN_DIR/osb-server-config.toml" <<TOML
 
 [idle_pause]
@@ -1342,8 +1336,6 @@ opensandbox_up() {
 	# fast-sandbox provider via FastPath, same signing key as the server.
 	local gateway_idle_args=()
 	if [[ "$IDLE_PAUSE" == "1" ]]; then
-		# OSEP-0024: activity recording (server reads the same Redis) and
-		# wake-on-access (gateway resumes parked-sandbox routes).
 		gateway_idle_args=(
 			--set gateway.activity.enabled=true
 			--set gateway.activity.redisDsn="$REDIS_DSN"
@@ -1657,10 +1649,7 @@ idle_ping_code() {
 }
 
 idle_pause_verify() {
-	# OSEP-0024 loop on the live stack: an opted-in sandbox is auto-paused
-	# after X idle seconds, and the next gateway request wakes it (parked,
-	# then forwarded). Uses raw curl for the create: the CLI has no
-	# lifecycle.idlePolicy parameter yet.
+	# Raw curl create: the CLI has no lifecycle.idlePolicy parameter yet.
 	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping verify"; return 0; }
 	local created t0 t1 t2 t3 code
 	local x=30
@@ -1680,18 +1669,13 @@ idle_pause_verify() {
 
 	wait_for "pre-idle execd /ping 200 through the gateway (records activity)" 100 execd_ping_ok
 
-	# No traffic: the sweeper must pause the sandbox within X + sweep
-	# interval + checkpoint duration.
 	t1="$(now_ms)"
 	wait_for "auto-paused within X + sweep + checkpoint" 240 sandbox_paused
 	t2="$(now_ms)"
 	log "verify (idle-pause): $VERIFY_ID idle->Paused in $(( (t2 - t1) / 1000000 ))ms (X=${x}s, sweep=5s)"
 	pass "auto-pause: opted-in sandbox went Running -> Paused with zero traffic"
 
-	# Wake-on-access: the gateway triggers the resume, parks the request,
-	# and forwards once the sandbox is Running again. A marked
-	# 503 (OpenSandbox-Wake: expired) may surface while the restore
-	# exceeds the park budget — retry it; the resume is never canceled.
+	# A marked 503 may surface while the restore exceeds the park budget.
 	log "verify (idle-pause): waking $VERIFY_ID through the gateway"
 	local deadline=$(( $(now_ms) + 240000000000 )) wake_seen=0
 	while :; do
@@ -1886,8 +1870,6 @@ sdk_e2e() {
 }
 
 idle_e2e() {
-	# OSEP-0024 profile suite: auto-pause, wake-on-access, and the
-	# no-idlePolicy compatibility invariant against the live stack.
 	[[ "$IDLE_PAUSE" == "1" ]] || die "idle-e2e requires the idle-pause profile (IDLE_PAUSE=1 up)"
 	kind get clusters 2>/dev/null | grep -x "$KIND_CLUSTER" >/dev/null \
 		|| die "cluster $KIND_CLUSTER is not up (run up first)"

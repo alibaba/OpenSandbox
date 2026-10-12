@@ -376,11 +376,8 @@ class SandboxModelConverter:
     ) -> CreateSandboxRequest:
         """Convert template-mode parameters to API CreateSandboxRequest.
 
-        Template mode fixes the workload shape on the server: workload-shaping
-        fields (entrypoint, env, resources, volumes, platform, ...) must be
-        omitted or the server rejects the request with 400. The exception is
-        ``lifecycle.idlePolicy`` (OSEP-0024): control-plane state, allowed
-        alongside a template id.
+        Template mode fixes the workload shape on the server; the exception
+        is ``lifecycle.idlePolicy`` (OSEP-0024, control-plane state).
         """
         from opensandbox.api.lifecycle.models.create_sandbox_request_extensions import (
             CreateSandboxRequestExtensions,

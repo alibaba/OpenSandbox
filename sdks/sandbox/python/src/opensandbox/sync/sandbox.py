@@ -655,9 +655,7 @@ class SandboxSync:
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
-            idle_policy: Optional idle behavior (OSEP-0024 auto-pause and
-                wake-on-access; fast-sandbox backend only). Absent preserves
-                non-automated behavior exactly.
+            idle_policy: Optional idle behavior (OSEP-0024, fast-sandbox only).
             connection_config: Connection configuration
             health_check: Custom sync health check function
             health_check_polling_interval: Polling interval used while waiting for endpoint publication and readiness/health.
