@@ -22,10 +22,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alibaba/opensandbox/execd/pkg/log"
 	"github.com/alibaba/opensandbox/internal/safego"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/alibaba/opensandbox/execd/pkg/log"
 )
 
 const (
