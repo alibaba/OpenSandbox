@@ -617,7 +617,10 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
                     "code": SandboxErrorCodes.INVALID_PARAMETER,
-                    "message": "lifecycle hooks are not supported by the Docker provider.",
+                    "message": (
+                        "lifecycle is not supported by the Docker provider; only the "
+                        "fast-sandbox backend accepts lifecycle.idlePolicy (OSEP-0024)."
+                    ),
                 },
             )
         if (request.extensions or {}).get("poolRef", "").strip():

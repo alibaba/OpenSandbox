@@ -19,8 +19,9 @@ replica per idle episode, and FastPath PauseSandbox is an idempotent CAS, so
 a lost race still converges to a single pause.
 
 Gates (first failure drops the candidate for this sweep): opt-in -> Running
--> expiry -> idle (value / tombstone / unknown) -> probe (declared probes
-are pause-exempt until the probe pipeline lands) -> lock -> re-verify ->
+-> expiry -> idle (value / tombstone / unknown) -> lock -> re-verify ->
+activity probe (declared probes; busy answer records activity, only an
+explicit not-active proceeds, failure drops) -> post-probe re-verify ->
 PauseSandbox. Any Redis failure skips the sweep; the worst case is a missed
 pause, never a lost sandbox.
 """
@@ -36,7 +37,8 @@ from typing import Callable, Optional, Sequence
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
-from opensandbox_server.config import AppConfig
+from opensandbox_server.config import AppConfig, INGRESS_MODE_GATEWAY
+from opensandbox_server.api.schema import Endpoint
 from opensandbox_server.integrations.idle_pause.activity import (
     ActivityRegistry,
     ThreadSafeActivityRecorder,
@@ -61,15 +63,31 @@ from opensandbox_server.integrations.idle_pause.logutil import (
     IDLEP_SOURCE_SWEEPER,
     idlep_bundle,
 )
-from opensandbox_server.integrations.idle_pause.metrics import record_pause_request
+from opensandbox_server.integrations.idle_pause.metrics import (
+    record_pause_latency,
+    record_pause_request,
+    record_probe_outcome,
+)
+from opensandbox_server.integrations.idle_pause.probe import (
+    PROBE_OUTCOME_ACTIVE,
+    PROBE_OUTCOME_ERROR,
+    ActivityProber,
+)
 from opensandbox_server.integrations.idle_pause.redis_client import (
     close_idle_pause_redis_client,
     connect_idle_pause_redis_from_config,
 )
 from opensandbox_server.services.composite_service import CompositeSandboxService
+from opensandbox_server.services.fast_sandbox.endpoint import build_endpoint
 from opensandbox_server.services.fast_sandbox.service import FastSandboxService
 
 logger = logging.getLogger(__name__)
+
+# Pause-latency observation: poll cadence and total observe window. A pause
+# still not Paused after the window is recorded as no sample, never an error.
+_PAUSE_LATENCY_POLL_SECONDS = 1.0
+_PAUSE_LATENCY_OBSERVE_TIMEOUT_MS = 300_000
+_PAUSE_LATENCY_TASKS: set[asyncio.Task[None]] = set()
 
 
 def _default_clock() -> int:
@@ -102,6 +120,9 @@ class IdlePauseSweeper:
         lock_owner: Optional[str] = None,
         clock: Callable[[], int] = _default_clock,
         owned_redis: Optional[Redis] = None,
+        pause_latency_poll_seconds: float = _PAUSE_LATENCY_POLL_SECONDS,
+        pause_latency_observe_timeout_ms: int = _PAUSE_LATENCY_OBSERVE_TIMEOUT_MS,
+        prober: Optional[ActivityProber] = None,
     ) -> None:
         # Re-resolved every sweep: tenants hot-reload and HTTP providers may
         # enumerate late.
@@ -113,6 +134,11 @@ class IdlePauseSweeper:
         self._interval = float(sweep_interval_seconds)
         self._lock_owner = lock_owner or f"sweeper-{id(self):x}"
         self._clock = clock
+        self._pause_latency_poll_seconds = pause_latency_poll_seconds
+        self._pause_latency_observe_timeout_ms = pause_latency_observe_timeout_ms
+        # None keeps probe-declared candidates pause-exempt (probe pipeline
+        # unavailable, e.g. no ingress gateway routing).
+        self._prober = prober
         # Set only when this sweeper created the client; caller-supplied
         # clients stay the caller's to close.
         self._owned_redis = owned_redis
@@ -133,6 +159,14 @@ class IdlePauseSweeper:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
             self._task = None
+        for task in list(_PAUSE_LATENCY_TASKS):
+            task.cancel()
+        await asyncio.gather(*_PAUSE_LATENCY_TASKS, return_exceptions=True)
+        if self._prober is not None:
+            try:
+                await self._prober.aclose()
+            except Exception as exc:  # noqa: BLE001 - shutdown must proceed
+                logger.debug(f"idle_pause prober close deferred error={exc!s}")
         if self._owned_redis is not None:
             client, self._owned_redis = self._owned_redis, None
             try:
@@ -261,12 +295,14 @@ class IdlePauseSweeper:
         ):
             return
 
-        # A declared probe must veto busy sandboxes; until the probe pipeline
-        # lands, declaring one keeps the sandbox pause-exempt.
-        if candidate.policy.active_probe is not None:
+        # A declared probe needs the probe pipeline (ingress-gateway routing).
+        # Without it the candidate is pause-exempt — the fail-safe direction:
+        # a declared probe means ingress observation alone cannot be trusted
+        # to pause this workload.
+        if candidate.policy.active_probe is not None and self._prober is None:
             record_pause_request(outcome="gated")
             stats.gated += 1
-            stats.details.append(f"{candidate.sandbox_id}:active_probe_declared")
+            stats.details.append(f"{candidate.sandbox_id}:probe_unavailable")
             return
 
         try:
@@ -315,7 +351,42 @@ class IdlePauseSweeper:
                 stats.details.append(f"{candidate.sandbox_id}:activity_changed")
                 return
 
-            await self._issue_pause(candidate, threshold, now_ms, last_active_ms, stats)
+            # Activity probe (declared probes only): the sweeper asks the
+            # sandbox itself whether work is in progress. A busy answer is
+            # recorded as an ordinary observation; an explicit not-active
+            # lets the pause through; any failure drops the candidate.
+            probe_note: Optional[str] = None
+            if candidate.policy.active_probe is not None:
+                probe_note = await self._run_probe(candidate, stats)
+                if probe_note is None:
+                    return
+                # Re-verify after the probe: it spans up to timeoutSeconds,
+                # and a request landing while it ran may not have flushed at
+                # the first re-verify. A newer observation drops us.
+                try:
+                    current = await self._activity.read(candidate.sandbox_id)
+                except (RedisError, OSError) as exc:
+                    line, ex = idlep_bundle(
+                        event=IDLEP_EVENT_SWEEP_SKIPPED,
+                        source=IDLEP_SOURCE_SWEEPER,
+                        sandbox_id=candidate.sandbox_id,
+                        namespace=candidate.namespace,
+                        skip_reason="post_probe_read_failed",
+                        error_type=type(exc).__name__,
+                    )
+                    logger.warning(f"idle_pause {line} error={exc!s}", extra=ex)
+                    record_pause_request(outcome="gated")
+                    stats.gated += 1
+                    return
+                if current != last_active_ms:
+                    record_pause_request(outcome="gated")
+                    stats.gated += 1
+                    stats.details.append(f"{candidate.sandbox_id}:activity_changed_after_probe")
+                    return
+
+            await self._issue_pause(
+                candidate, threshold, now_ms, last_active_ms, stats, probe_note=probe_note
+            )
         finally:
             # Best-effort; TTL is the primary release path.
             try:
@@ -401,6 +472,42 @@ class IdlePauseSweeper:
             return False
         return True
 
+    async def _run_probe(self, candidate: SandboxCandidate, stats: SweepStats) -> Optional[str]:
+        """Run the declared activity probe; return the pause-audit note.
+
+        ``None`` means the candidate is dropped for this sweep: a busy answer
+        (recorded as activity — the clock resets and the sandbox is probed
+        again at its next idle window), a probe failure, or a timeout.
+        """
+        assert self._prober is not None
+        verdict = await self._prober.probe(candidate)
+        record_probe_outcome(outcome=verdict.outcome)
+        if verdict.outcome == PROBE_OUTCOME_ACTIVE:
+            try:
+                await self._activity.record(candidate.sandbox_id, now_ms=self._clock())
+            except (RedisError, OSError) as exc:
+                # The observation write failed, but the verdict stands: this
+                # sweep still drops the candidate (never a pause on "active").
+                line, ex = idlep_bundle(
+                    event=IDLEP_EVENT_SWEEP_SKIPPED,
+                    source=IDLEP_SOURCE_SWEEPER,
+                    sandbox_id=candidate.sandbox_id,
+                    namespace=candidate.namespace,
+                    skip_reason="probe_active_record_failed",
+                    error_type=type(exc).__name__,
+                )
+                logger.warning(f"idle_pause {line} error={exc!s}", extra=ex)
+            record_pause_request(outcome="gated")
+            stats.gated += 1
+            stats.details.append(f"{candidate.sandbox_id}:probe_active")
+            return None
+        if verdict.outcome == PROBE_OUTCOME_ERROR:
+            record_pause_request(outcome="gated")
+            stats.gated += 1
+            stats.details.append(f"{candidate.sandbox_id}:probe_error")
+            return None
+        return verdict.audit_note()
+
     async def _issue_pause(
         self,
         candidate: SandboxCandidate,
@@ -408,11 +515,13 @@ class IdlePauseSweeper:
         judged_at_ms: int,
         last_active_ms: Optional[int],
         stats: SweepStats,
+        probe_note: Optional[str] = None,
     ) -> None:
         outcome = await asyncio.to_thread(self._executor.pause, candidate)
         if outcome == PauseOutcome.ACCEPTED:
             record_pause_request(outcome="accepted")
             stats.paused += 1
+            self._track_pause_latency(candidate)
             observation_age = (
                 "unknown"
                 if last_active_ms is None
@@ -426,6 +535,7 @@ class IdlePauseSweeper:
                 threshold_seconds=threshold,
                 last_observation_age=observation_age,
                 tombstoned=bool(last_active_ms is None),
+                probe_verdict=probe_note,
             )
             logger.info(f"idle_pause {line}", extra=ex)
         elif outcome in (PauseOutcome.STATE_CHANGED, PauseOutcome.NOT_FOUND):
@@ -436,6 +546,37 @@ class IdlePauseSweeper:
             record_pause_request(outcome="failed")
             stats.failed += 1
             stats.details.append(f"{candidate.sandbox_id}:{outcome.value}")
+
+    def _track_pause_latency(self, candidate: SandboxCandidate) -> None:
+        """Observe accepted->Paused duration in the background.
+
+        Best-effort and state() is fail-safe, so the tracker never raises and
+        a crash mid-poll just skips one histogram sample.
+        """
+        state_reader = getattr(self._executor, "state", None)
+        if state_reader is None:
+            return  # test fakes and other executors without a read side
+        started_ms = self._clock()
+        poll_seconds = self._pause_latency_poll_seconds
+        deadline_ms = started_ms + self._pause_latency_observe_timeout_ms
+
+        async def _track() -> None:
+            while self._clock() < deadline_ms:
+                await asyncio.sleep(poll_seconds)
+                state = await asyncio.to_thread(
+                    state_reader, candidate.namespace, candidate.sandbox_id
+                )
+                if state == "paused":
+                    record_pause_latency(
+                        seconds=max(0.0, (self._clock() - started_ms) / 1000)
+                    )
+                    return
+                if state is None:
+                    return  # gone or unreadable; no sample
+
+        task = asyncio.create_task(_track(), name=f"idlep_pause_latency_{candidate.sandbox_id}")
+        _PAUSE_LATENCY_TASKS.add(task)
+        task.add_done_callback(_PAUSE_LATENCY_TASKS.discard)
 
 
 async def start_idle_pause_sweeper(
@@ -486,6 +627,10 @@ async def start_idle_pause_sweeper(
     fsb.set_activity_recorder(
         ThreadSafeActivityRecorder(registry, asyncio.get_running_loop())
     )
+    # The activity-probe pipeline routes through the ingress gateway like any
+    # client request; without gateway routing the prober stays None and
+    # probe-declared candidates remain pause-exempt.
+    prober = _build_activity_prober(app_config)
     sweeper = IdlePauseSweeper(
         namespace_resolver=namespace_resolver,
         inventory=FastSandboxInventory(fsb.cr_reader),
@@ -494,11 +639,35 @@ async def start_idle_pause_sweeper(
         executor=FastPathPauseExecutor(fsb.fastpath_client),
         sweep_interval_seconds=ip.sweep_interval_seconds,
         owned_redis=redis_client if owned_redis else None,
+        prober=prober,
     )
     sweeper.start()
     logger.info(
         f"idle_pause sweeper started namespaces={list(dict.fromkeys(namespace_resolver()))} "
         f"sweep_interval={ip.sweep_interval_seconds} "
-        f"activity_ttl={ip.activity_ttl_seconds}"
+        f"activity_ttl={ip.activity_ttl_seconds} "
+        f"prober={'enabled' if prober is not None else 'unavailable'}"
     )
     return sweeper
+
+
+def _build_activity_prober(app_config: AppConfig) -> Optional[ActivityProber]:
+    """Build the probe client, or None when probes cannot be routed.
+
+    Mirrors the fsb endpoint requirements: an ingress gateway with signed
+    route scopes. The endpoint builder raises for unroutable targets at
+    probe time; every failure resolves to an error verdict (no pause).
+    """
+    ingress = app_config.ingress
+    if (
+        ingress is None
+        or ingress.mode != INGRESS_MODE_GATEWAY
+        or ingress.gateway is None
+        or ingress.secure_access is None
+    ):
+        return None
+
+    def build(namespace: str, sandbox_id: str, port: int) -> Endpoint:
+        return build_endpoint(ingress, namespace, sandbox_id, port)
+
+    return ActivityProber(endpoint_builder=build)

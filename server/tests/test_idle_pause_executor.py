@@ -15,6 +15,7 @@
 """FastPathPauseExecutor tests: request shape and error mapping."""
 
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -138,3 +139,31 @@ def test_request_id_tracks_generation_across_episodes():
 )
 def test_error_mapping(exc, expected):
     assert _execute(StubFastPathClient(exc=exc)) is expected
+
+
+class StubStateClient(StubFastPathClient):
+    """get_sandbox returns the configured SandboxState."""
+
+    def __init__(self, state: int | Exception):
+        super().__init__()
+        self.state = state
+
+    def get_sandbox(self, namespace: str, sandbox_name: str, **_):
+        if isinstance(self.state, Exception):
+            raise self.state
+        response = SimpleNamespace(sandbox=SimpleNamespace(state=self.state))
+        return response
+
+
+def test_state_maps_proto_states():
+    from opensandbox_server.services.fast_sandbox.generated import fastpath_pb2 as pb2
+
+    paused = FastPathPauseExecutor(StubStateClient(pb2.SANDBOX_STATE_PAUSED))  # type: ignore[arg-type]
+    assert paused.state("ns1", "fsb_x") == "paused"
+    running = FastPathPauseExecutor(StubStateClient(pb2.SANDBOX_STATE_RUNNING))  # type: ignore[arg-type]
+    assert running.state("ns1", "fsb_x") == "running"
+
+
+def test_state_resolves_errors_to_none():
+    executor = FastPathPauseExecutor(StubStateClient(FastPathNotFound("NOT_FOUND", "gone")))  # type: ignore[arg-type]
+    assert executor.state("ns1", "fsb_x") is None

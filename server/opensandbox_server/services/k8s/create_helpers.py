@@ -96,9 +96,11 @@ def _build_create_workload_context(
 
     sandbox_env, egress_env = split_egress_env(request.env)
     if request.lifecycle is not None:
+        # idlePolicy is control-plane state (OSEP-0024); it never reaches execd.
         sandbox_env[OPENSANDBOX_LIFECYCLE] = request.lifecycle.model_dump_json(
             by_alias=True,
             exclude_none=True,
+            exclude={"idle_policy"},
         )
 
     if credential_proxy_enabled and egress_env.get(OPENSANDBOX_EGRESS_MITMPROXY_SSL_INSECURE):

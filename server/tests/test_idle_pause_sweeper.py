@@ -14,6 +14,7 @@
 
 """Sweeper gate-order tests with in-memory collaborators."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 import logging
 from typing import Optional
@@ -32,6 +33,11 @@ from opensandbox_server.integrations.idle_pause.policy import (
     ActivityProbe,
     IdlePolicy,
     validate_idle_policy,
+)
+from opensandbox_server.integrations.idle_pause.probe import (
+    PROBE_OUTCOME_ACTIVE,
+    PROBE_OUTCOME_ERROR,
+    PROBE_OUTCOME_NOT_ACTIVE,
 )
 from opensandbox_server.integrations.idle_pause.sweeper import IdlePauseSweeper
 from tests.test_idle_pause_activity import FakeAsyncRedis
@@ -90,6 +96,7 @@ def _sweeper(
     *,
     clock_now: int = NOW_MS,
     namespaces: Optional[list[str]] = None,
+    prober: Optional[object] = None,
 ) -> IdlePauseSweeper:
     return IdlePauseSweeper(
         namespace_resolver=lambda: namespaces or ["ns"],
@@ -99,6 +106,7 @@ def _sweeper(
         executor=executor,  # type: ignore[arg-type]
         sweep_interval_seconds=15,
         clock=lambda: clock_now,
+        prober=prober,  # type: ignore[arg-type]
     )
 
 
@@ -271,6 +279,119 @@ async def test_declared_probe_gates_pause_until_probe_pipeline_lands():
     stats = await sweeper.sweep_once()
     assert executor.calls == []
     assert stats.gated == 1
+
+
+class _StubProber:
+    """Scripted prober; optionally records activity while probing."""
+
+    def __init__(self, verdicts: list[tuple[str, Optional[str]]], record_during_probe=None):
+        self.verdicts = list(verdicts)
+        self.probed: list[SandboxCandidate] = []
+        self.record_during_probe = record_during_probe
+
+    async def probe(self, candidate: SandboxCandidate):
+        self.probed.append(candidate)
+        if self.record_during_probe is not None:
+            await self.record_during_probe(candidate)
+        outcome, message = self.verdicts.pop(0)
+        from opensandbox_server.integrations.idle_pause.probe import ProbeVerdict
+
+        return ProbeVerdict(outcome, message)
+
+    async def aclose(self) -> None:
+        pass
+
+
+def _probe_candidate() -> SandboxCandidate:
+    return _candidate(policy=_policy(active_probe=ActivityProbe(port=8080, path="/active")))
+
+
+@pytest.mark.asyncio
+async def test_probe_active_answer_records_activity_and_drops_candidate():
+    redis = FakeAsyncRedis()
+    candidate = _probe_candidate()
+    executor = FakeExecutor()
+    registry = ActivityRegistry(redis, activity_ttl_seconds=1800)  # type: ignore[arg-type]
+    await registry.record(candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000)
+    prober = _StubProber(
+        [(PROBE_OUTCOME_ACTIVE, None)],
+        record_during_probe=lambda _c: registry.record(
+            candidate.sandbox_id, now_ms=NOW_MS
+        ),
+    )
+    sweeper = _sweeper([candidate], redis, executor, prober=prober)
+
+    stats = await sweeper.sweep_once()
+    await sweeper.stop()
+
+    assert executor.calls == []
+    assert stats.gated == 1
+    assert f"{candidate.sandbox_id}:probe_active" in stats.details
+    # The busy answer IS activity: the key now carries the fresh observation.
+    assert await registry.read(candidate.sandbox_id) == NOW_MS
+
+
+@pytest.mark.asyncio
+async def test_probe_not_active_answer_lets_pause_proceed():
+    redis = FakeAsyncRedis()
+    candidate = _probe_candidate()
+    executor = FakeExecutor()
+    await ActivityRegistry(redis, activity_ttl_seconds=1800).record(  # type: ignore[arg-type]
+        candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000
+    )
+    prober = _StubProber([(PROBE_OUTCOME_NOT_ACTIVE, "cron loop idle")])
+    sweeper = _sweeper([candidate], redis, executor, prober=prober)
+
+    stats = await sweeper.sweep_once()
+    await sweeper.stop()
+
+    assert len(executor.calls) == 1
+    assert stats.paused == 1
+    assert stats.gated == 0
+
+
+@pytest.mark.asyncio
+async def test_probe_error_drops_candidate_without_pause():
+    redis = FakeAsyncRedis()
+    candidate = _probe_candidate()
+    executor = FakeExecutor()
+    await ActivityRegistry(redis, activity_ttl_seconds=1800).record(  # type: ignore[arg-type]
+        candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000
+    )
+    prober = _StubProber([(PROBE_OUTCOME_ERROR, None)])
+    sweeper = _sweeper([candidate], redis, executor, prober=prober)
+
+    stats = await sweeper.sweep_once()
+    await sweeper.stop()
+
+    assert executor.calls == []
+    assert stats.gated == 1
+    assert f"{candidate.sandbox_id}:probe_error" in stats.details
+
+
+@pytest.mark.asyncio
+async def test_request_landing_during_probe_drops_candidate():
+    redis = FakeAsyncRedis()
+    candidate = _probe_candidate()
+    executor = FakeExecutor()
+    registry = ActivityRegistry(redis, activity_ttl_seconds=1800)  # type: ignore[arg-type]
+    await registry.record(candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000)
+    prober = _StubProber(
+        [(PROBE_OUTCOME_NOT_ACTIVE, None)],
+        record_during_probe=lambda _c: registry.record(
+            candidate.sandbox_id, now_ms=NOW_MS
+        ),
+    )
+    sweeper = _sweeper([candidate], redis, executor, prober=prober)
+
+    stats = await sweeper.sweep_once()
+    await sweeper.stop()
+
+    # The second re-verify catches the observation that landed while the
+    # probe ran: no pause, next sweep re-evaluates.
+    assert executor.calls == []
+    assert stats.gated == 1
+    assert f"{candidate.sandbox_id}:activity_changed_after_probe" in stats.details
 
 
 @pytest.mark.asyncio
@@ -600,3 +721,115 @@ async def test_tombstone_clear_failure_is_fail_safe():
 
     assert len(executor.calls) == 1  # value-based decision unaffected
     assert stats.paused == 1
+
+
+class _StatefulExecutor(FakeExecutor):
+    """FakeExecutor with the pause-latency read side (state)."""
+
+    def __init__(self, outcome: PauseOutcome = PauseOutcome.ACCEPTED):
+        super().__init__(outcome)
+        self.states: list[Optional[str]] = ["paused"]
+        self.state_calls = 0
+
+    def state(self, namespace: str, sandbox_id: str) -> Optional[str]:
+        self.state_calls += 1
+        return self.states.pop(0) if self.states else None
+
+
+@pytest.mark.asyncio
+async def test_accepted_pause_observes_pause_latency(monkeypatch):
+    samples: list[float] = []
+    monkeypatch.setattr(
+        "opensandbox_server.integrations.idle_pause.sweeper.record_pause_latency",
+        lambda *, seconds: samples.append(seconds),
+    )
+    redis = FakeAsyncRedis()
+    candidate = _candidate(policy=_policy())
+    executor = _StatefulExecutor()
+    sweeper = IdlePauseSweeper(
+        namespace_resolver=lambda: ["ns"],
+        inventory=FakeInventory([candidate]),
+        activity=ActivityRegistry(redis, activity_ttl_seconds=1800),  # type: ignore[arg-type]
+        locks=PauseLockManager(redis, lock_ttl_seconds=30),  # type: ignore[arg-type]
+        executor=executor,  # type: ignore[arg-type]
+        sweep_interval_seconds=15,
+        clock=lambda: NOW_MS,
+        pause_latency_poll_seconds=0.01,
+    )
+    await ActivityRegistry(redis, activity_ttl_seconds=1800).record(  # type: ignore[arg-type]
+        candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000
+    )
+
+    await sweeper.sweep_once()
+    for _ in range(200):
+        if samples:
+            break
+        await asyncio.sleep(0.01)
+    await sweeper.stop()
+
+    assert samples == [0.0]  # first poll already paused: sub-poll latency
+
+
+@pytest.mark.asyncio
+async def test_pause_latency_tracker_gives_up_without_paused_observation(monkeypatch):
+    samples: list[float] = []
+    monkeypatch.setattr(
+        "opensandbox_server.integrations.idle_pause.sweeper.record_pause_latency",
+        lambda *, seconds: samples.append(seconds),
+    )
+    redis = FakeAsyncRedis()
+    candidate = _candidate(policy=_policy())
+    executor = _StatefulExecutor()
+    executor.states = ["running"]  # never reaches paused
+    sweeper = IdlePauseSweeper(
+        namespace_resolver=lambda: ["ns"],
+        inventory=FakeInventory([candidate]),
+        activity=ActivityRegistry(redis, activity_ttl_seconds=1800),  # type: ignore[arg-type]
+        locks=PauseLockManager(redis, lock_ttl_seconds=30),  # type: ignore[arg-type]
+        executor=executor,  # type: ignore[arg-type]
+        sweep_interval_seconds=15,
+        clock=lambda: NOW_MS,
+        pause_latency_poll_seconds=0.01,
+        pause_latency_observe_timeout_ms=30,
+    )
+    await ActivityRegistry(redis, activity_ttl_seconds=1800).record(  # type: ignore[arg-type]
+        candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000
+    )
+
+    await sweeper.sweep_once()
+    await asyncio.sleep(0.15)
+    await sweeper.stop()
+
+    assert samples == []
+    assert executor.state_calls >= 1
+
+
+@pytest.mark.asyncio
+async def test_executor_without_state_read_skips_latency_tracking(monkeypatch):
+    samples: list[float] = []
+    monkeypatch.setattr(
+        "opensandbox_server.integrations.idle_pause.sweeper.record_pause_latency",
+        lambda *, seconds: samples.append(seconds),
+    )
+    redis = FakeAsyncRedis()
+    candidate = _candidate(policy=_policy())
+    executor = FakeExecutor()  # no state() attribute: plain pause-only fake
+    sweeper = IdlePauseSweeper(
+        namespace_resolver=lambda: ["ns"],
+        inventory=FakeInventory([candidate]),
+        activity=ActivityRegistry(redis, activity_ttl_seconds=1800),  # type: ignore[arg-type]
+        locks=PauseLockManager(redis, lock_ttl_seconds=30),  # type: ignore[arg-type]
+        executor=executor,  # type: ignore[arg-type]
+        sweep_interval_seconds=15,
+        clock=lambda: NOW_MS,
+        pause_latency_poll_seconds=0.01,
+    )
+    await ActivityRegistry(redis, activity_ttl_seconds=1800).record(  # type: ignore[arg-type]
+        candidate.sandbox_id, now_ms=NOW_MS - (X + 10) * 1000
+    )
+
+    stats = await sweeper.sweep_once()  # must not raise
+    await sweeper.stop()
+
+    assert stats.paused == 1
+    assert samples == []
