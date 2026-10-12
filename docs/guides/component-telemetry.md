@@ -63,3 +63,30 @@ Prometheus-style backends expect cumulative counters and histograms. Set
 environment, or configure the Collector's `deltatocumulative` processor when
 ingesting delta metrics. Choose the setting before component startup; these
 environment variables are not hot-reloaded.
+
+## OOM kill observation in execd
+
+execd watches the sandbox's own cgroup and reports OOM kills across the whole
+sandbox cgroup subtree: user and business processes and nested cgroups are all
+covered, not only the sandbox main process. cgroup v2 hosts are covered fully;
+cgroup v1 is best-effort. Kernel logs (dmesg) are intentionally not used: the
+sandbox container has no `CAP_SYSLOG`, and the kernel ring buffer is not
+sandbox-scoped.
+
+Every detection produces two signals:
+
+- Metric `execd.system.oom.kills` (counter, unit `{kill}`) with a `level`
+  attribute: `local` for kills of processes in the sandbox cgroup itself,
+  `descendant` for kills in nested cgroups (cgroup v1 reports a single
+  increment without `level`). It flows through the same OTLP export path and
+  shared attributes as the other execd metrics.
+- A warn log line on the container stdout (or the file configured with
+  `EXECD_LOG_FILE`), with the kill count, memory usage against the cgroup
+  limit, OOM sub-event deltas, the child cgroups that received the kills
+  (`kill_cgroups`), and the processes that disappeared around the event
+  (`exited=[...]`, best-effort candidates bounded by the kill count).
+
+On warm sandboxes rebound by `POST /internal/init`, the counter interval that
+crosses a binding handoff is dropped rather than attributed to the new sandbox
+identity. The full metric list and log field reference lives in the
+[execd telemetry docs](https://github.com/opensandbox-group/OpenSandbox/blob/main/components/execd/docs/opentelemetry.md).

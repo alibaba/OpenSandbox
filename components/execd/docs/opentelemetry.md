@@ -52,6 +52,11 @@ cgroup v1. Each increment is reported twice:
 Kernel logs (dmesg) are intentionally not used: the sandbox container has no
 `CAP_SYSLOG` and the kernel ring buffer is not sandbox-scoped.
 
+On warm sandboxes rebound by `POST /internal/init`, the counter interval that
+crosses a binding handoff is dropped instead of being attributed to the new
+sandbox identity. The operator-facing guide lives at
+`docs/guides/component-telemetry.md` in the repository root.
+
 ## Shared Attributes
 
 All execd metrics may include shared attributes:

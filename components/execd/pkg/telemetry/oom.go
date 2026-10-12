@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/alibaba/opensandbox/execd/pkg/binding"
 	"github.com/alibaba/opensandbox/execd/pkg/log"
 )
 
@@ -204,6 +206,50 @@ func victimAge(bootTime, startTicks, now int64) int64 {
 		return -1
 	}
 	return age
+}
+
+// bindingFingerprint identifies the RuntimeBinding in effect right now, so
+// the watcher can drop counter intervals crossing a /internal/init handoff:
+// the cgroup counters are continuous across rebinds while their attribution
+// switches to the new sandbox.
+func bindingFingerprint() string {
+	b := binding.Current()
+	if b == nil {
+		return ""
+	}
+	return strconv.FormatUint(b.Generation, 10) + "/" + b.SandboxID
+}
+
+// killCgroupNames returns the child cgroups whose subtree received kills in
+// the last interval: hierarchical counts that incremented, or newly seen
+// children with a positive count. A fresh child with zero kills is not
+// blamed just for being new. Names are sorted.
+func killCgroupNames(prev, cur map[string]int64) []string {
+	var names []string
+	for name, count := range cur {
+		if count <= 0 {
+			continue
+		}
+		if prevCount, seen := prev[name]; seen && monotonicDelta(prevCount, count) == 0 {
+			continue
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// mountOptionsHaveController reports whether the comma-separated mount
+// options mention the controller, e.g. "rw,nosuid,memory".
+func mountOptionsHaveController(options []string, controller string) bool {
+	for _, field := range options {
+		for _, name := range strings.Split(field, ",") {
+			if name == controller {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // limitExited keeps the most recent entries up to the limit: freshly exited

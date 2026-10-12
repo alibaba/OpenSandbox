@@ -174,6 +174,79 @@ func TestFormatEventsDelta(t *testing.T) {
 	}
 }
 
+func TestKillCgroupNames(t *testing.T) {
+	tests := []struct {
+		name string
+		prev map[string]int64
+		cur  map[string]int64
+		want []string
+	}{
+		{
+			name: "incrementing child included",
+			prev: map[string]int64{"a": 1},
+			cur:  map[string]int64{"a": 2},
+			want: []string{"a"},
+		},
+		{
+			name: "unchanged child excluded",
+			prev: map[string]int64{"a": 1},
+			cur:  map[string]int64{"a": 1},
+			want: nil,
+		},
+		{
+			name: "new child with kills included",
+			prev: map[string]int64{"a": 0},
+			cur:  map[string]int64{"a": 0, "b": 3},
+			want: []string{"b"},
+		},
+		{
+			name: "fresh child with zero kills not blamed",
+			prev: map[string]int64{},
+			cur:  map[string]int64{"new": 0},
+			want: nil,
+		},
+		{
+			name: "counter reset counts as kills",
+			prev: map[string]int64{"a": 5},
+			cur:  map[string]int64{"a": 2},
+			want: []string{"a"},
+		},
+		{
+			name: "sorted output",
+			prev: map[string]int64{},
+			cur:  map[string]int64{"b": 1, "a": 1},
+			want: []string{"a", "b"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := killCgroupNames(tt.prev, tt.cur)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("names = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMountOptionsHaveController(t *testing.T) {
+	if !mountOptionsHaveController([]string{"rw,nosuid,nodev,memory"}, "memory") {
+		t.Fatal("comma-separated single field should match")
+	}
+	if !mountOptionsHaveController([]string{"rw", "relatime", "memory"}, "memory") {
+		t.Fatal("split fields should match")
+	}
+	if mountOptionsHaveController([]string{"rw,nosuid,nodev"}, "memory") {
+		t.Fatal("absent controller should not match")
+	}
+	if mountOptionsHaveController(nil, "memory") {
+		t.Fatal("no options should not match")
+	}
+	// Prefix collisions must not match: "memory-full" is not "memory".
+	if mountOptionsHaveController([]string{"memory-full"}, "memory") {
+		t.Fatal("prefix collision should not match")
+	}
+}
+
 func TestLimitExited(t *testing.T) {
 	exited := []oomExited{{Pid: 1}, {Pid: 2}, {Pid: 3}}
 	// The limit keeps the most recent entries: freshly exited processes are

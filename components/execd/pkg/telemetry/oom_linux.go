@@ -80,26 +80,36 @@ func runOOMWatch(ctx context.Context) {
 	watchOOMSource(ctx, source, oomPollInterval)
 }
 
-// watchOOMSource polls source until ctx is done. The first sample only seeds
-// the baseline; each later increment is reported as a kill event. The pid
-// tracker observes /proc every tick (one directory read plus stats of newly
-// spawned processes), so attribution stays fresh without scanning the whole
-// process table repeatedly.
+// oomWatchState carries one watcher's polling state across ticks.
+type oomWatchState struct {
+	source  *oomSource
+	tracker *procTracker
+
+	prev         oomSample
+	prevChildren map[string]int64
+	prevFp       string
+	havePrev     bool
+
+	pendingExited []oomExited
+	hold          *oomDelta
+	holdPrev      oomSample
+	holdCur       oomSample
+
+	readErrReported bool
+}
+
+// watchOOMSource polls the sandbox cgroup OOM counters until ctx is done.
+// The baseline is seeded synchronously so kills during the first interval
+// are reported instead of being swallowed.
 func watchOOMSource(ctx context.Context, source *oomSource, interval time.Duration) {
 	log.Info("oom: watching for OOM kills (source=%s, cgroup=%s, interval=%s)",
 		source.mode, source.cgroupPath, interval)
 
+	state := &oomWatchState{source: source, tracker: newProcTracker()}
+	state.seed()
+
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-
-	tracker := newProcTracker()
-	havePrev := false
-	var prev oomSample
-	var prevChildren map[string]int64
-	var pendingExited []oomExited
-	var hold *oomDelta
-	var holdPrev, holdCur oomSample
-	readErrReported := false
 
 	for {
 		select {
@@ -107,59 +117,103 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 			return
 		case <-ticker.C:
 		}
-
-		cur, err := source.sample()
-		if err != nil {
-			// Report once: repeated failures (e.g. cgroupfs gone during
-			// teardown) would otherwise spam the log every interval.
-			if !readErrReported {
-				readErrReported = true
-				log.Warn("oom: reading %s failed, retrying: %v", source.eventsPath, err)
-			}
-			continue
-		}
-		readErrReported = false
-
-		// Cheap every-tick pass: directory read + stats of new pids only.
-		// Exited candidates are held in a bounded buffer across ticks.
-		pendingExited = append(pendingExited, tracker.observe()...)
-		if len(pendingExited) > oomMaxPendingExited {
-			pendingExited = pendingExited[len(pendingExited)-oomMaxPendingExited:]
-		}
-		curChildren := source.childKillCounts()
-
-		// A detection is emitted one tick late: a killed process disappears
-		// from /proc and the cgroup counter increments at slightly different
-		// moments, so holding the emit lets candidates observed on either
-		// side of the counter bump join the report.
-		if havePrev && hold != nil {
-			emitOOMKill(ctx, source.eventSource(),
-				source.killContext(holdPrev, holdCur, prevChildren, curChildren),
-				*hold, limitExited(pendingExited, int(hold.total)),
-				tracker.bootTime, time.Now().Unix())
-			pendingExited = nil
-			hold = nil
-		}
-
-		if havePrev {
-			if delta := diffOOMSample(prev, cur); delta.total > 0 {
-				if hold == nil {
-					copied := delta
-					hold = &copied
-					holdPrev, holdCur = prev, cur
-				} else {
-					hold.total += delta.total
-					if delta.haveLocal {
-						hold.haveLocal = true
-						hold.local += delta.local
-						hold.descendant += delta.descendant
-					}
-					holdCur = cur
-				}
-			}
-		}
-		prev, prevChildren, havePrev = cur, curChildren, true
+		state.tick(ctx)
 	}
+}
+
+// seed takes the initial baseline without waiting for the first tick.
+func (s *oomWatchState) seed() {
+	s.prevChildren = s.source.childKillCounts()
+	s.prevFp = bindingFingerprint()
+	prev, err := s.source.sample()
+	if err != nil {
+		log.Warn("oom: reading %s failed at startup: %v", s.source.eventsPath, err)
+		return
+	}
+	s.prev, s.havePrev = prev, true
+}
+
+// tick runs one polling step. skip is true when the step must not proceed to
+// detection (read failure or binding handoff).
+func (s *oomWatchState) tick(ctx context.Context) (skip bool) {
+	cur, err := s.source.sample()
+	if err != nil {
+		// Report once: repeated failures (e.g. cgroupfs gone during
+		// teardown) would otherwise spam the log every interval.
+		if !s.readErrReported {
+			s.readErrReported = true
+			log.Warn("oom: reading %s failed, retrying: %v", s.source.eventsPath, err)
+		}
+		return true
+	}
+	s.readErrReported = false
+
+	// Cheap every-tick pass: directory read + stats of new pids only. Exited
+	// candidates are held in a bounded buffer across ticks.
+	s.pendingExited = append(s.pendingExited, s.tracker.observe()...)
+	if len(s.pendingExited) > oomMaxPendingExited {
+		s.pendingExited = s.pendingExited[len(s.pendingExited)-oomMaxPendingExited:]
+	}
+	curChildren := s.source.childKillCounts()
+
+	if s.handleRebind(cur, curChildren) {
+		return true
+	}
+	s.emitHeld(ctx, curChildren)
+
+	if s.havePrev {
+		if delta := diffOOMSample(s.prev, cur); delta.total > 0 {
+			s.holdDetection(delta, s.prev, cur)
+		}
+	}
+	s.prev, s.prevChildren, s.havePrev = cur, curChildren, true
+	return false
+}
+
+// handleRebind drops the in-flight interval when the RuntimeBinding changed:
+// a /internal/init handoff switches the attribution to the new sandbox while
+// the cgroup counters stay continuous, so exporting the old sandbox's kills
+// under the new identity must be avoided.
+func (s *oomWatchState) handleRebind(cur oomSample, curChildren map[string]int64) bool {
+	fp := bindingFingerprint()
+	if fp == s.prevFp {
+		return false
+	}
+	if s.havePrev {
+		log.Info("oom: binding handoff detected, dropping the in-flight interval")
+	}
+	s.hold, s.holdPrev, s.holdCur, s.pendingExited = nil, oomSample{}, oomSample{}, nil
+	s.prev, s.prevChildren, s.prevFp, s.havePrev = cur, curChildren, fp, true
+	return true
+}
+
+// emitHeld reports a detection held since the previous tick.
+func (s *oomWatchState) emitHeld(ctx context.Context, curChildren map[string]int64) {
+	if !s.havePrev || s.hold == nil {
+		return
+	}
+	emitOOMKill(ctx, s.source.eventSource(),
+		s.source.killContext(s.holdPrev, s.holdCur, s.prevChildren, curChildren),
+		*s.hold, limitExited(s.pendingExited, int(s.hold.total)),
+		s.tracker.bootTime, time.Now().Unix())
+	s.pendingExited, s.hold = nil, nil
+}
+
+// holdDetection folds a new kill delta into the pending hold.
+func (s *oomWatchState) holdDetection(delta oomDelta, prev, cur oomSample) {
+	if s.hold == nil {
+		copied := delta
+		s.hold = &copied
+		s.holdPrev, s.holdCur = prev, cur
+		return
+	}
+	s.hold.total += delta.total
+	if delta.haveLocal {
+		s.hold.haveLocal = true
+		s.hold.local += delta.local
+		s.hold.descendant += delta.descendant
+	}
+	s.holdCur = cur
 }
 
 // killContext assembles the event context for the log line: where the memory
@@ -174,13 +228,7 @@ func (s *oomSource) killContext(prev, cur oomSample, prevChildren, curChildren m
 	if events := formatEventsDelta(prev, cur); events != "" {
 		parts = append(parts, events)
 	}
-	var kills []string
-	for name, count := range curChildren {
-		if prev, seen := prevChildren[name]; !seen || monotonicDelta(prev, count) > 0 {
-			kills = append(kills, name)
-		}
-	}
-	sort.Strings(kills)
+	kills := killCgroupNames(prevChildren, curChildren)
 	if len(kills) > 0 {
 		shown := kills
 		if len(shown) > oomMaxKillCgroups {
@@ -428,15 +476,9 @@ func cgroupV1MemoryMount() (string, error) {
 		return cgroupV1MemoryDir, nil
 	}
 	return scanMounts(func(mountPoint, fstype string, options []string) bool {
-		if fstype != "cgroup" {
-			return false
-		}
-		for _, option := range options {
-			if option == "memory" {
-				return true
-			}
-		}
-		return false
+		// /proc/self/mounts packs options into one comma-separated field,
+		// e.g. "rw,nosuid,nodev,memory".
+		return fstype == "cgroup" && mountOptionsHaveController(options, "memory")
 	})
 }
 
