@@ -64,6 +64,16 @@ jobs:
           go test -c -o /tmp/execd-filesystem-runtime.test ./pkg/runtime
           sudo /tmp/execd-filesystem-runtime.test -test.run "^TestFilesystem" -test.v -test.timeout 90s
 
+      - name: Verify OOM watcher smoke as root
+        working-directory: components/execd
+        run: |
+          # End-to-end: a helper process joins a memory-limited cgroup, the
+          # kernel OOM killer terminates it, and the execd OOM watcher must
+          # emit its detection log line. Skips itself when cgroup v2 or root
+          # is unavailable.
+          go test -c -o /tmp/execd-oom-smoke.test ./pkg/telemetry
+          sudo /tmp/execd-oom-smoke.test -test.run "^TestOOMSmoke$" -test.v -test.timeout 120s
+
       - name: Run execd-ebpf variant tests
         working-directory: components/execd
         run: |

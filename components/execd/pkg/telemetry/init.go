@@ -40,6 +40,7 @@ var (
 	executionDuration        metric.Float64Histogram
 	filesystemOperationDurMs metric.Float64Histogram
 	isolationRunDurationMs   metric.Float64Histogram
+	oomKills                 metric.Int64Counter
 )
 
 func Init(ctx context.Context) (shutdown func(context.Context) error, err error) {
@@ -150,6 +151,15 @@ func registerExecdMetrics() error {
 			obs.Observe(udpCount, metric.WithAttributes(append(base, attribute.String("protocol", "udp"))...))
 			return nil
 		}),
+	)
+	if err != nil {
+		return err
+	}
+
+	oomKills, err = meter.Int64Counter(
+		"execd.system.oom.kills",
+		metric.WithDescription("OOM kills observed in the sandbox cgroup"),
+		metric.WithUnit("{kill}"),
 	)
 	if err != nil {
 		return err

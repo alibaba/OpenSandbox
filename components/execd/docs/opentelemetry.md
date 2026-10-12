@@ -18,6 +18,29 @@ This page lists the OpenTelemetry metrics currently implemented in execd.
 | `execd.system.memory.usage_bytes` | Observable Gauge | `By` | - | System memory used bytes (gopsutil). |
 | `execd.system.network.io.bytes` | Observable Counter | `By` | `direction` (`in`/`out`) | Cumulative network I/O bytes. |
 | `execd.system.network.connections.active` | Observable Gauge | - | `protocol` (`tcp`/`udp`) | Current active network connections. |
+| `execd.system.oom.kills` | Counter | `{kill}` | `level` (`local`/`descendant`, cgroup v2 only) | OOM kills detected in the sandbox cgroup (see below). |
+| `execd.isolation.run.duration` | Histogram | `ms` | `result` | Isolated session run duration. |
+| `execd.isolation.session.count` | Observable Gauge | - | - | Current number of active isolated sessions. |
+| `execd.isolation.upper.usage_bytes` | Observable Gauge | `By` | - | Total bytes used by isolated session upper directories. |
+
+## OOM Kill Observation
+
+execd polls its own cgroup every 5 seconds and diffs the kernel OOM kill
+counter: `memory.events` (`oom_kill`) on cgroup v2, `memory.oom_control` on
+cgroup v1. Each increment is reported twice:
+
+- Metric: `execd.system.oom.kills` increments with `level=local` for kills of
+  processes in the sandbox cgroup itself and `level=descendant` for kills in
+  nested cgroups (e.g. isolated sessions). The v2 counters are hierarchical,
+  so the whole sandbox cgroup subtree is covered — including user/business
+  processes, not only the sandbox main process. cgroup v1 reports a single
+  increment without `level`.
+- Log: a structured log line with the kill count, cgroup path, and best-effort
+  victim attribution (pids that disappeared from `/proc` between the polls
+  surrounding the event, with their `comm`).
+
+Kernel logs (dmesg) are intentionally not used: the sandbox container has no
+`CAP_SYSLOG` and the kernel ring buffer is not sandbox-scoped.
 
 ## Shared Attributes
 
