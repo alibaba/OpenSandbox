@@ -154,8 +154,10 @@ func (p *Proxy) handle(sw *statusCapturingResponseWriter, r *http.Request) {
 	}
 
 	// OSEP-0024: every routed request feeds the sandbox idle clock, including
-	// requests that skip renewal. Fire-and-forget; failures are dropped.
-	if p.activity != nil {
+	// requests that skip renewal. The activity-probe sentinel is the one
+	// opt-out: the sweeper's probe must never reset the idle clock it is
+	// trying to measure. Fire-and-forget; failures are dropped.
+	if p.activity != nil && !IsSkipActivity(r.Header) {
 		p.activity.Record(host.namespace, host.ingressKey)
 	}
 
@@ -255,6 +257,7 @@ func (p *Proxy) applyUpstreamRequest(r *http.Request, host *sandboxHost, targetU
 	r.Header.Del(SandboxIngress)
 	r.Header.Del(DeprecatedSandboxIngress)
 	r.Header.Del(AccessRenew)
+	r.Header.Del(SkipActivity)
 	r.Header.Del(signature.OpenSandboxSecureAccessCanonical)
 	r.Header.Del(sandbox.FastSandboxCredential)
 	// Host is carried by r.Host, not r.Header. The Phase 1a Fast Sandbox provider

@@ -39,6 +39,16 @@ var (
 	AccessRenew          = http.CanonicalHeaderKey("OpenSandbox-Access-Renew")
 	AccessRenewSkipValue = "skip"
 
+	// SkipActivity is the OSEP-0024 activity-probe sentinel. The exact
+	// sentinel value SkipActivitySkipValue ("skip") suppresses the activity
+	// observation for that one request, so the idle sweeper's probe never
+	// resets the idle clock it is trying to measure. The server's sweeper is
+	// the only intended issuer; suppressing one's own traffic only delays
+	// (never accelerates) pausing of a sandbox the caller can already route
+	// to. Like AccessRenew, it is stripped before forwarding upstream.
+	SkipActivity          = http.CanonicalHeaderKey("OpenSandbox-Skip-Activity")
+	SkipActivitySkipValue = "skip"
+
 	ReverseProxyServerPowerBy = http.CanonicalHeaderKey("Reverse-Proxy-Server-PowerBy")
 
 	// WebSocket handshake headers passed through to the upgrader.
@@ -65,4 +75,10 @@ var (
 // intents for this single request (OSEP-0009 per-request opt-out).
 func IsAccessRenewSkip(header http.Header) bool {
 	return header.Get(AccessRenew) == AccessRenewSkipValue
+}
+
+// IsSkipActivity reports whether the request opted out of activity tracking
+// for this single request (OSEP-0024 activity-probe sentinel).
+func IsSkipActivity(header http.Header) bool {
+	return header.Get(SkipActivity) == SkipActivitySkipValue
 }
