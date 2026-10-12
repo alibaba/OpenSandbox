@@ -81,6 +81,7 @@ func TestOOMSmoke(t *testing.T) {
 		watchOOMSource(ctx, &oomSource{
 			mode:       "cgroup-v2",
 			cgroupPath: "/" + filepath.Base(dir),
+			dir:        dir,
 			eventsPath: filepath.Join(dir, "memory.events"),
 			localPath:  filepath.Join(dir, "memory.events.local"),
 		}, smokePollInterval)

@@ -35,9 +35,18 @@ cgroup v1. Each increment is reported twice:
   so the whole sandbox cgroup subtree is covered — including user/business
   processes, not only the sandbox main process. cgroup v1 reports a single
   increment without `level`.
-- Log: a structured log line with the kill count, cgroup path, and best-effort
-  victim attribution (pids that disappeared from `/proc` between the polls
-  surrounding the event, with their `comm`).
+- Log: one structured line per detection with the kill count, cgroup path,
+  and troubleshooting context:
+  - `memory=<used>/<limit> peak=<peak>` — where memory stood against the
+    cgroup limit when the detection fired
+  - `events=[oom=N oom_kill=N oom_group_kill=N]` — deltas of the
+    memory.events sub-counters (cgroup v2 only)
+  - `kill_cgroups=a,b` — first-level child cgroups whose subtree received
+    the kills (any nested cgroup inside the sandbox: isolated sessions,
+    user- or system-created cgroups)
+  - `victims=[pid=N comm=x ppid=N rss=N age=Ns, ...]` — best-effort
+    attribution of killed processes (pids that disappeared from `/proc`
+    between the polls surrounding the event), capped at 5 entries
 
 Kernel logs (dmesg) are intentionally not used: the sandbox container has no
 `CAP_SYSLOG` and the kernel ring buffer is not sandbox-scoped.

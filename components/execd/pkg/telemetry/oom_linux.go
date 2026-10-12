@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,18 +33,27 @@ import (
 const (
 	procCgroupFile     = "/proc/self/cgroup"
 	procDir            = "/proc"
+	procStatFile       = "/proc/stat"
 	cgroupV2DefaultDir = "/sys/fs/cgroup"
 	cgroupV1MemoryDir  = "/sys/fs/cgroup/memory"
+	// oomMaxChildCgroups caps how many first-level child cgroups are polled
+	// for kill localization per tick.
+	oomMaxChildCgroups = 64
+	// oomMaxKillCgroups caps child cgroups named in one log line.
+	oomMaxKillCgroups = 3
+	// oomUnlimitedV1Bytes: v1 reports a huge byte value instead of "max".
+	oomUnlimitedV1Bytes = 1 << 50
 )
 
 // oomSource is the cgroupfs location of the sandbox OOM counters. execd sits
 // in the sandbox's own cgroup (often also its own cgroup namespace), so its
 // /proc/self/cgroup path resolved under the cgroup mount scopes the whole
-// sandbox subtree: kills of user processes and of nested cgroups (e.g.
-// isolated sessions) all show up in the counters read here.
+// sandbox subtree: kills of user processes and of nested cgroups all show up
+// in the counters read here.
 type oomSource struct {
 	mode       string
 	cgroupPath string
+	dir        string // cgroup directory holding the memory interface files
 	eventsPath string // memory.events (v2) or memory.oom_control (v1)
 	localPath  string // memory.events.local (v2 only, empty otherwise)
 }
@@ -69,7 +79,8 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 
 	havePrev := false
 	var prev oomSample
-	var prevProcs map[int]string
+	var prevProcs procSnapshot
+	var prevChildren map[string]int64
 	readErrReported := false
 
 	for {
@@ -92,14 +103,50 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 		readErrReported = false
 
 		curProcs := snapshotProcesses()
+		curChildren := source.childKillCounts()
 
 		if havePrev {
 			if delta := diffOOMSample(prev, cur); delta.total > 0 {
-				emitOOMKill(ctx, source.eventSource(), delta, diffVictims(prevProcs, curProcs))
+				emitOOMKill(ctx, source.eventSource(),
+					source.killContext(prev, cur, prevChildren, curChildren),
+					delta, diffVictims(prevProcs.procs, curProcs.procs),
+					curProcs.bootTime, time.Now().Unix())
 			}
 		}
-		prev, prevProcs, havePrev = cur, curProcs, true
+		prev, prevProcs, prevChildren, havePrev = cur, curProcs, curChildren, true
 	}
+}
+
+// killContext assembles the event context for the log line: where the memory
+// stood, which OOM sub-events fired, and which child cgroup subtrees the
+// kills landed in (hierarchical child counters localize kills at any depth;
+// they cover any nested cgroup inside the sandbox, session-created or not).
+func (s *oomSource) killContext(prev, cur oomSample, prevChildren, curChildren map[string]int64) string {
+	var parts []string
+	if mem := s.memoryContext(); mem != "" {
+		parts = append(parts, mem)
+	}
+	if events := formatEventsDelta(prev, cur); events != "" {
+		parts = append(parts, events)
+	}
+	var kills []string
+	for name, count := range curChildren {
+		if prev, seen := prevChildren[name]; !seen || monotonicDelta(prev, count) > 0 {
+			kills = append(kills, name)
+		}
+	}
+	sort.Strings(kills)
+	if len(kills) > 0 {
+		shown := kills
+		if len(shown) > oomMaxKillCgroups {
+			shown = append(shown[:oomMaxKillCgroups], fmt.Sprintf("+%d more", len(kills)-oomMaxKillCgroups))
+		}
+		parts = append(parts, "kill_cgroups="+strings.Join(shown, ","))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return ", " + strings.Join(parts, ", ")
 }
 
 func newOOMSource() (*oomSource, error) {
@@ -129,6 +176,7 @@ func newCgroupV2Source() (*oomSource, error) {
 	source := &oomSource{
 		mode:       "cgroup-v2",
 		cgroupPath: cgroupPath,
+		dir:        dir,
 		eventsPath: eventsPath,
 	}
 	// memory.events.local separates kills of processes in this cgroup from
@@ -151,13 +199,15 @@ func newCgroupV1Source() (*oomSource, error) {
 	}
 	// v1 counters are per-cgroup: this is best-effort and does not cover
 	// descendant cgroups the way the v2 hierarchical counters do.
-	oomControl := filepath.Join(mount, filepath.FromSlash(cgroupPath), "memory.oom_control")
+	dir := filepath.Join(mount, filepath.FromSlash(cgroupPath))
+	oomControl := filepath.Join(dir, "memory.oom_control")
 	if _, err := os.Stat(oomControl); err != nil {
 		return nil, fmt.Errorf("stat %s: %w", oomControl, err)
 	}
 	return &oomSource{
 		mode:       "cgroup-v1",
 		cgroupPath: cgroupPath,
+		dir:        dir,
 		eventsPath: oomControl,
 	}, nil
 }
@@ -171,24 +221,115 @@ func (s *oomSource) sample() (oomSample, error) {
 	if err != nil {
 		return oomSample{}, err
 	}
-	total, ok := oomKillFromEvents(data)
-	if !ok {
+	counters := parseOOMEvents(data)
+	if _, ok := counters["oom_kill"]; !ok {
 		return oomSample{}, fmt.Errorf("no oom_kill counter in %s", s.eventsPath)
 	}
-	sample := oomSample{total: total}
+	sample := oomSample{counters: counters}
 	if s.localPath != "" {
 		data, err := os.ReadFile(s.localPath)
 		if err != nil {
 			return oomSample{}, err
 		}
-		local, ok := oomKillFromEvents(data)
+		local := parseOOMEvents(data)
+		localKills, ok := local["oom_kill"]
 		if !ok {
 			return oomSample{}, fmt.Errorf("no oom_kill counter in %s", s.localPath)
 		}
-		sample.local = local
+		sample.local = localKills
 		sample.haveLocal = true
 	}
 	return sample, nil
+}
+
+// memoryContext describes how close the watched cgroup was to its limit when
+// the detection fired. Best-effort: unreadable files are skipped.
+func (s *oomSource) memoryContext() string {
+	if s.mode == "cgroup-v2" {
+		current, ok := readMemoryBytes(filepath.Join(s.dir, "memory.current"))
+		if !ok {
+			return ""
+		}
+		_, limitStr := readMemoryLimit(filepath.Join(s.dir, "memory.max"))
+		context := fmt.Sprintf("memory=%s/%s", humanBytes(current), limitStr)
+		if peak, ok := readMemoryBytes(filepath.Join(s.dir, "memory.peak")); ok {
+			context += " peak=" + humanBytes(peak)
+		}
+		return context
+	}
+	// cgroup v1 best-effort.
+	current, ok1 := readMemoryBytes(filepath.Join(s.dir, "memory.usage_in_bytes"))
+	limit, ok2 := readMemoryBytes(filepath.Join(s.dir, "memory.limit_in_bytes"))
+	if !ok1 || !ok2 {
+		return ""
+	}
+	limitStr := humanBytes(limit)
+	if limit >= oomUnlimitedV1Bytes {
+		limitStr = "unlimited"
+	}
+	return fmt.Sprintf("memory=%s/%s", humanBytes(current), limitStr)
+}
+
+// childKillCounts returns the hierarchical oom_kill counter of every
+// first-level child cgroup. Hierarchical (not .local) counters are used so a
+// kill nested deeper than one level still increments the child subtree that
+// contains it.
+func (s *oomSource) childKillCounts() map[string]int64 {
+	if s.mode != "cgroup-v2" {
+		return nil
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil
+	}
+	counts := make(map[string]int64)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if len(counts) >= oomMaxChildCgroups {
+			break
+		}
+		data, err := os.ReadFile(filepath.Join(s.dir, entry.Name(), "memory.events"))
+		if err != nil {
+			continue
+		}
+		if kills, ok := parseOOMEvents(data)["oom_kill"]; ok {
+			counts[entry.Name()] = kills
+		}
+	}
+	return counts
+}
+
+// readMemoryBytes reads a cgroupfs file holding a single byte value.
+func readMemoryBytes(path string) (int64, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+// readMemoryLimit reads memory.max: a byte value or the literal "max"
+// (unlimited).
+func readMemoryLimit(path string) (int64, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0, ""
+	}
+	text := strings.TrimSpace(string(data))
+	if text == "max" {
+		return 0, "unlimited"
+	}
+	value, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return 0, ""
+	}
+	return value, humanBytes(value)
 }
 
 // cgroupV2RelPath returns the sandbox's cgroup v2 path relative to the
@@ -272,30 +413,49 @@ func scanMounts(match func(mountPoint, fstype string, options []string) bool) (s
 	return "", errors.New("no matching mount in /proc/self/mounts")
 }
 
-// snapshotProcesses captures the pid->comm map visible to execd (the sandbox
-// pid namespace) for victim attribution. Best effort: a partial or empty map
-// degrades attribution, never the OOM detection itself.
-func snapshotProcesses() map[int]string {
+// snapshotProcesses captures the process table visible to execd (the sandbox
+// pid namespace) for victim attribution, plus the kernel boot time for age
+// computation. Best effort: a partial or empty snapshot degrades attribution,
+// never the OOM detection itself.
+func snapshotProcesses() procSnapshot {
+	snapshot := procSnapshot{procs: map[int]oomProc{}}
+	if data, err := os.ReadFile(procStatFile); err == nil {
+		snapshot.bootTime = bootTimeFromProcStat(data)
+	}
 	entries, err := os.ReadDir(procDir)
 	if err != nil {
-		return nil
+		return snapshot
 	}
-	procs := make(map[int]string, len(entries))
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue
 		}
-		comm, err := os.ReadFile(filepath.Join(procDir, entry.Name(), "comm"))
+		data, err := os.ReadFile(filepath.Join(procDir, entry.Name(), "stat"))
 		if err != nil {
 			// Exited between readdir and read; it stays in the previous
-			// snapshot and may be reported as a victim with its old comm.
+			// snapshot and may be reported as a victim with its old state.
 			continue
 		}
-		procs[pid] = strings.TrimSuffix(string(comm), "\n")
-		if len(procs) >= oomMaxSnapshotPids {
+		if proc, ok := parseStat(data); ok {
+			snapshot.procs[pid] = proc
+		}
+		if len(snapshot.procs) >= oomMaxSnapshotPids {
 			break
 		}
 	}
-	return procs
+	return snapshot
+}
+
+// bootTimeFromProcStat extracts the btime (boot time, epoch seconds) line
+// from /proc/stat.
+func bootTimeFromProcStat(data []byte) int64 {
+	for _, line := range strings.Split(string(data), "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "btime" {
+			if value, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+				return value
+			}
+		}
+	}
+	return 0
 }
