@@ -86,6 +86,15 @@ spec:
             # FastPath gRPC endpoint for the fast-sandbox provider.
             - "--fastpath-endpoint={{ .Values.gateway.fastpathEndpoint }}"
             {{- end }}
+            {{- if .Values.gateway.activity.enabled }}
+            # OSEP-0024 activity tracking. Requires a Redis reachable from
+            # the gateway; the server's [idle_pause] must point at the
+            # same Redis (activity.*.ttlSeconds = server activity_ttl_seconds).
+            - "--activity-enabled=true"
+            - "--activity-redis-dsn={{ .Values.gateway.activity.redisDsn }}"
+            - "--activity-min-interval={{ .Values.gateway.activity.minInterval }}"
+            - "--activity-ttl-seconds={{ .Values.gateway.activity.ttlSeconds }}"
+            {{- end }}
             {{- if .Values.gateway.wake.enabled }}
             # OSEP-0024 wake-on-access. Requires the policy-read RBAC below
             # and a Fast Sandbox provider.

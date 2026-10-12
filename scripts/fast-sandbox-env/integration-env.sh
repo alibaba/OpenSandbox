@@ -57,6 +57,9 @@
 #   XFS_STATEROOT / XFS_SIZE  reflink StateRoot on/off and virtual size
 #   OSB_PACKAGE / OSB_BIN  opensandbox CLI for the verify stages (latest from PyPI / preinstalled binary)
 #   SKIP_TOOL_INSTALL / SKIP_LEFTOVER_CLEAN / INOTIFY_VALUE
+#   IDLE_PAUSE=1     OSEP-0024 idle-pause/wake profile: Redis, server [idle_pause],
+#                    gateway activity+wake flags, idle-pause verify stage
+#   REDIS_IMAGE      Redis image for the idle-pause profile (default redis:7-alpine)
 #
 # Every stage logs to $WORK/logs/; failures dump component logs to
 # logs/failure-<task>-<ts>.txt before exiting (never silently).
@@ -147,6 +150,15 @@ IMG_SERVER="${SERVER_IMAGE:-docker.io/opensandbox/server:env}"
 IMG_INGRESS="${INGRESS_IMAGE:-docker.io/opensandbox/ingress:env}"
 FASTPATH_ENDPOINT="fast-sandbox-fastpath.opensandbox-system.svc:9090"
 SERVER_API_KEY="fast-sandbox-env"
+
+# OSEP-0024 idle-pause/wake profile: IDLE_PAUSE=1 deploys Redis, enables the
+# server [idle_pause] sweeper and the gateway's --activity-enabled +
+# --wake-enabled, and runs the idle-pause verify stage. Sandboxes without
+# lifecycle.idlePolicy are never auto-paused or auto-woken regardless.
+IDLE_PAUSE="${IDLE_PAUSE:-0}"
+REDIS_IMAGE="${REDIS_IMAGE:-redis:7-alpine}"
+REDIS_RELEASE="idle-pause-redis"
+REDIS_DSN="redis://$REDIS_RELEASE.$OSB_NS.svc.cluster.local:6379/0"
 # Per-workdir f1.* route-scope signing key: re-applies must keep old routes
 # verifiable.
 SIGNING_KEY_FILE="$WORK/opensandbox-signing-key"
@@ -1224,6 +1236,18 @@ dart_source_counters() { # pod -> "<source> <value>" lines
 		}'
 }
 
+# --- stage: idle-pause Redis (OSEP-0024 profile) --------------------------------
+
+redis_up() {
+	# Deployed before the server: the sweeper connects to Redis at startup
+	# and stays dead if it is unreachable at that moment.
+	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping Redis"; return 0; }
+	kubectl apply -n "$OSB_NS" -f "$MANIFESTS_DIR/idle-pause/redis.yaml" >/dev/null
+	wait_for "idle-pause Redis deployment ready" 120 \
+		kubectl -n "$OSB_NS" rollout status deploy/idle-pause-redis --timeout=10s
+	pass "idle-pause Redis up ($REDIS_DSN)"
+}
+
 # --- stage: OpenSandbox server + ingress gateway --------------------------------
 
 # Per-workdir key (not per-run): re-applies must keep old routes verifiable.
@@ -1271,6 +1295,21 @@ fastpath_resource_pool = "@POOL_NAME@"
 fastpath_wait_ready_seconds = 30.0
 template_s3_publish_secret = "sandbox-oss-credentials"
 TOML
+	if [[ "$IDLE_PAUSE" == "1" ]]; then
+		# OSEP-0024 auto-pause: dotted keys nest the [idle_pause.redis] table.
+		# sweep_interval_seconds=5 keeps the verify stage's pause detection
+		# tight; activity_ttl_seconds stays the 1800 default (>= any accepted X).
+		cat >> "$GEN_DIR/osb-server-config.toml" <<TOML
+
+[idle_pause]
+enabled = true
+sweep_interval_seconds = 5
+activity_ttl_seconds = 1800
+redis.enabled = true
+redis.dsn = "$REDIS_DSN"
+redis.lock_ttl_seconds = 30
+TOML
+	fi
 	if grep -Eq '@[A-Z_]+@' "$GEN_DIR/osb-server-config.toml"; then
 		die "unrendered token left in $GEN_DIR/osb-server-config.toml"
 	fi
@@ -1299,8 +1338,20 @@ opensandbox_up() {
 		--set server.gateway.secureAccess.activeKey=a \
 		--set "server.gateway.secureAccess.keys[0].key_id=a" \
 		--set "server.gateway.secureAccess.keys[0].key=$(osb_signing_key)"
-	kubectl apply -f "$GEN_DIR/osb-server.yaml" >/dev/null
+		kubectl apply -f "$GEN_DIR/osb-server.yaml" >/dev/null
 	# fast-sandbox provider via FastPath, same signing key as the server.
+	local gateway_idle_args=()
+	if [[ "$IDLE_PAUSE" == "1" ]]; then
+		# OSEP-0024: activity recording (server reads the same Redis) and
+		# wake-on-access (gateway resumes parked-sandbox routes).
+		gateway_idle_args=(
+			--set gateway.activity.enabled=true
+			--set gateway.activity.redisDsn="$REDIS_DSN"
+			--set gateway.activity.minInterval=5s
+			--set gateway.activity.ttlSeconds=1800
+			--set gateway.wake.enabled=true
+		)
+	fi
 	helm_render opensandbox-ingress-gateway "$OSB_ROOT/manifests/charts/ingress-gateway" "$OSB_NS" \
 		"$GEN_DIR/osb-ingress-gateway.yaml" \
 		--set gateway.image.repository="$(image_repo "$IMG_INGRESS")" \
@@ -1316,7 +1367,8 @@ opensandbox_up() {
 		--set gateway.resources.requests.cpu=100m \
 		--set gateway.resources.requests.memory=128Mi \
 		--set gateway.resources.limits.cpu=1 \
-		--set gateway.resources.limits.memory=1Gi
+		--set gateway.resources.limits.memory=1Gi \
+		"${gateway_idle_args[@]}"
 	kubectl apply -f "$GEN_DIR/osb-ingress-gateway.yaml" >/dev/null
 	wait_for "server deployment ready" 180 \
 		kubectl -n "$OSB_NS" rollout status deploy/opensandbox-server --timeout=10s
@@ -1581,6 +1633,86 @@ pause_resume_verify() {
 	wait_for "pause/resume sandbox deleted" 120 verify_sandbox_gone
 }
 
+# --- stage: idle-pause / wake-on-access verify (OSEP-0024 profile) --------------
+
+# Gateway answer for one /ping attempt: "200", "wake-503", or "other-<code>".
+idle_ping_code() {
+	local route headers code marker
+	route="$(osb_api sandbox endpoint "$VERIFY_ID" --port 44772 -o json 2>/dev/null \
+		| jq -r '.headers["OpenSandbox-Ingress-To"] // empty')"
+	[[ -n "$route" ]] || { echo "noroute"; return 0; }
+	headers="$(mktemp)"
+	code="$(curl -sS -m 10 -D "$headers" -o /dev/null \
+		-H "OpenSandbox-Ingress-To: $route" "$GATEWAY_URL/ping" 2>/dev/null \
+		| head -1 | tr -d '\r' | awk '{print $2}')" || true
+	marker="$(tr -d '\r' < "$headers" | grep -i '^OpenSandbox-Wake:' | awk '{print $2}')" || true
+	rm -f "$headers"
+	if [[ "$code" == "200" ]]; then
+		echo "200"
+	elif [[ "$code" == "503" && "$marker" == "expired" ]]; then
+		echo "wake-503"
+	else
+		echo "other-${code:-none}"
+	fi
+}
+
+idle_pause_verify() {
+	# OSEP-0024 loop on the live stack: an opted-in sandbox is auto-paused
+	# after X idle seconds, and the next gateway request wakes it (parked,
+	# then forwarded). Uses raw curl for the create: the CLI has no
+	# lifecycle.idlePolicy parameter yet.
+	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping verify"; return 0; }
+	local created t0 t1 t2 t3 code
+	local x=30
+	log "verify (idle-pause): creating an opted-in sandbox (idleTimeoutSeconds=$x) via the lifecycle API"
+	t0="$(now_ms)"
+	created="$(server_api POST /sandboxes "$(jq -n \
+		--arg template "$TEMPLATE_ID" \
+		--argjson timeout 3600 --argjson x "$x" \
+		'{templateId: $template, timeout: $timeout,
+		  lifecycle: {idlePolicy: {idleTimeoutSeconds: $x, onIdle: "pause", wakeOnAccess: true}},
+		  metadata: {origin: "fast-sandbox-env-idle-pause"}}')" 2>/dev/null)" \
+		|| fail "idle-pause create failed against $SERVER_URL"
+	VERIFY_ID="$(printf '%s' "$created" | jq -r '.id')"
+	[[ -n "$VERIFY_ID" && "$VERIFY_ID" != "null" ]] || fail "create response carried no id"
+	wait_for "idle-pause target Running" 300 sandbox_running
+	log "verify (idle-pause): $VERIFY_ID create->Running $(( ($(now_ms) - t0) / 1000000 ))ms"
+
+	wait_for "pre-idle execd /ping 200 through the gateway (records activity)" 100 execd_ping_ok
+
+	# No traffic: the sweeper must pause the sandbox within X + sweep
+	# interval + checkpoint duration.
+	t1="$(now_ms)"
+	wait_for "auto-paused within X + sweep + checkpoint" 240 sandbox_paused
+	t2="$(now_ms)"
+	log "verify (idle-pause): $VERIFY_ID idle->Paused in $(( (t2 - t1) / 1000000 ))ms (X=${x}s, sweep=5s)"
+	pass "auto-pause: opted-in sandbox went Running -> Paused with zero traffic"
+
+	# Wake-on-access: the gateway triggers the resume, parks the request,
+	# and forwards once the sandbox is Running again. A marked
+	# 503 (OpenSandbox-Wake: expired) may surface while the restore
+	# exceeds the park budget — retry it; the resume is never canceled.
+	log "verify (idle-pause): waking $VERIFY_ID through the gateway"
+	local deadline=$(( $(now_ms) + 240000000000 )) wake_seen=0
+	while :; do
+		code="$(idle_ping_code)"
+		case "$code" in
+			200) break ;;
+			wake-503) wake_seen=1 ;;
+		esac
+		[[ "$(now_ms)" -ge "$deadline" ]] && fail "wake /ping never returned 200 (last=$code)"
+		sleep 1
+	done
+	wait_for "woken sandbox Running again" 120 sandbox_running
+	t3="$(now_ms)"
+	log "verify (idle-pause): $VERIFY_ID wake->200 in $(( (t3 - t2) / 1000000 ))ms (marked-503 observed: $wake_seen)"
+	pass "wake-on-access: paused sandbox resumed on the next gateway request"
+
+	osb_api sandbox kill "$VERIFY_ID" >/dev/null 2>&1 \
+		|| log "verify cleanup: kill failed; remove $VERIFY_ID manually"
+	wait_for "idle-pause sandbox deleted" 120 verify_sandbox_gone
+}
+
 # --- stage: snapshot (opensandbox CLI -> SandboxSnapshot CR -> restore) ----------
 
 # Ready once the server watcher converges the row from the SandboxSnapshot
@@ -1753,6 +1885,29 @@ sdk_e2e() {
 	uv run pytest tests/test_fsb_e2e.py
 }
 
+idle_e2e() {
+	# OSEP-0024 profile suite: auto-pause, wake-on-access, and the
+	# no-idlePolicy compatibility invariant against the live stack.
+	[[ "$IDLE_PAUSE" == "1" ]] || die "idle-e2e requires the idle-pause profile (IDLE_PAUSE=1 up)"
+	kind get clusters 2>/dev/null | grep -x "$KIND_CLUSTER" >/dev/null \
+		|| die "cluster $KIND_CLUSTER is not up (run up first)"
+	curl -fsS -m 5 "$SERVER_URL/health" >/dev/null 2>&1 \
+		|| die "server $SERVER_URL is not reachable (run up first)"
+	command -v uv >/dev/null 2>&1 \
+		|| die "uv is required on PATH (https://docs.astral.sh/uv/ — curl -LsSf https://astral.sh/uv/install.sh | sh)"
+	local template_id
+	template_id="$(cat "$WORK/template-id" 2>/dev/null || true)"
+	[[ -n "$template_id" ]] || die "no template id at $WORK/template-id (run up first; template_up stores it there)"
+	export OPENSANDBOX_TEST_FSB_TEMPLATE_ID="$template_id"
+	export OPENSANDBOX_TEST_DOMAIN="127.0.0.1:$SERVER_HOST_PORT"
+	export OPENSANDBOX_TEST_PROTOCOL="http"
+	export OPENSANDBOX_TEST_API_KEY="$SERVER_API_KEY"
+	export OPENSANDBOX_TEST_IDLE_PAUSE="1"
+	log "sdk e2e (idle-pause): template=$template_id server=$SERVER_URL -> tests/python/tests/test_fsb_idle_pause_e2e.py"
+	cd "$OSB_ROOT/tests/python" || die "tests/python not found under $OSB_ROOT"
+	uv run pytest tests/test_fsb_idle_pause_e2e.py
+}
+
 # --- status / summary ---------------------------------------------------------------------
 
 dart_metrics_summary() {
@@ -1785,6 +1940,11 @@ status() {
 	fi
 	echo
 	log "status: pods ($NS)"
+	if [[ "$IDLE_PAUSE" == "1" ]]; then
+		log "status: idle-pause Redis ($OSB_NS)"
+		kubectl -n "$OSB_NS" get deploy,svc -l app=idle-pause-redis -o wide 2>/dev/null || true
+		echo
+	fi
 	kubectl -n "$NS" get pods -o wide
 	kubectl -n "$RESOURCE_NS" get pods -o wide
 	echo
@@ -1857,7 +2017,7 @@ down() {
 
 usage() {
 	cat <<'EOF'
-usage: integration-env.sh [--auto-clean] {up|down|status|pool|sdk-e2e}
+usage: integration-env.sh [--auto-clean] {up|down|status|pool|sdk-e2e|idle-e2e}
 
   up       initialize the full environment: fast-sandbox@pinned-commit images,
            two-node kind cluster (KVM), RustFS, control plane, firecracker
@@ -1868,12 +2028,17 @@ usage: integration-env.sh [--auto-clean] {up|down|status|pool|sdk-e2e}
            (create -> gateway route -> execd /ping, plus a pause/resume
            round-trip through the checkpoint). The CLI (osb) is installed
            fresh from PyPI unless OSB_BIN points at an existing binary.
+           With IDLE_PAUSE=1: Redis + server [idle_pause] + gateway
+           activity/wake flags, plus the idle-pause/wake verify stage.
   pool     re-apply only the SandboxPool (after editing manifests/pool/)
   status   nodes / pods / pool / DART P2P counters / RustFS / OpenSandbox health
   sdk-e2e  run the Python SDK e2e suite (tests/python/tests/test_fsb_e2e.py)
            against the live stack; requires `up` (template id at
            $WORK/template-id) and uv on PATH. Extra pytest args go through
            PYTEST_ADDOPTS.
+  idle-e2e run the OSEP-0024 idle-pause/wake SDK suite
+           (tests/python/tests/test_fsb_idle_pause_e2e.py); requires an
+           `up` with IDLE_PAUSE=1 and uv on PATH.
   down     teardown: kind cluster + RustFS + sysctl + XFS StateRoot + caches
 
   --auto-clean  on up failure, run down automatically before dumping logs
@@ -1886,8 +2051,9 @@ DOCKER_MIRROR, RUSTFS_*, RC_IMAGE, EGRESS_IMAGE, SERVER_IMAGE, INGRESS_IMAGE,
 FSB_GOPROXY (default direct; set e.g. https://mirrors.aliyun.com/goproxy/,direct
 when the host cannot reach module VCS hosts directly),
 IMAGE_<COMPONENT>, POOL_MIN/POOL_MAX, WARM_IMAGES=1, SBX_IMAGE, EXECD,
-XFS_STATEROOT=0, OSB_PACKAGE/OSB_BIN, SKIP_TOOL_INSTALL=1, SKIP_LEFTOVER_CLEAN=1.
-See the header of this script.
+XFS_STATEROOT=0, OSB_PACKAGE/OSB_BIN, SKIP_TOOL_INSTALL=1, SKIP_LEFTOVER_CLEAN=1,
+IDLE_PAUSE=1 (OSEP-0024 idle-pause/wake profile; REDIS_IMAGE overrides the
+Redis image). See the header of this script.
 EOF
 	exit 1
 }
@@ -1895,13 +2061,13 @@ EOF
 # Allow focused tests to load the stage functions without starting the environment.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
-for arg in "$@"; do
-	case "$arg" in
-		--auto-clean) AUTO_CLEAN=1 ;;
-		up|down|status|pool|sdk-e2e) ACTION="$arg" ;;
-		*) usage ;;
-	esac
-done
+	for arg in "$@"; do
+		case "$arg" in
+			--auto-clean) AUTO_CLEAN=1 ;;
+			up|down|status|pool|sdk-e2e|idle-e2e) ACTION="$arg" ;;
+			*) usage ;;
+		esac
+	done
 [[ -n "$ACTION" ]] || usage
 
 mkdir -p "$WORK" "$LOGS_DIR"
@@ -1945,11 +2111,13 @@ case "$ACTION" in
 		run_stage "CRDs + control plane" control_plane_up
 		run_stage "credentials (publish/pull)" credentials_up
 		run_stage "firecracker runtime readiness + DART (P2P)" runtime_up
+		run_stage "idle-pause Redis (OSEP-0024 profile)" redis_up
 		run_stage "OpenSandbox server + ingress gateway" opensandbox_up
 		run_stage "SandboxTemplate build (opensandbox CLI)" template_up
 		run_stage "SandboxPool $POOL_NAME (egress + P2P)" pool_up
 		run_stage "end-to-end verify (CLI create -> gateway -> execd /ping)" opensandbox_verify
 		run_stage "pause/resume verify (CLI -> FastPath checkpoint)" pause_resume_verify
+		run_stage "idle-pause / wake-on-access verify (OSEP-0024 profile)" idle_pause_verify
 		run_stage "snapshot verify (CLI -> SandboxSnapshot -> restore)" snapshot_verify
 		trap - ERR
 		stage_summary
@@ -1973,6 +2141,13 @@ case "$ACTION" in
 			|| die "cluster $KIND_CLUSTER is not up (run up first)"
 		trap 'on_error sdk-e2e' ERR
 		sdk_e2e
+		trap - ERR
+		;;
+	idle-e2e)
+		kind get clusters 2>/dev/null | grep -x "$KIND_CLUSTER" >/dev/null \
+			|| die "cluster $KIND_CLUSTER is not up (run up first)"
+		trap 'on_error idle-e2e' ERR
+		idle_e2e
 		trap - ERR
 		;;
 	down)

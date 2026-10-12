@@ -25,6 +25,7 @@ from typing import Protocol
 from opensandbox.models.sandboxes import (
     CreateSnapshotRequest,
     CredentialProxyConfig,
+    IdlePolicy,
     NetworkPolicy,
     PagedSandboxInfos,
     PagedSnapshotInfos,
@@ -107,13 +108,14 @@ class Sandboxes(Protocol):
         metadata: dict[str, str] | None = None,
         network_policy: NetworkPolicy | None = None,
         extensions: dict[str, str] | None = None,
+        idle_policy: IdlePolicy | None = None,
     ) -> SandboxCreateResponse:
         """
         Create a sandbox from a ``Succeeded`` fsb template.
 
         Template mode fixes the workload shape on the server: only metadata,
-        network policy and extensions may accompany the template id, and the
-        timeout is required.
+        network policy, extensions and the control-plane ``idle_policy``
+        (OSEP-0024) may accompany the template id, and the timeout is required.
 
         Args:
             template_id: Succeeded fsb template to create the sandbox from

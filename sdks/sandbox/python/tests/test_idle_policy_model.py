@@ -167,3 +167,44 @@ class TestCreatePayload:
             "onIdle": "pause",
             "wakeOnAccess": True,
         }
+
+
+class TestTemplateCreatePayload:
+    def test_idle_policy_rides_template_create(self) -> None:
+        from datetime import timedelta
+
+        from opensandbox.api.lifecycle.types import Unset
+
+        request = SandboxModelConverter.to_api_create_template_sandbox_request(
+            template_id="tpl_1",
+            timeout=timedelta(hours=1),
+            metadata=None,
+            network_policy=None,
+            extensions=None,
+            idle_policy=IdlePolicy(idle_timeout_seconds=30, on_idle="pause"),
+        )
+        lifecycle_field = request.lifecycle
+        assert lifecycle_field is not None and not isinstance(
+            lifecycle_field, Unset
+        )
+        assert lifecycle_field.to_dict() == {
+            "idlePolicy": {
+                "idleTimeoutSeconds": 30,
+                "onIdle": "pause",
+                "wakeOnAccess": True,
+            }
+        }
+
+    def test_template_create_without_policy_keeps_lifecycle_unset(self) -> None:
+        from datetime import timedelta
+
+        from opensandbox.api.lifecycle.types import UNSET, Unset
+
+        request = SandboxModelConverter.to_api_create_template_sandbox_request(
+            template_id="tpl_1",
+            timeout=timedelta(hours=1),
+            metadata=None,
+            network_policy=None,
+            extensions=None,
+        )
+        assert request.lifecycle is UNSET or isinstance(request.lifecycle, Unset)

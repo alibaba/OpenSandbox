@@ -50,6 +50,7 @@ from opensandbox.api.lifecycle.types import Unset
 from opensandbox.models.sandboxes import (
     CreateSnapshotRequest,
     CredentialProxyConfig,
+    IdlePolicy,
     NetworkPolicy,
     NetworkRule,
     PagedSandboxInfos,
@@ -371,12 +372,15 @@ class SandboxModelConverter:
         metadata: dict[str, str] | None,
         network_policy: NetworkPolicy | None,
         extensions: dict[str, str] | None,
+        idle_policy: IdlePolicy | None = None,
     ) -> CreateSandboxRequest:
         """Convert template-mode parameters to API CreateSandboxRequest.
 
         Template mode fixes the workload shape on the server: workload-shaping
         fields (entrypoint, env, resources, volumes, platform, ...) must be
-        omitted or the server rejects the request with 400.
+        omitted or the server rejects the request with 400. The exception is
+        ``lifecycle.idlePolicy`` (OSEP-0024): control-plane state, allowed
+        alongside a template id.
         """
         from opensandbox.api.lifecycle.models.create_sandbox_request_extensions import (
             CreateSandboxRequestExtensions,
@@ -384,7 +388,21 @@ class SandboxModelConverter:
         from opensandbox.api.lifecycle.models.create_sandbox_request_metadata import (
             CreateSandboxRequestMetadata,
         )
+        from opensandbox.api.lifecycle.models.sandbox_lifecycle import (
+            SandboxLifecycle as ApiSandboxLifecycle,
+        )
         from opensandbox.api.lifecycle.types import UNSET
+
+        api_lifecycle = UNSET
+        if idle_policy is not None:
+            if not isinstance(idle_policy, IdlePolicy):
+                raise TypeError(
+                    "idle_policy must be an IdlePolicy or None, "
+                    f"got {type(idle_policy).__name__}"
+                )
+            api_lifecycle = ApiSandboxLifecycle.from_dict(
+                {"idlePolicy": idle_policy.model_dump(by_alias=True, exclude_none=True)}
+            )
 
         request = CreateSandboxRequest(
             template_id=template_id,
@@ -401,6 +419,7 @@ class SandboxModelConverter:
                 if extensions
                 else UNSET
             ),
+            lifecycle=api_lifecycle,
         )
         request.timeout = int(timeout.total_seconds())
         return request

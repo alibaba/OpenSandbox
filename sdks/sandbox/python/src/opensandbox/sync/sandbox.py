@@ -39,6 +39,7 @@ from opensandbox.models.diagnostics import DiagnosticContent
 from opensandbox.models.sandboxes import (
     CreateSnapshotRequest,
     CredentialProxyConfig,
+    IdlePolicy,
     NetworkPolicy,
     NetworkRule,
     PlatformSpec,
@@ -629,6 +630,7 @@ class SandboxSync:
         metadata: dict[str, str] | None = None,
         network_policy: NetworkPolicy | None = None,
         extensions: dict[str, str] | None = None,
+        idle_policy: IdlePolicy | None = None,
         connection_config: ConnectionConfigSync | None = None,
         health_check: Callable[["SandboxSync"], bool] | None = None,
         health_check_polling_interval: timedelta = timedelta(milliseconds=200),
@@ -638,10 +640,11 @@ class SandboxSync:
         Create a new sandbox from a ``Succeeded`` fsb template (blocking).
 
         Template mode fixes the workload shape on the server: the entrypoint,
-        env, resources, volumes, platform and lifecycle of the sandbox come
+        env, resources, volumes, platform and lifecycle hooks of the sandbox come
         from the template's golden image and cannot be overridden here. Only
-        metadata, network policy and extensions may accompany the template id,
-        and the timeout is required.
+        metadata, network policy, extensions and the control-plane
+        ``idle_policy`` (OSEP-0024 ``lifecycle.idlePolicy``) may accompany the
+        template id, and the timeout is required.
 
         Args:
             template_id: ID of a ``Succeeded`` fsb template (see
@@ -652,6 +655,9 @@ class SandboxSync:
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.
                 Prefer namespaced keys (e.g. ``storage.id``).
+            idle_policy: Optional idle behavior (OSEP-0024 auto-pause and
+                wake-on-access; fast-sandbox backend only). Absent preserves
+                non-automated behavior exactly.
             connection_config: Connection configuration
             health_check: Custom sync health check function
             health_check_polling_interval: Polling interval used while waiting for endpoint publication and readiness/health.
@@ -691,6 +697,7 @@ class SandboxSync:
                 metadata=metadata,
                 network_policy=network_policy,
                 extensions=extensions,
+                idle_policy=idle_policy,
             ),
             origin=SandboxOrigin.TEMPLATE,
         )

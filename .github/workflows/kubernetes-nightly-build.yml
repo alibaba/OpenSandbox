@@ -356,6 +356,66 @@ jobs:
         run: |
           kind delete cluster --name "${KIND_CLUSTER}" || true
 
+  # OSEP-0024 idle-pause / wake-on-access integration environment: the
+  # fast-sandbox env brought up with IDLE_PAUSE=1 (Redis, server [idle_pause]
+  # sweeper, gateway activity+wake flags) plus the idle-pause shell verify
+  # stage and the SDK e2e suite. Needs KVM passthrough, so it runs on the
+  # same self-hosted runner as fast-sandbox-test.yml; nightly/dispatch only
+  # (PRs cover the base env there).
+  fsb-idle-pause-e2e:
+    name: Fast Sandbox Idle-Pause/Wake E2E (OSEP-0024)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: kvm
+    timeout-minutes: 180
+    steps:
+      # actions/checkout always executes as the runner user; the script
+      # steps below run as root and leave root-owned files (venv, pycache)
+      # in the workspace, so hand ownership back before every checkout.
+      - name: Reset workspace ownership
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE" 2>/dev/null || true
+
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run integration tests (idle-pause profile)
+        run: sudo -E env "PATH=$PATH" "IDLE_PAUSE=1" ./scripts/fast-sandbox-env/integration-env.sh up --auto-clean
+
+      - name: Run idle-pause SDK e2e
+        timeout-minutes: 45
+        run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh idle-e2e
+
+      # Collect the env's own failure dump ($WORK/logs/failure-*.txt) plus
+      # live status, BEFORE teardown removes the cluster.
+      - name: Collect failure diagnostics
+        if: failure()
+        run: |
+          work="/data/fast-sandbox-env"; [ -d "$work" ] || work="$PWD/.fast-sandbox-env"
+          mkdir -p diagnostics
+          sudo cp -a "$work/logs" "$work/run.log" diagnostics/ 2>/dev/null || true
+          sudo chown -R "$(id -u):$(id -g)" diagnostics || true
+          sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh status \
+            > diagnostics/live-status.txt 2>&1 || true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsb-idle-pause-diagnostics-${{ github.run_attempt }}
+          path: diagnostics/
+          retention-days: 7
+
+      - name: Teardown
+        if: always()
+        run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh down
+
   publish-nightly-latest:
     name: Publish latest (${{ matrix.component }} nightly)
     needs: [k8s-mini-e2e, k8s-pool-e2e, execd-init-e2e]

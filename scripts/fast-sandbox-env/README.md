@@ -37,8 +37,24 @@ caveats): `fast-sandbox/docs/guides/firecracker-integration-env.md`.
 ./scripts/fast-sandbox-env/integration-env.sh status    # component / pool / DART / OpenSandbox health
 ./scripts/fast-sandbox-env/integration-env.sh pool      # re-apply the pool only
 ./scripts/fast-sandbox-env/integration-env.sh sdk-e2e   # Python SDK e2e suite against the live stack
+./scripts/fast-sandbox-env/integration-env.sh idle-e2e  # OSEP-0024 idle-pause/wake suite (needs IDLE_PAUSE=1 up)
 ./scripts/fast-sandbox-env/integration-env.sh down      # teardown, host left clean
 ```
+
+### Idle-pause / wake-on-access profile (OSEP-0024)
+
+`IDLE_PAUSE=1 ./scripts/fast-sandbox-env/integration-env.sh up` additionally
+deploys an ephemeral Redis (`manifests/idle-pause/redis.yaml`, before the
+server — the sweeper connects at startup), enables the server `[idle_pause]`
+sweeper (5s sweep) and the gateway's `--activity-enabled` + `--wake-enabled`,
+and runs an `idle-pause / wake-on-access` verify stage: an opted-in sandbox
+(`lifecycle.idlePolicy`, X=30s) is auto-paused with zero traffic, and the next
+gateway request wakes it (parked while the restore completes). The
+`idle-e2e` action then runs the SDK suite
+(`tests/python/tests/test_fsb_idle_pause_e2e.py`) covering auto-pause,
+wake-on-access through the SDK's wake retry contract, and the no-idlePolicy
+compatibility invariant. Sandboxes without `lifecycle.idlePolicy` are never
+auto-paused or auto-woken regardless of the profile.
 
 After `up`, point any OpenSandbox SDK at `http://127.0.0.1:18080` with the
 `OPEN-SANDBOX-API-KEY: fast-sandbox-env` header; sandbox endpoints are
