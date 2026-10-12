@@ -336,7 +336,6 @@ async def test_probe_active_answer_records_activity_and_drops_candidate():
 
     assert executor.calls == []
     assert stats.gated == 1
-    assert f"{candidate.sandbox_id}:probe_active" in stats.details
     # The busy answer IS activity: the key now carries the fresh observation.
     assert await registry.read(candidate.sandbox_id) == NOW_MS
 
@@ -376,7 +375,6 @@ async def test_probe_error_drops_candidate_without_pause():
 
     assert executor.calls == []
     assert stats.gated == 1
-    assert f"{candidate.sandbox_id}:probe_error" in stats.details
 
 
 @pytest.mark.asyncio
@@ -401,7 +399,6 @@ async def test_request_landing_during_probe_drops_candidate():
     # probe ran: no pause, next sweep re-evaluates.
     assert executor.calls == []
     assert stats.gated == 1
-    assert f"{candidate.sandbox_id}:activity_changed_after_probe" in stats.details
 
 
 @pytest.mark.asyncio

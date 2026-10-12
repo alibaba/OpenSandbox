@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable, Optional, Sequence
 
 from redis.asyncio import Redis
@@ -100,7 +100,6 @@ class SweepStats:
     gated: int = 0
     tombstoned: int = 0
     failed: int = 0
-    details: list[str] = field(default_factory=list)
 
 
 class IdlePauseSweeper:
@@ -293,7 +292,6 @@ class IdlePauseSweeper:
         if candidate.policy.active_probe is not None and self._prober is None:
             record_pause_request(outcome="gated")
             stats.gated += 1
-            stats.details.append(f"{candidate.sandbox_id}:probe_unavailable")
             return
 
         try:
@@ -316,7 +314,6 @@ class IdlePauseSweeper:
         if not acquired:
             record_pause_request(outcome="gated")
             stats.gated += 1
-            stats.details.append(f"{candidate.sandbox_id}:lock_contended")
             return
         try:
             # Re-verify under lock: a request may have landed since the batch
@@ -339,7 +336,6 @@ class IdlePauseSweeper:
             if current != last_active_ms:
                 record_pause_request(outcome="gated")
                 stats.gated += 1
-                stats.details.append(f"{candidate.sandbox_id}:activity_changed")
                 return
 
             # Activity probe: a busy answer records activity, only an
@@ -369,7 +365,6 @@ class IdlePauseSweeper:
                 if current != last_active_ms:
                     record_pause_request(outcome="gated")
                     stats.gated += 1
-                    stats.details.append(f"{candidate.sandbox_id}:activity_changed_after_probe")
                     return
 
             await self._issue_pause(
@@ -483,12 +478,10 @@ class IdlePauseSweeper:
                 logger.warning(f"idle_pause {line} error={exc!s}", extra=ex)
             record_pause_request(outcome="gated")
             stats.gated += 1
-            stats.details.append(f"{candidate.sandbox_id}:probe_active")
             return None
         if verdict.outcome == PROBE_OUTCOME_ERROR:
             record_pause_request(outcome="gated")
             stats.gated += 1
-            stats.details.append(f"{candidate.sandbox_id}:probe_error")
             return None
         return verdict.audit_note()
 
@@ -524,11 +517,9 @@ class IdlePauseSweeper:
         elif outcome in (PauseOutcome.STATE_CHANGED, PauseOutcome.NOT_FOUND):
             record_pause_request(outcome="gated")
             stats.gated += 1
-            stats.details.append(f"{candidate.sandbox_id}:{outcome.value}")
         else:
             record_pause_request(outcome="failed")
             stats.failed += 1
-            stats.details.append(f"{candidate.sandbox_id}:{outcome.value}")
 
 
 async def start_idle_pause_sweeper(
