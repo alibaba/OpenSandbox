@@ -19,7 +19,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -35,10 +34,8 @@ const (
 	// oomPollInterval balances detection latency against cgroupfs polling
 	// cost; kills within one interval collapse into a single counter diff.
 	oomPollInterval = 5 * time.Second
-	// oomMaxVictims caps victim pid/comm pairs in one log line.
-	oomMaxVictims = 5
-	// oomMaxSnapshotPids caps the per-poll /proc scan used for attribution.
-	oomMaxSnapshotPids = 2048
+	// oomMaxExited caps exited-process entries in one log line.
+	oomMaxExited = 5
 	// clockTicksPerSecond is the USER_HZ the kernel uses for the starttime
 	// field of /proc/<pid>/stat (the same constant gopsutil assumes).
 	clockTicksPerSecond = 100
@@ -54,19 +51,12 @@ func StartOOMWatch(parent context.Context) func() {
 	return cancel
 }
 
-// oomProc is a process snapshot entry used for victim attribution.
+// oomProc is a process snapshot entry used for exited-process attribution.
 type oomProc struct {
 	Comm       string
 	Ppid       int
 	RSSBytes   int64
 	StartTicks int64 // starttime field of /proc/<pid>/stat, in clock ticks
-}
-
-// procSnapshot is one /proc scan plus the kernel boot time (epoch seconds)
-// used to compute how long a victim had been alive.
-type procSnapshot struct {
-	procs    map[int]oomProc
-	bootTime int64
 }
 
 // oomSample is one read of the cgroup OOM counters. counters carries the
@@ -98,11 +88,33 @@ type oomEventSource struct {
 	CgroupPath string // sandbox cgroup path as seen inside the container
 }
 
-// oomVictim is a best-effort attribution of a killed process: a pid that
-// disappeared from /proc between the polls surrounding an OOM event.
-type oomVictim struct {
+// oomExited is a process that disappeared from /proc between the polls
+// surrounding an OOM event: a candidate victim, since normal exits are
+// indistinguishable from kills at this distance.
+type oomExited struct {
 	Pid  int
 	Proc oomProc
+}
+
+// parseCgroupEntries extracts the unified (v2) path and the v1 memory
+// hierarchy path from /proc/self/cgroup content.
+func parseCgroupEntries(data []byte) (v2Path, v1MemoryPath string) {
+	for _, line := range strings.Split(string(data), "\n") {
+		if path, ok := strings.CutPrefix(line, "0::"); ok && path != "" {
+			v2Path = path
+			continue
+		}
+		parts := strings.SplitN(line, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		for _, controller := range strings.Split(parts[1], ",") {
+			if controller == "memory" && parts[2] != "" {
+				v1MemoryPath = parts[2]
+			}
+		}
+	}
+	return v2Path, v1MemoryPath
 }
 
 // diffOOMSample computes the delta between two counter samples. A shrinking
@@ -112,6 +124,11 @@ func diffOOMSample(prev, cur oomSample) oomDelta {
 	delta.total = monotonicDelta(prev.killTotal(), cur.killTotal())
 	if cur.haveLocal {
 		delta.local = monotonicDelta(prev.local, cur.local)
+		// memory.events and memory.events.local are read separately; a kill
+		// landing between the two reads can push local past total.
+		if delta.local > delta.total {
+			delta.local = delta.total
+		}
 		delta.descendant = delta.total - delta.local
 	}
 	return delta
@@ -189,18 +206,14 @@ func victimAge(bootTime, startTicks, now int64) int64 {
 	return age
 }
 
-// diffVictims returns processes present in prev but gone from cur, ordered
-// by pid.
-func diffVictims(prev, cur map[int]oomProc) []oomVictim {
-	var victims []oomVictim
-	for pid, proc := range prev {
-		if _, alive := cur[pid]; alive {
-			continue
-		}
-		victims = append(victims, oomVictim{Pid: pid, Proc: proc})
+// limitExited caps the exited list at the number of detected kills: listing
+// more exited processes than kills would assert causality the heuristic
+// cannot back up.
+func limitExited(exited []oomExited, limit int) []oomExited {
+	if limit >= 0 && len(exited) > limit {
+		return exited[:limit:limit]
 	}
-	sort.Slice(victims, func(i, j int) bool { return victims[i].Pid < victims[j].Pid })
-	return victims
+	return exited
 }
 
 // formatEventsDelta renders the deltas of the OOM-related memory.events
@@ -224,9 +237,9 @@ func formatEventsDelta(prev, cur oomSample) string {
 }
 
 // emitOOMKill reports one detection: metric increments plus a log line.
-// Metric attributes stay low-cardinality (level only); pid/comm attribution
+// Metric attributes stay low-cardinality (level only); process attribution
 // lives in the log because pids churn and comms are user-controlled.
-func emitOOMKill(ctx context.Context, src oomEventSource, context string, delta oomDelta, victims []oomVictim, bootTime, now int64) {
+func emitOOMKill(ctx context.Context, src oomEventSource, context string, delta oomDelta, exited []oomExited, bootTime, now int64) {
 	if oomKills != nil && delta.total > 0 {
 		if delta.haveLocal {
 			if delta.local > 0 {
@@ -240,7 +253,7 @@ func emitOOMKill(ctx context.Context, src oomEventSource, context string, delta 
 		}
 	}
 
-	summary := formatVictims(victims, bootTime, now)
+	summary := formatExited(exited, bootTime, now)
 	if delta.haveLocal {
 		log.Warn("oom: detected %d OOM kill(s) (local=%d, descendant=%d, source=%s, cgroup=%s%s)%s",
 			delta.total, delta.local, delta.descendant, src.Mode, src.CgroupPath, context, summary)
@@ -255,22 +268,23 @@ func oomLevelAttrs(level string) []attribute.KeyValue {
 	return append(attrs, attribute.String("level", level))
 }
 
-// formatVictims renders victims for the log line, capped at oomMaxVictims.
-func formatVictims(victims []oomVictim, bootTime, now int64) string {
-	if len(victims) == 0 {
+// formatExited renders exited processes for the log line, capped at
+// oomMaxExited.
+func formatExited(exited []oomExited, bootTime, now int64) string {
+	if len(exited) == 0 {
 		return ""
 	}
-	shown := victims
+	shown := exited
 	extra := 0
-	if len(victims) > oomMaxVictims {
-		shown = victims[:oomMaxVictims]
-		extra = len(victims) - oomMaxVictims
+	if len(exited) > oomMaxExited {
+		shown = exited[:oomMaxExited]
+		extra = len(exited) - oomMaxExited
 	}
 	parts := make([]string, 0, len(shown)+1)
-	for _, victim := range shown {
+	for _, process := range shown {
 		entry := fmt.Sprintf("pid=%d comm=%s ppid=%d rss=%s",
-			victim.Pid, victim.Proc.Comm, victim.Proc.Ppid, humanBytes(victim.Proc.RSSBytes))
-		if age := victimAge(bootTime, victim.Proc.StartTicks, now); age >= 0 {
+			process.Pid, process.Proc.Comm, process.Proc.Ppid, humanBytes(process.Proc.RSSBytes))
+		if age := victimAge(bootTime, process.Proc.StartTicks, now); age >= 0 {
 			entry += fmt.Sprintf(" age=%ds", age)
 		}
 		parts = append(parts, entry)
@@ -278,7 +292,7 @@ func formatVictims(victims []oomVictim, bootTime, now int64) string {
 	if extra > 0 {
 		parts = append(parts, fmt.Sprintf("+%d more", extra))
 	}
-	return " victims=[" + strings.Join(parts, ", ") + "]"
+	return " exited=[" + strings.Join(parts, ", ") + "]"
 }
 
 // humanBytes renders a byte count with MiB/GiB units for logs.

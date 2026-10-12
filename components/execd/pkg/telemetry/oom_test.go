@@ -31,6 +31,49 @@ func sampleCounters(values ...int64) map[string]int64 {
 	return counters
 }
 
+func TestParseCgroupEntries(t *testing.T) {
+	tests := []struct {
+		name         string
+		data         string
+		wantV2       string
+		wantV1Memory string
+	}{
+		{
+			name:   "pure cgroup v2",
+			data:   "0::/system.slice/docker/abc\n",
+			wantV2: "/system.slice/docker/abc",
+		},
+		{
+			name:         "pure cgroup v1",
+			data:         "10:cpuset:/\n12:memory:/sandbox\n",
+			wantV1Memory: "/sandbox",
+		},
+		{
+			name:         "hybrid host",
+			data:         "10:cpuset:/a\n0::/\n12:memory:/x\n",
+			wantV2:       "/",
+			wantV1Memory: "/x",
+		},
+		{
+			name: "empty",
+			data: "",
+		},
+		{
+			name:         "combined controllers line",
+			data:         "3:cpu,memory:/sandbox\n",
+			wantV1Memory: "/sandbox",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v2, v1Memory := parseCgroupEntries([]byte(tt.data))
+			if v2 != tt.wantV2 || v1Memory != tt.wantV1Memory {
+				t.Fatalf("got (%q, %q), want (%q, %q)", v2, v1Memory, tt.wantV2, tt.wantV1Memory)
+			}
+		})
+	}
+}
+
 func TestParseOOMEvents(t *testing.T) {
 	got := parseOOMEvents([]byte("low 0\nhigh 1\nmax 2\noom 3\noom_kill 4\noom_group_kill 5\nnot-a-counter\nbroken x\n"))
 	want := map[string]int64{"low": 0, "high": 1, "max": 2, "oom": 3, "oom_kill": 4, "oom_group_kill": 5}
@@ -100,6 +143,12 @@ func TestDiffOOMSample(t *testing.T) {
 			cur:  oomSample{counters: sampleCounters(0, 5)},
 			want: oomDelta{total: 4},
 		},
+		{
+			name: "local read skew clamped to total",
+			prev: oomSample{counters: sampleCounters(5, 5), local: 5, haveLocal: true},
+			cur:  oomSample{counters: sampleCounters(6, 6), local: 7, haveLocal: true},
+			want: oomDelta{total: 1, local: 1, descendant: 0, haveLocal: true},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -125,36 +174,16 @@ func TestFormatEventsDelta(t *testing.T) {
 	}
 }
 
-func TestDiffVictims(t *testing.T) {
-	prev := map[int]oomProc{
-		10:  {Comm: "python3", Ppid: 1, RSSBytes: 100, StartTicks: 5},
-		20:  {Comm: "node", Ppid: 1, RSSBytes: 200, StartTicks: 6},
-		30:  {Comm: "bash", Ppid: 10, RSSBytes: 300, StartTicks: 7},
-		301: {Comm: "worker", Ppid: 1, RSSBytes: 400, StartTicks: 8},
+func TestLimitExited(t *testing.T) {
+	exited := []oomExited{{Pid: 1}, {Pid: 2}, {Pid: 3}}
+	if got := limitExited(exited, 2); len(got) != 2 || got[0].Pid != 1 || got[1].Pid != 2 {
+		t.Fatalf("limit 2 = %+v", got)
 	}
-	cur := map[int]oomProc{
-		10:  {Comm: "python3", Ppid: 1, RSSBytes: 100, StartTicks: 5},
-		301: {Comm: "worker-renamed", Ppid: 1, RSSBytes: 400, StartTicks: 8},
-		40:  {Comm: "new", Ppid: 1, RSSBytes: 500, StartTicks: 9},
+	if got := limitExited(exited, 5); len(got) != 3 {
+		t.Fatalf("limit above len = %+v", got)
 	}
-	got := diffVictims(prev, cur)
-	want := []oomVictim{
-		{Pid: 20, Proc: oomProc{Comm: "node", Ppid: 1, RSSBytes: 200, StartTicks: 6}},
-		{Pid: 30, Proc: oomProc{Comm: "bash", Ppid: 10, RSSBytes: 300, StartTicks: 7}},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("victims = %+v, want %+v", got, want)
-	}
-}
-
-func TestDiffVictimsEmpty(t *testing.T) {
-	if got := diffVictims(nil, nil); got != nil {
-		t.Fatalf("victims = %+v, want nil", got)
-	}
-	prev := map[int]oomProc{1: {Comm: "a"}}
-	cur := map[int]oomProc{1: {Comm: "a"}, 2: {Comm: "b"}}
-	if got := diffVictims(prev, cur); got != nil {
-		t.Fatalf("victims = %+v, want nil", got)
+	if got := limitExited(nil, 0); got != nil {
+		t.Fatalf("limit nil = %+v", got)
 	}
 }
 
@@ -175,28 +204,28 @@ func TestVictimAge(t *testing.T) {
 	}
 }
 
-func TestFormatVictims(t *testing.T) {
-	if got := formatVictims(nil, 0, 0); got != "" {
+func TestFormatExited(t *testing.T) {
+	if got := formatExited(nil, 0, 0); got != "" {
 		t.Fatalf("format = %q, want empty", got)
 	}
-	victim := oomVictim{Pid: 7, Proc: oomProc{Comm: "python3", Ppid: 1, RSSBytes: 2 << 20, StartTicks: 100}}
+	exited := oomExited{Pid: 7, Proc: oomProc{Comm: "python3", Ppid: 1, RSSBytes: 2 << 20, StartTicks: 100}}
 	// age = now - boot - startTicks/HZ = 11 - 10 - 1 = 0.
-	if got, want := formatVictims([]oomVictim{victim}, 10, 11),
-		" victims=[pid=7 comm=python3 ppid=1 rss=2.0MiB age=0s]"; got != want {
+	if got, want := formatExited([]oomExited{exited}, 10, 11),
+		" exited=[pid=7 comm=python3 ppid=1 rss=2.0MiB age=0s]"; got != want {
 		t.Fatalf("format = %q, want %q", got, want)
 	}
 	// Unknown boot time: age omitted.
-	if got, want := formatVictims([]oomVictim{victim}, 0, 11),
-		" victims=[pid=7 comm=python3 ppid=1 rss=2.0MiB]"; got != want {
+	if got, want := formatExited([]oomExited{exited}, 0, 11),
+		" exited=[pid=7 comm=python3 ppid=1 rss=2.0MiB]"; got != want {
 		t.Fatalf("format = %q, want %q", got, want)
 	}
 
-	var many []oomVictim
-	for i := 0; i < oomMaxVictims+2; i++ {
-		many = append(many, oomVictim{Pid: i + 1, Proc: oomProc{Comm: "p", Ppid: 1}})
+	var many []oomExited
+	for i := 0; i < oomMaxExited+2; i++ {
+		many = append(many, oomExited{Pid: i + 1, Proc: oomProc{Comm: "p", Ppid: 1}})
 	}
-	got := formatVictims(many, 0, 0)
-	want := " victims=[pid=1 comm=p ppid=1 rss=0.0MiB, pid=2 comm=p ppid=1 rss=0.0MiB, " +
+	got := formatExited(many, 0, 0)
+	want := " exited=[pid=1 comm=p ppid=1 rss=0.0MiB, pid=2 comm=p ppid=1 rss=0.0MiB, " +
 		"pid=3 comm=p ppid=1 rss=0.0MiB, pid=4 comm=p ppid=1 rss=0.0MiB, pid=5 comm=p ppid=1 rss=0.0MiB, +2 more]"
 	if got != want {
 		t.Fatalf("format = %q, want %q", got, want)

@@ -39,10 +39,19 @@ const (
 	// oomMaxChildCgroups caps how many first-level child cgroups are polled
 	// for kill localization per tick.
 	oomMaxChildCgroups = 64
+	// oomMaxTrackedPids caps how many process detail records the tracker
+	// keeps; pids beyond the cap are still observed but get no details, so
+	// attribution degrades instead of growing without bound.
+	oomMaxTrackedPids = 4096
 	// oomMaxKillCgroups caps child cgroups named in one log line.
 	oomMaxKillCgroups = 3
 	// oomUnlimitedV1Bytes: v1 reports a huge byte value instead of "max".
 	oomUnlimitedV1Bytes = 1 << 50
+)
+
+const (
+	oomSourceV2 = "cgroup-v2"
+	oomSourceV1 = "cgroup-v1"
 )
 
 // oomSource is the cgroupfs location of the sandbox OOM counters. execd sits
@@ -69,7 +78,10 @@ func runOOMWatch(ctx context.Context) {
 }
 
 // watchOOMSource polls source until ctx is done. The first sample only seeds
-// the baseline; each later increment is reported as a kill event.
+// the baseline; each later increment is reported as a kill event. The pid
+// tracker observes /proc every tick (one directory read plus stats of newly
+// spawned processes), so attribution stays fresh without scanning the whole
+// process table repeatedly.
 func watchOOMSource(ctx context.Context, source *oomSource, interval time.Duration) {
 	log.Info("oom: watching for OOM kills (source=%s, cgroup=%s, interval=%s)",
 		source.mode, source.cgroupPath, interval)
@@ -77,9 +89,9 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	tracker := newProcTracker()
 	havePrev := false
 	var prev oomSample
-	var prevProcs procSnapshot
 	var prevChildren map[string]int64
 	readErrReported := false
 
@@ -102,18 +114,19 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 		}
 		readErrReported = false
 
-		curProcs := snapshotProcesses()
+		// Cheap every-tick pass: directory read + stats of new pids only.
+		exited := tracker.observe()
 		curChildren := source.childKillCounts()
 
 		if havePrev {
 			if delta := diffOOMSample(prev, cur); delta.total > 0 {
 				emitOOMKill(ctx, source.eventSource(),
 					source.killContext(prev, cur, prevChildren, curChildren),
-					delta, diffVictims(prevProcs.procs, curProcs.procs),
-					curProcs.bootTime, time.Now().Unix())
+					delta, limitExited(exited, int(delta.total)),
+					tracker.bootTime, time.Now().Unix())
 			}
 		}
-		prev, prevProcs, prevChildren, havePrev = cur, curProcs, curChildren, true
+		prev, prevChildren, havePrev = cur, curChildren, true
 	}
 }
 
@@ -174,7 +187,7 @@ func newCgroupV2Source() (*oomSource, error) {
 		return nil, fmt.Errorf("stat %s: %w", eventsPath, err)
 	}
 	source := &oomSource{
-		mode:       "cgroup-v2",
+		mode:       oomSourceV2,
 		cgroupPath: cgroupPath,
 		dir:        dir,
 		eventsPath: eventsPath,
@@ -205,7 +218,7 @@ func newCgroupV1Source() (*oomSource, error) {
 		return nil, fmt.Errorf("stat %s: %w", oomControl, err)
 	}
 	return &oomSource{
-		mode:       "cgroup-v1",
+		mode:       oomSourceV1,
 		cgroupPath: cgroupPath,
 		dir:        dir,
 		eventsPath: oomControl,
@@ -245,7 +258,7 @@ func (s *oomSource) sample() (oomSample, error) {
 // memoryContext describes how close the watched cgroup was to its limit when
 // the detection fired. Best-effort: unreadable files are skipped.
 func (s *oomSource) memoryContext() string {
-	if s.mode == "cgroup-v2" {
+	if s.mode == oomSourceV2 {
 		current, ok := readMemoryBytes(filepath.Join(s.dir, "memory.current"))
 		if !ok {
 			return ""
@@ -275,7 +288,7 @@ func (s *oomSource) memoryContext() string {
 // kill nested deeper than one level still increments the child subtree that
 // contains it.
 func (s *oomSource) childKillCounts() map[string]int64 {
-	if s.mode != "cgroup-v2" {
+	if s.mode != oomSourceV2 {
 		return nil
 	}
 	entries, err := os.ReadDir(s.dir)
@@ -339,12 +352,19 @@ func cgroupV2RelPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if path, ok := strings.CutPrefix(line, "0::"); ok && path != "" {
-			return path, nil
-		}
+	v2Path, v1MemoryPath := parseCgroupEntries(data)
+	if v2Path == "" {
+		return "", errors.New("no cgroup v2 entry in /proc/self/cgroup")
 	}
-	return "", errors.New("no cgroup v2 entry in /proc/self/cgroup")
+	if v1MemoryPath != "" {
+		// Hybrid host (v1 controllers + unified hierarchy): the "0::" entry
+		// is degenerate — its root is not this process's memory cgroup, and
+		// reading counters there would silently attribute unrelated host
+		// kills to the sandbox. Memory accounting lives on the v1 hierarchy;
+		// refuse v2 and let the v1 fallback take over.
+		return "", errors.New("hybrid cgroup host: memory is on the v1 hierarchy")
+	}
+	return v2Path, nil
 }
 
 // cgroupV2Mount locates the cgroup v2 filesystem mount.
@@ -364,16 +384,8 @@ func cgroupV1MemoryRelPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		for _, controller := range strings.Split(parts[1], ",") {
-			if controller == "memory" && parts[2] != "" {
-				return parts[2], nil
-			}
-		}
+	if _, v1MemoryPath := parseCgroupEntries(data); v1MemoryPath != "" {
+		return v1MemoryPath, nil
 	}
 	return "", errors.New("no memory hierarchy entry in /proc/self/cgroup")
 }
@@ -413,38 +425,71 @@ func scanMounts(match func(mountPoint, fstype string, options []string) bool) (s
 	return "", errors.New("no matching mount in /proc/self/mounts")
 }
 
-// snapshotProcesses captures the process table visible to execd (the sandbox
-// pid namespace) for victim attribution, plus the kernel boot time for age
-// computation. Best effort: a partial or empty snapshot degrades attribution,
-// never the OOM detection itself.
-func snapshotProcesses() procSnapshot {
-	snapshot := procSnapshot{procs: map[int]oomProc{}}
+// procTracker observes /proc incrementally: every tick costs one directory
+// read, plus one stat read per newly spawned pid. When a pid disappears, its
+// recorded details become an exited-process candidate. Details are captured
+// once when a pid is first observed (RSS of long-lived processes can be
+// stale), which keeps a calm sandbox with a stable process table near zero
+// cost per tick.
+type procTracker struct {
+	pidset   map[int]struct{} // pids seen in the previous tick; nil until the first observe
+	details  map[int]oomProc  // details captured when a pid was first observed
+	bootTime int64            // kernel boot time (epoch seconds), read once
+}
+
+func newProcTracker() *procTracker {
+	tracker := &procTracker{details: map[int]oomProc{}}
 	if data, err := os.ReadFile(procStatFile); err == nil {
-		snapshot.bootTime = bootTimeFromProcStat(data)
+		tracker.bootTime = bootTimeFromProcStat(data)
 	}
+	return tracker
+}
+
+// observe scans /proc once and returns the processes that vanished since the
+// previous tick, ordered by pid. A failed scan skips vanish detection for
+// that tick instead of reporting against an unknown view.
+func (t *procTracker) observe() []oomExited {
 	entries, err := os.ReadDir(procDir)
 	if err != nil {
-		return snapshot
+		return nil
 	}
+	cur := make(map[int]struct{}, len(entries))
 	for _, entry := range entries {
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue
 		}
-		data, err := os.ReadFile(filepath.Join(procDir, entry.Name(), "stat"))
-		if err != nil {
-			// Exited between readdir and read; it stays in the previous
-			// snapshot and may be reported as a victim with its old state.
-			continue
-		}
-		if proc, ok := parseStat(data); ok {
-			snapshot.procs[pid] = proc
-		}
-		if len(snapshot.procs) >= oomMaxSnapshotPids {
-			break
+		cur[pid] = struct{}{}
+		if _, known := t.details[pid]; !known && len(t.details) < oomMaxTrackedPids {
+			// Capture details while the process is alive; after it exits
+			// there is nothing left to read.
+			if data, err := os.ReadFile(filepath.Join(procDir, entry.Name(), "stat")); err == nil {
+				if proc, ok := parseStat(data); ok {
+					t.details[pid] = proc
+				}
+			}
 		}
 	}
-	return snapshot
+
+	var exited []oomExited
+	if t.pidset != nil {
+		for pid := range t.pidset {
+			if _, alive := cur[pid]; alive {
+				continue
+			}
+			proc, known := t.details[pid]
+			delete(t.details, pid)
+			if !known {
+				// Never observed alive (e.g. tracker cap): reporting an
+				// empty record would fabricate details, so skip it.
+				continue
+			}
+			exited = append(exited, oomExited{Pid: pid, Proc: proc})
+		}
+		sort.Slice(exited, func(i, j int) bool { return exited[i].Pid < exited[j].Pid })
+	}
+	t.pidset = cur
+	return exited
 }
 
 // bootTimeFromProcStat extracts the btime (boot time, epoch seconds) line

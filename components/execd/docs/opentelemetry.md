@@ -44,9 +44,10 @@ cgroup v1. Each increment is reported twice:
   - `kill_cgroups=a,b` — first-level child cgroups whose subtree received
     the kills (any nested cgroup inside the sandbox: isolated sessions,
     user- or system-created cgroups)
-  - `victims=[pid=N comm=x ppid=N rss=N age=Ns, ...]` — best-effort
-    attribution of killed processes (pids that disappeared from `/proc`
-    between the polls surrounding the event), capped at 5 entries
+  - `exited=[pid=N comm=x ppid=N rss=N age=Ns, ...]` — processes that
+    disappeared from `/proc` between the polls surrounding the event
+    (candidates for victims; bounded by the kill count), with details
+    captured while they were alive, capped at 5 entries
 
 Kernel logs (dmesg) are intentionally not used: the sandbox container has no
 `CAP_SYSLOG` and the kernel ring buffer is not sandbox-scoped.

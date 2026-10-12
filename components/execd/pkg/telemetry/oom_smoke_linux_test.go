@@ -130,11 +130,16 @@ func TestOOMSmokeHelperProcess(t *testing.T) {
 			chunk[j] = 1
 		}
 		sink = append(sink, chunk)
+		// Stretch the allocation out over several watcher ticks so the pid
+		// tracker observes this process alive before the kernel kills it.
+		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("helper survived %d chunks (%d MiB); OOM did not trigger", len(sink), len(sink)*16)
 }
 
-// waitForOOMLog polls the captured log until the watcher reports the kill.
+// waitForOOMLog polls the captured log until the watcher reports the kill,
+// including the exited-process attribution: the helper lives for several
+// ticks before dying, so the tracker must have its details on record.
 func waitForOOMLog(t *testing.T, path string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -144,6 +149,9 @@ func waitForOOMLog(t *testing.T, path string, timeout time.Duration) {
 			t.Logf("OOM detection log received:\n%s", data)
 			if !strings.Contains(string(data), "OOM kill") {
 				t.Fatalf("unexpected detection log format:\n%s", data)
+			}
+			if !strings.Contains(string(data), "exited=[pid=") {
+				t.Fatalf("detection log is missing exited-process attribution:\n%s", data)
 			}
 			return
 		}
