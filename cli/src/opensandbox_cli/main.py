@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.console import Console
@@ -48,8 +50,34 @@ BANNER = r"""[bold cyan]
 """
 
 
+def _tolerate_unencodable_output() -> None:
+    """Degrade unencodable output instead of aborting the command.
+
+    Help text and success lines render emoji/box-drawing characters. On a
+    legacy code page (cp936/GBK, cp1252, ...) or an ASCII stream (POSIX ``C``
+    locale, ``PYTHONIOENCODING=ascii``), writing those raises
+    ``UnicodeEncodeError`` and the command exits 1 after its work already
+    succeeded. Reconfigure the standard streams to replace unencodable
+    characters so the command finishes with its normal exit code.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream is not None and stream.errors == "strict":
+                stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+        except (AttributeError, ValueError, OSError):
+            # Non-standard stream objects (embedded contexts, capture wrappers)
+            # keep their own error handling.
+            pass
+
+
 class BannerGroup(click.Group):
     """Custom Click group that shows a banner before help text."""
+
+    def main(self, *args: Any, **kwargs: Any) -> Any:
+        # Runs before argument parsing, so eager --help/--version paths are
+        # covered as well; the group callback itself never runs for those.
+        _tolerate_unencodable_output()
+        return super().main(*args, **kwargs)
 
     def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         console = Console(stderr=False)
@@ -58,17 +86,42 @@ class BannerGroup(click.Group):
 
 
 @click.group(cls=BannerGroup, context_settings={"help_option_names": ["-h", "--help"]})
-@click.option("--api-key", envvar="OPEN_SANDBOX_API_KEY", default=None, help="API key for authentication.")
-@click.option("--domain", envvar="OPEN_SANDBOX_DOMAIN", default=None, help="API server domain (e.g. localhost:8080).")
-@click.option("--protocol", type=click.Choice(["http", "https"]), default=None, help="Protocol (http/https).")
-@click.option("--request-timeout", type=int, default=None, help="Request timeout in seconds.")
+@click.option(
+    "--api-key",
+    envvar="OPEN_SANDBOX_API_KEY",
+    default=None,
+    help="API key for authentication.",
+)
+@click.option(
+    "--domain",
+    envvar="OPEN_SANDBOX_DOMAIN",
+    default=None,
+    help="API server domain (e.g. localhost:8080).",
+)
+@click.option(
+    "--protocol",
+    type=click.Choice(["http", "https"]),
+    default=None,
+    help="Protocol (http/https).",
+)
+@click.option(
+    "--request-timeout", type=int, default=None, help="Request timeout in seconds."
+)
 @click.option(
     "--use-server-proxy/--no-use-server-proxy",
     default=None,
     help="Route execd and endpoint traffic through the sandbox server proxy.",
 )
-@click.option("--config", "config_path", type=click.Path(exists=False, path_type=Path), default=None, help="Config file path.")
-@click.option("-v", "--verbose", is_flag=True, default=False, help="Enable verbose/debug output.")
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(exists=False, path_type=Path),
+    default=None,
+    help="Config file path.",
+)
+@click.option(
+    "-v", "--verbose", is_flag=True, default=False, help="Enable verbose/debug output."
+)
 @click.option("--no-color", is_flag=True, default=False, help="Disable colored output.")
 @click.version_option(version=__version__, prog_name="opensandbox")
 @click.pass_context
@@ -103,7 +156,9 @@ def cli(
             "domain": domain,
             "protocol": protocol or "http",
             "request_timeout": request_timeout or 30,
-            "use_server_proxy": use_server_proxy if use_server_proxy is not None else False,
+            "use_server_proxy": use_server_proxy
+            if use_server_proxy is not None
+            else False,
             "color": True,
             "default_image": None,
             "default_timeout": None,
