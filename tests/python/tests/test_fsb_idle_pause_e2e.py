@@ -50,7 +50,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 PAUSE_BUDGET = timedelta(seconds=IDLE_TIMEOUT + 210)
-WAKE_BUDGET = timedelta(seconds=120)
+# Same-node restore is fast, but a cross-node restore pulls the full
+# checkpoint through DART (minutes for multi-GiB guests).
+WAKE_BUDGET = timedelta(seconds=600)
 
 
 def _connection_config() -> ConnectionConfig:

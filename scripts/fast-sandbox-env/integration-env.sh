@@ -1676,14 +1676,18 @@ idle_pause_verify() {
 	pass "auto-pause: opted-in sandbox went Running -> Paused with zero traffic"
 
 	# A marked 503 may surface while the restore exceeds the park budget.
-	log "verify (idle-pause): waking $VERIFY_ID through the gateway"
-	local deadline=$(( $(now_ms) + 240000000000 )) wake_seen=0
+	log "verify (idle-pause): waking $VERIFY_ID through the gateway (budget 600s: a cross-node restore pulls the full checkpoint)"
+	local deadline=$(( $(now_ms) + 600000000000 )) wake_seen=0 next_state_log=0
 	while :; do
 		code="$(idle_ping_code)"
 		case "$code" in
 			200) break ;;
 			wake-503) wake_seen=1 ;;
 		esac
+		if (( $(now_ms) >= next_state_log )); then
+			log "verify (idle-pause): still waiting (last=$code, state=$(osb_api sandbox get "$VERIFY_ID" -o json 2>/dev/null | jq -r '.status.state // empty'))"
+			next_state_log=$(( $(now_ms) + 30000000000 ))
+		fi
 		[[ "$(now_ms)" -ge "$deadline" ]] && fail "wake /ping never returned 200 (last=$code)"
 		sleep 1
 	done
