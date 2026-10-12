@@ -138,6 +138,7 @@ export class RemoteShell extends ShellExecutor {
     const spec = this.resolve(input);
     if (spec.signal?.aborted) throw new RemoteShellError('aborted', 'Remote command cancelled before launch.');
     const stdout = new OutputBuffer(spec.stdoutMaxBytes);
+    // DSH's stdout override leaves stderr at the executor-owned capture cap.
     const stderr = new OutputBuffer(this.#options.maxOutputBytes);
     const streamAbort = new AbortController();
     const startedAt = Date.now();
@@ -235,6 +236,7 @@ export class RemoteShell extends ShellExecutor {
     };
     const onAbort = () => { stop('abort'); };
     const handle: ShellExecution = {
+      // The remote API supplies numeric exits, not signal names; never infer one.
       status: 'running', exitCode: null, signal: null, done,
       observed: { stdout: { readFrom: offset => stdout.read(offset) }, stderr: { readFrom: offset => stderr.read(offset) } },
       readOutput: () => {

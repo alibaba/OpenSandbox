@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { inspect } from 'node:util';
 import { Context } from '@deepseek-ai/cordis';
 import { Sandbox } from '@alibaba-group/opensandbox';
 import type { ServerStreamEvent } from '@alibaba-group/opensandbox';
@@ -62,14 +63,14 @@ describe('remote dsh shell', () => {
     expect(await result).toMatchObject({ exitCode: 0, signal: null, timedOut: false, aborted: false,
       stdout: { text: 'hello', truncated: false }, stderr: { text: 'warning', truncated: false } });
   });
-  it('normal nonzero exit resolves rather than becoming an infrastructure rejection', async () => {
+  it.each([7, -1, 143])('numeric terminal exit %s resolves without inferring a signal', async exitCode => {
     const f = fixture(); const flow = controlled(f);
     const h = await f.shell.execute(f.shell.resolve({ command: 'exit 7' }));
     flow.send({ type: 'init', text: 'cmd' });
-    flow.send({ type: 'error', error: { ename: 'CommandExecError', evalue: '7' } });
+    flow.send({ type: 'error', error: { ename: 'CommandExecError', evalue: String(exitCode) } });
     flow.send(null);
-    expect(await h.result()).toMatchObject({ exitCode: 7, timedOut: false, aborted: false });
-    expect(h.status).toBe('completed');
+    expect(await h.result()).toMatchObject({ exitCode, signal: null, timedOut: false, aborted: false });
+    expect(h.status).toBe('completed'); expect(h.exitCode).toBe(exitCode); expect(h.signal).toBeNull();
   });
   it('bounds both streams and exposes independent monotonically advancing readers', async () => {
     const f = fixture({ maxOutputBytes: 5 }); const flow = controlled(f);
@@ -81,7 +82,7 @@ describe('remote dsh shell', () => {
     expect(h.observed.stderr.readFrom(0)).toEqual({ text: 'ef界', nextOffset: 9, lossy: true });
     expect(h.readOutput().lossy).toBe(true);
     flow.send({ type: 'execution_complete' });
-    expect((await h.result()).stdout.truncated).toBe(true);
+    expect(await h.result()).toMatchObject({ stdout: { text: 'bcdef世', truncated: true }, stderr: { text: 'ef界', truncated: true } });
   });
   it('never rejects done and safely rejects lazy result on infrastructure launch failure without retry', async () => {
     const f = fixture(); const flow = controlled(f);
@@ -326,6 +327,41 @@ describe('remote dsh shell', () => {
     flow.send({ type: 'init', text: 'known' }); await tick();
     await fiber.dispose(); await h.done;
     expect(f.commands.interrupt).toHaveBeenCalledWith('known'); expect(ctx.get('shell')).toBeUndefined();
+  });
+  it.each(['running', 'unknown'] as const)('Cordis plugin disposal logs a safe error when remote stop remains %s', async remoteState => {
+    vi.useFakeTimers(); const f = fixture(); const ctx = new Context(); const flow = controlled(f);
+    const diagnostic = 'private-cleanup-token';
+    f.commands.interrupt.mockRejectedValue(new Error(`interrupt ${diagnostic}`));
+    if (remoteState === 'running') f.commands.getCommandStatus.mockResolvedValue({ id: 'known', running: true });
+    else f.commands.getCommandStatus.mockRejectedValue(new Error(`status ${diagnostic}`));
+    const fiber = ctx.plugin(RemoteShell, { binding: f.binding, settlementTimeoutMs: 10 }); await fiber;
+    const shell = ctx.shell;
+    const h = await shell.execute(shell.resolve({ command: 'sleep', onExpiry: 'none' }));
+    flow.send({ type: 'init', text: 'known' }); await tick();
+    const unhandled: unknown[] = [], onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      // Pinned Cordis catches effect-disposer failures and sends them to its logger.
+      const disposing = fiber.dispose();
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(disposing).resolves.toBeUndefined(); await expect(h.done).resolves.toBeUndefined();
+      expect(unhandled).toEqual([]);
+      const errors = ctx.logger.buffer.filter(message => message.type === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.args[0]).toMatchObject({ code: 'termination_unknown', commandId: 'known', remoteState });
+      expect(inspect(errors, { depth: 20 })).not.toContain(diagnostic);
+      expect(JSON.stringify(errors)).not.toContain(diagnostic);
+      await expect(h.result()).rejects.toMatchObject({ code: 'termination_unknown', remoteState });
+      expect(ctx.get('shell')).toBeUndefined();
+      await expect(shell.execute(shell.resolve({ command: 'no' }))).rejects.toMatchObject({ code: 'disposed' });
+      expect(f.commands.interrupt).toHaveBeenCalledExactlyOnceWith('known');
+      expect(f.commands.runStream).toHaveBeenCalledOnce();
+      expect(f.boundary.kill).not.toHaveBeenCalled(); expect(f.boundary.close).not.toHaveBeenCalled();
+      expect(f.binding.state).toBe('open'); expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      flow.send(null); await tick(); await ctx.fiber.dispose();
+    }
   });
   it('uses published SDK SSE/argv contracts and independently cancels after response headers', async () => {
     const requests: { url: string; method: string; body: unknown }[] = [];

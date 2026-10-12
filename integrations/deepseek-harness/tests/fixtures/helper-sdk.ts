@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Sandbox, ServerStreamEvent } from '@alibaba-group/opensandbox';
@@ -12,7 +12,8 @@ import { execdLines } from './execd-lines.js';
 
 /** Test-only remote namespace boundary. Actual Python runs only in disposable local directories. */
 export async function helperSdk(id = 'sandbox-a', sessionId = 'session-a') {
-  const root = await mkdtemp(join(tmpdir(), 'dsh-helper-sdk-'));
+  // The helper resolves physical paths; the namespace prefix must use that same root.
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-helper-sdk-')));
   await mkdir(join(root, 'workspace')); await mkdir(join(root, 'tmp'));
   const sdk = fakeSandbox(id);
   const processes = new Map<string, { child: ReturnType<typeof spawn>; running: boolean; exitCode: number | null }>();

@@ -230,6 +230,49 @@ describe('private headless composition over published dsh and actual Python help
     expect(f.sandbox.kill).not.toHaveBeenCalled(); expect(f.sandbox.close).not.toHaveBeenCalled(); expect(f.binding.state).toBe('open');
     await expect(session.run('Too late.')).rejects.toThrow(/disposed/i);
   });
+  it('exposes unconfirmed shell termination and still cleans filesystem and Cordis Context', async () => {
+    const f = await fixture(), session = await api.createHeadlessSession({ binding: f.binding, adapter: new ScriptedAdapter([]), provider: 'scripted', model: 'offline-model' });
+    cleanups.push(() => session.dispose().catch(() => undefined));
+    const root = session.agent.ctx.root, started = deferred<void>(), endStream = deferred<void>();
+    const launches = f.commands.runStream.mock.calls.length, diagnostic = 'private-cleanup-token';
+    f.commands.runStream.mockImplementationOnce(async function* () {
+      yield { type: 'init', text: 'unconfirmed' }; started.resolve(); await endStream.promise;
+    });
+    f.commands.interrupt.mockRejectedValue(new Error(`interrupt ${diagnostic}`));
+    f.commands.getCommandStatus.mockRejectedValue(new Error(`status ${diagnostic}`));
+    const original = root.fiber.dispose, phases: string[] = [];
+    vi.spyOn(root.fiber, 'dispose').mockImplementation(async () => {
+      phases.push('root');
+      await expect(root.fs.resolve('note.txt')).rejects.toMatchObject({ code: 'FS_IO_ERROR' });
+      await original();
+    });
+    const unhandled: unknown[] = [], onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled); vi.useFakeTimers();
+    try {
+      const h = await root.shell.execute(root.shell.resolve({ command: 'sleep', onExpiry: 'none' })); await started.promise;
+      const disposing = session.dispose(), observed = disposing.catch(error => error);
+      expect(session.dispose()).toBe(disposing);
+      await vi.advanceTimersByTimeAsync(3_000);
+      const error = await observed;
+      expect(error).toBeInstanceOf(AggregateError);
+      expect(error.errors).toHaveLength(1);
+      expect(error.errors[0]).toMatchObject({ code: 'termination_unknown', commandId: 'unconfirmed', remoteState: 'unknown' });
+      expect(inspect(error, { depth: 20 })).not.toContain(diagnostic);
+      expect(JSON.stringify(error.errors)).not.toContain(diagnostic);
+      await expect(h.done).resolves.toBeUndefined();
+      await expect(h.result()).rejects.toMatchObject({ code: 'termination_unknown', remoteState: 'unknown' });
+      expect(unhandled).toEqual([]); expect(phases).toEqual(['root']);
+      expect(root.registry.size).toBe(0); expect(root.get('shell')).toBeUndefined(); expect(root.get('fs')).toBeUndefined();
+      expect(await f.artifactRoots()).toEqual([]);
+      expect(f.commands.interrupt).toHaveBeenCalledExactlyOnceWith('unconfirmed');
+      expect(f.commands.runStream).toHaveBeenCalledTimes(launches + 1);
+      expect(f.sandbox.kill).not.toHaveBeenCalled(); expect(f.sandbox.close).not.toHaveBeenCalled();
+      expect(f.binding.state).toBe('open'); expect(vi.getTimerCount()).toBe(0);
+      await expect(session.run('Too late.')).rejects.toThrow(/disposed/i);
+    } finally {
+      vi.useRealTimers(); process.off('unhandledRejection', onUnhandled); endStream.resolve();
+    }
+  });
   it('rejects a terminal binding before composing anything', async () => {
     const f = await fixture(); await f.binding.close();
     await expect(create(f.binding, new ScriptedAdapter([]))).rejects.toMatchObject({ code: 'binding_closed' });

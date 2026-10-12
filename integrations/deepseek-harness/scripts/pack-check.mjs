@@ -4,10 +4,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { assertTarballInstall } from './pack-check-paths.mjs';
 
 const packageDir = fileURLToPath(new URL('../', import.meta.url));
 const scratch = await mkdtemp(join(tmpdir(), 'opensandbox-dsh-pack-'));
@@ -39,8 +40,7 @@ try {
   }, null, 2));
   run(npm, ['install', '--ignore-scripts', '--strict-peer-deps', '--no-audit', '--no-fund',
     '--registry=https://registry.npmjs.org', `--cache=${join(tmpdir(), 'opensandbox-dsh-pack-npm-cache')}`], scratch);
-  const installed = join(scratch, 'node_modules', '@opensandbox', 'deepseek-harness');
-  assert.equal(await realpath(installed), installed, 'Consumer must install tarball, not a source symlink');
+  const installed = await assertTarballInstall(scratch);
   const sourceHelper = await readFile(join(packageDir, 'remote', 'fs_helper.py'));
   const packedHelper = await readFile(join(installed, 'remote', 'fs_helper.py'));
   assert.equal(createHash('sha256').update(packedHelper).digest('hex'), createHash('sha256').update(sourceHelper).digest('hex'));

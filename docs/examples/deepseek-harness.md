@@ -116,6 +116,31 @@ and fresh SDK configuration. It does not restore the prior in-memory Agent log.
 resources. For attached sandboxes, choose `kill` only when you intend to delete
 that sandbox and all its data.
 
+`SessionStore` holds the Agent's session log in client memory. This composition
+mounts no session-persistence plugin, so it writes no session log to either the
+client filesystem or the sandbox. `ShellEnv.dshHome` sets the remote shell's
+`DSH_HOME` environment value to the remote cwd; it does not relocate the session
+store or enable persistence.
+
+Shell stdout and stderr have independent capture budgets. `stdoutMaxBytes`
+overrides stdout only; stderr retains the executor's `maxOutputBytes` limit
+(64,000 bytes by default), as specified by the pinned DSH contract. Truncated
+results and lossy incremental reads report that output was omitted.
+
+The pinned remote execution API reports numeric exit outcomes without a
+terminating signal name. The provider preserves those numbers and reports
+`signal: null` (not reported); it does not infer a signal from `-1` or `128 + N`.
+Use `aborted` and `timedOut` for the provider's first stop cause, and command-status
+evidence for confirmed termination. These fields do not establish which POSIX
+signal terminated a process.
+
+Await `session.dispose()` and handle its rejection before choosing binding
+cleanup. The headless entry explicitly joins providers, continues remaining
+cleanup after a failure, and reports incomplete disposal with an `AggregateError`.
+For direct Cordis plugin consumers, await `RemoteShell.dispose()` explicitly:
+Cordis logs effect-disposer errors during Context teardown, so successful
+`fiber.dispose()` alone does not prove that remote commands stopped.
+
 Connection ownership follows SDK 1.1.0. Reusing plain options or a fresh,
 uninitialized `ConnectionConfig` gives each binding an independent transport;
 the SDK clones an uninitialized instance before initializing its transport.
