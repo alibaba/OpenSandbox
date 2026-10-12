@@ -440,6 +440,21 @@ paths:
                         schedule: "*/5 * * * *"
                         command: ["/opt/hooks/checkpoint.sh"]
                         timeoutSeconds: 60
+              idle-policy:
+                summary: Auto-pause after five idle minutes and wake on access
+                value:
+                  image:
+                    uri: python:3.11
+                  resourceLimits:
+                    cpu: "500m"
+                    memory: "512Mi"
+                  entrypoint: ["python", "/app/main.py"]
+                  timeout: 86400
+                  lifecycle:
+                    idlePolicy:
+                      idleTimeoutSeconds: 300
+                      onIdle: pause
+                      wakeOnAccess: true
       responses:
         '202':
           description: |
@@ -1671,11 +1686,14 @@ components:
     SandboxLifecycle:
       type: object
       description: |
-        Extensible container for sandbox lifecycle hooks. All fields are optional.
-        Future lifecycle events are added as new optional fields without changing
-        the semantics of existing fields.
+        Extensible container for sandbox lifecycle configuration. All fields
+        are optional. Future lifecycle events are added as new optional
+        fields without changing the semantics of existing fields.
 
-        This release supports only `preStart` and `periodic`.
+        `preStart` and `periodic` are hooks executed inside the sandbox by
+        execd. `idlePolicy` is control-plane policy (OSEP-0024): it tells the
+        server how to treat the sandbox's state machine and never reaches the
+        guest.
       properties:
         preStart:
           $ref: '#/components/schemas/LifecycleHook'
@@ -1691,6 +1709,90 @@ components:
             Scheduled hooks run by execd while the sandbox is running. Runs of
             the same named hook never overlap; a scheduled run is skipped when
             its previous run is still active.
+        idlePolicy:
+          $ref: '#/components/schemas/IdlePolicy'
+          description: |
+            Auto-pause and wake-on-access behavior (OSEP-0024). Supported only
+            by the fast-sandbox backend; other backends reject the field.
+            Omitting `idlePolicy` preserves non-automated behavior exactly:
+            the sandbox is never auto-paused and never auto-woken.
+      additionalProperties: false
+    IdlePolicy:
+      type: object
+      description: |
+        Idle behavior declared by the sandbox (OSEP-0024). The policy is
+        desired state: the server validates it and persists it as the
+        reserved `sandbox.opensandbox.io/idle-policy` Sandbox CR annotation.
+
+        With `idleTimeoutSeconds`, the sandbox is auto-paused after that many
+        seconds without ingress-observed activity. Without it, the policy is
+        wake-only: the sandbox is never auto-paused, but a (manually) paused
+        sandbox wakes on access. A missing, malformed, or invalid policy is
+        treated exactly as absent — never as an implicit opt-in.
+
+        Constraints: `idleTimeoutSeconds` must not exceed the server's
+        configured activity TTL (default 1800), so a present-but-stale
+        activity key always implies idle-by-value. Enabling deployment flags
+        never changes the behavior of sandboxes that do not declare a policy.
+      properties:
+        idleTimeoutSeconds:
+          type: integer
+          minimum: 30
+          maximum: 86400
+          description: |
+            Idle threshold X in seconds: the sandbox is auto-paused after X
+            continuously idle seconds. Absent together with `onIdle` means a
+            wake-only policy.
+        onIdle:
+          type: string
+          enum: [pause]
+          description: |
+            Action taken at the idle threshold. Required with, and only
+            valid with, `idleTimeoutSeconds`. Only `pause` exists today; the
+            enum exists so future actions are additive.
+        wakeOnAccess:
+          type: boolean
+          default: true
+          description: |
+            Whether incoming traffic may wake the sandbox from `Paused`.
+            `false` keeps today's paused behavior (permanent 503 through the
+            gateway) and only `POST /sandboxes/{sandboxId}/resume` restores
+            the sandbox.
+        activeProbe:
+          $ref: '#/components/schemas/ActivityProbe'
+          description: |
+            Application-declared activity probe. When the sandbox is
+            otherwise idle, the server issues `GET {path}` on `{port}`;
+            `200 {"active": true}` counts as activity and resets the idle
+            clock, while `{"active": false}`, any failure, or a timeout
+            records nothing. Relevant only with auto-pause.
+      additionalProperties: false
+    ActivityProbe:
+      type: object
+      required: [port, path]
+      description: |
+        Endpoint inside the sandbox that answers `{"active": bool,
+        "message"?: string}` with 200 while work is in progress.
+      properties:
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: Sandbox port serving the probe endpoint.
+        path:
+          type: string
+          minLength: 1
+          maxLength: 512
+          pattern: '^/'
+          description: |
+            Absolute HTTP path of the probe endpoint. Must not contain
+            whitespace or control characters.
+        timeoutSeconds:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 2
+          description: Probe request budget in seconds. The server defaults to 2 when omitted.
       additionalProperties: false
     PatchSandboxMetadataRequest:
       type: object
