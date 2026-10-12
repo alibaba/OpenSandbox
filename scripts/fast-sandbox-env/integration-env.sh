@@ -1634,9 +1634,9 @@ idle_ping_code() {
 		| jq -r '.headers["OpenSandbox-Ingress-To"] // empty')"
 	[[ -n "$route" ]] || { echo "noroute"; return 0; }
 	headers="$(mktemp)"
-	code="$(curl -sS -m 10 -D "$headers" -o /dev/null \
-		-H "OpenSandbox-Ingress-To: $route" "$GATEWAY_URL/ping" 2>/dev/null \
-		| head -1 | tr -d '\r' | awk '{print $2}')" || true
+	curl -sS -m 10 -D "$headers" -o /dev/null \
+		-H "OpenSandbox-Ingress-To: $route" "$GATEWAY_URL/ping" >/dev/null 2>&1 || true
+	code="$(tr -d '\r' < "$headers" | head -1 | awk '{print $2}')" || true
 	marker="$(tr -d '\r' < "$headers" | grep -i '^OpenSandbox-Wake:' | awk '{print $2}')" || true
 	rm -f "$headers"
 	if [[ "$code" == "200" ]]; then
