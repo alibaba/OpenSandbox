@@ -69,7 +69,6 @@ from opensandbox_server.integrations.idle_pause.logutil import (
     idlep_bundle,
 )
 from opensandbox_server.integrations.idle_pause.metrics import (
-    record_pause_latency,
     record_pause_request,
     record_probe_outcome,
 )
@@ -87,13 +86,6 @@ from opensandbox_server.services.fast_sandbox.endpoint import build_endpoint
 from opensandbox_server.services.fast_sandbox.service import FastSandboxService
 
 logger = logging.getLogger(__name__)
-
-# Pause-latency observation: poll cadence and observe window; expiry is a
-# skipped sample, never an error. Trackers share the sweeper's thread pool,
-# so their concurrency is capped and overflow skips the sample.
-_PAUSE_LATENCY_POLL_SECONDS = 1.0
-_PAUSE_LATENCY_OBSERVE_TIMEOUT_MS = 300_000
-_PAUSE_LATENCY_MAX_TRACKERS = 64
 
 
 def _default_clock() -> int:
@@ -126,9 +118,6 @@ class IdlePauseSweeper:
         lock_owner: Optional[str] = None,
         clock: Callable[[], int] = _default_clock,
         owned_redis: Optional[Redis] = None,
-        pause_latency_poll_seconds: float = _PAUSE_LATENCY_POLL_SECONDS,
-        pause_latency_observe_timeout_ms: int = _PAUSE_LATENCY_OBSERVE_TIMEOUT_MS,
-        pause_latency_max_trackers: int = _PAUSE_LATENCY_MAX_TRACKERS,
         prober: Optional[ActivityProber] = None,
         owned_prober: bool = False,
     ) -> None:
@@ -142,17 +131,10 @@ class IdlePauseSweeper:
         self._interval = float(sweep_interval_seconds)
         self._lock_owner = lock_owner or f"sweeper-{id(self):x}"
         self._clock = clock
-        self._pause_latency_poll_seconds = pause_latency_poll_seconds
-        self._pause_latency_observe_timeout_ms = pause_latency_observe_timeout_ms
-        self._pause_latency_max_trackers = pause_latency_max_trackers
         # None keeps probe-declared candidates pause-exempt (no gateway routing).
         self._prober = prober
         # Injected probers stay their caller's, mirroring owned_redis.
         self._owned_prober = owned_prober
-        # Instance-scoped: stop() must not cancel other instances' trackers.
-        self._latency_tasks: set[asyncio.Task[None]] = set()
-        # Created lazily on the running loop at first use.
-        self._latency_slots: Optional[asyncio.Semaphore] = None
         # Set only when this sweeper created the client; caller-supplied
         # clients stay the caller's to close.
         self._owned_redis = owned_redis
@@ -173,9 +155,6 @@ class IdlePauseSweeper:
             self._task.cancel()
             await asyncio.gather(self._task, return_exceptions=True)
             self._task = None
-        for task in list(self._latency_tasks):
-            task.cancel()
-        await asyncio.gather(*self._latency_tasks, return_exceptions=True)
         if self._prober is not None and self._owned_prober:
             try:
                 await self._prober.aclose()
@@ -526,7 +505,6 @@ class IdlePauseSweeper:
         if outcome == PauseOutcome.ACCEPTED:
             record_pause_request(outcome="accepted")
             stats.paused += 1
-            self._track_pause_latency(candidate)
             observation_age = (
                 "unknown"
                 if last_active_ms is None
@@ -551,41 +529,6 @@ class IdlePauseSweeper:
             record_pause_request(outcome="failed")
             stats.failed += 1
             stats.details.append(f"{candidate.sandbox_id}:{outcome.value}")
-
-    def _track_pause_latency(self, candidate: SandboxCandidate) -> None:
-        """Observe accepted->Paused duration; best-effort, never raises."""
-        state_reader = getattr(self._executor, "state", None)
-        if state_reader is None:
-            return  # test fakes and other executors without a read side
-        if self._latency_slots is None:
-            self._latency_slots = asyncio.Semaphore(self._pause_latency_max_trackers)
-        if self._latency_slots.locked():
-            return  # at capacity: the metric is best-effort, skip the sample
-        started_ms = self._clock()
-        poll_seconds = self._pause_latency_poll_seconds
-        deadline_ms = started_ms + self._pause_latency_observe_timeout_ms
-        slots = self._latency_slots
-
-        async def _track() -> None:
-            # Read before sleeping: sub-second pauses must not inherit
-            # the poll interval as a floor.
-            async with slots:
-                while True:
-                    state = await asyncio.to_thread(
-                        state_reader, candidate.namespace, candidate.sandbox_id
-                    )
-                    if state == "paused":
-                        record_pause_latency(
-                            seconds=max(0.0, (self._clock() - started_ms) / 1000)
-                        )
-                        return
-                    if state is None or self._clock() >= deadline_ms:
-                        return
-                    await asyncio.sleep(poll_seconds)
-
-        task = asyncio.create_task(_track(), name=f"idlep_pause_latency_{candidate.sandbox_id}")
-        self._latency_tasks.add(task)
-        task.add_done_callback(self._latency_tasks.discard)
 
 
 async def start_idle_pause_sweeper(

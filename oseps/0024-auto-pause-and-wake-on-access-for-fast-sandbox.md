@@ -506,7 +506,6 @@ Server (meter `server`):
 | Instrument | Type | Labels |
 | --- | --- | --- |
 | `opensandbox.server.idlep.pause.requests` | counter | `outcome` = `accepted`/`gated`/`failed` |
-| `opensandbox.server.idlep.pause.latency` | histogram (s) | `PauseSandbox` accepted → observed `Paused` |
 | `opensandbox.server.idlep.probe.outcome` | counter | `outcome` = `active`/`not_active`/`error` | app-defined activity probe results; sustained `error` ⇒ broken probe endpoint on an opted-in workload |
 | `opensandbox.server.idlep.flap.ratio` | gauge | fraction of pauses followed by a wake within a configurable window; the single most useful tuning signal for X |
 

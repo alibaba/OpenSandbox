@@ -12,9 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# pyright: reportAttributeAccessIssue=false
-# protobuf-generated modules expose dynamic attributes.
-
 """Pause executor: the sweeper's single authority for issuing pauses.
 
 Wraps ``FastPathClient.pause_sandbox`` with the OSEP-0024 pause contract:
@@ -29,7 +26,7 @@ from __future__ import annotations
 
 import enum
 import logging
-from typing import Optional, Protocol
+from typing import Protocol
 
 from opensandbox_server.integrations.idle_pause.constants import IDLE_PAUSE_REQUEST_ID_PREFIX
 from opensandbox_server.integrations.idle_pause.inventory import SandboxCandidate
@@ -41,15 +38,8 @@ from opensandbox_server.services.fast_sandbox.fastpath_client import (
     FastPathNotFound,
     FastPathUnavailable,
 )
-from opensandbox_server.services.fast_sandbox.generated import fastpath_pb2 as pb2
 
 logger = logging.getLogger(__name__)
-
-# SandboxState enum value -> lowercase name; unmapped values resolve to None.
-_STATE_NAMES = {
-    pb2.SANDBOX_STATE_RUNNING: "running",
-    pb2.SANDBOX_STATE_PAUSED: "paused",
-}
 
 
 class PauseOutcome(enum.Enum):
@@ -102,20 +92,6 @@ class FastPathPauseExecutor:
             )
             return PauseOutcome.FAILED
         return PauseOutcome.ACCEPTED
-
-    def state(self, namespace: str, sandbox_id: str) -> Optional[str]:
-        """Current state name ("running"/"paused"/...), None when gone or
-        unreadable; read side of the pause-latency observation."""
-        try:
-            response = self._client.get_sandbox(namespace, sandbox_id)
-        except FastPathError:
-            return None
-        except Exception:  # pragma: no cover - defensive; never break tracking
-            logger.exception(
-                f"idle_pause state read failed sandbox_id={sandbox_id} namespace={namespace}"
-            )
-            return None
-        return _STATE_NAMES.get(response.sandbox.state, None)
 
 
 __all__ = ["FastPathPauseExecutor", "PauseExecutor", "PauseOutcome"]

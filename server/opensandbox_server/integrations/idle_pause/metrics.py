@@ -24,12 +24,10 @@ from opentelemetry import metrics
 logger = logging.getLogger(__name__)
 
 PAUSE_REQUESTS_COUNTER = "opensandbox.server.idlep.pause.requests"
-PAUSE_LATENCY_HISTOGRAM = "opensandbox.server.idlep.pause.latency"
 PROBE_OUTCOME_COUNTER = "opensandbox.server.idlep.probe.outcome"
 
 _meter: Optional[metrics.Meter] = None
 _pause_requests = None
-_pause_latency = None
 _probe_outcomes = None
 
 
@@ -48,28 +46,6 @@ def _counter():
             logger.exception("Failed to create idlep instruments")
             return None
     return _pause_requests
-
-
-def _histogram():
-    global _meter, _pause_latency
-    if _pause_latency is None:
-        try:
-            meter = _meter or metrics.get_meter("opensandbox.server")
-            _meter = meter
-            _pause_latency = meter.create_histogram(
-                name=PAUSE_LATENCY_HISTOGRAM,
-                unit="s",
-                description=(
-                    "PauseSandbox accepted -> observed Paused (checkpoint duration)."
-                ),
-                explicit_bucket_boundaries_advisory=(
-                    0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300,
-                ),
-            )
-        except Exception:  # pragma: no cover - defensive; never break a sweep
-            logger.exception("Failed to create idlep instruments")
-            return None
-    return _pause_latency
 
 
 def record_pause_request(*, outcome: str) -> None:
@@ -114,13 +90,3 @@ def record_probe_outcome(*, outcome: str) -> None:
     except Exception:
         logger.exception("Failed to record idlep.probe.outcome")
 
-
-def record_pause_latency(*, seconds: float) -> None:
-    """Record one accepted pause's accepted->Paused duration."""
-    histogram = _histogram()
-    if histogram is None:
-        return
-    try:
-        histogram.record(max(0.0, seconds))
-    except Exception:
-        logger.exception("Failed to record idlep.pause.latency")
