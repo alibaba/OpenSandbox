@@ -43,6 +43,9 @@ const (
 	// keeps; pids beyond the cap are still observed but get no details, so
 	// attribution degrades instead of growing without bound.
 	oomMaxTrackedPids = 4096
+	// oomMaxPendingExited bounds the exited-process buffer carried between
+	// detections.
+	oomMaxPendingExited = 64
 	// oomMaxKillCgroups caps child cgroups named in one log line.
 	oomMaxKillCgroups = 3
 	// oomUnlimitedV1Bytes: v1 reports a huge byte value instead of "max".
@@ -93,6 +96,7 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 	havePrev := false
 	var prev oomSample
 	var prevChildren map[string]int64
+	var pendingExited []oomExited
 	readErrReported := false
 
 	for {
@@ -115,15 +119,23 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 		readErrReported = false
 
 		// Cheap every-tick pass: directory read + stats of new pids only.
-		exited := tracker.observe()
+		// Exited processes are buffered until the next detection: a process
+		// killed by the OOM killer disappears from /proc and increments the
+		// cgroup counter at slightly different moments, so the kill and its
+		// candidate often land in adjacent ticks.
+		pendingExited = append(pendingExited, tracker.observe()...)
+		if len(pendingExited) > oomMaxPendingExited {
+			pendingExited = pendingExited[len(pendingExited)-oomMaxPendingExited:]
+		}
 		curChildren := source.childKillCounts()
 
 		if havePrev {
 			if delta := diffOOMSample(prev, cur); delta.total > 0 {
 				emitOOMKill(ctx, source.eventSource(),
 					source.killContext(prev, cur, prevChildren, curChildren),
-					delta, limitExited(exited, int(delta.total)),
+					delta, limitExited(pendingExited, int(delta.total)),
 					tracker.bootTime, time.Now().Unix())
+				pendingExited = nil
 			}
 		}
 		prev, prevChildren, havePrev = cur, curChildren, true
