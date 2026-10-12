@@ -24,6 +24,7 @@ from datetime import timedelta
 
 import httpx
 
+from opensandbox.exceptions import SandboxWakeTimeoutException
 from opensandbox.transport._async_retry import (
     _capture_baseline_timeout,
     _clamp_attempt_timeout,
@@ -31,6 +32,7 @@ from opensandbox.transport._async_retry import (
 from opensandbox.transport._classify import (
     classify_transport_exception,
     is_body_replayable,
+    is_wake_timeout_response,
     outcome_for_response,
 )
 from opensandbox.transport._deadline_sync import DEADLINE_EXTENSION
@@ -40,8 +42,14 @@ from opensandbox.transport._decision import (
     compute_backoff,
     parse_retry_after,
     should_retry,
+    should_retry_wake,
 )
-from opensandbox.transport.retry import RetryEvent, RetryPolicy
+from opensandbox.transport.retry import (
+    WAKE_DEFAULT_RETRY_AFTER,
+    RetryCause,
+    RetryEvent,
+    RetryPolicy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +81,7 @@ class RetrySyncTransport(httpx.BaseTransport):
         start = time.monotonic()
         previous_sleep = timedelta(0)
         retries_used = 0
+        wake_attempts_used = 0
         last_exc: BaseException | None = None
         body_replayable = is_body_replayable(request)
 
@@ -109,6 +118,87 @@ class RetrySyncTransport(httpx.BaseTransport):
                 outcome = classify_transport_exception(e)
 
             elapsed = timedelta(seconds=time.monotonic() - start)
+
+            # OSEP-0024 wake branch. The marker proves the gateway parked
+            # the request without forwarding it, so the original request
+            # may be resent for any method (replayable body) — governed
+            # by the wake budget, not the general retry budget.
+            if (
+                response is not None
+                and policy.wake_retry_enabled
+                and body_replayable
+                and is_wake_timeout_response(response)
+            ):
+                wake_attempts_used += 1
+                retry_after = parse_retry_after(
+                    response.headers.get("Retry-After")
+                )
+                if retry_after is None:
+                    retry_after = WAKE_DEFAULT_RETRY_AFTER
+                if not should_retry_wake(
+                    wake_attempts_used=wake_attempts_used,
+                    policy=policy,
+                    elapsed=elapsed,
+                    retry_after=retry_after,
+                ):
+                    body: bytes | None = None
+                    try:
+                        body = response.read()
+                    except Exception:
+                        logger.debug(
+                            "failed to read wake-timeout body", exc_info=True
+                        )
+                    request_id = response.headers.get("X-Request-ID")
+                    try:
+                        response.close()
+                    except Exception:
+                        logger.debug(
+                            "failed to close wake-timeout response",
+                            exc_info=True,
+                        )
+                    raise SandboxWakeTimeoutException(
+                        "sandbox wake timeout: restore did not complete "
+                        f"within the wake retry budget "
+                        f"(attempts={wake_attempts_used}, "
+                        f"waited={elapsed.total_seconds():.3f}s); the "
+                        "request was never forwarded and the resume "
+                        "continues server-side",
+                        attempts=wake_attempts_used,
+                        waited=elapsed,
+                        request_id=request_id,
+                        response_body=body,
+                    )
+                # Clamp only against budgets tighter than the wake wait
+                # (general deadline / readiness deadline); the next loop
+                # iteration surfaces their exhaustion.
+                if policy.overall_deadline is not None:
+                    remaining = policy.overall_deadline - elapsed
+                    if retry_after > remaining:
+                        retry_after = max(remaining, timedelta(0))
+                if readiness_deadline is not None:
+                    retry_after = min(
+                        retry_after,
+                        timedelta(
+                            seconds=max(
+                                0, readiness_deadline - time.monotonic()
+                            )
+                        ),
+                    )
+                self._emit_wake_retry(
+                    request=request,
+                    event=wake_attempts_used,
+                    sleep_for=retry_after,
+                )
+                try:
+                    response.close()
+                except Exception:
+                    logger.debug(
+                        "failed to close retried response", exc_info=True
+                    )
+                if retry_after.total_seconds() > 0:
+                    time.sleep(retry_after.total_seconds())
+                continue
+
             if not should_retry(
                 method,
                 outcome,
@@ -187,6 +277,40 @@ class RetrySyncTransport(httpx.BaseTransport):
             previous_sleep = sleep_for
             if sleep_for.total_seconds() > 0:
                 time.sleep(sleep_for.total_seconds())
+
+    def _emit_wake_retry(
+        self,
+        *,
+        request: httpx.Request,
+        event: int,
+        sleep_for: timedelta,
+    ) -> None:
+        logger.warning(
+            "retrying %s %s: attempt=%d cause=%s status=%s backoff=%.3fs",
+            request.method,
+            request.url,
+            event + 1,
+            RetryCause.WAKE_TIMEOUT.value,
+            503,
+            sleep_for.total_seconds(),
+        )
+        if self._policy.on_retry is not None:
+            try:
+                self._policy.on_retry(
+                    RetryEvent(
+                        attempt=event + 1,
+                        retries_used=event,
+                        method=request.method.upper(),
+                        url=str(request.url),
+                        cause=RetryCause.WAKE_TIMEOUT,
+                        status_code=503,
+                        backoff=sleep_for,
+                        request_id=None,
+                        exception=None,
+                    )
+                )
+            except Exception:
+                logger.exception("RetryPolicy.on_retry callback raised")
 
     def close(self) -> None:
         if self._owns_inner:

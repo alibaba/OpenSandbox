@@ -75,7 +75,9 @@ class CreateSandboxRequest:
                 the workload shape is fixed by the template's golden image, so
                 `entrypoint`, `env`, `resourceLimits`, `resourceRequests`,
                 `volumes`, `platform`, `credentialProxy`, `secureAccess` and
-                `lifecycle` are rejected (400), and `timeout` is required.
+                lifecycle hooks are rejected (400), and `timeout` is required.
+                `lifecycle.idlePolicy` is allowed: it is control-plane state,
+                not workload shape.
                 The template must belong to the requester's tenant and be
                 `Succeeded`; anything else yields 404 (no existence leak).
             platform (PlatformSpec | Unset): Runtime platform constraint used for scheduling/provisioning.
@@ -121,11 +123,14 @@ class CreateSandboxRequest:
                 Use "name" key for a human-readable identifier.
                  Example: {'name': 'Data Processing Sandbox', 'project': 'data-processing', 'team': 'ml', 'environment':
                 'staging'}.
-            lifecycle (SandboxLifecycle | Unset): Extensible container for sandbox lifecycle hooks. All fields are optional.
-                Future lifecycle events are added as new optional fields without changing
-                the semantics of existing fields.
+            lifecycle (SandboxLifecycle | Unset): Extensible container for sandbox lifecycle configuration. All fields
+                are optional. Future lifecycle events are added as new optional
+                fields without changing the semantics of existing fields.
 
-                This release supports only `preStart` and `periodic`.
+                `preStart` and `periodic` are hooks executed inside the sandbox by
+                execd. `idlePolicy` is control-plane policy (OSEP-0024): it tells the
+                server how to treat the sandbox's state machine and never reaches the
+                guest.
             entrypoint (list[str] | Unset): The command to execute as the sandbox's entry process.
 
                 Required when `image` is provided.

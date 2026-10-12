@@ -265,7 +265,11 @@ class SandboxModelConverter:
                     "lifecycle must be a SandboxLifecycle or None, "
                     f"got {type(lifecycle).__name__}"
                 )
-            if lifecycle.pre_start is not None or lifecycle.periodic:
+            if (
+                lifecycle.pre_start is not None
+                or lifecycle.periodic
+                or lifecycle.idle_policy is not None
+            ):
                 lifecycle_payload = lifecycle.model_dump(
                     by_alias=True, exclude_none=True
                 )
