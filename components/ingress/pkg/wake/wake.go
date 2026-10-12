@@ -29,6 +29,7 @@ import (
 
 	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
 	"github.com/alibaba/opensandbox/ingress/pkg/telemetry"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 )
 
 var (
@@ -97,6 +98,11 @@ type allowAllPolicy struct{}
 
 func (allowAllPolicy) WakeAllowed(context.Context, string, string) bool { return true }
 
+// Logger is the audit logger. It defaults to a plain stderr logger so the
+// package never logs into nil; main() replaces it with the process-wide
+// "opensandbox.ingress" logger at startup.
+var Logger = slogger.MustNew(slogger.Config{Level: "info"})
+
 // Waker is the per-replica wake orchestrator, safe for concurrent use.
 type Waker struct {
 	cfg       Config
@@ -111,6 +117,13 @@ type Waker struct {
 	// epoch counter alone is process-local.
 	processUnique string
 	now           func() time.Time
+}
+
+func logFor(target sandbox.EndpointTarget) slogger.Logger {
+	return Logger.With(
+		slogger.Field{Key: "namespace", Value: target.Namespace},
+		slogger.Field{Key: "sandbox_id", Value: target.SandboxID},
+	)
 }
 
 func NewWaker(cfg Config, lifecycle Lifecycle, activity ActivityWriter, policy PolicySource) (*Waker, error) {
@@ -196,12 +209,14 @@ func (w *Waker) Wake(ctx context.Context, target sandbox.EndpointTarget) error {
 	// Opt-in gate: no policy keeps today's permanent 503. Runs before
 	// admission so denial consumes no slot and no permit.
 	if !w.policy.WakeAllowed(ctx, target.Namespace, target.SandboxID) {
+		logFor(target).Warnf("wake denied: paused sandbox has no wake-on-access policy")
 		return fmt.Errorf("%w: sandbox is paused without a wake-on-access policy", sandbox.ErrSandboxNotReady)
 	}
 
 	// Admission precedes flight creation.
 	if !w.lot.tryAcquire() {
 		telemetry.RecordParkShed()
+		logFor(target).Warnf("wake shed: parking lot full")
 		return ErrParkingLotFull
 	}
 	defer w.lot.release()
@@ -212,8 +227,13 @@ func (w *Waker) Wake(ctx context.Context, target sandbox.EndpointTarget) error {
 	}
 	if joined {
 		telemetry.RecordWakeFlight("joined")
+		logFor(target).Debugf("wake flight joined")
 	} else {
 		telemetry.RecordWakeFlight("triggered")
+		logFor(target).With(
+			slogger.Field{Key: "checkpoint_id", Value: probe.CheckpointID},
+			slogger.Field{Key: "epoch", Value: flight.epoch},
+		).Infof("wake flight started")
 	}
 
 	start := w.now()
@@ -256,6 +276,7 @@ func (w *Waker) acquireFlight(ctx context.Context, target sandbox.EndpointTarget
 				target:   target,
 				epoch:    w.epoch.Add(1),
 				deadline: w.now().Add(w.cfg.ParkBudget),
+				started:  w.now(),
 				done:     make(chan struct{}),
 				waker:    w,
 			}

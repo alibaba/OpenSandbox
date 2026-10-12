@@ -262,5 +262,6 @@ func newIngressMux(reverseProxy, networkReadiness http.Handler) *http.ServeMux {
 
 func withLogger(ctx context.Context, logLevel string) context.Context {
 	logger := slogger.MustNew(slogger.Config{Level: logLevel}).Named("opensandbox.ingress")
+	wake.Logger = logger
 	return proxy.WithLogger(ctx, logger)
 }

@@ -23,6 +23,7 @@ import (
 
 	"github.com/alibaba/opensandbox/ingress/pkg/sandbox"
 	"github.com/alibaba/opensandbox/ingress/pkg/telemetry"
+	slogger "github.com/alibaba/opensandbox/internal/logger"
 )
 
 type flightKey struct {
@@ -39,6 +40,7 @@ type flight struct {
 	target   sandbox.EndpointTarget
 	epoch    uint64
 	deadline time.Time
+	started  time.Time
 	done     chan struct{}
 	err      error
 
@@ -90,6 +92,13 @@ func (f *flight) finish(err error) {
 // phase so a stuck restore frees its permit instead of holding it forever.
 func (f *flight) run(checkpointID string) {
 	defer func() {
+		Logger.With(
+			slogger.Field{Key: "namespace", Value: f.target.Namespace},
+			slogger.Field{Key: "sandbox_id", Value: f.target.SandboxID},
+			slogger.Field{Key: "epoch", Value: f.epoch},
+			slogger.Field{Key: "outcome", Value: flightOutcome(f.err)},
+			slogger.Field{Key: "waited_seconds", Value: time.Since(f.started).Seconds()},
+		).Infof("wake flight finished")
 		f.waker.releasePermit()
 		telemetry.RecordRestoreDelta(-1)
 	}()
@@ -105,6 +114,21 @@ func (f *flight) run(checkpointID string) {
 	f.pollUntilReady(ctx, backoff)
 }
 
+func flightOutcome(err error) string {
+	switch {
+	case err == nil:
+		return "ready"
+	case errors.Is(err, ErrBudgetExhausted):
+		return "budget_exhausted"
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return "canceled"
+	case errors.Is(err, sandbox.ErrSandboxNotFound):
+		return "not_found"
+	default:
+		return "error"
+	}
+}
+
 // establishResume submits the resume intent, restarting on the checkpoint
 // fence until it is accepted, joined, or the flight ends. It reports false
 // when the flight finished without reaching the poll phase.
@@ -113,7 +137,8 @@ func (f *flight) establishResume(ctx context.Context, backoff *backoff, checkpoi
 	attempt := 0
 	for {
 		attempt++
-		outcome, err := w.lifecycle.ResumeSandbox(ctx, f.target, *checkpointID, f.requestID(attempt))
+		requestID := f.requestID(attempt)
+		outcome, err := w.lifecycle.ResumeSandbox(ctx, f.target, *checkpointID, requestID)
 
 		// With an empty fence, "not paused" may also mean the pause is
 		// still in progress — joining a resume that does not exist would
@@ -122,7 +147,22 @@ func (f *flight) establishResume(ctx context.Context, backoff *backoff, checkpoi
 			(outcome == sandbox.ResumeAlreadyRunning && *checkpointID == "")
 
 		if err == nil && !needsReprobe {
+			Logger.With(
+				slogger.Field{Key: "namespace", Value: f.target.Namespace},
+				slogger.Field{Key: "sandbox_id", Value: f.target.SandboxID},
+				slogger.Field{Key: "epoch", Value: f.epoch},
+				slogger.Field{Key: "attempt", Value: attempt},
+				slogger.Field{Key: "request_id", Value: requestID},
+			).Infof("ResumeSandbox accepted")
 			return true
+		}
+		if needsReprobe {
+			Logger.With(
+				slogger.Field{Key: "namespace", Value: f.target.Namespace},
+				slogger.Field{Key: "sandbox_id", Value: f.target.SandboxID},
+				slogger.Field{Key: "epoch", Value: f.epoch},
+				slogger.Field{Key: "attempt", Value: attempt},
+			).Warnf("resume fence conflict or ambiguous join, re-probing")
 		}
 		if err != nil {
 			switch {
