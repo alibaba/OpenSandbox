@@ -104,11 +104,8 @@ class FastPathPauseExecutor:
         return PauseOutcome.ACCEPTED
 
     def state(self, namespace: str, sandbox_id: str) -> Optional[str]:
-        """Current sandbox state name ("running"/"paused"/...), None when gone.
-
-        Read side of the pause-latency observation; any error resolves to
-        None so tracking can never raise past the sweeper.
-        """
+        """Current state name ("running"/"paused"/...), None when gone or
+        unreadable; read side of the pause-latency observation."""
         try:
             response = self._client.get_sandbox(namespace, sandbox_id)
         except FastPathError:

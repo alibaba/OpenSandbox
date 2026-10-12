@@ -14,19 +14,11 @@
 
 """Activity-probe execution (OSEP-0024).
 
-When a candidate that declares ``idlePolicy.activeProbe`` reaches the pause
-point, the sweeper asks the sandbox itself whether work is in progress. The
-probe is an ordinary GET issued through the ingress gateway — the same
-routing, addressing, and trust as client traffic — carrying the
-``OpenSandbox-Skip-Activity`` sentinel so the probe never resets the idle
-clock it is trying to measure.
-
-Verdicts are fail-safe: ``{"active": true}`` records an activity observation
-(a busy answer IS activity); ``{"active": false}`` lets the pause proceed,
-carrying the answer's ``message`` into the pause audit line; anything else —
-non-200, malformed body, timeout, connection error — records nothing and
-drops the candidate for this sweep. A timeout may be an app too busy to
-answer, so only an explicit "not active" lets a pause through.
+The sweeper asks a sandbox that declares ``idlePolicy.activeProbe`` whether
+work is in progress: an ordinary GET through the ingress gateway, carrying
+the ``OpenSandbox-Skip-Activity`` sentinel so the probe never resets the
+clock it measures. Fail-safe mapping: a busy answer records activity, an
+explicit not-active lets the pause proceed, everything else drops the sweep.
 """
 
 from __future__ import annotations
@@ -68,12 +60,11 @@ class ProbeVerdict:
 
 
 def _probe_target_url(endpoint: Endpoint, path: str) -> str:
-    """Join the gateway endpoint and the probe path into an absolute URL.
+    """Join the gateway endpoint and probe path into an absolute URL.
 
-    ``ingress.gateway.address`` is configured without a scheme (the config
-    rejects one), so default to plain ``http://`` — the same way the server
-    proxy path targets the gateway; route authenticity comes from the signed
-    scope, not transport TLS.
+    ``ingress.gateway.address`` is configured without a scheme; default to
+    plain http, the same way the server proxy path targets the gateway
+    (route authenticity comes from the signed scope, not TLS).
     """
     base = endpoint.endpoint.rstrip("/")
     if not base.startswith(("http://", "https://")):

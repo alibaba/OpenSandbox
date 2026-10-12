@@ -83,9 +83,8 @@ from opensandbox_server.services.fast_sandbox.service import FastSandboxService
 
 logger = logging.getLogger(__name__)
 
-# Pause-latency observation defaults: poll cadence and total observe window.
-# A pause still not Paused after the window is recorded as no sample, never
-# an error.
+# Pause-latency observation: poll cadence and observe window; expiry is a
+# skipped sample, never an error.
 _PAUSE_LATENCY_POLL_SECONDS = 1.0
 _PAUSE_LATENCY_OBSERVE_TIMEOUT_MS = 300_000
 
@@ -136,11 +135,9 @@ class IdlePauseSweeper:
         self._clock = clock
         self._pause_latency_poll_seconds = pause_latency_poll_seconds
         self._pause_latency_observe_timeout_ms = pause_latency_observe_timeout_ms
-        # None keeps probe-declared candidates pause-exempt (probe pipeline
-        # unavailable, e.g. no ingress gateway routing).
+        # None keeps probe-declared candidates pause-exempt (no gateway routing).
         self._prober = prober
-        # Instance-scoped: one sweeper's stop() must not cancel another
-        # instance's in-flight latency trackers.
+        # Instance-scoped: stop() must not cancel other instances' trackers.
         self._latency_tasks: set[asyncio.Task[None]] = set()
         # Set only when this sweeper created the client; caller-supplied
         # clients stay the caller's to close.
@@ -298,10 +295,8 @@ class IdlePauseSweeper:
         ):
             return
 
-        # A declared probe needs the probe pipeline (ingress-gateway routing).
-        # Without it the candidate is pause-exempt — the fail-safe direction:
-        # a declared probe means ingress observation alone cannot be trusted
-        # to pause this workload.
+        # No prober: a declared probe means ingress observation alone must
+        # not pause this workload — stay exempt.
         if candidate.policy.active_probe is not None and self._prober is None:
             record_pause_request(outcome="gated")
             stats.gated += 1
@@ -354,18 +349,15 @@ class IdlePauseSweeper:
                 stats.details.append(f"{candidate.sandbox_id}:activity_changed")
                 return
 
-            # Activity probe (declared probes only): the sweeper asks the
-            # sandbox itself whether work is in progress. A busy answer is
-            # recorded as an ordinary observation; an explicit not-active
-            # lets the pause through; any failure drops the candidate.
+            # Activity probe: a busy answer records activity, only an
+            # explicit not-active proceeds, any failure drops. Re-verify
+            # after: the probe spans seconds, so a request may have landed
+            # while it ran.
             probe_note: Optional[str] = None
             if candidate.policy.active_probe is not None:
                 probe_note = await self._run_probe(candidate, stats)
                 if probe_note is None:
                     return
-                # Re-verify after the probe: it spans up to timeoutSeconds,
-                # and a request landing while it ran may not have flushed at
-                # the first re-verify. A newer observation drops us.
                 try:
                     current = await self._activity.read(candidate.sandbox_id)
                 except (RedisError, OSError) as exc:
@@ -476,12 +468,8 @@ class IdlePauseSweeper:
         return True
 
     async def _run_probe(self, candidate: SandboxCandidate, stats: SweepStats) -> Optional[str]:
-        """Run the declared activity probe; return the pause-audit note.
-
-        ``None`` means the candidate is dropped for this sweep: a busy answer
-        (recorded as activity — the clock resets and the sandbox is probed
-        again at its next idle window), a probe failure, or a timeout.
-        """
+        """Run the probe; return the pause-audit note, or None to drop the
+        candidate (busy answer, probe failure, or timeout)."""
         assert self._prober is not None
         verdict = await self._prober.probe(candidate)
         record_probe_outcome(outcome=verdict.outcome)
@@ -551,11 +539,7 @@ class IdlePauseSweeper:
             stats.details.append(f"{candidate.sandbox_id}:{outcome.value}")
 
     def _track_pause_latency(self, candidate: SandboxCandidate) -> None:
-        """Observe accepted->Paused duration in the background.
-
-        Best-effort and state() is fail-safe, so the tracker never raises and
-        a crash mid-poll just skips one histogram sample.
-        """
+        """Observe accepted->Paused duration; best-effort, never raises."""
         state_reader = getattr(self._executor, "state", None)
         if state_reader is None:
             return  # test fakes and other executors without a read side
@@ -565,9 +549,8 @@ class IdlePauseSweeper:
 
         async def _track() -> None:
             while True:
-                # Read first, sleep after: sampling before waiting keeps
-                # sub-second checkpoints out of the floor set by the poll
-                # interval.
+                # Read before sleeping: sub-second pauses must not inherit
+                # the poll interval as a floor.
                 state = await asyncio.to_thread(
                     state_reader, candidate.namespace, candidate.sandbox_id
                 )
@@ -577,7 +560,7 @@ class IdlePauseSweeper:
                     )
                     return
                 if state is None or self._clock() >= deadline_ms:
-                    return  # gone, unreadable, or observe window elapsed
+                    return
                 await asyncio.sleep(poll_seconds)
 
         task = asyncio.create_task(_track(), name=f"idlep_pause_latency_{candidate.sandbox_id}")
@@ -658,12 +641,7 @@ async def start_idle_pause_sweeper(
 
 
 def _build_activity_prober(app_config: AppConfig) -> Optional[ActivityProber]:
-    """Build the probe client, or None when probes cannot be routed.
-
-    Mirrors the fsb endpoint requirements: an ingress gateway with signed
-    route scopes. The endpoint builder raises for unroutable targets at
-    probe time; every failure resolves to an error verdict (no pause).
-    """
+    """Build the probe client, or None when probes cannot be routed."""
     ingress = app_config.ingress
     if (
         ingress is None

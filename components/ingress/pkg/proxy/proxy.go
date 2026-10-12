@@ -153,10 +153,9 @@ func (p *Proxy) handle(sw *statusCapturingResponseWriter, r *http.Request) {
 		return
 	}
 
-	// OSEP-0024: every routed request feeds the sandbox idle clock, including
-	// requests that skip renewal. The activity-probe sentinel is the one
-	// opt-out: the sweeper's probe must never reset the idle clock it is
-	// trying to measure. Fire-and-forget; failures are dropped.
+	// OSEP-0024: every routed request feeds the sandbox idle clock, renewal
+	// skip included. The activity-probe sentinel is the one opt-out.
+	// Fire-and-forget; failures are dropped.
 	if p.activity != nil && !IsSkipActivity(r.Header) {
 		p.activity.Record(host.namespace, host.ingressKey)
 	}

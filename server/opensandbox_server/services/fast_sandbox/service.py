@@ -158,13 +158,9 @@ class FastSandboxService(SandboxService, ExtensionService):
     def _validated_idle_policy_annotation(
         self, request: CreateSandboxRequest
     ) -> Optional[str]:
-        """Validate ``lifecycle.idlePolicy`` against this deployment's bounds.
-
-        Returns the canonical annotation value, or ``None`` when the request
-        declares no policy. Raises 400 on any violation so a malformed opt-in
-        fails before the create has side effects. The activity-TTL bound is
-        deployment config, so it can only be checked here (OSEP-0024).
-        """
+        """Validate the declared policy (deployment bounds included) and
+        return the annotation value, or None. Raises 400 before any create
+        side effect; the TTL bound needs config, so it lives here."""
         lifecycle = request.lifecycle
         if lifecycle is None or lifecycle.idle_policy is None:
             return None
@@ -203,13 +199,9 @@ class FastSandboxService(SandboxService, ExtensionService):
     def _persist_idle_policy_annotation(
         self, namespace: str, sandbox_id: str, annotation: str
     ) -> None:
-        """Write the idle policy onto the Sandbox CR (best effort).
-
-        The policy is desired state read from the CR by the sweeper and the
-        ingress wake gate. A failed write leaves the sandbox unpolicied —
-        never auto-paused and never auto-woken, the fail-safe direction — so
-        the create itself must not fail after its side effects exist.
-        """
+        """Best-effort CR annotation write: a failed write leaves the sandbox
+        unpolicied (never auto-paused or auto-woken), so the create itself
+        must not fail after its side effects exist."""
         try:
             self._kubernetes_client().patch_custom_object(
                 GROUP,
@@ -233,9 +225,8 @@ class FastSandboxService(SandboxService, ExtensionService):
             self._cr_reader.invalidate(namespace)
 
     def _kubernetes_client(self) -> K8sClient:
-        # create_sandbox runs in worker threads; the lazy init must not race
-        # into a double K8sClient construction (K8sClient._load_config mutates
-        # process-global k8s configuration). Same pattern as SandboxCRReader.
+        # create_sandbox runs in worker threads; lazy init must not race
+        # (K8sClient._load_config mutates process-global config).
         with self._k8s_client_lock:
             if self._k8s_client is None:
                 self._k8s_client = K8sClient(self._k8s)
@@ -347,9 +338,7 @@ class FastSandboxService(SandboxService, ExtensionService):
     def _create_sandbox_sync(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
         if request.network_policy is not None:
             self._reject_network_policy_with_upstream_proxy()
-        # Validate before any side effect: a malformed opt-in is a 400, and
-        # the annotation value is fixed now so create persists exactly what
-        # was validated.
+        # Validate the opt-in before any side effect.
         idle_policy_annotation = self._validated_idle_policy_annotation(request)
         created_at = datetime.now(timezone.utc)
         # Template mode: the resolved artifact reference becomes

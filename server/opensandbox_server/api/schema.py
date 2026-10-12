@@ -182,11 +182,10 @@ class PeriodicLifecycleHook(BaseModel):
 
 
 class ActivityProbe(BaseModel):
-    """Application-declared activity probe (``idlePolicy.activeProbe``, OSEP-0024).
+    """App-declared activity probe (``idlePolicy.activeProbe``, OSEP-0024).
 
-    The server issues ``GET {path}`` on ``{port}`` when the sandbox is
-    otherwise idle; ``200 {"active": true}`` counts as activity and resets
-    the idle clock.
+    ``GET {path}`` on ``{port}`` answering ``200 {"active": true}`` counts
+    as activity and resets the idle clock.
     """
 
     port: int = Field(..., ge=1, le=65535)
@@ -211,11 +210,9 @@ class ActivityProbe(BaseModel):
 class IdlePolicy(BaseModel):
     """Idle behavior declared by the sandbox (OSEP-0024).
 
-    With ``idleTimeoutSeconds`` the sandbox is auto-paused after that many
-    seconds without ingress-observed activity (fast-sandbox backend only).
-    Without it the policy is wake-only: the sandbox is never auto-paused,
-    but a (manually) paused sandbox wakes on traffic. Omitting ``idlePolicy``
-    entirely preserves today's behavior exactly.
+    With a timeout the sandbox is auto-paused after X idle seconds; without
+    it the policy is wake-only. Omitting ``idlePolicy`` preserves today's
+    behavior exactly.
     """
 
     idle_timeout_seconds: Optional[int] = Field(
@@ -260,11 +257,8 @@ class IdlePolicy(BaseModel):
 
 
 class SandboxLifecycle(BaseModel):
-    """Extensible lifecycle configuration.
-
-    ``preStart``/``periodic`` hooks are transported internally to execd;
-    ``idlePolicy`` is control-plane state consumed by the server (OSEP-0024)
-    and never reaches the guest.
+    """Extensible lifecycle configuration: hooks run in the guest via execd;
+    ``idlePolicy`` is control-plane state (OSEP-0024) and never reaches it.
     """
 
     pre_start: Optional[LifecycleHook] = Field(None, alias="preStart")
@@ -675,10 +669,9 @@ class CreateSandboxRequest(BaseModel):
                 "Use the lifecycle request field instead."
             )
 
-        # Template mode (fsb): the workload shape is fixed by the golden
-        # image, so workload-shaping fields are rejected, not ignored.
-        # lifecycle.idlePolicy is control-plane state, not workload shape,
-        # so a hooks-free lifecycle is allowed to carry it (OSEP-0024).
+        # Template mode (fsb): workload-shaping fields are rejected, not
+        # ignored; idlePolicy is control-plane state, so a hooks-free
+        # lifecycle may carry it.
         if self.template_id is not None and self.template_id.strip():
             conflicts = {
                 "image": self.image is not None,

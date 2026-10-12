@@ -284,8 +284,7 @@ def _reject_unsupported_fields(request: CreateSandboxRequest) -> None:
                 "lifecycle hooks are not supported by the fsb backend; "
                 "only lifecycle.idlePolicy is accepted (OSEP-0024)",
             )
-        # lifecycle.idlePolicy is control-plane state: validated and persisted
-        # as a Sandbox CR annotation by FastSandboxService, not mapped here.
+        # idlePolicy is validated and persisted as a CR annotation by the service.
     # snapshotId is allowed: restore resolution replaced it with the snapshot
     # artifact reference (restore_config.image) before routing reached fsb.
     if request.platform is not None:

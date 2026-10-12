@@ -39,16 +39,12 @@ var (
 	AccessRenew          = http.CanonicalHeaderKey("OpenSandbox-Access-Renew")
 	AccessRenewSkipValue = "skip"
 
-	// SkipActivity is the OSEP-0024 activity-probe sentinel. The exact
-	// sentinel value SkipActivitySkipValue ("skip") suppresses the activity
-	// observation for that one request, so the idle sweeper's probe never
-	// resets the idle clock it is trying to measure. The server's sweeper is
-	// the only intended issuer. A client that forges it suppresses recording
-	// of traffic it can already route to — which makes its own sandbox look
-	// idle sooner and can push an in-use sandbox into Paused (a self-inflicted
-	// availability cost, recovered by the next ordinary request); it never
-	// affects a sandbox the caller cannot route to. Like AccessRenew, it is
-	// stripped before forwarding upstream.
+	// SkipActivity is the OSEP-0024 activity-probe sentinel. The exact value
+	// SkipActivitySkipValue ("skip") suppresses the activity observation for
+	// that one request, so the sweeper's probe never resets the clock it
+	// measures. A client forging it only hurts itself: its own sandbox looks
+	// idle sooner and may be paused mid-use, recovered by the next ordinary
+	// request. Stripped before forwarding upstream, like AccessRenew.
 	SkipActivity          = http.CanonicalHeaderKey("OpenSandbox-Skip-Activity")
 	SkipActivitySkipValue = "skip"
 

@@ -549,8 +549,7 @@ def test_http_create_survives_idle_policy_annotation_write_failure(http_fsb):
         },
     )
 
-    # The sandbox exists; a failed policy write must not fail the create.
-    # Fail-safe direction: the sandbox stays unpolicied.
+    # A failed policy write must not fail the create; sandbox stays unpolicied.
     assert response.status_code == 202
     assert fake.last_create is not None
 
