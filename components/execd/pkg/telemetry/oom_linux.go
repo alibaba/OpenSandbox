@@ -97,6 +97,8 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 	var prev oomSample
 	var prevChildren map[string]int64
 	var pendingExited []oomExited
+	var hold *oomDelta
+	var holdPrev, holdCur oomSample
 	readErrReported := false
 
 	for {
@@ -119,23 +121,41 @@ func watchOOMSource(ctx context.Context, source *oomSource, interval time.Durati
 		readErrReported = false
 
 		// Cheap every-tick pass: directory read + stats of new pids only.
-		// Exited processes are buffered until the next detection: a process
-		// killed by the OOM killer disappears from /proc and increments the
-		// cgroup counter at slightly different moments, so the kill and its
-		// candidate often land in adjacent ticks.
+		// Exited candidates are held in a bounded buffer across ticks.
 		pendingExited = append(pendingExited, tracker.observe()...)
 		if len(pendingExited) > oomMaxPendingExited {
 			pendingExited = pendingExited[len(pendingExited)-oomMaxPendingExited:]
 		}
 		curChildren := source.childKillCounts()
 
+		// A detection is emitted one tick late: a killed process disappears
+		// from /proc and the cgroup counter increments at slightly different
+		// moments, so holding the emit lets candidates observed on either
+		// side of the counter bump join the report.
+		if havePrev && hold != nil {
+			emitOOMKill(ctx, source.eventSource(),
+				source.killContext(holdPrev, holdCur, prevChildren, curChildren),
+				*hold, limitExited(pendingExited, int(hold.total)),
+				tracker.bootTime, time.Now().Unix())
+			pendingExited = nil
+			hold = nil
+		}
+
 		if havePrev {
 			if delta := diffOOMSample(prev, cur); delta.total > 0 {
-				emitOOMKill(ctx, source.eventSource(),
-					source.killContext(prev, cur, prevChildren, curChildren),
-					delta, limitExited(pendingExited, int(delta.total)),
-					tracker.bootTime, time.Now().Unix())
-				pendingExited = nil
+				if hold == nil {
+					copied := delta
+					hold = &copied
+					holdPrev, holdCur = prev, cur
+				} else {
+					hold.total += delta.total
+					if delta.haveLocal {
+						hold.haveLocal = true
+						hold.local += delta.local
+						hold.descendant += delta.descendant
+					}
+					holdCur = cur
+				}
 			}
 		}
 		prev, prevChildren, havePrev = cur, curChildren, true

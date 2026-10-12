@@ -206,12 +206,13 @@ func victimAge(bootTime, startTicks, now int64) int64 {
 	return age
 }
 
-// limitExited caps the exited list at the number of detected kills: listing
-// more exited processes than kills would assert causality the heuristic
-// cannot back up.
+// limitExited keeps the most recent entries up to the limit: freshly exited
+// processes are the likelier kill candidates, and listing more exited
+// processes than detected kills would assert causality the heuristic cannot
+// back up.
 func limitExited(exited []oomExited, limit int) []oomExited {
 	if limit >= 0 && len(exited) > limit {
-		return exited[:limit:limit]
+		return exited[len(exited)-limit:]
 	}
 	return exited
 }

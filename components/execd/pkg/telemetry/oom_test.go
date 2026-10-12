@@ -176,7 +176,9 @@ func TestFormatEventsDelta(t *testing.T) {
 
 func TestLimitExited(t *testing.T) {
 	exited := []oomExited{{Pid: 1}, {Pid: 2}, {Pid: 3}}
-	if got := limitExited(exited, 2); len(got) != 2 || got[0].Pid != 1 || got[1].Pid != 2 {
+	// The limit keeps the most recent entries: freshly exited processes are
+	// the likelier kill candidates.
+	if got := limitExited(exited, 2); len(got) != 2 || got[0].Pid != 2 || got[1].Pid != 3 {
 		t.Fatalf("limit 2 = %+v", got)
 	}
 	if got := limitExited(exited, 5); len(got) != 3 {
