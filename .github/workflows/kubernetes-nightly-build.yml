@@ -358,10 +358,9 @@ jobs:
 
   # Full fast-sandbox stack on the same KVM runner as
   # fast-sandbox-test.yml, with the OSEP-0024 idle-pause profile:
-  # base e2e + idle-pause/wake e2e; nightly/dispatch only.
+  # base e2e + idle-pause/wake e2e.
   fast-sandbox-full-stack:
     name: Fast Sandbox Full-Stack E2E (KVM)
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: kvm
     timeout-minutes: 180
     steps:
