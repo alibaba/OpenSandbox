@@ -162,11 +162,30 @@ OpenSandbox-Wake: expired
            "sandboxId": "sb_..."}}
 ```
 
-The `OpenSandbox-Wake: expired` header is gateway-owned (stripped from every upstream response), so its presence proves the request never reached the sandbox — that is what makes automatic retry safe for any method, including command/code-execution starts, provided the body is replayable. Today the auto-retry contract ships in the **Python SDK** (other SDKs surface the marked 503 and leave retry to the caller):
+The `OpenSandbox-Wake: expired` header is gateway-owned (stripped from every upstream response), so its presence proves the request never reached the sandbox — that is what makes automatic retry safe for any method, including command/code-execution starts, provided the body is replayable. Official SDKs apply this contract to the marked response only:
 
-- Wait per `Retry-After`, resend the original request. On by default; disable via `ConnectionConfig(retry_policy=RetryPolicy(wake_retry_enabled=False))`.
-- Total wait bound: `wake_overall_deadline` (default 60 s) and `wake_max_attempts` (default 5), spanning all wake cycles; retries never reset the deadline.
-- Success continues the original call; exhausted budget raises `SandboxWakeTimeoutException` (carrying attempt count and waited time). A bare `503` (no marker) is never auto-retried for non-idempotent methods.
+- Wait per `Retry-After`, resend the original request. On by default, disable-able per client.
+- Total wait bound: a wake-retry deadline (default 60 s) and a max-attempts cap (default 5) spanning all wake cycles; retries never reset the deadline.
+- Success continues the original call; exhausted budget raises a typed wake-timeout error carrying the attempt count and waited time. A bare `503` (no marker) is never auto-retried for non-idempotent methods.
+
+Python example:
+
+```python
+from datetime import timedelta
+
+from opensandbox.config import ConnectionConfig
+from opensandbox.transport import RetryPolicy
+
+config = ConnectionConfig(
+    retry_policy=RetryPolicy(
+        wake_retry_enabled=False,             # disable auto wake-retry
+        wake_overall_deadline=timedelta(seconds=120),
+        wake_max_attempts=10,
+    )
+)
+```
+
+Exhaustion raises `SandboxWakeTimeoutException`.
 
 ## Composition with other features
 
