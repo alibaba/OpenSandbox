@@ -57,7 +57,7 @@ The ingress gains exactly two FastPath calls on the channel it already holds (`G
 
 ## Observability
 
-The loop exposes wake flights, park wait durations, shed count, active restores, dropped activity writes, probe outcomes, and the **flap ratio** — the primary tuning signal for X. See the [Telemetry guide](/guides/telemetry).
+The loop exposes wake flights, park wait durations, shed count, active restores, dropped activity writes, and probe outcomes. The **flap ratio** (pauses followed by a quick wake — the primary tuning signal for X) is derived per sandbox from pause and wake telemetry. See the [Telemetry guide](/guides/telemetry).
 
 ## References
 

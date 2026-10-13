@@ -162,11 +162,11 @@ OpenSandbox-Wake: expired
            "sandboxId": "sb_..."}}
 ```
 
-The `OpenSandbox-Wake: expired` header is gateway-owned (stripped from every upstream response), so its presence proves the request never reached the sandbox — that is what makes automatic retry safe for any method, including command/code-execution starts, provided the body is replayable. Official SDKs apply this contract to the marked response only:
+The `OpenSandbox-Wake: expired` header is gateway-owned (stripped from every upstream response), so its presence proves the request never reached the sandbox — that is what makes automatic retry safe for any method, including command/code-execution starts, provided the body is replayable. Today the auto-retry contract ships in the **Python SDK** (other SDKs surface the marked 503 and leave retry to the caller):
 
-- Wait per `Retry-After`, resend the original request (on by default; disable-able per client).
-- Total wait bound: `overall_deadline` (default 60 s) and `max_attempts` (default 5), spanning all wake cycles; retries never reset the deadline.
-- Success continues the original call; exhausted budget raises a typed `WakeTimeoutExceeded` error (attempt count + waited time). A bare `503` (no marker) is never auto-retried for non-idempotent methods.
+- Wait per `Retry-After`, resend the original request. On by default; disable via `ConnectionConfig(retry_policy=RetryPolicy(wake_retry_enabled=False))`.
+- Total wait bound: `wake_overall_deadline` (default 60 s) and `wake_max_attempts` (default 5), spanning all wake cycles; retries never reset the deadline.
+- Success continues the original call; exhausted budget raises `SandboxWakeTimeoutException` (carrying attempt count and waited time). A bare `503` (no marker) is never auto-retried for non-idempotent methods.
 
 ## Composition with other features
 
@@ -179,7 +179,7 @@ The `OpenSandbox-Wake: expired` header is gateway-owned (stripped from every ups
 - `X ≤ activity_ttl_seconds` (server + ingress values must match); X floor is 30 s — lower values are rejected to keep the checkpoint cycle worth its cost.
 - Everything in front of the ingress (LB idle timeouts, client response-header timeouts) must exceed **Y**, otherwise middle layers cut parked connections before the gateway can answer `503 + Retry-After`.
 - Pause timing = X + at most one sweep interval of detection lag.
-- Only new requests count: open WebSocket/SSE streams are not activity — after X seconds of frame silence the sandbox pauses and the connection breaks. Send application-level pings more frequently than X, or do not opt in.
+- Only new HTTP requests count: open WebSocket/SSE streams are not activity — frames (including WS ping/pong) are relayed without being recorded, so application-level WS pings cannot keep a sandbox alive. After X seconds without a fresh request the sandbox pauses and the connection breaks. Keep a background HTTP request cadence shorter than X, declare an `activeProbe`, or do not opt in.
 - Scheduled workloads: a paused sandbox cannot wake itself. Arrange an external scheduler to call `POST /sandboxes/{id}/resume` before each run.
 - Checkpoint cost is proportional to guest memory; every paused sandbox holds a full checkpoint in the artifact store until resumed or deleted. Size artifact-store capacity for peak concurrent paused sandboxes.
 
@@ -188,10 +188,12 @@ The `OpenSandbox-Wake: expired` header is gateway-owned (stripped from every ups
 - **Rollout order**: deploy with all flags off → enable activity + sweeper for a canary tenant → enable wake on a canary ingress → opt in real workloads via `idlePolicy`.
 - **Rollback**: disable the flags. Sandboxes left `Paused` stay resumable through the manual API — resume or delete stranded ones after disabling wake, since traffic will no longer wake them.
 - **Key metrics** (see [Telemetry](/guides/telemetry)):
-  - `opensandbox.server.idlep.flap.ratio` — pauses followed by a quick wake; the primary tuning signal for X. Sustained flapping means traffic period ≈ X: raise X above the workload period.
-  - `opensandbox.ingress.activity.writes_dropped` — Redis pressure on the producer side.
-  - `opensandbox.ingress.park.shed` — parking-lot overflows; sustained growth ⇒ raise `--wake-park-max` or investigate restore latency.
-  - `opensandbox.ingress.park.wait.duration`, `opensandbox.ingress.wake.restore.active`, wake P95 — wake health.
+  - `opensandbox.server.idlep.pause.requests` (`outcome` = accepted/gated/failed) — pause pipeline health.
+  - `opensandbox.server.idlep.probe.outcome` — sustained `error` ⇒ broken probe endpoint on an opted-in workload.
+  - `ingress.activity.writes_dropped` — Redis pressure on the producer side.
+  - `ingress.park.shed` — parking-lot overflows; sustained growth ⇒ raise `--wake-park-max` or investigate restore latency.
+  - `ingress.park.wait.duration` and `ingress.wake.restore.active` — wake health; same-node wake P95 target < 500 ms.
+  - Flap ratio (pauses followed by a quick wake — the primary tuning signal for X) is not emitted as an instrument yet: derive it per sandbox by joining `pause.requests{outcome="accepted"}` with subsequent wake flights. Sustained flapping means traffic period ≈ X — raise X above the workload period.
 
 ## Troubleshooting
 
