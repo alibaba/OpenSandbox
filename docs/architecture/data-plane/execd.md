@@ -149,4 +149,4 @@ Sandboxes can be pre-warmed in pools and reused across allocations. Execd makes 
 
 ## Observability
 
-Execd exposes local CPU and memory metrics as a snapshot and as a live stream, and exports OpenTelemetry metrics when the platform configures an endpoint — attributed to your sandbox ID and allocation. See [component telemetry](/guides/component-telemetry) for how export is configured.
+Execd exposes local CPU and memory metrics as a snapshot and as a live stream, and exports OpenTelemetry metrics when the platform configures an endpoint — attributed to your sandbox ID and allocation. See [telemetry](/guides/telemetry#execd) for the metric list and how export is configured.

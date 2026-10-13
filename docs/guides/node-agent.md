@@ -156,7 +156,7 @@ opensandbox-node-agent:
       value: http://otel-collector.observability:4318/v1/metrics
 ```
 
-See [component telemetry](/guides/component-telemetry) for shared exporter behavior.
+See [telemetry](/guides/telemetry#node-agent) for the metric list and [shared exporter behavior](/guides/telemetry#shared-otlp-configuration-for-go-components).
 
 ## Operating rules
 

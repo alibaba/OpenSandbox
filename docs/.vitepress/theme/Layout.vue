@@ -24,6 +24,7 @@ const EXACT: Record<string, string> = {
   "/specs/readme": "/api/",
   "/secure-container": "/guides/secure-container",
   "/pause-resume": "/guides/pause-resume",
+  "/guides/component-telemetry": "/guides/telemetry",
   "/execd-path-migration": "/reference/execd-path-migration",
 };
 

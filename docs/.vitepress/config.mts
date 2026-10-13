@@ -236,6 +236,10 @@ export default defineConfig({
               text: "Node Agent Configuration",
               link: "/guides/node-agent",
             },
+            {
+              text: "Telemetry",
+              link: "/guides/telemetry",
+            },
           ],
         },
       ],

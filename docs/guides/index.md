@@ -19,3 +19,7 @@ Check the [SDK capability matrix](/sdks/#capability-coverage) for language suppo
 - [Secure container runtimes](/guides/secure-container)
 - [Multi-tenancy](/guides/multi-tenancy)
 - [Windows sandboxes](/guides/windows-sandbox)
+
+## Operations
+
+- [Telemetry](/guides/telemetry)
