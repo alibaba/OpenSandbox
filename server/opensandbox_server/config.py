@@ -335,26 +335,6 @@ class IdlePauseConfig(BaseModel):
             "redis.lock_ttl_seconds (dotted keys)."
         ),
     )
-    probe_gateway_address: Optional[str] = Field(
-        default=None,
-        description=(
-            "Optional gateway address the activity probe dials instead of the "
-            "announced ingress.gateway.address. Set it when the announced address "
-            "is only client-reachable (e.g. a host loopback publish) while the "
-            "server runs where that address is not dialable: an in-cluster address "
-            "such as 'opensandbox-ingress-gateway.opensandbox-system.svc:80' keeps "
-            "the probe inside the cluster."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def reject_blank_probe_gateway_address(self) -> "IdlePauseConfig":
-        if self.probe_gateway_address is not None \
-                and not self.probe_gateway_address.strip():
-            raise ValueError(
-                "[idle_pause] probe_gateway_address must be a non-empty address."
-            )
-        return self
 
 
 _KEY_ID_RE = re.compile(r"^[0-9a-z]$")

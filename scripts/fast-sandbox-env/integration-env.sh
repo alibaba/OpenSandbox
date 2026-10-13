@@ -1240,7 +1240,7 @@ dart_source_counters() { # pod -> "<source> <value>" lines
 
 redis_up() {
 	# The sweeper connects at startup, so Redis must precede the server.
-	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping Redis"; return 0; }
+	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping Redis"; rm -f "$WORK/idle-pause"; return 0; }
 	touch "$WORK/idle-pause"
 	mkdir -p "$GEN_DIR"
 	sed "s|image: redis:7-alpine|image: $REDIS_IMAGE|" \
@@ -1760,7 +1760,7 @@ idle_pause_verify() {
 	t0="$(now_ms)"
 	kubectl -n "$OSB_NS" scale deploy/idle-pause-redis --replicas=0 >/dev/null
 	while sandbox_running; do
-		(( $(now_ms) - t0 >= 90000 )) && break
+		(( $(now_ms) - t0 >= 90000000000 )) && break
 		sleep 5
 	done
 	sandbox_running || fail "sandbox paused while Redis was scaled down"
@@ -2083,6 +2083,9 @@ down() {
 	# Server/gateway die with the cluster; only the signing key outlives it.
 	rm -f "$WORK/agent-registry.json" "$SIGNING_KEY_FILE"
 	rm -rf "$GEN_DIR" "$FSB_GEN_DIR"
+	# A stale profile marker would let idle-e2e run against a stack whose
+	# Redis/sweeper are gone.
+	rm -f "$WORK/idle-pause"
 	# RustFS data is owned by UID/GID 10001; leftovers pollute the host and
 	# later docker build contexts.
 	sudo_ rm -rf "$RUSTFS_DATA"
