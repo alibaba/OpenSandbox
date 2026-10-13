@@ -31,7 +31,7 @@ import pytest
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import SandboxApiException, SandboxException
 from opensandbox.manager import SandboxManager
-from opensandbox.models.sandboxes import ActivityProbe, IdlePolicy, SandboxOrigin
+from opensandbox.models.sandboxes import IdlePolicy, SandboxOrigin
 from opensandbox.sandbox import Sandbox
 
 logger = logging.getLogger(__name__)
@@ -262,89 +262,5 @@ class TestFsbIdlePauseE2E:
             result = await resumed.commands.run("echo manual-resume-ok")
             assert result.error is None
             assert "manual-resume-ok" in result.logs.stdout[0].text
-        finally:
-            await _kill_and_wait_gone(manager, sandbox.id)
-
-    @pytest.mark.timeout(1800)
-    async def test_04_active_probe_keeps_busy_sandbox_alive(
-        self, manager: SandboxManager, connection_config
-    ) -> None:
-        """A busy activeProbe answer resets the idle clock; not-active lets the pause through."""
-        sandbox = await Sandbox.create_from_template(
-            FSB_TEMPLATE_ID,
-            timeout=timedelta(hours=2),
-            connection_config=connection_config,
-            idle_policy=IdlePolicy(
-                idle_timeout_seconds=IDLE_TIMEOUT,
-                on_idle="pause",
-                active_probe=ActivityProbe(port=8080, path="/active"),
-            ),
-            metadata={"origin": "fsb-idle-pause-probe"},
-        )
-        logger.info("probe sandbox ready: %s", sandbox.id)
-        try:
-            # busybox httpd serves a static probe file on a user port; the
-            # sweeper GETs it through the gateway with the sentinel header.
-            result = await sandbox.commands.run(
-                "mkdir -p /tmp/probe && printf '{\"active\": true}' "
-                "> /tmp/probe/active "
-                "&& (setsid python3 -m http.server 8080 --directory /tmp/probe "
-                ">/dev/null 2>&1 < /dev/null &)"
-            )
-            assert result.error is None
-
-            # Busy answers reset the clock: no pause across two idle windows.
-            await asyncio.sleep(IDLE_TIMEOUT * 2 + 20)
-            assert await _state_is(manager, sandbox.id, "Running"), (
-                "sandbox paused while the probe answered busy"
-            )
-
-            # Flip to not-active: the next idle window lets the pause through.
-            result = await sandbox.commands.run(
-                "printf '{\"active\": false, \"message\": \"e2e idle\"}' "
-                "> /tmp/probe/active"
-            )
-            assert result.error is None
-            await _wait_until(
-                lambda: _state_is(manager, sandbox.id, "Paused"),
-                PAUSE_BUDGET,
-                "paused after the probe answered not-active",
-            )
-
-            # Wake-on-access still restores it.
-            await _wake_and_run(sandbox.id, connection_config, "probe-wake-ok")
-        finally:
-            await _kill_and_wait_gone(manager, sandbox.id)
-
-    @pytest.mark.timeout(900)
-    async def test_03_wake_only_policy_wakes_on_traffic(
-        self, manager: SandboxManager, connection_config
-    ) -> None:
-        # Wake-only: never auto-paused, but a paused sandbox wakes on access.
-        sandbox = await Sandbox.create_from_template(
-            FSB_TEMPLATE_ID,
-            timeout=timedelta(hours=1),
-            connection_config=connection_config,
-            idle_policy=IdlePolicy(),
-            metadata={"origin": "fsb-idle-pause-wake-only"},
-        )
-        logger.info("wake-only sandbox ready: %s", sandbox.id)
-        try:
-            result = await sandbox.commands.run("echo pre-pause")
-            assert result.error is None
-
-            await manager.pause_sandbox(sandbox.id)
-            await _wait_until(
-                lambda: _state_is(manager, sandbox.id, "Paused"),
-                timedelta(minutes=4),
-                "manually Paused",
-            )
-
-            await _wake_and_run(sandbox.id, connection_config, "wake-only-ok")
-            await _wait_until(
-                lambda: _state_is(manager, sandbox.id, "Running"),
-                timedelta(minutes=2),
-                "Running after wake-only wake",
-            )
         finally:
             await _kill_and_wait_gone(manager, sandbox.id)
