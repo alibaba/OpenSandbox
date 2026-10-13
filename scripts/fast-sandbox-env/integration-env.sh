@@ -1250,6 +1250,14 @@ resolve_gateway_address() {
 	# Proxy env must not intercept node-IP traffic (curl, osb/httpx).
 	export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$node_ip"
 	export no_proxy="${no_proxy:+$no_proxy,}$node_ip"
+	# Later invocations (sdk-e2e / idle-e2e are separate processes) must
+	# see the same address and proxy bypass.
+	{
+		echo "export GATEWAY_ADDRESS='$GATEWAY_ADDRESS'"
+		echo "export GATEWAY_URL='$GATEWAY_URL'"
+		echo "export NO_PROXY=\"\${NO_PROXY:+\$NO_PROXY,}$node_ip\""
+		echo "export no_proxy=\"\${no_proxy:+\$no_proxy,}$node_ip\""
+	} > "$WORK/gateway-env.sh"
 	log "gateway address: $GATEWAY_ADDRESS (server announces this to clients and probes)"
 }
 
@@ -2080,6 +2088,7 @@ sdk_e2e() {
 	local template_id
 	template_id="$(cat "$WORK/template-id" 2>/dev/null || true)"
 	[[ -n "$template_id" ]] || die "no template id at $WORK/template-id (run up first; template_up stores it there)"
+	source "$WORK/gateway-env.sh" 2>/dev/null || true
 	export OPENSANDBOX_TEST_FSB_TEMPLATE_ID="$template_id"
 	export OPENSANDBOX_TEST_DOMAIN="127.0.0.1:$SERVER_HOST_PORT"
 	export OPENSANDBOX_TEST_PROTOCOL="http"
@@ -2108,6 +2117,7 @@ idle_e2e() {
 	export OPENSANDBOX_TEST_DOMAIN="127.0.0.1:$SERVER_HOST_PORT"
 	export OPENSANDBOX_TEST_PROTOCOL="http"
 	export OPENSANDBOX_TEST_API_KEY="$SERVER_API_KEY"
+	source "$WORK/gateway-env.sh" 2>/dev/null || true
 	export OPENSANDBOX_TEST_IDLE_PAUSE="1"
 	export OPENSANDBOX_TEST_IDLE_ROUNDS="${IDLE_PAUSE_ROUNDS:-3}"
 	log "sdk e2e (idle-pause): template=$template_id server=$SERVER_URL rounds=$OPENSANDBOX_TEST_IDLE_ROUNDS -> tests/python/tests/test_fsb_idle_pause_e2e.py"
