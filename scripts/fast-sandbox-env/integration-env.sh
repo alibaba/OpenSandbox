@@ -1791,7 +1791,7 @@ idle_pause_verify() {
 	# Scenario: activeProbe audit — a not-active answer with a message must
 	# land in the server's pause audit line, and the wake must land in the
 	# gateway's audit log.
-	local created3 id3
+	local created3 id3 probe_out
 	log "verify (idle-pause): scenario activeProbe audit"
 	created3="$(server_api POST /sandboxes "$(jq -n \
 		--arg template "$TEMPLATE_ID" --argjson timeout 3600 --argjson x "$x" \
@@ -1805,9 +1805,15 @@ idle_pause_verify() {
 	[[ -n "$id3" && "$id3" != "null" ]] || fail "activeProbe create carried no id"
 	VERIFY_ID="$id3"
 	wait_for "activeProbe target Running" 300 sandbox_running
-	payload="mkdir -p /tmp/probe && printf '%s' '{\"active\": false, \"message\": \"shell-probe\"}' > /tmp/probe/active && nohup busybox httpd -f -p 8080 -h /tmp/probe >/dev/null 2>&1 & sleep 1"
-	osb_api command run "$id3" --background -- "$payload" >/dev/null 2>&1 \
+	payload="mkdir -p /tmp/probe \
+		&& printf '%s' '{\"active\": false, \"message\": \"shell-probe\"}' > /tmp/probe/active \
+		&& setsid busybox httpd -f -p 8080 -h /tmp/probe >/dev/null 2>&1 < /dev/null & sleep 1; cat /tmp/probe/active"
+	probe_out="$(osb_api command run "$id3" -- "$payload" 2>/dev/null)" \
 		|| fail "probe httpd start failed in $id3"
+	[[ "$probe_out" == *'"active"'* ]] || fail "probe file not written (exec output: $(printf '%s' "$probe_out" | head -c 200))"
+	probe_out="$(osb_api command run "$id3" -- "curl -fsS -m 5 http://127.0.0.1:8080/active" 2>/dev/null)" \
+		|| fail "in-guest probe endpoint check failed (is busybox httpd running?)"
+	[[ "$probe_out" == *false* ]] || fail "in-guest probe answered unexpected body: $(printf '%s' "$probe_out" | head -c 200)"
 	wait_for "activeProbe not-active pause" 300 sandbox_paused
 	sleep 3
 	kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=400 > "$WORK/idlep-server.log" 2>/dev/null || true
@@ -1817,7 +1823,9 @@ idle_pause_verify() {
 		&& grep -q "shell-probe" "$WORK/idlep-server.log"; then
 		pass "activeProbe: server pause audit carries verdict + message"
 	else
-		fail "server pause audit line missing probe verdict/message (see $WORK/idlep-server.log)"
+		kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=200 2>/dev/null | grep "idle_pause" | tail -20 \
+			> "$WORK/idlep-server-failure.log" || true
+		fail "server pause audit line missing probe verdict/message (see $WORK/idlep-server-failure.log)"
 	fi
 	VERIFY_ID="$id3"
 	idle_wake_wait "activeProbe wake" "$id3"
@@ -1830,6 +1838,7 @@ idle_pause_verify() {
 	else
 		fail "gateway audit lines missing for the wake (see $WORK/idlep-gateway.log)"
 	fi
+
 	osb_api sandbox kill "$id3" >/dev/null 2>&1 || true
 	VERIFY_ID="$id3"
 	wait_for "activeProbe sandbox deleted" 120 verify_sandbox_gone
