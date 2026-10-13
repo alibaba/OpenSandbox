@@ -1754,6 +1754,9 @@ idle_pause_verify() {
 	# recovery pauses via the missing-key tombstone (restart lost the
 	# ephemeral activity key).
 	log "verify (idle-pause): scenario redis down"
+	# The sandbox may have auto-paused during the previous scenario's idle
+	# window; the wake records activity and leaves it Running.
+	idle_wake_wait "pre-redis-down wake"
 	t0="$(now_ms)"
 	kubectl -n "$OSB_NS" scale deploy/idle-pause-redis --replicas=0 >/dev/null
 	while sandbox_running; do
