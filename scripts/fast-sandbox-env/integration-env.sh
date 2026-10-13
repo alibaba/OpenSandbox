@@ -1807,7 +1807,7 @@ idle_pause_verify() {
 	wait_for "activeProbe target Running" 300 sandbox_running
 	payload="mkdir -p /tmp/probe \
 		&& printf '%s' '{\"active\": false, \"message\": \"shell-probe\"}' > /tmp/probe/active \
-		&& setsid busybox httpd -f -p 8080 -h /tmp/probe >/dev/null 2>&1 < /dev/null & sleep 1; cat /tmp/probe/active"
+		&& setsid python3 -m http.server 8080 --directory /tmp/probe >/dev/null 2>&1 < /dev/null & sleep 2; cat /tmp/probe/active"
 
 	# Diagnostic only: whether the CLI's command path works through the
 	# gateway. The scenario itself uses the raw execd API below.
