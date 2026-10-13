@@ -699,7 +699,7 @@ render_kind_config() { # > $GEN_DIR/kind-cluster.yaml
 		echo '    protocol: TCP'
 		echo "  - containerPort: $GATEWAY_NODEPORT"
 		echo "    hostPort: $GATEWAY_HOST_PORT"
-		echo '    listenAddress: 127.0.0.1'
+		echo '    listenAddress: 0.0.0.0'
 		echo '    protocol: TCP'
 	} > "$ports_file"
 	awk -v block_file="$ports_file" '
@@ -1234,6 +1234,20 @@ dart_source_counters() { # pod -> "<source> <value>" lines
 			match($0, /source="[^"]+"/); s = substr($0, RSTART + 8, RLENGTH - 9)
 			match($0, /} [0-9]+$/); print s, substr($0, RSTART + 2)
 		}'
+}
+
+resolve_gateway_address() {
+	# The gateway must be dialable from BOTH host clients and server pods
+	# (the OSEP-0024 sweeper probe runs inside the server pod), so the
+	# loopback publish cannot serve as the announced gateway address: use
+	# the kind node's bridge IP (the mapping binds 0.0.0.0).
+	local node_ip
+	node_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
+		"$KIND_CLUSTER-control-plane" 2>/dev/null | head -1)"
+	[[ -n "$node_ip" ]] || die "cannot resolve the kind node IP for the gateway address"
+	GATEWAY_ADDRESS="$node_ip:$GATEWAY_HOST_PORT"
+	GATEWAY_URL="http://$GATEWAY_ADDRESS"
+	log "gateway address: $GATEWAY_ADDRESS (server announces this to clients and probes)"
 }
 
 # --- stage: idle-pause Redis (OSEP-0024 profile) --------------------------------
@@ -1859,14 +1873,14 @@ idle_pause_verify() {
 				tombstone=$(kubectl -n "$OSB_NS" exec deploy/idle-pause-redis -- \
 				redis-cli GET "opensandbox:idlep:unknown:$id3" 2>/dev/null | tr -d '\n')"
 			kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=200 2>/dev/null \
-				| grep "idle_pause" | tail -15 > "$WORK/idlep-server-failure.log" || true
+				| grep "idle_pause" | tail -15 > "$WORK/logs/idlep-server-failure.log" || true
 			log "verify (idle-pause): server idle_pause lines in $WORK/idlep-server-failure.log"
 			fail "activeProbe sandbox did not pause within 300s"
 		fi
 		sleep 5
 	done
 	sleep 3
-	kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=400 > "$WORK/idlep-server.log" 2>/dev/null || true
+	kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=400 > "$WORK/logs/idlep-server.log" 2>/dev/null || true
 	if grep -q "event=pause_issued" "$WORK/idlep-server.log" \
 		&& grep -q "$id3" "$WORK/idlep-server.log" \
 		&& grep -q "probe=not_active" "$WORK/idlep-server.log" \
@@ -1883,7 +1897,7 @@ idle_pause_verify() {
 	VERIFY_ID="$id3"
 	idle_wake_wait "activeProbe wake" "$id3"
 	sleep 3
-	kubectl -n "$OSB_NS" logs deploy/opensandbox-ingress-gateway --tail=400 > "$WORK/idlep-gateway.log" 2>/dev/null || true
+	kubectl -n "$OSB_NS" logs deploy/opensandbox-ingress-gateway --tail=400 > "$WORK/logs/idlep-gateway.log" 2>/dev/null || true
 	if grep -q "wake flight started" "$WORK/idlep-gateway.log" \
 		&& grep -q "ResumeSandbox accepted" "$WORK/idlep-gateway.log" \
 		&& grep -q "$id3" "$WORK/idlep-gateway.log"; then
@@ -2297,6 +2311,7 @@ case "$ACTION" in
 		run_stage "XFS StateRoot (reflink)" stateroot_xfs_up
 		run_stage "render kind config" render_kind_config
 		run_stage "kind cluster (KVM passthrough + labels)" kind_up
+		run_stage "gateway address (node IP: host + server pod reachable)" resolve_gateway_address
 		run_stage "RustFS + bucket" rustfs_up
 		run_stage "RustFS endpoint (kind network)" resolve_rustfs_endpoint
 		run_stage "CRDs + control plane" control_plane_up
