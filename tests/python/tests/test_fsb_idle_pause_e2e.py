@@ -264,3 +264,36 @@ class TestFsbIdlePauseE2E:
             assert "manual-resume-ok" in result.logs.stdout[0].text
         finally:
             await _kill_and_wait_gone(manager, sandbox.id)
+
+    @pytest.mark.timeout(900)
+    async def test_03_wake_only_policy_wakes_on_traffic(
+        self, manager: SandboxManager, connection_config
+    ) -> None:
+        # Wake-only: never auto-paused, but a paused sandbox wakes on access.
+        sandbox = await Sandbox.create_from_template(
+            FSB_TEMPLATE_ID,
+            timeout=timedelta(hours=1),
+            connection_config=connection_config,
+            idle_policy=IdlePolicy(),
+            metadata={"origin": "fsb-idle-pause-wake-only"},
+        )
+        logger.info("wake-only sandbox ready: %s", sandbox.id)
+        try:
+            result = await sandbox.commands.run("echo pre-pause")
+            assert result.error is None
+
+            await manager.pause_sandbox(sandbox.id)
+            await _wait_until(
+                lambda: _state_is(manager, sandbox.id, "Paused"),
+                timedelta(minutes=4),
+                "manually Paused",
+            )
+
+            await _wake_and_run(sandbox.id, connection_config, "wake-only-ok")
+            await _wait_until(
+                lambda: _state_is(manager, sandbox.id, "Running"),
+                timedelta(minutes=2),
+                "Running after wake-only wake",
+            )
+        finally:
+            await _kill_and_wait_gone(manager, sandbox.id)
