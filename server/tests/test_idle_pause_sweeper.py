@@ -757,9 +757,23 @@ def _ingress(route_mode: str) -> IngressConfig:
     ],
 )
 def test_prober_build_follows_gateway_route_mode(route_mode, expected):
-    app_config = SimpleNamespace(ingress=_ingress(route_mode))
+    app_config = SimpleNamespace(
+        ingress=_ingress(route_mode),
+        idle_pause=SimpleNamespace(probe_gateway_address=None),
+    )
     prober = _build_activity_prober(app_config)  # type: ignore[arg-type]
     assert (prober is not None) is expected
+
+
+def test_prober_build_applies_probe_gateway_address_override():
+    app_config = SimpleNamespace(
+        ingress=_ingress("header"),
+        idle_pause=SimpleNamespace(probe_gateway_address="gateway.svc:80"),
+    )
+    prober = _build_activity_prober(app_config)  # type: ignore[arg-type]
+    endpoint = prober._endpoint_builder("tenant-a", "sb-1", 8080)
+    assert endpoint.endpoint == "gateway.svc:80"
+    assert endpoint.headers.get("OpenSandbox-Ingress-To", "").startswith("f1.")
 
 
 @pytest.mark.asyncio

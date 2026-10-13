@@ -608,6 +608,12 @@ def _build_activity_prober(app_config: AppConfig) -> Optional[ActivityProber]:
         return None
 
     def build(namespace: str, sandbox_id: str, port: int) -> Endpoint:
-        return build_endpoint(ingress, namespace, sandbox_id, port)
+        endpoint = build_endpoint(ingress, namespace, sandbox_id, port)
+        probe_address = app_config.idle_pause.probe_gateway_address
+        if probe_address:
+            # The announced gateway address may be client-only (e.g. a host
+            # loopback publish); the probe dials the override from here.
+            endpoint = endpoint.model_copy(update={"endpoint": probe_address})
+        return endpoint
 
     return ActivityProber(endpoint_builder=build)

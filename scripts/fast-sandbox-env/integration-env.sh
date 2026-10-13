@@ -699,7 +699,7 @@ render_kind_config() { # > $GEN_DIR/kind-cluster.yaml
 		echo '    protocol: TCP'
 		echo "  - containerPort: $GATEWAY_NODEPORT"
 		echo "    hostPort: $GATEWAY_HOST_PORT"
-		echo '    listenAddress: 0.0.0.0'
+		echo '    listenAddress: 127.0.0.1'
 		echo '    protocol: TCP'
 	} > "$ports_file"
 	awk -v block_file="$ports_file" '
@@ -1236,31 +1236,6 @@ dart_source_counters() { # pod -> "<source> <value>" lines
 		}'
 }
 
-resolve_gateway_address() {
-	# The gateway must be dialable from BOTH host clients and server pods
-	# (the OSEP-0024 sweeper probe runs inside the server pod), so the
-	# loopback publish cannot serve as the announced gateway address: use
-	# the kind node's bridge IP (the mapping binds 0.0.0.0).
-	local node_ip
-	node_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
-		"$KIND_CLUSTER-control-plane" 2>/dev/null | head -1)"
-	[[ -n "$node_ip" ]] || die "cannot resolve the kind node IP for the gateway address"
-	GATEWAY_ADDRESS="$node_ip:$GATEWAY_HOST_PORT"
-	GATEWAY_URL="http://$GATEWAY_ADDRESS"
-	# Proxy env must not intercept node-IP traffic (curl, osb/httpx).
-	export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$node_ip"
-	export no_proxy="${no_proxy:+$no_proxy,}$node_ip"
-	# Later invocations (sdk-e2e / idle-e2e are separate processes) must
-	# see the same address and proxy bypass.
-	{
-		echo "export GATEWAY_ADDRESS='$GATEWAY_ADDRESS'"
-		echo "export GATEWAY_URL='$GATEWAY_URL'"
-		echo "export NO_PROXY=\"\${NO_PROXY:+\$NO_PROXY,}$node_ip\""
-		echo "export no_proxy=\"\${no_proxy:+\$no_proxy,}$node_ip\""
-	} > "$WORK/gateway-env.sh"
-	log "gateway address: $GATEWAY_ADDRESS (server announces this to clients and probes)"
-}
-
 # --- stage: idle-pause Redis (OSEP-0024 profile) --------------------------------
 
 redis_up() {
@@ -1334,6 +1309,9 @@ activity_ttl_seconds = 1800
 redis.enabled = true
 redis.dsn = "$REDIS_DSN"
 redis.lock_ttl_seconds = 30
+# The announced gateway address is the host loopback publish; the
+# sweeper's probe dials the in-cluster Service instead.
+probe_gateway_address = "opensandbox-ingress-gateway.$OSB_NS.svc.cluster.local:80"
 TOML
 	fi
 	if grep -Eq '@[A-Z_]+@' "$GEN_DIR/osb-server-config.toml"; then
@@ -2088,7 +2066,6 @@ sdk_e2e() {
 	local template_id
 	template_id="$(cat "$WORK/template-id" 2>/dev/null || true)"
 	[[ -n "$template_id" ]] || die "no template id at $WORK/template-id (run up first; template_up stores it there)"
-	source "$WORK/gateway-env.sh" 2>/dev/null || true
 	export OPENSANDBOX_TEST_FSB_TEMPLATE_ID="$template_id"
 	export OPENSANDBOX_TEST_DOMAIN="127.0.0.1:$SERVER_HOST_PORT"
 	export OPENSANDBOX_TEST_PROTOCOL="http"
@@ -2117,7 +2094,6 @@ idle_e2e() {
 	export OPENSANDBOX_TEST_DOMAIN="127.0.0.1:$SERVER_HOST_PORT"
 	export OPENSANDBOX_TEST_PROTOCOL="http"
 	export OPENSANDBOX_TEST_API_KEY="$SERVER_API_KEY"
-	source "$WORK/gateway-env.sh" 2>/dev/null || true
 	export OPENSANDBOX_TEST_IDLE_PAUSE="1"
 	export OPENSANDBOX_TEST_IDLE_ROUNDS="${IDLE_PAUSE_ROUNDS:-3}"
 	log "sdk e2e (idle-pause): template=$template_id server=$SERVER_URL rounds=$OPENSANDBOX_TEST_IDLE_ROUNDS -> tests/python/tests/test_fsb_idle_pause_e2e.py"
@@ -2324,7 +2300,6 @@ case "$ACTION" in
 		run_stage "XFS StateRoot (reflink)" stateroot_xfs_up
 		run_stage "render kind config" render_kind_config
 		run_stage "kind cluster (KVM passthrough + labels)" kind_up
-		run_stage "gateway address (node IP: host + server pod reachable)" resolve_gateway_address
 		run_stage "RustFS + bucket" rustfs_up
 		run_stage "RustFS endpoint (kind network)" resolve_rustfs_endpoint
 		run_stage "CRDs + control plane" control_plane_up
