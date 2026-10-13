@@ -171,7 +171,6 @@ class TestFsbIdlePauseE2E:
     async def test_01_auto_pause_then_wake_on_access(
         self, manager: SandboxManager, connection_config
     ) -> None:
-        """IDLE_ROUNDS cycles of auto-pause -> wake, per-phase timing."""
         sandbox = await Sandbox.create_from_template(
             FSB_TEMPLATE_ID,
             timeout=timedelta(hours=2),

@@ -1676,14 +1676,11 @@ idle_pause_verify() {
 
 	local -a pause_ms=() wake_ms=() attempts=()
 	for ((i = 1; i <= rounds; i++)); do
-		# Pause phase: the clock starts at the previous activity observation.
-		t0="$(now_ms)"
+			t0="$(now_ms)"
 		wait_for "round $i/$rounds auto-paused within X + sweep + checkpoint" 240 sandbox_paused
 		pause_ms+=("$(( ($(now_ms) - t0) / 1000000 ))")
 		pass "round $i/$rounds: auto-paused in ${pause_ms[-1]}ms"
 
-		# Wake phase: a marked 503 may surface while the restore exceeds
-		# the park budget; the resume is never canceled.
 		t1="$(now_ms)"
 		local deadline=$(( $(now_ms) + 600000000000 )) wake_seen=0 next_state_log=0
 		while :; do

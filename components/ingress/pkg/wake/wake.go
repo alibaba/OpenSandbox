@@ -98,8 +98,7 @@ type allowAllPolicy struct{}
 
 func (allowAllPolicy) WakeAllowed(context.Context, string, string) bool { return true }
 
-// Logger is the audit logger. It defaults to a plain stderr logger so the
-// package never logs into nil; main() replaces it with the process-wide
+// Logger defaults to stderr and is replaced by the process-wide
 // "opensandbox.ingress" logger at startup.
 var Logger = slogger.MustNew(slogger.Config{Level: "info"})
 
