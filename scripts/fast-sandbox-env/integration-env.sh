@@ -1827,6 +1827,9 @@ idle_pause_verify() {
 			> "$WORK/idlep-server-failure.log" || true
 		fail "server pause audit line missing probe verdict/message (see $WORK/idlep-server-failure.log)"
 	fi
+	# The daemon has served its purpose once the pause happened; do not
+	# leave it running for the wake phase or any later failure path.
+	osb_api command run "$id3" -- "pkill -f 'busybox httpd' 2>/dev/null; true" >/dev/null 2>&1 || true
 	VERIFY_ID="$id3"
 	idle_wake_wait "activeProbe wake" "$id3"
 	sleep 3
