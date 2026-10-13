@@ -221,7 +221,7 @@ class SandboxPoolAsync:
                     self._run_heartbeat(stop_event, self._run_generation),
                     name=f"sandbox-pool-heartbeat-{self._config.pool_name}",
                 )
-            except Exception:
+            except (Exception, asyncio.CancelledError):
                 await self._stop_reconcile(wait_for_warmup=True)
                 await self._close_provider()
                 self._lifecycle_state = PoolLifecycleState.STOPPED
