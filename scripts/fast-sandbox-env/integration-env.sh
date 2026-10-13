@@ -1725,7 +1725,7 @@ idle_pause_verify() {
 
 	# Scenario: wakeOnAccess=false — auto-pause still happens, traffic
 	# never wakes, only the resume API does.
-	local created2 id2
+	local main_id="$VERIFY_ID" created2 id2 payload
 	log "verify (idle-pause): scenario wakeOnAccess=false"
 	created2="$(server_api POST /sandboxes "$(jq -n \
 		--arg template "$TEMPLATE_ID" --argjson timeout 3600 --argjson x "$x" \
@@ -1748,6 +1748,7 @@ idle_pause_verify() {
 	pass "wakeOnAccess=false: traffic never woke it, manual resume did"
 	osb_api sandbox kill "$id2" >/dev/null 2>&1 || true
 	wait_for "wakeOnAccess=false sandbox deleted" 120 verify_sandbox_gone
+	VERIFY_ID="$main_id"
 
 	# Scenario: Redis unavailable — sweeps skip entirely (no pauses), then
 	# recovery pauses via the missing-key tombstone (restart lost the
@@ -1760,7 +1761,7 @@ idle_pause_verify() {
 		sleep 5
 	done
 	sandbox_running || fail "sandbox paused while Redis was scaled down"
-	pass "redis down: no pauses while Redis unreachable ($( (( $(now_ms) - t0) / 1000000 ))ms asserted)"
+	pass "redis down: no pauses while Redis unreachable"
 	kubectl -n "$OSB_NS" scale deploy/idle-pause-redis --replicas=1 >/dev/null
 	wait_for "redis back ready" 120 \
 		kubectl -n "$OSB_NS" rollout status deploy/idle-pause-redis --timeout=10s
@@ -1783,6 +1784,53 @@ idle_pause_verify() {
 		sleep 2
 	done
 	pass "flushall: pause delayed to a full idle window after data loss ($(( ($(now_ms) - t0) / 1000000 ))ms)"
+
+	# Scenario: activeProbe audit — a not-active answer with a message must
+	# land in the server's pause audit line, and the wake must land in the
+	# gateway's audit log.
+	local created3 id3
+	log "verify (idle-pause): scenario activeProbe audit"
+	created3="$(server_api POST /sandboxes "$(jq -n \
+		--arg template "$TEMPLATE_ID" --argjson timeout 3600 --argjson x "$x" \
+		'{templateId: $template, timeout: $timeout,
+		  lifecycle: {idlePolicy: {idleTimeoutSeconds: $x, onIdle: "pause",
+		    wakeOnAccess: true,
+		    activeProbe: {port: 8080, path: "/active"}}},
+		  metadata: {origin: "fast-sandbox-env-idle-pause"}}')" 2>/dev/null)" \
+		|| fail "activeProbe create failed"
+	id3="$(printf '%s' "$created3" | jq -r '.id')"
+	[[ -n "$id3" && "$id3" != "null" ]] || fail "activeProbe create carried no id"
+	VERIFY_ID="$id3"
+	wait_for "activeProbe target Running" 300 sandbox_running
+	payload="mkdir -p /tmp/probe && printf '%s' '{\"active\": false, \"message\": \"shell-probe\"}' > /tmp/probe/active && nohup busybox httpd -f -p 8080 -h /tmp/probe >/dev/null 2>&1 & sleep 1"
+	osb_api command run "$id3" --background -- "$payload" >/dev/null 2>&1 \
+		|| fail "probe httpd start failed in $id3"
+	wait_for "activeProbe not-active pause" 300 sandbox_paused
+	sleep 3
+	kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=400 > "$WORK/idlep-server.log" 2>/dev/null || true
+	if grep -q "event=pause_issued" "$WORK/idlep-server.log" \
+		&& grep -q "$id3" "$WORK/idlep-server.log" \
+		&& grep -q "probe=not_active" "$WORK/idlep-server.log" \
+		&& grep -q "shell-probe" "$WORK/idlep-server.log"; then
+		pass "activeProbe: server pause audit carries verdict + message"
+	else
+		fail "server pause audit line missing probe verdict/message (see $WORK/idlep-server.log)"
+	fi
+	VERIFY_ID="$id3"
+	idle_wake_wait "activeProbe wake" "$id3"
+	sleep 3
+	kubectl -n "$OSB_NS" logs deploy/opensandbox-ingress-gateway --tail=400 > "$WORK/idlep-gateway.log" 2>/dev/null || true
+	if grep -q "wake flight started" "$WORK/idlep-gateway.log" \
+		&& grep -q "ResumeSandbox accepted" "$WORK/idlep-gateway.log" \
+		&& grep -q "$id3" "$WORK/idlep-gateway.log"; then
+		pass "activeProbe: gateway audit logged flight + resume"
+	else
+		fail "gateway audit lines missing for the wake (see $WORK/idlep-gateway.log)"
+	fi
+	osb_api sandbox kill "$id3" >/dev/null 2>&1 || true
+	VERIFY_ID="$id3"
+	wait_for "activeProbe sandbox deleted" 120 verify_sandbox_gone
+	VERIFY_ID="$main_id"
 
 	osb_api sandbox kill "$VERIFY_ID" >/dev/null 2>&1 \
 		|| log "verify cleanup: kill failed; remove $VERIFY_ID manually"
