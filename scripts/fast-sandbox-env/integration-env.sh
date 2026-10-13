@@ -60,6 +60,8 @@
 #   IDLE_PAUSE=1     OSEP-0024 idle-pause/wake profile: Redis, server [idle_pause],
 #                    gateway activity+wake flags, idle-pause verify stage
 #   IDLE_PAUSE_ROUNDS  auto-pause/wake rounds in the verify stage and idle-e2e (default 3)
+#   IDLE_PAUSE_PARK_BUDGET  gateway wake park budget (default 5s; set e.g. 100ms to
+#                    force every wake through the marked-503 + client-retry path)
 #   REDIS_IMAGE      Redis image for the idle-pause profile (default redis:7-alpine)
 #
 # Every stage logs to $WORK/logs/; failures dump component logs to
@@ -1347,6 +1349,7 @@ opensandbox_up() {
 			--set gateway.activity.minInterval=5s
 			--set gateway.activity.ttlSeconds=1800
 			--set gateway.wake.enabled=true
+			--set gateway.wake.parkBudget="${IDLE_PAUSE_PARK_BUDGET:-5s}"
 		)
 	fi
 	helm_render opensandbox-ingress-gateway "$OSB_ROOT/manifests/charts/ingress-gateway" "$OSB_NS" \
@@ -1635,10 +1638,30 @@ pause_resume_verify() {
 
 # --- stage: idle-pause / wake-on-access verify (OSEP-0024 profile) --------------
 
+# Poll the gateway until /ping returns 200 (marked 503s tolerated; the
+# resume is never canceled). Fails on budget exhaustion.
+idle_wake_wait() { # <label> [sandbox_id]
+	local label="$1" id="${2:-$VERIFY_ID}" code
+	local deadline=$(( $(now_ms) + 600000000000 )) wake_seen=0 next_state_log=0
+	while :; do
+		code="$(idle_ping_code "$id")"
+		case "$code" in
+			200) break ;;
+			wake-503) wake_seen=1 ;;
+		esac
+		if (( $(now_ms) >= next_state_log )); then
+			log "verify (idle-pause): $label still waiting (last=$code, state=$(sandbox_state_get))"
+			next_state_log=$(( $(now_ms) + 30000000000 ))
+		fi
+		[[ "$(now_ms)" -ge "$deadline" ]] && fail "$label: wake /ping never returned 200 (last=$code)"
+		sleep 1
+	done
+}
+
 # Gateway answer for one /ping attempt: "200", "wake-503", or "other-<code>".
-idle_ping_code() {
-	local route headers code marker
-	route="$(osb_api sandbox endpoint "$VERIFY_ID" --port 44772 -o json 2>/dev/null \
+idle_ping_code() { # [sandbox_id] (default $VERIFY_ID)
+	local id="${1:-$VERIFY_ID}" route headers code marker
+	route="$(osb_api sandbox endpoint "$id" --port 44772 -o json 2>/dev/null \
 		| jq -r '.headers["OpenSandbox-Ingress-To"] // empty')"
 	[[ -n "$route" ]] || { echo "noroute"; return 0; }
 	headers="$(mktemp)"
@@ -1681,30 +1704,17 @@ idle_pause_verify() {
 
 	local -a pause_ms=() wake_ms=() attempts=()
 	for ((i = 1; i <= rounds; i++)); do
-			t0="$(now_ms)"
+		t0="$(now_ms)"
 		wait_for "round $i/$rounds auto-paused within X + sweep + checkpoint" 240 sandbox_paused
 		pause_ms+=("$(( ($(now_ms) - t0) / 1000000 ))")
 		pass "round $i/$rounds: auto-paused in ${pause_ms[-1]}ms"
 
 		t1="$(now_ms)"
-		local deadline=$(( $(now_ms) + 600000000000 )) wake_seen=0 next_state_log=0
-		while :; do
-			code="$(idle_ping_code)"
-			case "$code" in
-				200) break ;;
-				wake-503) wake_seen=1 ;;
-			esac
-			if (( $(now_ms) >= next_state_log )); then
-				log "verify (idle-pause): round $i still waiting (last=$code, state=$(sandbox_state_get))"
-				next_state_log=$(( $(now_ms) + 30000000000 ))
-			fi
-			[[ "$(now_ms)" -ge "$deadline" ]] && fail "round $i: wake /ping never returned 200 (last=$code)"
-			sleep 1
-		done
+		idle_wake_wait "round $i wake"
 		wake_ms+=("$(( ($(now_ms) - t1) / 1000000 ))")
 		attempts+=("$(kubectl -n "$RESOURCE_NS" get sandbox "$VERIFY_ID" \
 			-o jsonpath='{.status.placement.attempt}' 2>/dev/null || echo '?')")
-		pass "round $i/$rounds: woke in ${wake_ms[-1]}ms (marked-503 observed: $wake_seen, placement.attempt=${attempts[-1]})"
+		pass "round $i/$rounds: woke in ${wake_ms[-1]}ms (placement.attempt=${attempts[-1]})"
 	done
 
 	local joined_pause joined_wake joined_att
@@ -1712,6 +1722,67 @@ idle_pause_verify() {
 	printf -v joined_wake '%sms/' "${wake_ms[@]}"
 	printf -v joined_att '%s/' "${attempts[@]}"
 	pass "idle-pause ${rounds} rounds: pause=${joined_pause%?} wake=${joined_wake%?} placement.attempt=${joined_att%?}"
+
+	# Scenario: wakeOnAccess=false — auto-pause still happens, traffic
+	# never wakes, only the resume API does.
+	local created2 id2
+	log "verify (idle-pause): scenario wakeOnAccess=false"
+	created2="$(server_api POST /sandboxes "$(jq -n \
+		--arg template "$TEMPLATE_ID" --argjson timeout 3600 --argjson x "$x" \
+		'{templateId: $template, timeout: $timeout,
+		  lifecycle: {idlePolicy: {idleTimeoutSeconds: $x, onIdle: "pause", wakeOnAccess: false}},
+		  metadata: {origin: "fast-sandbox-env-idle-pause"}}')" 2>/dev/null)" \
+		|| fail "wakeOnAccess=false create failed"
+	id2="$(printf '%s' "$created2" | jq -r '.id')"
+	[[ -n "$id2" && "$id2" != "null" ]] || fail "wakeOnAccess=false create carried no id"
+	VERIFY_ID="$id2"
+	wait_for "wakeOnAccess=false target Running" 300 sandbox_running
+	wait_for "wakeOnAccess=false auto-paused" 240 sandbox_paused
+	code="$(idle_ping_code "$id2")"
+	[[ "$code" == "200" || "$code" == "wake-503" ]] \
+		&& fail "wakeOnAccess=false sandbox was woken by traffic (code=$code)"
+	sleep 10
+	sandbox_paused || fail "wakeOnAccess=false sandbox changed state without resume API"
+	osb_api sandbox resume "$id2" --skip-health-check >/dev/null 2>&1 || fail "manual resume failed"
+	wait_for "wakeOnAccess=false resumed manually" 240 sandbox_running
+	pass "wakeOnAccess=false: traffic never woke it, manual resume did"
+	osb_api sandbox kill "$id2" >/dev/null 2>&1 || true
+	wait_for "wakeOnAccess=false sandbox deleted" 120 verify_sandbox_gone
+
+	# Scenario: Redis unavailable — sweeps skip entirely (no pauses), then
+	# recovery pauses via the missing-key tombstone (restart lost the
+	# ephemeral activity key).
+	log "verify (idle-pause): scenario redis down"
+	t0="$(now_ms)"
+	kubectl -n "$OSB_NS" scale deploy/idle-pause-redis --replicas=0 >/dev/null
+	while sandbox_running; do
+		(( $(now_ms) - t0 >= 90000 )) && break
+		sleep 5
+	done
+	sandbox_running || fail "sandbox paused while Redis was scaled down"
+	pass "redis down: no pauses while Redis unreachable ($( (( $(now_ms) - t0) / 1000000 ))ms asserted)"
+	kubectl -n "$OSB_NS" scale deploy/idle-pause-redis --replicas=1 >/dev/null
+	wait_for "redis back ready" 120 \
+		kubectl -n "$OSB_NS" rollout status deploy/idle-pause-redis --timeout=10s
+	wait_for "tombstone pause after redis recovery" 300 sandbox_paused
+	pass "redis recovery: missing-key tombstone paused after the full idle window"
+
+	# Scenario: FLUSHALL — data loss must delay, never accelerate. The
+	# sandbox is Paused here; wake it, flush, and time the next pause.
+	idle_wake_wait "post-flushall wake"
+	t0="$(now_ms)"
+	kubectl -n "$OSB_NS" exec deploy/idle-pause-redis -- redis-cli FLUSHALL >/dev/null 2>&1 \
+		|| fail "FLUSHALL failed"
+	while :; do
+		if sandbox_paused; then
+			(( $(now_ms) - t0 < (x - 5) * 1000000000 )) \
+				&& fail "FLUSHALL accelerated the pause ($(( ($(now_ms) - t0) / 1000000 ))ms after flush)"
+			break
+		fi
+		(( $(now_ms) - t0 >= 300000000000 )) && fail "no pause within budget after FLUSHALL"
+		sleep 2
+	done
+	pass "flushall: pause delayed to a full idle window after data loss ($(( ($(now_ms) - t0) / 1000000 ))ms)"
 
 	osb_api sandbox kill "$VERIFY_ID" >/dev/null 2>&1 \
 		|| log "verify cleanup: kill failed; remove $VERIFY_ID manually"
