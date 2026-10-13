@@ -238,7 +238,9 @@ class TestFsbIdlePauseE2E:
 
             # The checkpoint can queue behind a concurrent fastlet teardown;
             # one idempotent re-issue covers a lost first intent.
-            await _wait_until(_paused, timedelta(seconds=120), "manually Paused (first issue)")
+            soft_deadline = time.monotonic() + 120
+            while time.monotonic() < soft_deadline and not await _paused():
+                await asyncio.sleep(2)
             if not await _paused():
                 await manager.pause_sandbox(sandbox.id)
             await _wait_until(_paused, timedelta(seconds=360), "manually Paused")
