@@ -306,6 +306,16 @@ class DockerNetworkingMixin:
                     labels,
                     port,
                 )
+            # User-mode networks (`pasta`, `slirp4netns`) have no host-routable container IP at
+            # all: the Docker-compatible inspect reports an empty IPAddress and no Networks entry,
+            # and the host reaches the sandbox through the published ports. Resolve those through
+            # the host mapping as well instead of failing with NETWORK_MODE_ENDPOINT_UNAVAILABLE.
+            if self.network_mode in {PASTA_NETWORK_MODE, SLIRP4NETNS_NETWORK_MODE}:
+                return self._resolve_host_mapped_endpoint(
+                    self._resolve_proxy_host(),
+                    labels,
+                    port,
+                )
             return self._resolve_internal_endpoint(container, port)
 
         # The server-side proxy needs a locally reachable host: when the

@@ -1272,7 +1272,12 @@ class SecureRuntimeConfig(BaseModel):
 class DockerConfig(BaseModel):
     network_mode: str = Field(
         default="host",
-        description="Docker network mode for sandbox containers (host, bridge, or a custom user-defined network name).",
+        description=(
+            "Network attachment for sandbox containers: 'host', 'bridge', 'none', 'pasta', "
+            "'slirp4netns', or the name of an existing user-defined network. 'pasta' / "
+            "'slirp4netns' are container-runtime user-mode networks (podman) that the host "
+            "reaches through the published ports; egress/networkPolicy still requires 'bridge'."
+        ),
     )
     api_timeout: Optional[int] = Field(
         default=None,

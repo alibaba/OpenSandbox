@@ -33,6 +33,12 @@ The Docker runtime exposes every sandbox port through one host port per sandbox:
 - Port `8080` may also receive a direct host binding (`opensandbox.io/http-port`), providing a conventional HTTP endpoint without the proxy path when required.
 - This bridge setup lets a single machine host many sandboxes without port conflicts, because the same host proxy port can multiplex requests for HTTP, SSE, WebSocket, VNC, etc.
 
+### User-mode network modes (podman: `pasta`, `slirp4netns`)
+- Some container runtimes can attach a container to a user-mode network namespace instead of a bridge. Podman uses this for rootless containers, and `network_mode = "pasta"` is the practical choice on hosts where bridge networking is unavailable (for example a rootless podman machine whose netavark cannot apply its nftables ruleset).
+- These modes involve **no** bridge, so no host-routable container IP exists: the Docker-compatible inspect reports an empty `NetworkSettings.IPAddress` and no `NetworkSettings.Networks` entry. The host reaches the sandbox only through the published ports.
+- `get_endpoint(..., resolve_internal=True)` therefore returns the server-local host-mapped endpoint (`{proxy_host}:{host_proxy_port}/proxy/{X}`) for these modes — the same fallback used for sandboxes that share an egress sidecar network namespace — instead of failing with `NETWORK_MODE_ENDPOINT_UNAVAILABLE`.
+- Everything else is unchanged: `host` / `bridge` / `none` and user-defined networks keep their existing behaviour, and `networkPolicy` (egress sidecar) still requires `bridge`.
+
 ## Containerized lifecycle server
 
 When the lifecycle server runs on a Compose network and creates sandboxes on Docker's default bridge through the mounted Docker socket, route server-proxy traffic through the host-published ports:

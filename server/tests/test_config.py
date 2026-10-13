@@ -531,6 +531,15 @@ def test_full_config_includes_store_sections(tmp_path) -> None:
     assert "min_pool_size" in content
 
 
+def test_full_config_documents_container_runtime_network_modes(tmp_path) -> None:
+    """`osb config init` renders pydantic field descriptions, so they must list every accepted mode."""
+    config_path = render_full_config(tmp_path / "generated.toml")
+
+    content = config_path.read_text()
+    for mode in ("host", "bridge", "none", "pasta", "slirp4netns"):
+        assert mode in content
+
+
 def test_load_config_renew_intent_legacy_redis_subtable(tmp_path, monkeypatch):
     """[renew_intent.redis] remains accepted (same parsed shape as dotted keys)."""
     _reset_config(monkeypatch)

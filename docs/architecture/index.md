@@ -193,7 +193,7 @@ Core responsibilities:
 - Pull public or private images, including per-request registry authentication.
 - Create containers with CPU, memory, GPU, platform, capability, AppArmor, seccomp, PID, and secure-runtime settings.
 - Stage the `execd` binary from `[runtime].execd_image` into the sandbox and install a bootstrap launcher before starting the user entrypoint.
-- Support network modes `host`, `bridge`, and custom user-defined networks.
+- Support network modes `host`, `bridge`, `none`, `pasta`, `slirp4netns`, and custom user-defined networks. The user-mode modes (`pasta`, `slirp4netns`) expose no host-routable container IP and are reached through the published host ports.
 - Allocate host ports for `execd` and user service endpoints in non-host network modes.
 - Restore expiration timers for existing managed containers after server restart.
 - Support host bind mounts, Docker named volumes via the `pvc` volume model, and OSSFS-backed mounts.
