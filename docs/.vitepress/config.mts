@@ -150,6 +150,10 @@ export default defineConfig({
               text: "Single-Host Network (Docker)",
               link: "/architecture/network/single-host-network",
             },
+            {
+              text: "Auto-Pause and Wake-on-Access",
+              link: "/architecture/network/auto-pause-wake-on-access",
+            },
           ],
         },
         {
@@ -217,6 +221,10 @@ export default defineConfig({
             { text: "Multi-Tenancy", link: "/guides/multi-tenancy" },
             { text: "Isolation Sessions", link: "/guides/isolation-sessions" },
             { text: "Pause & Resume", link: "/guides/pause-resume" },
+            {
+              text: "Auto-Pause & Wake-on-Access",
+              link: "/guides/auto-pause-wake",
+            },
             {
               text: "Kubernetes Resume Benchmark",
               link: "/guides/kubernetes-resume-benchmark",
