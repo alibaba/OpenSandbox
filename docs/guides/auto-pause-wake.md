@@ -22,6 +22,7 @@ Three parties must agree before anything happens — the server, the ingress, an
 
 ## Prerequisites
 
+- **OpenSandbox full stack v1.2.0 or later.** The lifecycle server, ingress gateway, and SDKs must all be at v1.2.0+; earlier stacks do not accept `lifecycle.idlePolicy` or the wake-timeout contract.
 - **Fast Sandbox backend only.** Docker and Kubernetes pod sandboxes are not covered (their manual pause/resume is separate — see [Pause & Resume](/guides/pause-resume)).
 - **Traffic through the ingress gateway.** The ingress is the only activity source. Sandboxes reached through the server proxy path (`/sandboxes/{id}/proxy/{port}`, the SDK `useServerProxy` mode) neither record activity nor wake — do not opt those workloads in.
 - **Redis reachable from both the ingress and the server** (the same deployment as renew-intents). Wake itself does not use Redis — a Redis outage can only delay pauses, never break wake.
