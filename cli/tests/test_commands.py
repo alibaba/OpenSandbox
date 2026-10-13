@@ -31,6 +31,7 @@ import pytest
 from click.testing import CliRunner
 from opensandbox.exceptions import SandboxApiException
 from opensandbox.models.diagnostics import DiagnosticContent
+from opensandbox.models.execd import Execution, ExecutionComplete, ExecutionError
 from opensandbox.models.sandboxes import (
     PagedSnapshotInfos,
     PaginationInfo,
@@ -45,6 +46,7 @@ from opensandbox.models.templates import (
     TemplateStatus,
 )
 
+from opensandbox_cli.config import load_config_file
 from opensandbox_cli.main import cli
 from opensandbox_cli.output import OutputFormatter
 
@@ -137,6 +139,19 @@ class TestConfigShow:
         assert data["config_path"].endswith(".opensandbox/config.toml")
         assert "config_file_exists" in data
 
+    def test_show_masks_numeric_api_key_from_file(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text("[connection]\napi_key = 1234567890\n")
+        result = runner.invoke(
+            cli, ["--config", str(cfg_path), "config", "show", "-o", "json"]
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        # A numeric-looking key is still a string, so it is masked and not dropped.
+        assert data["api_key"] == "12******90"
+
     def test_show_table_output(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["--api-key", "test-key", "config", "show"])
         assert result.exit_code == 0
@@ -182,6 +197,144 @@ class TestConfigSet:
         )
         assert result.exit_code != 0
         assert "Run 'osb config init' first." in result.output
+
+    def test_set_escapes_special_characters(self, runner: CliRunner, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text("[connection]\n")
+
+        result = runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "connection.domain", 'a"b\\c'],
+        )
+
+        assert result.exit_code == 0
+        parsed = load_config_file(cfg_path)
+        assert parsed["connection"]["domain"] == 'a"b\\c'
+
+    def test_set_preserves_comments_and_unrelated_sections(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text(
+            "# top comment\n"
+            "[connection]\n"
+            "# keep this note\n"
+            'api_key = "k"\n\n'
+            "[output]\n"
+            "color = true\n"
+        )
+
+        result = runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "connection.domain", "team.host"],
+        )
+
+        assert result.exit_code == 0
+        text = cfg_path.read_text()
+        assert "# top comment" in text
+        assert "# keep this note" in text
+        parsed = load_config_file(cfg_path)
+        assert parsed["connection"]["api_key"] == "k"
+        assert parsed["connection"]["domain"] == "team.host"
+        assert parsed["output"]["color"] is True
+
+    def test_set_creates_missing_section(self, runner: CliRunner, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text("[connection]\n")
+
+        result = runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "defaults.image", "python:3.12"],
+        )
+
+        assert result.exit_code == 0
+        parsed = load_config_file(cfg_path)
+        assert parsed["defaults"]["image"] == "python:3.12"
+
+    def test_set_infers_scalar_types(self, runner: CliRunner, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text("[connection]\n")
+
+        runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "connection.request_timeout", "45"],
+        )
+        runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "connection.use_server_proxy", "true"],
+        )
+
+        parsed = load_config_file(cfg_path)
+        assert parsed["connection"]["request_timeout"] == 45
+        assert parsed["connection"]["use_server_proxy"] is True
+
+    def test_set_reports_invalid_existing_toml(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text("[connection\nbroken =")
+
+        result = runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "connection.domain", "team.host"],
+        )
+
+        assert result.exit_code != 0
+        assert "not valid TOML" in result.output
+
+    def test_set_rejects_nested_key(self, runner: CliRunner, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text("[connection]\n")
+
+        result = runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "connection.retry.count", "3"],
+        )
+
+        assert result.exit_code != 0
+        assert "section.field" in result.output
+        # The value must not be silently misfiled as a quoted literal key.
+        assert load_config_file(cfg_path) == {"connection": {}}
+
+    def test_set_handles_out_of_order_tables(self, runner: CliRunner, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text(
+            "[connection]\n"
+            'domain = "old"\n\n'
+            "[output]\n"
+            "color = true\n\n"
+            "[connection.retry]\n"
+            "count = 3\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "connection.domain", "team.host"],
+        )
+
+        assert result.exit_code == 0
+        parsed = load_config_file(cfg_path)
+        assert parsed["connection"]["domain"] == "team.host"
+        assert parsed["connection"]["retry"]["count"] == 3
+        assert parsed["output"]["color"] is True
+
+    def test_set_preserves_non_ascii_config(self, runner: CliRunner, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "config.toml"
+        cfg_path.write_text(
+            "# café comment\n[connection]\ndomain = \"old\"\n",
+            encoding="utf-8",
+        )
+
+        result = runner.invoke(
+            cli,
+            ["--config", str(cfg_path), "config", "set", "connection.domain", "team.host"],
+        )
+
+        assert result.exit_code == 0
+        # Reads and writes must stay UTF-8 regardless of the platform locale.
+        assert "café comment" in cfg_path.read_text(encoding="utf-8")
+        assert load_config_file(cfg_path)["connection"]["domain"] == "team.host"
 
 
 # Sandbox commands
@@ -1760,6 +1913,23 @@ class TestCommandSeparators:
         mock_sb.commands.run.assert_called_once()
         assert mock_sb.commands.run.call_args.args[0] == "sh -lc 'echo ready'"
 
+    def test_command_run_exits_nonzero_when_stream_ends_early(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        execution = MagicMock()
+        execution.error = None
+        execution.complete = None
+        mock_sb.commands.run.return_value = execution
+
+        result = _invoke(
+            runner,
+            ["command", "run", "sb-1", "--", "sleep", "60"],
+            sandbox=mock_sb,
+            output_format="raw",
+        )
+
+        assert result.exit_code == 1
+        assert "ended before the command finished" in result.output
+
     def test_command_run_argv_flag_preserves_literal_arguments(self, runner: CliRunner) -> None:
         # With --argv the trailing arguments must reach the process verbatim:
         # literal "$HOME", embedded space, single quote, and an empty string,
@@ -2038,28 +2208,41 @@ bindings: []
 
 
 class TestCommandRun:
-    def test_background_run(self, runner: CliRunner) -> None:
+    @pytest.mark.parametrize("output_format", ["table", "json", "yaml"])
+    def test_background_run(self, runner: CliRunner, output_format: str) -> None:
         mock_sb = MagicMock()
-        mock_execution = MagicMock()
-        mock_execution.id = "exec-123"
+        mock_execution = Execution(
+            id="exec-123",
+            complete=ExecutionComplete(timestamp=1, execution_time_in_millis=2),
+        )
         mock_sb.commands.run.return_value = mock_execution
 
         result = _invoke(
             runner,
-            ["command", "run", "sb-1", "-d", "echo", "hello", "-o", "json"],
+            ["command", "run", "sb-1", "-d", "-o", output_format, "--", "echo", "hello"],
             sandbox=mock_sb,
         )
         assert result.exit_code == 0
-        data = json.loads(result.output)
-        assert data["execution_id"] == "exec-123"
-        assert data["mode"] == "background"
+        if output_format == "json":
+            data = json.loads(result.stdout)
+            assert data["execution_id"] == "exec-123"
+            assert data["mode"] == "background"
+        else:
+            assert "exec-123" in result.stdout
+            assert "background" in result.stdout
+        assert not result.stderr
         mock_sb.commands.run.assert_called_once()
         assert mock_sb.commands.run.call_args.args[0] == "echo hello"
+        assert mock_sb.commands.run.call_args.kwargs["opts"].background is True
+        mock_sb.commands.get_command_status.assert_not_called()
+        mock_sb.close.assert_called_once()
 
     def test_background_run_argv_flag_passes_native_argv(self, runner: CliRunner) -> None:
         mock_sb = MagicMock()
-        mock_execution = MagicMock()
-        mock_execution.id = "exec-123"
+        mock_execution = Execution(
+            id="exec-123",
+            complete=ExecutionComplete(timestamp=1, execution_time_in_millis=2),
+        )
         mock_sb.commands.run.return_value = mock_execution
 
         result = _invoke(
@@ -2073,6 +2256,48 @@ class TestCommandRun:
         assert data["mode"] == "background"
         mock_sb.commands.run.assert_called_once()
         assert mock_sb.commands.run.call_args.args[0] == ["echo", "hello"]
+
+    @pytest.mark.parametrize("output_format", ["table", "json", "yaml"])
+    def test_background_run_exits_nonzero_on_execution_error(
+        self, runner: CliRunner, output_format: str
+    ) -> None:
+        mock_sb = MagicMock()
+        mock_sb.commands.run.return_value = Execution(
+            id="exec-123",
+            error=ExecutionError(
+                name="CommandExecError", value="cannot start command", timestamp=1
+            ),
+        )
+
+        result = _invoke(
+            runner,
+            ["command", "run", "sb-1", "--background", "-o", output_format, "--", "echo", "hello"],
+            sandbox=mock_sb,
+        )
+
+        assert result.exit_code == 1
+        assert "CommandExecError: cannot start command" in result.stderr
+        assert not result.stdout
+        mock_sb.close.assert_called_once()
+
+    @pytest.mark.parametrize("output_format", ["table", "json", "yaml"])
+    @pytest.mark.parametrize("execution_id", [None, "exec-123"])
+    def test_background_run_exits_nonzero_when_startup_is_unconfirmed(
+        self, runner: CliRunner, output_format: str, execution_id: str | None
+    ) -> None:
+        mock_sb = MagicMock()
+        mock_sb.commands.run.return_value = Execution(id=execution_id)
+
+        result = _invoke(
+            runner,
+            ["command", "run", "sb-1", "--background", "-o", output_format, "--", "echo", "hello"],
+            sandbox=mock_sb,
+        )
+
+        assert result.exit_code == 1
+        assert "before background command startup was confirmed" in result.stderr
+        assert not result.stdout
+        mock_sb.close.assert_called_once()
 
     def test_foreground_run_rejects_json_output(self, runner: CliRunner) -> None:
         result = _invoke(
@@ -2124,6 +2349,23 @@ class TestCommandSession:
         mock_sb.commands.run_in_session.assert_called_once()
         assert mock_sb.commands.run_in_session.call_args.args[:2] == ("sess-123", "pwd")
         assert mock_sb.commands.run_in_session.call_args.kwargs["timeout"] == timedelta(seconds=30)
+
+    def test_session_run_exits_nonzero_when_stream_ends_early(self, runner: CliRunner) -> None:
+        mock_sb = MagicMock()
+        mock_execution = MagicMock()
+        mock_execution.error = None
+        mock_execution.complete = None
+        mock_sb.commands.run_in_session.return_value = mock_execution
+
+        result = _invoke(
+            runner,
+            ["command", "session", "run", "sb-1", "sess-123", "--", "sleep", "60"],
+            sandbox=mock_sb,
+            output_format="raw",
+        )
+
+        assert result.exit_code == 1
+        assert "ended before the command finished" in result.output
 
     def test_session_delete(self, runner: CliRunner) -> None:
         mock_sb = MagicMock()

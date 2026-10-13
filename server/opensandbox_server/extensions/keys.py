@@ -30,3 +30,7 @@ ISOLATION_UPPER_MOUNT_PATH = "/var/lib/execd/isolation"
 # are automatically propagated to Pod annotations with ANNOTATION_METADATA_PREFIX
 EXTENSIONS_ANNOTATION_PREFIX = "opensandbox.extensions."
 ANNOTATION_METADATA_PREFIX = "opensandbox.io/extensions."
+
+# OSEP-0024 idle policy: reserved Sandbox CR annotation (JSON), parsed by the
+# same key on the ingress wake gate. Reserved prefix: user patches cannot set it.
+IDLE_POLICY_ANNOTATION_KEY = "sandbox.opensandbox.io/idle-policy"

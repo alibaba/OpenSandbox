@@ -38,7 +38,7 @@ The implementation is documented by architectural layer under `architecture/`:
 |---|---|---|
 | Control plane | Lifecycle orchestration, workload orchestration, snapshots | [Server](/architecture/control-plane/server), [Kubernetes Controller](/architecture/control-plane/operator) |
 | Data plane | In-sandbox execution, node-side collection | [Execd](/architecture/data-plane/execd), [Node Agent](/architecture/data-plane/node-agent) |
-| Network | Inbound access, outbound policy, isolation design | [Ingress](/architecture/network/ingress), [Egress](/architecture/network/egress), [Single-Host Network](/architecture/network/single-host-network), [Network Isolation](/architecture/network/network-isolation) |
+| Network | Inbound access, outbound policy | [Ingress](/architecture/network/ingress), [Egress](/architecture/network/egress), [Single-Host Network](/architecture/network/single-host-network) |
 | Backend integration | Template-backed sandboxes on the fast-sandbox platform | [Fast Sandbox](/architecture/fast-sandbox/) |
 
 ## 1. Client Surface
@@ -193,7 +193,7 @@ Core responsibilities:
 - Pull public or private images, including per-request registry authentication.
 - Create containers with CPU, memory, GPU, platform, capability, AppArmor, seccomp, PID, and secure-runtime settings.
 - Stage the `execd` binary from `[runtime].execd_image` into the sandbox and install a bootstrap launcher before starting the user entrypoint.
-- Support network modes `host`, `bridge`, and custom user-defined networks.
+- Support network modes `host`, `bridge`, `none`, `pasta`, `slirp4netns`, and custom user-defined networks. The user-mode modes (`pasta`, `slirp4netns`) expose no host-routable container IP and are reached through the published host ports.
 - Allocate host ports for `execd` and user service endpoints in non-host network modes.
 - Restore expiration timers for existing managed containers after server restart.
 - Support host bind mounts, Docker named volumes via the `pvc` volume model, and OSSFS-backed mounts.
@@ -424,27 +424,3 @@ Sandbox state includes `state`, `reason`, `message`, and transition time. `execd
 - **Remote development**: expose VS Code Web, desktops, VNC, or development servers through sandbox endpoints.
 - **RL and evaluation workloads**: use Kubernetes BatchSandbox, Pool, and task orchestration for high-throughput sandbox delivery.
 - **Enterprise isolation**: combine secure runtimes, ingress, egress, endpoint access headers, and Kubernetes deployment controls.
-
-## 10. References
-
-- [Getting Started](/getting-started/)
-- [Sandbox Lifecycle Spec](https://github.com/opensandbox-group/OpenSandbox/blob/main/specs/sandbox-lifecycle.yml)
-- [Diagnostics Spec](https://github.com/opensandbox-group/OpenSandbox/blob/main/specs/diagnostic-api.yml)
-- [Sandbox Execution Spec](https://github.com/opensandbox-group/OpenSandbox/blob/main/specs/execd-api.yaml)
-- [Egress Spec](https://github.com/opensandbox-group/OpenSandbox/blob/main/specs/egress-api.yaml)
-- [Server](/architecture/control-plane/server)
-- [Server Configuration](https://github.com/opensandbox-group/OpenSandbox/blob/main/server/configuration.md)
-- [Execd](/architecture/data-plane/execd)
-- [Node Agent](/architecture/data-plane/node-agent)
-- [Ingress](/architecture/network/ingress)
-- [Egress](/architecture/network/egress)
-- [Kubernetes Controller](/architecture/control-plane/operator)
-- [Kubernetes Deployment](/deployment/)
-- [Fast Sandbox](/architecture/fast-sandbox/)
-- [Pause and Resume](/guides/pause-resume)
-- [Secure Container Runtime Guide](/guides/secure-container)
-- [Credential Vault](/guides/credential-vault)
-- [Network Isolation](/architecture/network/network-isolation)
-- [CLI](/cli/)
-- [MCP Server](/sdks/mcp)
-- [Examples](/examples/)

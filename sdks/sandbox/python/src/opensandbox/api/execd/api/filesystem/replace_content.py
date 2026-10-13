@@ -58,6 +58,8 @@ def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
 ) -> ErrorResponse | ReplaceContentResponse200 | None:
     if response.status_code == 200:
+        if not response.content:
+            return None
         response_200 = ReplaceContentResponse200.from_dict(response.json())
 
         return response_200

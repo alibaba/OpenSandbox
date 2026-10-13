@@ -168,11 +168,17 @@ class FastPathClient:
         sandbox_name: str,
         *,
         expected_uid: str = "",
+        expected_generation: int = 0,
         request_id: str = "",
     ) -> fastpath_pb2.PauseSandboxResponse:
-        """Persist the pause intent; completion (PAUSED) is observed via get_sandbox."""
+        """Persist the pause intent; completion (PAUSED) is observed via get_sandbox.
+
+        ``expected_generation`` fences against concurrent state changes
+        (0 = no fence); rejection surfaces as FailedPrecondition.
+        """
         request = fastpath_pb2.PauseSandboxRequest(
             sandbox=namespaced_reference(namespace, sandbox_name, expected_uid=expected_uid),
+            expected_generation=expected_generation,
             request_id=request_id,
         )
         return self._call(

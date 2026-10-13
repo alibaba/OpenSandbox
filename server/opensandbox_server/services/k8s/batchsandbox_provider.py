@@ -849,8 +849,18 @@ class BatchSandboxProvider(WorkloadProvider):
 
     def get_status(self, workload: Dict[str, Any]) -> Dict[str, Any]:
         """Derive sandbox state from BatchSandbox status and pod readiness."""
+        metadata = workload.get("metadata", {})
+        deletion_timestamp = metadata.get("deletionTimestamp")
+        if deletion_timestamp:
+            return {
+                "state": "Stopping",
+                "reason": "DELETING",
+                "message": "Sandbox is being deleted",
+                "last_transition_at": deletion_timestamp,
+            }
+
         status = workload.get("status", {})
-        creation_timestamp = workload.get("metadata", {}).get("creationTimestamp")
+        creation_timestamp = metadata.get("creationTimestamp")
 
         # Phase is authoritative when set (Pausing/Paused/Resuming/Failed)
         phase = status.get("phase", "")

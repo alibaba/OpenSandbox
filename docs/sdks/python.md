@@ -391,6 +391,28 @@ For binary data, pass `bytes` to `WriteEntry.data` and use `read_bytes()`;
 use `read_bytes_stream()` for large downloads. `read_file()` and `read_bytes()`
 also accept `offset` and `limit` for partial reads.
 
+#### File operations with an explicit identity
+
+Bind a filesystem client to a Linux UID and GID:
+
+```python
+files = sandbox.files_with_identity(1001, 2000)
+```
+
+Both the asynchronous and synchronous Sandbox clients expose this helper.
+
+The bound client exposes the usual file operations and shares the sandbox
+connection, authentication, and endpoint routing headers. The existing file
+client retains its default identity. Select the UID/GID separately for command
+execution.
+
+This requires Linux and an Execd version that supports filesystem execution
+identity. Unsupported servers return an error; requests never fall back to the
+default filesystem routes. Keep sandbox credentials and identity selection in
+the trusted backend. Linux filesystem permissions apply; this feature does not
+create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd)
+for permission and workspace provisioning details.
+
 ### 5. Sandbox Management (Admin)
 
 Use `SandboxManager` for administrative tasks and finding existing sandboxes.
@@ -498,11 +520,39 @@ The `ConnectionConfig` class manages API server connection settings.
 | `request_timeout` | Timeout for API requests                   | 30 seconds                   | -                      |
 | `debug`           | Enable debug logging for HTTP requests     | `False`                      | -                      |
 | `headers`         | Custom HTTP headers                        | Empty                        | -                      |
+| `follow_redirects` | Follow HTTP redirects for SDK requests    | `False`                      | -                      |
+| `event_hooks`     | Additional httpx hooks for adapter clients | Empty                        | -                      |
 | `transport`       | Shared httpx transport (pool/proxy/retry); custom transports must honor request timeouts  | SDK-created per instance     | -                      |
 | `retry_policy`    | Automatic retry policy for non-streaming requests (see [Automatic retries](#_2-automatic-retries)) | Enabled (`RetryPolicy()`) | -                 |
 | `use_server_proxy` | Use sandbox server as proxy for execd/endpoint requests (e.g. when client cannot reach the sandbox directly) | `False` | -                      |
 | `disable_metrics` | Disable SDK create-latency telemetry (see [SDK Telemetry](/sdks/observability#creation-metrics)) | `False` | `OPENSANDBOX_DISABLE_METRICS` |
 | `enable_tracing` | Enable OpenTelemetry tracing for pool warmup (see [SDK Tracing](/sdks/observability#pool-warmup-tracing)) | `False` | - |
+
+The Python Code Interpreter inherits the sandbox's connection configuration.
+With `use_server_proxy=True`, context requests and streamed code execution include
+the configured API key in `OPEN-SANDBOX-API-KEY` for server authentication. In direct
+mode, the SDK does not automatically attach this key to code execution requests.
+This applies to both the asynchronous and synchronous APIs.
+
+When `follow_redirects` is enabled, same-origin redirects preserve request
+headers. An origin is the combination of scheme, host, and port, so changing
+any of those values is cross-origin. Before following a cross-origin redirect,
+the SDK removes every header whose name starts with `OPEN-SANDBOX-` or
+`OPENSANDBOX-` (case-insensitive). Other custom headers are not stripped
+automatically.
+
+File uploads never follow redirects, even when `follow_redirects` is enabled,
+because streamed or file-backed multipart request bodies cannot always be
+safely replayed. This applies to both direct chunked uploads and uploads through
+the server proxy. A redirect response from an upload is surfaced as a
+`SandboxApiException` with the original 3xx status.
+
+`ConnectionConfig.event_hooks` accepts async httpx hooks, while
+`ConnectionConfigSync.event_hooks` accepts synchronous hooks. Configured
+request hooks run before the SDK safety hook, so they cannot re-add protected
+OpenSandbox headers to a cross-origin request. Lifecycle telemetry honors
+`follow_redirects` and the SDK safety hook, but does not invoke configured user
+hooks.
 
 ```python
 from datetime import timedelta

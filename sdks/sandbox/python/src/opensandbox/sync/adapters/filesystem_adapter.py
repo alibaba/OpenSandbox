@@ -27,6 +27,7 @@ from typing import TypedDict
 
 import httpx
 
+from opensandbox._httpx import build_redirect_client_options
 from opensandbox.adapters.converter.exception_converter import (
     ExceptionConverter,
 )
@@ -37,6 +38,7 @@ from opensandbox.adapters.converter.response_handler import (
     extract_request_id,
     handle_api_error,
 )
+from opensandbox.adapters.filesystem_identity import filesystem_identity_path
 from opensandbox.config.connection_sync import ConnectionConfigSync
 from opensandbox.exceptions import InvalidArgumentException, SandboxApiException
 from opensandbox.models.filesystem import (
@@ -81,10 +83,12 @@ class FilesystemAdapterSync(FilesystemSync):
     FILESYSTEM_DOWNLOAD_PATH = "/files/download"
 
     def __init__(
-        self, connection_config: ConnectionConfigSync, execd_endpoint: SandboxEndpoint
+        self, connection_config: ConnectionConfigSync, execd_endpoint: SandboxEndpoint,
+        *, _identity_prefix: str = "",
     ) -> None:
         self.connection_config = connection_config
         self.execd_endpoint = execd_endpoint
+        self._identity_prefix = _identity_prefix
         from opensandbox.api.execd import Client
 
         base_url = self._get_execd_base_url()
@@ -97,16 +101,32 @@ class FilesystemAdapterSync(FilesystemSync):
             headers=headers,
             timeout=timeout,
             transport=self.connection_config.transport,
+            **build_redirect_client_options(self.connection_config, base_url),
         )
-        self._client = Client(base_url=base_url, timeout=timeout)
+        self._client = Client(
+            base_url=base_url,
+            timeout=timeout,
+            follow_redirects=self.connection_config.follow_redirects,
+        )
         self._client.set_httpx_client(self._httpx_client)
 
+    def with_identity(self, uid: int, gid: int) -> "FilesystemAdapterSync":
+        """Create an independent filesystem client with explicit Linux credentials."""
+        return FilesystemAdapterSync(
+            self.connection_config,
+            self.execd_endpoint,
+            _identity_prefix=filesystem_identity_path(uid, gid),
+        )
+
     def _get_execd_base_url(self) -> str:
-        return f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}"
+        return (
+            f"{self.connection_config.protocol}://"
+            f"{self.execd_endpoint.endpoint.rstrip('/')}{self._identity_prefix}"
+        )
 
     def _get_execd_url(self, path: str) -> str:
         return (
-            f"{self.connection_config.protocol}://{self.execd_endpoint.endpoint}{path}"
+            f"{self._get_execd_base_url()}{path}"
         )
 
     def _build_download_request(
@@ -283,7 +303,11 @@ class FilesystemAdapterSync(FilesystemSync):
 
             multipart_parts.append(("file", (entry.path, content, content_type)))
 
-        return self._httpx_client.post(url, files=multipart_parts)
+        return self._httpx_client.post(
+            url,
+            files=multipart_parts,
+            follow_redirects=False,
+        )
 
     def _write_files_chunked(
         self,
@@ -368,6 +392,7 @@ class FilesystemAdapterSync(FilesystemSync):
             url,
             content=_body(),
             headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+            follow_redirects=False,
         )
 
     def write_file(

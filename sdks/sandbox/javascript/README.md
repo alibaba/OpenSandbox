@@ -356,6 +356,12 @@ The `ConnectionConfig` class manages API server connection settings.
 Runtime notes:
 
 - In browsers, the SDK uses the global `fetch` implementation.
+- `requestTimeoutSeconds` bounds the wait for a response: it stops applying once
+  the response headers arrive (streaming responses are not cut off). It never
+  caps a healthy file upload body, which can legitimately take longer than the
+  timeout; on Node.js a stalled upload, or an upload that gets no response
+  headers within the timeout once the body has been sent, is aborted instead of
+  hanging (the Go SDK's `ResponseHeaderTimeout` contract).
 - In Node.js, every `Sandbox` and `SandboxManager` gets its own transport via `withTransportIfMissing()` unless you pass an already-initialized `ConnectionConfig`; shared configs are reused, and the SDK only closes transports it allocated itself. Call `sandbox.close()` or `manager.close()` when you are done so the SDK can release the agent it owns.
 
 | Parameter               | Description                                                                                                  | Default          | Environment Variable   |

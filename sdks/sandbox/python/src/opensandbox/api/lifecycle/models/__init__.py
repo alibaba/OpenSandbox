@@ -16,6 +16,7 @@
 
 """Contains all the data models used in inputs/outputs"""
 
+from .activity_probe import ActivityProbe
 from .allocation_summary import AllocationSummary
 from .allocation_summary_mode import AllocationSummaryMode
 from .allocation_summary_state import AllocationSummaryState
@@ -43,6 +44,8 @@ from .fsb_template_readiness import FsbTemplateReadiness
 from .fsb_template_status import FsbTemplateStatus
 from .fsb_template_status_phase import FsbTemplateStatusPhase
 from .host import Host
+from .idle_policy import IdlePolicy
+from .idle_policy_on_idle import IdlePolicyOnIdle
 from .image_spec import ImageSpec
 from .image_spec_auth import ImageSpecAuth
 from .lifecycle_hook import LifecycleHook
@@ -78,6 +81,7 @@ from .snapshot_status import SnapshotStatus
 from .volume import Volume
 
 __all__ = (
+    "ActivityProbe",
     "AllocationSummary",
     "AllocationSummaryMode",
     "AllocationSummaryState",
@@ -105,6 +109,8 @@ __all__ = (
     "FsbTemplateStatus",
     "FsbTemplateStatusPhase",
     "Host",
+    "IdlePolicy",
+    "IdlePolicyOnIdle",
     "ImageSpec",
     "ImageSpecAuth",
     "LifecycleHook",

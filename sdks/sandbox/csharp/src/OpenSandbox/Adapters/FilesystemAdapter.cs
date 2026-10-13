@@ -26,11 +26,13 @@ namespace OpenSandbox.Adapters;
 /// <summary>
 /// Adapter for the execd filesystem service.
 /// </summary>
-internal sealed class FilesystemAdapter : ISandboxFiles
+internal sealed class FilesystemAdapter : IIdentitySandboxFiles
 {
+    internal const uint MaxIdentityId = uint.MaxValue - 1;
     private readonly HttpClientWrapper _client;
     private readonly HttpClient _httpClient;
     private readonly string _baseUrl;
+    private readonly string _identityBaseUrl;
     private readonly IReadOnlyDictionary<string, string> _headers;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -44,12 +46,24 @@ internal sealed class FilesystemAdapter : ISandboxFiles
         HttpClientWrapper client,
         HttpClient httpClient,
         string baseUrl,
-        IReadOnlyDictionary<string, string> headers)
+        IReadOnlyDictionary<string, string> headers,
+        string? identityBaseUrl = null)
     {
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _baseUrl = baseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(baseUrl));
+        _identityBaseUrl = identityBaseUrl?.TrimEnd('/') ?? _baseUrl;
         _headers = headers ?? new Dictionary<string, string>();
+    }
+
+    public ISandboxFiles WithIdentity(uint uid, uint gid)
+    {
+        if (uid > MaxIdentityId)
+            throw new ArgumentOutOfRangeException(nameof(uid), $"UID must be between 0 and {MaxIdentityId}.");
+        if (gid > MaxIdentityId)
+            throw new ArgumentOutOfRangeException(nameof(gid), $"GID must be between 0 and {MaxIdentityId}.");
+        var baseUrl = _identityBaseUrl + FormattableString.Invariant($"/v1/filesystem/{uid}/{gid}");
+        return new FilesystemAdapter(_client.WithBaseUrl(baseUrl), _httpClient, baseUrl, _headers, _identityBaseUrl);
     }
 
     public async Task<IReadOnlyDictionary<string, SandboxFileInfo>> GetFileInfoAsync(

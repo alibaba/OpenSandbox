@@ -41,6 +41,8 @@ tags:
     description: Shell command execution and interruption
   - name: Filesystem
     description: File and directory operations
+  - name: FilesystemIdentity
+    description: Linux filesystem operations under an explicit execution identity
   - name: Metric
     description: System resource monitoring and metrics
   - name: IsolatedExecution
@@ -405,6 +407,9 @@ paths:
         Executes shell text (`command`) or native arguments (`argv`) and streams output using SSE; supply exactly one input mode.
         The command can run in foreground or background mode. The response includes stdout, stderr,
         execution status, and completion events.
+        In foreground mode, stdout and stderr event text preserves the original line endings
+        (`\n`, `\r`, or `\r\n`). Concatenate text from each stream's events to recover its output;
+        the final event may contain an unterminated fragment.
         Optionally specify `timeout` (milliseconds) to enforce a maximum runtime; the server will
         terminate the process when the timeout is reached. You can also pass `uid`/`gid` to run
         with specific user/group IDs, and `envs` to inject environment variables.
@@ -1076,6 +1081,664 @@ paths:
       responses:
         "200":
           description: Directories deleted successfully
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/files/info:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    get:
+      summary: Get file metadata
+      description: |
+        Retrieves detailed metadata for one or multiple files including permissions, owner,
+        group, size, and modification time. Returns a map of file paths to their corresponding
+        FileInfo objects.
+      operationId: identityGetFilesInfo
+      tags:
+        - FilesystemIdentity
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: File path(s) to get info for (can be specified multiple times)
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          examples:
+            single:
+              summary: Single file
+              value: ["/workspace/file.txt"]
+            multiple:
+              summary: Multiple files
+              value: ["/workspace/file1.txt", "/workspace/file2.py"]
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Map of file paths to FileInfo objects
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/FileInfo"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/files:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    delete:
+      summary: Delete files
+      description: |
+        Deletes one or multiple files from the sandbox. Only removes files, not directories.
+        Use RemoveDirs for directory removal.
+      operationId: identityRemoveFiles
+      tags:
+        - FilesystemIdentity
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: File path(s) to delete (can be specified multiple times)
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          example: ["/workspace/temp.txt"]
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Files deleted successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/files/permissions:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    post:
+      summary: Change file permissions
+      description: |
+        Changes permissions (mode), owner, and group for one or multiple files.
+        Accepts a map of file paths to permission settings including octal mode,
+        owner username, and group name.
+      operationId: identityChmodFiles
+      tags:
+        - FilesystemIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/Permission"
+            example:
+              "/workspace/script.sh":
+                owner: admin
+                group: admin
+                mode: 755
+              "/workspace/config.json":
+                owner: admin
+                group: admin
+                mode: 755
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Permissions changed successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/files/mv:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    post:
+      summary: Rename or move files
+      description: |
+        Renames or moves one or multiple files to new paths. Can be used for both
+        renaming within the same directory and moving to different directories.
+        Target directory must exist.
+      operationId: identityRenameFiles
+      tags:
+        - FilesystemIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/RenameFileItem"
+            example:
+              - src: /workspace/old_name.txt
+                dest: /workspace/new_name.txt
+              - src: /workspace/file.py
+                dest: /archive/file.py
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Files renamed/moved successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/files/search:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    get:
+      summary: Search for files
+      description: |
+        Searches for files matching a glob pattern within a specified directory and
+        its subdirectories. Returns file metadata including path, permissions, owner,
+        and group. Supports glob patterns like **, *.txt, etc. Default pattern is ** (all files).
+      operationId: identitySearchFiles
+      tags:
+        - FilesystemIdentity
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Root directory path to search in
+          schema:
+            type: string
+        - name: pattern
+          in: query
+          required: false
+          description: Glob pattern to match files (default is **)
+          schema:
+            type: string
+            default: "**"
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Array of matching files with metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileInfo"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/files/replace:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    post:
+      summary: Replace file content
+      description: |
+        Performs text replacement in one or multiple files. Replaces all occurrences
+        of the old string with the new string (similar to strings.ReplaceAll).
+        Preserves file permissions. Useful for batch text substitution across files.
+
+        When `verbose=true` is set, the response includes per-file replacement counts.
+        Without this parameter, the response body is empty (backward-compatible behavior).
+      operationId: identityReplaceContent
+      tags:
+        - FilesystemIdentity
+      parameters:
+        - name: verbose
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When true, return per-file replacement counts in the response body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/ReplaceFileContentItem"
+            example:
+              "/workspace/config.yaml":
+                old: "localhost:8080"
+                new: "0.0.0.0:9090"
+              "/workspace/app.py":
+                old: "DEBUG = True"
+                new: "DEBUG = False"
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: |
+            Content replaced successfully. When `verbose=true`, returns per-file
+            replacement counts. Otherwise, the response body is empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: "#/components/schemas/ReplaceFileContentResult"
+              example:
+                "/workspace/config.yaml":
+                  replacedCount: 1
+                "/workspace/app.py":
+                  replacedCount: 0
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/files/upload:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    post:
+      summary: Upload files to sandbox
+      description: |
+        Uploads one or multiple files to specified paths within the sandbox.
+        Reads metadata and file content from multipart form parts in sequence.
+        Each file upload consists of two parts: a metadata part (JSON) followed
+        by the actual file part.
+      operationId: identityUploadFile
+      tags:
+        - FilesystemIdentity
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                metadata:
+                  type: string
+                  description: JSON-encoded file metadata (FileMetadata object)
+                  example: '{"path":"/workspace/file.txt","owner":"admin","group":"admin","mode":755}'
+                file:
+                  type: string
+                  format: binary
+                  description: File to upload
+            encoding:
+              metadata:
+                contentType: application/json
+              file:
+                contentType: application/octet-stream
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Files uploaded successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/files/download:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    get:
+      summary: Download file from sandbox
+      description: |
+        Downloads a file from the specified path within the sandbox. Supports HTTP
+        range requests for resumable downloads and partial content retrieval.
+        Returns file as octet-stream with appropriate headers.
+
+        When offset/limit query parameters are provided, the endpoint performs
+        line-based reading and returns text/plain content instead. Line-based
+        parameters are mutually exclusive with the Range header.
+      operationId: identityDownloadFile
+      tags:
+        - FilesystemIdentity
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Absolute or relative path of the file to download
+          schema:
+            type: string
+          example: /workspace/data.csv
+        - name: offset
+          in: query
+          required: false
+          description: >
+            Starting line number (1-based) for line-based reading.
+            Mutually exclusive with the Range header.
+          schema:
+            type: integer
+            minimum: 1
+          example: 100
+        - name: limit
+          in: query
+          required: false
+          description: >
+            Number of lines to return for line-based reading.
+            Mutually exclusive with the Range header.
+          schema:
+            type: integer
+            minimum: 1
+          example: 20
+        - name: Range
+          in: header
+          required: false
+          description: HTTP Range header for partial content requests. Mutually exclusive with offset/limit.
+          schema:
+            type: string
+          example: "bytes=0-1023"
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: |
+            File content. Returns application/octet-stream for full or byte-range
+            downloads, or text/plain for line-based reads (when offset/limit are provided).
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+            text/plain:
+              schema:
+                type: string
+                description: Line-based content returned when offset/limit parameters are used
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: Attachment header with filename (byte-range mode only)
+            Content-Length:
+              schema:
+                type: integer
+              description: File size in bytes (byte-range mode only)
+        "206":
+          description: Partial file content (when Range header is provided)
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Range:
+              schema:
+                type: string
+              description: Range of bytes being returned
+            Content-Length:
+              schema:
+                type: integer
+              description: Length of the returned range
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "416":
+          description: Requested range not satisfiable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/directories/list:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    get:
+      summary: List directory contents
+      description: |
+        Lists entries under a directory with optional depth control. By default,
+        only immediate children are returned (`depth=1`). Set `depth` to a larger
+        value to include descendants up to that many levels below `path`. The
+        root directory itself is not included in the response.
+
+        Symbolic links are reported with `type=symlink` and are not traversed:
+        the listing never descends into a link target, even when `depth` would
+        otherwise allow it. For the same reason, when `path` itself resolves to
+        a symbolic link the request is rejected with `400`; callers must pass
+        the real directory path they want listed.
+
+        Entries are returned in lexical order by entry name within each
+        directory. Descendants reported via `depth>1` follow their parent in
+        the same lexical order, so a depth-2 listing yields stable, predictable
+        output for file-browser style clients.
+      operationId: identityListDirectory
+      tags:
+        - FilesystemIdentity
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Directory path to list
+          schema:
+            type: string
+          example: /workspace/project
+        - name: depth
+          in: query
+          required: false
+          description: Maximum child depth to include. `1` lists immediate children only.
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+            default: 1
+          example: 2
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Array of directory entries with metadata
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FileInfo"
+              example:
+                - path: /workspace/project/src
+                  type: directory
+                  size: 0
+                  modified_at: 2025-11-16T14:30:45Z
+                  created_at: 2025-11-16T14:30:45Z
+                  owner: admin
+                  group: admin
+                  mode: 755
+                - path: /workspace/project/README.md
+                  type: file
+                  size: 2048
+                  modified_at: 2025-11-16T14:30:45Z
+                  created_at: 2025-11-16T14:30:45Z
+                  owner: admin
+                  group: admin
+                  mode: 644
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /v1/filesystem/{uid}/{gid}/directories:
+    description: |
+      Runs this filesystem operation in a separate process as the selected UID/GID.
+      Supplementary groups are resolved from the selected system account; an unknown
+      UID receives no supplementary groups. Lookup and credential setup errors fail
+      closed. Target owner/group/mode metadata never changes the execution identity.
+      Keep API credentials in a trusted backend that selects identities. Unsupported
+      servers return an unknown route; callers must not retry an unprefixed route.
+    parameters:
+      - $ref: '#/components/parameters/FilesystemUid'
+      - $ref: '#/components/parameters/FilesystemGid'
+    post:
+      summary: Create directories
+      description: |
+        Creates one or multiple directories with specified permissions. Creates parent
+        directories as needed (similar to mkdir -p). Accepts a map of directory paths
+        to permission objects.
+      operationId: identityMakeDirs
+      tags:
+        - FilesystemIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                $ref: "#/components/schemas/Permission"
+            example:
+              "/workspace/project":
+                owner: admin
+                group: admin
+                mode: 755
+              "/workspace/logs":
+                owner: admin
+                group: admin
+                mode: 755
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Directories created successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+    delete:
+      summary: Delete directories
+      description: |
+        Recursively deletes one or multiple directories and all their contents.
+        Similar to rm -rf. Use with caution as this operation cannot be undone.
+      operationId: identityRemoveDirs
+      tags:
+        - FilesystemIdentity
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: Directory path(s) to delete (can be specified multiple times)
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+          example: ["/workspace/temp"]
+      responses:
+        "501":
+          description: Filesystem execution identity requires Linux.
+        "503":
+          description: The requested identity could not be established or the worker failed; no fallback to Execd identity occurs.
+        "200":
+          description: Directories deleted successfully
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalServerError"
 
@@ -1833,6 +2496,27 @@ paths:
           $ref: "#/components/responses/ServiceUnavailable"
 
 components:
+  parameters:
+    FilesystemUid:
+      name: uid
+      in: path
+      required: true
+      description: Linux UID performing the operation, separate from target-file ownership.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+        maximum: 4294967294
+    FilesystemGid:
+      name: gid
+      in: path
+      required: true
+      description: Primary Linux GID performing the operation.
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+        maximum: 4294967294
   securitySchemes:
     AccessToken:
       type: apiKey

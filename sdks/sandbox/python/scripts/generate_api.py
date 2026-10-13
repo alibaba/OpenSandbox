@@ -304,9 +304,31 @@ def add_license_headers(root: Path) -> None:
 
 
 
+def post_process_execd_filesystem(root: Path) -> None:
+    """Keep filesystem generation aligned with base-URL identity routing."""
+    # Identity clients reuse the ordinary operations with a scoped base URL.
+    # Avoid shipping duplicate operations that are not used by the adapters.
+    identity_operations = root / "api/filesystem_identity"
+    if identity_operations.exists():
+        shutil.rmtree(identity_operations)
+
+    # Execd returns an empty 200 body unless verbose is supported and enabled.
+    # Preserve this compatibility fix whenever the transport is regenerated.
+    replace_operation = root / "api/filesystem/replace_content.py"
+    if replace_operation.exists():
+        content = replace_operation.read_text(encoding="utf-8")
+        branch = "    if response.status_code == 200:\n"
+        guarded_branch = branch + "        if not response.content:\n            return None\n"
+        if guarded_branch not in content:
+            if branch not in content:
+                raise ValueError("Generated replace_content has no expected 200 response branch")
+            replace_operation.write_text(content.replace(branch, guarded_branch, 1), encoding="utf-8")
+
+
 def post_process_generated_code() -> None:
     """Post-process the generated code to ensure proper package structure."""
     print("\n🔧 Post-processing generated code...")
+    post_process_execd_filesystem(Path("src/opensandbox/api/execd"))
 
     # Ensure API directory has __init__.py
     api_dir = Path("src/opensandbox/api")

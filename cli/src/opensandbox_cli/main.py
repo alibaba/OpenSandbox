@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import click
@@ -48,8 +49,45 @@ BANNER = r"""[bold cyan]
 """
 
 
+# A representative icon: any encoding that cannot render it would raise on output.
+_OUTPUT_PROBE = "\u2705"
+
+
+def _configure_output_streams() -> None:
+    """Keep CLI output writable when the active encoding cannot represent it.
+
+    Click and Rich print emoji and box-drawing characters. On a legacy Windows
+    code page (cp936, cp1252, ...) or a POSIX ``C`` locale writing them raises
+    ``UnicodeEncodeError``, which aborts the command - even after the work is
+    done - so streams whose encoding cannot represent that output escape the
+    characters instead of raising.
+
+    Escaping (``backslashreplace``) keeps payload writes - raw command and
+    file data, machine-readable output - recoverable; ``errors="replace"``
+    would silently corrupt them into ``?``. CPython uses the same handler for
+    Windows stderr.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        encoding = getattr(stream, "encoding", None)
+        if reconfigure is None or encoding is None:
+            continue
+        try:
+            _OUTPUT_PROBE.encode(encoding)
+        except (LookupError, UnicodeEncodeError):
+            try:
+                reconfigure(errors="backslashreplace")
+            except (OSError, ValueError):  # pragma: no cover - detached stream
+                pass
+
+
 class BannerGroup(click.Group):
     """Custom Click group that shows a banner before help text."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        """Configure output streams before Click renders help or runs a command."""
+        _configure_output_streams()
+        return super().parse_args(ctx, args)
 
     def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
         console = Console(stderr=False)

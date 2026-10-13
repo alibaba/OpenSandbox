@@ -293,7 +293,7 @@ Policy **deny** is not represented in this log (use **`egress.policy.denied_tota
     synchronous counters/histograms retain delta temporality and observable
     counters retain cumulative temporality. Prometheus-style pipelines need
     cumulative export or Collector `deltatocumulative` conversion.
-  - See [component telemetry configuration](../docs/guides/component-telemetry.md)
+  - See [telemetry reference](../docs/guides/telemetry.md)
     for current deployment behavior and process-environment configuration.
 
 - **Environment variables**  

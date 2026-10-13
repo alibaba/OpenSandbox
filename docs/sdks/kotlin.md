@@ -367,6 +367,26 @@ files.forEach(f -> System.out.println("Found: " + f.getPath()));
 sandbox.files().deleteFiles(List.of("/tmp/hello.txt"));
 ```
 
+#### File operations with an explicit identity
+
+Bind a filesystem client to a Linux UID and GID:
+
+```kotlin
+val files = sandbox.filesWithIdentity(1001, 2000)
+```
+
+The bound client exposes the usual file operations and shares the sandbox
+connection, authentication, and endpoint routing headers. The existing file
+client retains its default identity. Select the UID/GID separately for command
+execution.
+
+This requires Linux and an Execd version that supports filesystem execution
+identity. Unsupported servers return an error; requests never fall back to the
+default filesystem routes. Keep sandbox credentials and identity selection in
+the trusted backend. Linux filesystem permissions apply; this feature does not
+create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd)
+for permission and workspace provisioning details.
+
 ### 5. Sandbox Management (Admin)
 
 Use `SandboxManager` for administrative tasks and finding existing sandboxes.
@@ -448,6 +468,10 @@ sandbox.patchMetadata(patch);
 ### 1. Connection Configuration
 
 The `ConnectionConfig` class manages API server connection settings.
+
+::: info Transfer timeouts
+`requestTimeout` bounds each transport phase - connecting, waiting for response headers, and waiting for more of a response body - but it never caps a healthy file upload or download that keeps making progress. A transfer that stalls for longer than the timeout, or an upload that gets no response headers within it after the body has been sent, fails instead of hanging (the Go SDK's `ResponseHeaderTimeout` contract). An explicit `RetryPolicy.overallDeadline` still caps the whole transfer.
+:::
 
 | Parameter        | Description                                | Default                      | Environment Variable   |
 | ---------------- | ------------------------------------------ | ---------------------------- | ---------------------- |

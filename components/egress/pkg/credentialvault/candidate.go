@@ -72,7 +72,7 @@ func (v *Store) PreparePatch(req MutationRequest, pol *policy.NetworkPolicy) (*M
 		return nil, ErrNotFound
 	}
 	if req.ExpectedRevision != nil && *req.ExpectedRevision != v.revision {
-		return nil, fmt.Errorf("expectedRevision %d does not match current revision %d", *req.ExpectedRevision, v.revision)
+		return nil, fmt.Errorf("%w: expectedRevision %d does not match current revision %d", ErrRevisionConflict, *req.ExpectedRevision, v.revision)
 	}
 	credentials, bindings, err := v.buildPatch(req, pol, v.revision+1)
 	if err != nil {

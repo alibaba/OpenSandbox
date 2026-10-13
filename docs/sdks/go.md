@@ -289,6 +289,29 @@ if err := sandbox.DeleteFiles(ctx, []string{"/tmp/demo.txt"}); err != nil {
 The same upload/download methods support binary files. Pass a Range header such
 as `"bytes=0-1023"` to `DownloadFile` for a partial download.
 
+#### File operations with an explicit identity
+
+Bind a filesystem client to a Linux UID and GID:
+
+```go
+files, err := sandbox.FilesWithIdentity(1001, 2000)
+if err != nil {
+    return err
+}
+```
+
+The bound client exposes the usual file operations and shares the sandbox
+connection, authentication, and endpoint routing headers. The existing file
+client retains its default identity. Select the UID/GID separately for command
+execution.
+
+This requires Linux and an Execd version that supports filesystem execution
+identity. Unsupported servers return an error; requests never fall back to the
+default filesystem routes. Keep sandbox credentials and identity selection in
+the trusted backend. Linux filesystem permissions apply; this feature does not
+create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd)
+for permission and workspace provisioning details.
+
 ### Pause and reconnect
 
 Pause is asynchronous and runtime-dependent. Use a deadline before resuming:
@@ -634,7 +657,7 @@ Created with `NewLifecycleClient(baseURL, apiKey string, opts ...Option)`.
 | `DeleteSandbox(ctx, id)` | Delete a sandbox |
 | `PauseSandbox(ctx, id)` | Pause a running sandbox |
 | `ResumeSandbox(ctx, id)` | Resume a paused sandbox |
-| `RenewExpiration(ctx, id, expiresAt)` | Extend sandbox expiration time |
+| `RenewExpiration(ctx, id, expiresAt)` | Set sandbox expiration to a future timestamp (may shorten or extend) |
 | `GetEndpoint(ctx, sandboxID, port, useServerProxy)` | Get public endpoint for a sandbox port |
 | `GetSignedEndpoint(ctx, sandboxID, port, expires)` | Get signed endpoint URL with a signed route token |
 | `CreateTemplate(ctx, req)` | Declare a fsb template (async golden-image build) |
@@ -764,6 +787,27 @@ SDK-created HTTP clients enforce NIST 2030 minimum TLS certificate strength by d
 ::: tip SDK Telemetry
 `CreateSandbox` reports create latency to `POST /v1/metrics/events` by default. Set `ConnectionConfig.DisableMetrics` or `OPENSANDBOX_DISABLE_METRICS=1` to opt out. See [SDK Telemetry](/sdks/observability#creation-metrics).
 :::
+
+### Follow redirects
+
+The Go SDK retains Go's standard redirect behavior, including for file uploads
+and downloads. On redirects to a different origin (scheme, hostname, or effective
+port), it removes the client's default and configured authentication headers (including
+`X-EXECD-ACCESS-TOKEN`, `X-API-Key`, or a custom `WithAuthHeader` name), as well
+as all headers whose names start with `OPEN-SANDBOX-` or `OPENSANDBOX-`,
+case-insensitively. Each redirect destination is compared with
+the initial request's origin, so subsequent hops on another origin remain
+protected. Same-origin redirects retain these headers. Unrelated custom headers
+continue to follow Go's standard forwarding rules.
+
+This protection applies to lifecycle (including creation metrics), execd, egress, file transfers, and SSE
+requests. A custom `http.Client.CheckRedirect` supplied through `WithHTTPClient`
+or `ConnectionConfig.HTTPClient` still controls whether redirects are followed;
+the SDK removes protected headers after that callback runs, even if the callback
+adds them again. The SDK copies the supplied HTTP client rather than modifying it.
+HTTP and HTTPS default ports are treated as equivalent to explicit ports 80 and
+443 respectively. Upload method conversion and body replay follow Go's existing
+rules; this protection does not enable replay of streaming multipart bodies.
 
 ## Error Handling
 

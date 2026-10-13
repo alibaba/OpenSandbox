@@ -39,6 +39,8 @@ Creation returns before the sandbox is running (`Pending`), and clients poll sta
 
 A sandbox is observed as `Pending` or `Running`, moves through the `Pausing` / `Paused` / `Resuming` / `Stopping` transitions, and ends in `Terminated` (exit code 0) or `Failed` (non-zero). `resume()` is deliberately a pause-state operation, never a general restart: a workload that already exited is `Terminated` or `Failed`, and the honest answer to that is a replacement sandbox, not a silent revive. Pausing on Kubernetes keeps the sandbox ID and restores the root filesystem — with the opt-in QEMU mode, even guest memory. See [Pause & Resume](/guides/pause-resume).
 
+For Kubernetes BatchSandbox workloads, deletion can leave the object visible while task cleanup and pool release finish. During this window, both list and individual sandbox queries report `Stopping`, with reason `DELETING` and the deletion timestamp as `lastTransitionAt`, regardless of the previous runtime phase. Once Kubernetes removes the object, it disappears from the list and individual queries return `404`.
+
 ### Endpoint resolution is part of the contract
 
 Clients never guess how to reach a sandbox service. `GET /sandboxes/{id}/endpoints/{port}` returns a reachable address in one of three forms, chosen by runtime and deployment topology: a direct address (Docker host mapping or pod IP), an ingress gateway route, or a server-proxied URL for deployments where neither direct nor gateway paths exist. The proxy is the compatibility fallback, not the fast path.

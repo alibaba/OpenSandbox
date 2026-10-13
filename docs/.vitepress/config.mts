@@ -150,10 +150,6 @@ export default defineConfig({
               text: "Single-Host Network (Docker)",
               link: "/architecture/network/single-host-network",
             },
-            {
-              text: "Network Isolation",
-              link: "/architecture/network/network-isolation",
-            },
           ],
         },
         {
@@ -214,9 +210,17 @@ export default defineConfig({
             },
             { text: "Secure Access", link: "/guides/secure-access" },
             { text: "Secure Container", link: "/guides/secure-container" },
+            {
+              text: "Network Isolation on Kubernetes",
+              link: "/guides/network-isolation",
+            },
             { text: "Multi-Tenancy", link: "/guides/multi-tenancy" },
             { text: "Isolation Sessions", link: "/guides/isolation-sessions" },
             { text: "Pause & Resume", link: "/guides/pause-resume" },
+            {
+              text: "Kubernetes Resume Benchmark",
+              link: "/guides/kubernetes-resume-benchmark",
+            },
             { text: "Pod Provision Failure Recovery", link: "/guides/pod-recovery" },
             {
               text: "QEMU VMState Snapshots",
@@ -228,6 +232,14 @@ export default defineConfig({
             },
             { text: "Lifecycle Hooks", link: "/guides/lifecycle-hooks" },
             { text: "Windows Sandbox", link: "/guides/windows-sandbox" },
+            {
+              text: "Node Agent Configuration",
+              link: "/guides/node-agent",
+            },
+            {
+              text: "Telemetry",
+              link: "/guides/telemetry",
+            },
           ],
         },
       ],
@@ -258,6 +270,7 @@ export default defineConfig({
             { text: "Claude Code", link: "/examples/claude-code" },
             { text: "Gemini CLI", link: "/examples/gemini-cli" },
             { text: "Codex CLI", link: "/examples/codex-cli" },
+            { text: "Apply Model Patches", link: "/examples/apply-patch" },
             { text: "OpenCode", link: "/examples/opencode" },
             { text: "Qwen Code", link: "/examples/qwen-code" },
             { text: "Kimi CLI", link: "/examples/kimi-cli" },
@@ -282,6 +295,7 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: "Code Interpreter", link: "/examples/code-interpreter" },
+            { text: "Scheduled Client Pool", link: "/examples/client-pool-schedule" },
             { text: "AIO Sandbox", link: "/examples/aio-sandbox" },
             { text: "Agent Sandbox", link: "/examples/agent-sandbox" },
             { text: "Windows", link: "/examples/windows" },

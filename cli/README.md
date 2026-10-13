@@ -297,6 +297,10 @@ osb command status <sandbox-id> <execution-id> -o json
 osb command logs <sandbox-id> <execution-id> -o json
 ```
 
+Background start errors or a stream ending before startup confirmation make the
+CLI exit non-zero without success metadata. After a successful start, use
+`command status` and `command logs` to check the process's eventual result.
+
 By default the payload after `--` is joined into one shell command string, so
 pipelines, redirection, and `$VAR` expansion work as in a terminal. Add `--argv`
 to pass the arguments to the executable as a literal argv list (no shell) when
@@ -464,12 +468,12 @@ Supported targets:
 
 | Target | Install location |
 | --- | --- |
-| `claude` | `./.claude/skills/` or `~/.claude/skills/` |
+| `claude` | `./.claude/skills/<name>/SKILL.md` or `~/.claude/skills/<name>/SKILL.md` |
 | `cursor` | `./.cursor/rules/` or `~/.cursor/rules/` |
 | `codex` | `./.codex/skills/<name>/SKILL.md` or `~/.codex/skills/<name>/SKILL.md` |
-| `copilot` | `./.github/copilot-instructions.md` or `~/.github/copilot-instructions.md` |
+| `copilot` | `./.github/copilot-instructions.md` or `~/.copilot/copilot-instructions.md` |
 | `windsurf` | `./.windsurfrules` or `~/.windsurfrules` |
-| `cline` | `./.clinerules` or `~/.clinerules` |
+| `cline` | `./.clinerules` or `~/.cline/rules/opensandbox-<name>.md` |
 | `opencode` | `./.agents/skills/<name>/SKILL.md` or `~/.agents/skills/<name>/SKILL.md` |
 
 Common flows:

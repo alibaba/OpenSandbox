@@ -24,6 +24,12 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
 
+from opensandbox_server.constants import (
+    IDLE_TIMEOUT_MAX_SECONDS,
+    IDLE_TIMEOUT_MIN_SECONDS,
+    PROBE_TIMEOUT_MAX_SECONDS,
+    PROBE_TIMEOUT_MIN_SECONDS,
+)
 from opensandbox_server.constants import OPENSANDBOX_LIFECYCLE
 
 # ============================================================================
@@ -181,11 +187,107 @@ class PeriodicLifecycleHook(BaseModel):
         extra = "forbid"
 
 
+class ActivityProbe(BaseModel):
+    """App-declared activity probe (``idlePolicy.activeProbe``, OSEP-0024).
+
+    ``GET {path}`` on ``{port}`` answering ``200 {"active": true}`` counts
+    as activity and resets the idle clock.
+    """
+
+    port: int = Field(..., ge=1, le=65535)
+    path: str = Field(..., min_length=1, max_length=512)
+    timeout_seconds: Optional[int] = Field(
+        None,
+        alias="timeoutSeconds",
+        ge=PROBE_TIMEOUT_MIN_SECONDS,
+        le=PROBE_TIMEOUT_MAX_SECONDS,
+    )
+
+    @model_validator(mode="after")
+    def validate_path(self) -> "ActivityProbe":
+        if not self.path.startswith("/"):
+            raise ValueError("idlePolicy.activeProbe.path must be an absolute HTTP path.")
+        if any(ord(char) < 0x20 or char == "\x7f" or char.isspace() for char in self.path):
+            raise ValueError(
+                "idlePolicy.activeProbe.path must not contain whitespace or control characters."
+            )
+        return self
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class IdlePolicy(BaseModel):
+    """Idle behavior declared by the sandbox (OSEP-0024).
+
+    With a timeout the sandbox is auto-paused after X idle seconds; without
+    it the policy is wake-only. Omitting ``idlePolicy`` preserves today's
+    behavior exactly.
+    """
+
+    idle_timeout_seconds: Optional[int] = Field(
+        None,
+        alias="idleTimeoutSeconds",
+        ge=IDLE_TIMEOUT_MIN_SECONDS,
+        le=IDLE_TIMEOUT_MAX_SECONDS,
+        description="Idle threshold X in seconds. Absent means a wake-only policy.",
+    )
+    on_idle: Optional[Literal["pause"]] = Field(
+        None,
+        alias="onIdle",
+        description="Action taken at the idle threshold; only 'pause' exists today.",
+    )
+    wake_on_access: bool = Field(
+        True,
+        alias="wakeOnAccess",
+        description=(
+            "Whether traffic may wake the sandbox from Paused. False keeps "
+            "today's manual-resume-only behavior."
+        ),
+    )
+    active_probe: Optional[ActivityProbe] = Field(None, alias="activeProbe")
+
+    @model_validator(mode="after")
+    def validate_pairing(self) -> "IdlePolicy":
+        if self.idle_timeout_seconds is None:
+            if self.on_idle is not None:
+                raise ValueError(
+                    "idlePolicy.onIdle must be omitted when idleTimeoutSeconds is omitted "
+                    "(a policy without a timeout is wake-only)."
+                )
+            if self.active_probe is not None:
+                raise ValueError(
+                    "idlePolicy.activeProbe requires idleTimeoutSeconds; the probe "
+                    "governs auto-pause and a wake-only policy is never probed."
+                )
+        elif self.on_idle is None:
+            raise ValueError(
+                "idlePolicy.onIdle is required when idleTimeoutSeconds is set."
+            )
+        return self
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
 class SandboxLifecycle(BaseModel):
-    """Extensible lifecycle configuration transported internally to execd."""
+    """Extensible lifecycle configuration: hooks run in the guest via execd;
+    ``idlePolicy`` is control-plane state (OSEP-0024) and never reaches it.
+    """
 
     pre_start: Optional[LifecycleHook] = Field(None, alias="preStart")
     periodic: Optional[List[PeriodicLifecycleHook]] = None
+    idle_policy: Optional[IdlePolicy] = Field(
+        None,
+        alias="idlePolicy",
+        description="Auto-pause and wake-on-access behavior (fast-sandbox backend only).",
+    )
+
+    @property
+    def has_hooks(self) -> bool:
+        return self.pre_start is not None or bool(self.periodic)
 
     @model_validator(mode="after")
     def validate_periodic_names(self) -> "SandboxLifecycle":
@@ -569,7 +671,9 @@ class CreateSandboxRequest(BaseModel):
             "exclusive with image and snapshotId; in template mode the workload "
             "shape is fixed by the template's golden image, so entrypoint, env, "
             "resourceLimits, resourceRequests, volumes, platform, credentialProxy, "
-            "secureAccess and lifecycle are rejected. timeout is required."
+            "secureAccess and lifecycle hooks are rejected. lifecycle.idlePolicy "
+            "is allowed (control-plane state, not workload shape). timeout is "
+            "required."
         ),
     )
 
@@ -581,8 +685,9 @@ class CreateSandboxRequest(BaseModel):
                 "Use the lifecycle request field instead."
             )
 
-        # Template mode (fsb): the workload shape is fixed by the golden
-        # image, so workload-shaping fields are rejected, not ignored.
+        # Template mode (fsb): workload-shaping fields are rejected, not
+        # ignored; idlePolicy is control-plane state, so a hooks-free
+        # lifecycle may carry it.
         if self.template_id is not None and self.template_id.strip():
             conflicts = {
                 "image": self.image is not None,
@@ -595,7 +700,7 @@ class CreateSandboxRequest(BaseModel):
                 "platform": self.platform is not None,
                 "credentialProxy": self.credential_proxy is not None,
                 "secureAccess": self.secure_access,
-                "lifecycle": self.lifecycle is not None,
+                "lifecycle": self.lifecycle is not None and self.lifecycle.has_hooks,
             }
             present = [name for name, is_set in conflicts.items() if is_set]
             if present:
@@ -613,8 +718,12 @@ class CreateSandboxRequest(BaseModel):
         # all defined in the Pool CRD and not required from the caller.
         has_pool_ref = bool((self.extensions or {}).get("poolRef", "").strip())
         if has_pool_ref:
-            if self.lifecycle is not None:
-                raise ValueError("lifecycle cannot be used together with poolRef.")
+            if self.lifecycle is not None and self.lifecycle.has_hooks:
+                raise ValueError(
+                    "lifecycle hooks cannot be used together with poolRef; "
+                    "lifecycle.idlePolicy is not a hook and is allowed where "
+                    "the backend supports it."
+                )
             # Reject conflicting fields that would be ignored in pool mode
             if bool((self.snapshot_id or "").strip()):
                 raise ValueError("snapshotId cannot be used together with poolRef.")
@@ -940,7 +1049,11 @@ class RenewSandboxExpirationRequest(BaseModel):
     expires_at: datetime = Field(
         ...,
         alias="expiresAt",
-        description="New absolute expiration time in UTC (RFC 3339 format). Must be in the future.",
+        description=(
+            "New absolute expiration time in UTC (RFC 3339 format). Must be in the future. "
+            "May be earlier than, equal to, or later than the current expiresAt. "
+            "The creation-time limit server.max_sandbox_timeout_seconds does not apply."
+        ),
     )
 
     class Config:

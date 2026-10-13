@@ -72,7 +72,7 @@ The workflow then runs:
 | scan | version-consistency scan (release-blocking) |
 | build | 13 images built and pushed directly to `release-X.Y.Z` (run-scoped staging tags while the `UMBRELLA_PUBLISH_ENABLED` gate is closed); all packages built and held |
 | BOM | digests pinned into `docs/releases/<version>.yaml`, pushed to a `release/<version>` branch; the workflow opens a PR to the release branch and merges it (`C_bom`) — stable waits for a code-owner approval (required by the branch ruleset), rc merges immediately |
-| publish | once the BOM PR merges (all images green + code-owner approval), packages publish in verify-then-continue order (PyPI → npm → NuGet → Maven Central last); images are already public at `release-X.Y.Z` from the build stage |
+| publish | once the BOM PR merges (all images green + code-owner approval), packages publish in parallel per registry (PyPI, npm, NuGet, Maven Central); images are already public at `release-X.Y.Z` from the build stage |
 | tag | `release-X.Y.Z` + `sdks/sandbox/go/vX.Y.Z` minted on `C_bom`, GitHub Release created with the notes and BOM |
 
 A failed release never mints its git tag or GitHub Release, so the
@@ -109,13 +109,16 @@ setting being off.
 
 ## Release Runbook
 
-### Publish order and rollback
+### Publish and rollback
 
-Packages publish in verify-then-continue order — each leg is externally
-verified before the next starts. Maven Central runs **last** because a
-released Maven version is immutable: ordering it last means every
-reversible ecosystem is already verified before the irreversible step.
-On a failure, remediate already-published legs in reverse order:
+Registry legs (PyPI, npm, NuGet, Maven Central) run in parallel and
+independently — there is no cross-ecosystem ordering. Publish steps are
+idempotent: a version already visible on its registry is skipped, so
+re-runs never collide with registry immutability (a released Maven
+version is immutable; the `sandbox-bom` POM's presence on Central is
+the skip marker). A successful upload is not re-verified against the
+public index — registries' simple indexes can lag an upload by minutes.
+On a failure, remediate already-published legs:
 
 | Ecosystem | Revocation |
 |---|---|

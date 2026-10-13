@@ -75,7 +75,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Rules removed successfully. */
+                /**
+                 * @description Rules removed successfully, or no matching rules were found. With
+                 *     the internal experimental revision runtime enabled, an applied
+                 *     change is confirmed by the receiver after optional policy-file
+                 *     persistence and nft application, before local policy publication
+                 *     and success. It does not wait for the default 30-second old-request
+                 *     drain or promise atomic visibility before confirmation.
+                 */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -87,6 +94,21 @@ export interface paths {
                 400: components["responses"]["BadRequest"];
                 401: components["responses"]["Unauthorized"];
                 500: components["responses"]["InternalServerError"];
+                /**
+                 * @description The internal experimental revision runtime is unavailable, the
+                 *     mutation outcome could not be confirmed, or sticky recovery is
+                 *     required. This response does not prove that external effects were
+                 *     rolled back or that packets are isolated. No policy epoch is
+                 *     exposed by this API.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": string;
+                    };
+                };
             };
         };
         options?: never;
@@ -113,7 +135,13 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description Patch applied successfully. */
+                /**
+                 * @description Patch applied successfully. With the internal experimental revision
+                 *     runtime enabled, success follows optional policy-file persistence,
+                 *     nft application, exact receiver confirmation and local policy
+                 *     publication. It does not wait for the default 30-second old-request
+                 *     drain or promise atomic visibility before confirmation.
+                 */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -125,6 +153,21 @@ export interface paths {
                 400: components["responses"]["BadRequest"];
                 401: components["responses"]["Unauthorized"];
                 500: components["responses"]["InternalServerError"];
+                /**
+                 * @description The internal experimental revision runtime is unavailable, the
+                 *     mutation outcome could not be confirmed, or sticky recovery is
+                 *     required. This response does not prove that external effects were
+                 *     rolled back or that packets are isolated. No policy epoch is
+                 *     exposed by this API.
+                 */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/plain": string;
+                    };
+                };
             };
         };
         trace?: never;

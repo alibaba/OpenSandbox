@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import json
 import os
 from datetime import datetime, timedelta, timezone
@@ -799,6 +800,33 @@ def test_fetch_execd_archive_caches_by_platform_key(mock_docker):
 
 
 @patch("opensandbox_server.services.docker.docker_service.docker")
+def test_fetch_execd_archive_passes_configured_network_mode(mock_docker):
+    """The execd cache container must not fall back to the Docker API default (`bridge`).
+
+    Without an explicit network mode the Docker API attaches the cache container to `bridge`,
+    which fails wherever netavark cannot apply its ruleset (e.g. rootless podman in WSL2) even
+    though the sandbox itself is configured with a working mode such as `pasta`.
+    """
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.info.return_value = {"OSType": "linux", "Architecture": "amd64"}
+
+    container = MagicMock()
+    container.get_archive.return_value = ([b"payload"], {})
+    mock_client.containers.create.return_value = container
+
+    cfg = _app_config()
+    cfg.docker.network_mode = "pasta"
+    service = DockerSandboxService(config=cfg)
+
+    with patch.object(service, "_docker_operation"):
+        service._fetch_execd_archive()
+
+    assert mock_client.containers.create.call_args.kwargs["network_mode"] == "pasta"
+
+
+@patch("opensandbox_server.services.docker.docker_service.docker")
 def test_fetch_execd_archive_caches_session_gate_by_platform_key(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
@@ -971,6 +999,62 @@ async def test_network_policy_requires_egress_image(mock_docker):
 
     assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
     assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker_service.docker")
+async def test_container_runtime_network_modes_are_not_treated_as_user_defined(mock_docker):
+    """`pasta` / `slirp4netns` / `none` are runtime network modes, not user-defined networks.
+
+    They must be passed through to the container runtime instead of being looked up as a
+    Docker network (podman has no `pasta` network driver and rejects a network with that
+    name), which is what makes them usable where bridge networking is unavailable.
+    """
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    for mode in ("pasta", "slirp4netns", "none"):
+        cfg = _app_config()
+        cfg.docker.network_mode = mode
+        service = DockerSandboxService(config=cfg)
+
+        assert service.network_mode == mode
+        assert service._is_user_defined_network() is False
+        service._validate_network_exists()  # must not raise for runtime network modes
+
+    mock_client.networks.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker_service.docker")
+async def test_network_policy_rejects_container_runtime_network_modes(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    for mode in ("pasta", "slirp4netns", "none"):
+        cfg = _app_config()
+        cfg.docker.network_mode = mode
+        cfg.egress = EgressConfig(image="egress:latest")
+        service = DockerSandboxService(config=cfg)
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            networkPolicy=NetworkPolicy(default_action="deny", egress=[]),
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await service.create_sandbox(request)
+
+        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+        assert mode in exc.value.detail["message"]
 
 
 @pytest.mark.asyncio
@@ -3104,6 +3188,41 @@ def test_renew_expiration_rejects_manual_cleanup_sandbox():
     assert exc_info.value.detail["message"] == "Sandbox manual-id does not have automatic expiration enabled."
 
 
+@pytest.mark.parametrize(
+    "delta_seconds",
+    [-600, 0, 600, 7200],
+    ids=["shorten", "unchanged", "extend", "above-create-limit"],
+)
+def test_renew_expiration_sets_future_timestamp_without_create_limit(tmp_path, delta_seconds):
+    config = _app_config()
+    config.server.max_sandbox_timeout_seconds = 3600
+    service = DockerSandboxService(config=config)
+    service._metadata_store = DockerMetadataStore(root=tmp_path / "metadata")
+    current_expiration = datetime.now(timezone.utc) + timedelta(minutes=30)
+    new_expiration = current_expiration + timedelta(seconds=delta_seconds)
+    container = MagicMock()
+    labels = {
+        SANDBOX_ID_LABEL: "sandbox-1",
+        SANDBOX_EXPIRES_AT_LABEL: current_expiration.isoformat(),
+    }
+    container.attrs = {"Config": {"Labels": labels}}
+
+    with (
+        patch.object(service, "_get_container_by_sandbox_id", return_value=container),
+        patch.object(service, "_schedule_expiration") as mock_schedule,
+        patch.object(service, "_update_container_labels") as mock_update,
+    ):
+        response = service.renew_expiration(
+            "sandbox-1", RenewSandboxExpirationRequest(expiresAt=new_expiration)
+        )
+
+    assert response.expires_at == new_expiration
+    mock_schedule.assert_called_once_with("sandbox-1", new_expiration)
+    mock_update.assert_called_once_with(container, labels)
+    assert labels[SANDBOX_EXPIRES_AT_LABEL] == new_expiration.isoformat()
+    assert service._metadata_store.get_expiration("sandbox-1") == new_expiration.isoformat()
+
+
 def test_renew_expiration_persists_override_when_label_refresh_fails(tmp_path):
     service = DockerSandboxService(config=_app_config())
     service._metadata_store = DockerMetadataStore(root=tmp_path / "metadata")
@@ -3398,6 +3517,73 @@ class TestDockerVolumeValidation:
 
         assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST
         assert exc_info.value.detail["code"] == SandboxErrorCodes.PVC_VOLUME_NOT_FOUND
+
+    @staticmethod
+    async def _create_with_failing_image_pull(mock_docker, remove_volume=None):
+        """Create a sandbox whose image pull fails after an auto-created PVC volume.
+
+        Returns the raised exception, the pull error, and the volumes left behind.
+        """
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+        volumes: dict[str, dict] = {}
+
+        def inspect_volume(name):
+            if name not in volumes:
+                raise DockerNotFound("volume not found")
+            return volumes[name]
+
+        def create_volume(name, labels):
+            volumes[name] = {"Name": name, "Labels": labels}
+
+        mock_client.api.inspect_volume.side_effect = inspect_volume
+        mock_client.api.create_volume.side_effect = create_volume
+        mock_client.api.remove_volume.side_effect = remove_volume or volumes.pop
+        mock_docker.from_env.return_value = mock_client
+
+        service = DockerSandboxService(config=_app_config())
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:does-not-exist"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            volumes=[
+                Volume(
+                    name="scratch",
+                    pvc=PVC(claim_name="scratch", delete_on_sandbox_termination=True),
+                    mount_path="/mnt/scratch",
+                )
+            ],
+        )
+        pull_failed = HTTPException(status_code=500, detail="pull failed")
+
+        with patch.object(service, "_ensure_image_available", side_effect=pull_failed):
+            with pytest.raises(HTTPException) as exc_info:
+                await asyncio.wait_for(service.create_sandbox(request), timeout=5)
+        return exc_info.value, pull_failed, volumes
+
+    @pytest.mark.asyncio
+    async def test_auto_created_pvc_volume_removed_when_image_pull_fails(self, mock_docker):
+        """A volume auto-created for the request is removed if creation fails before provisioning."""
+        raised, pull_failed, volumes = await self._create_with_failing_image_pull(mock_docker)
+
+        assert raised is pull_failed
+        assert "scratch" not in volumes
+
+    @pytest.mark.asyncio
+    async def test_create_failure_still_raised_when_volume_cleanup_fails(self, mock_docker):
+        """A cleanup error must not swallow the create failure or leave the request hanging."""
+
+        def remove_volume(name):
+            raise RuntimeError("unexpected cleanup failure")
+
+        raised, pull_failed, _ = await self._create_with_failing_image_pull(
+            mock_docker, remove_volume=remove_volume
+        )
+
+        assert raised is pull_failed
 
     def test_pvc_volume_auto_created_when_not_found(self, mock_docker):
         """PVC backend auto-creates Docker named volume when createIfNotExists is true (default)."""

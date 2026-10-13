@@ -29,4 +29,5 @@ This is the complete list of OpenSandbox Enhancement Proposals:
 | [OSEP-0021](0021-scalable-asynchronous-client-side-pool-warmup.md) |      Scalable Asynchronous Client-Side Pool Warmup                      |     draft     |  2026-08-19  |
 | [OSEP-0022](0022-multi-sandbox-egress-control-plane.md)        |      Multi-Sandbox Egress Control Plane                                  | implementing  |  2026-08-21  |
 | [OSEP-0023](0023-credential-bound-tls-interception.md)          |      Credential-Bound TLS Interception                                    | implementing  |  2026-09-09  |
-| [OSEP-0025](0025-delegated-sandbox-admission.md) | Admission and Idempotency for Delegated Sandbox Creation | draft | 2026-09-30 |
+| [OSEP-0024](0024-auto-pause-and-wake-on-access-for-fast-sandbox.md) |      Auto-Pause and Wake-on-Access for Fast Sandbox                  | implementing  |  2026-10-12  |
+| [OSEP-0025](0025-delegated-sandbox-admission.md) | Broker Integration for Delegated Sandbox Creation | draft | 2026-10-13 |

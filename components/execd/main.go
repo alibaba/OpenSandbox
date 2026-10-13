@@ -60,6 +60,14 @@ func main() {
 }
 
 func run() int {
+	if len(os.Args) > 1 && os.Args[1] == web.FilesystemWorkerArg {
+		if err := web.RunFilesystemWorker(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+		return 0
+	}
+
 	clone3Compat := clone3compat.MaybeApply()
 
 	version.EchoVersion("OpenSandbox Execd")
@@ -172,6 +180,12 @@ func run() int {
 			_ = otelShutdown(shutdownCtx)
 		}()
 	}
+
+	// Watch the sandbox cgroup for OOM kills (metric + troubleshooting logs,
+	// see components/execd/docs/opentelemetry.md). Runs independently of
+	// OTLP export so OOM logs work even when metrics are disabled.
+	oomWatchStop := telemetry.StartOOMWatch(context.Background())
+	defer oomWatchStop()
 
 	initManager := controller.InitRuntimeInitManager(&controller.RuntimeInitConfig{
 		Ctrl:              ctrl,

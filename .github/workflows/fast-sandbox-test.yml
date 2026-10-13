@@ -26,6 +26,10 @@ jobs:
     if: needs.changes.outputs.relevant == 'true'
     runs-on: kvm
     timeout-minutes: 180
+    env:
+      # Full-stack profile (single round while scenarios stabilize).
+      IDLE_PAUSE: "1"
+      IDLE_PAUSE_ROUNDS: "1"
     steps:
       # actions/checkout always executes as the runner user; the script
       # steps below run as root and leave root-owned files (venv, pycache)
@@ -44,12 +48,20 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
+      - name: Test integration script failure handling
+        # The self-hosted runner's system python3 may still be Python 3.6.
+        run: uv run --no-project --python 3.12 python -m unittest discover -s scripts/tests -p test_fast_sandbox_integration_env.py -v
+
       - name: Run integration tests
         run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh up --auto-clean
 
-      - name: Run SDK e2e
+      - name: Run base SDK e2e
         timeout-minutes: 30
         run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh sdk-e2e
+
+      - name: Run idle-pause SDK e2e
+        timeout-minutes: 45
+        run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh idle-e2e
 
       # Collect the env's own failure dump ($WORK/logs/failure-*.txt: kind
       # nodes/pods, controller / firecracker-runtime / fastlet / builder /

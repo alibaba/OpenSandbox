@@ -34,10 +34,12 @@ from opensandbox_server.services.constants import (
 )
 from opensandbox_server.api.schema import (
     CredentialProxyConfig,
+    IdlePolicy,
     ImageAuth,
     ListSandboxesRequest,
     NetworkPolicy,
     PlatformSpec,
+    SandboxLifecycle,
 )
 from opensandbox_server.config import (
     EGRESS_MODE_DNS,
@@ -561,6 +563,25 @@ class TestKubernetesSandboxServiceCreate:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
         assert "ingress.mode='gateway'" in exc_info.value.detail["message"]
+        k8s_service.workload_provider.create_workload.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_create_sandbox_rejects_idle_policy_on_pod_backend(
+        self, k8s_service, create_sandbox_request
+    ):
+        # OSEP-0024: auto-pause/wake is fsb-only; pods must refuse the opt-in
+        # instead of silently ignoring it.
+        create_sandbox_request.lifecycle = SandboxLifecycle(
+            idlePolicy=IdlePolicy(idleTimeoutSeconds=300, onIdle="pause")
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await k8s_service.create_sandbox(create_sandbox_request)
+
+        assert exc_info.value.status_code == 400
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+        assert "idlePolicy" in exc_info.value.detail["message"]
+        assert "fast-sandbox" in exc_info.value.detail["message"]
         k8s_service.workload_provider.create_workload.assert_not_called()
 
     @pytest.mark.asyncio
@@ -2360,6 +2381,34 @@ class TestAttachPvcOwnerReferences:
 
 
 class TestListSandboxes:
+    def test_deleting_batchsandbox_status_in_list_and_get(self, k8s_service, mock_workload):
+        from opensandbox_server.api.schema import PaginationRequest, SandboxFilter
+        from opensandbox_server.services.k8s.batchsandbox_provider import BatchSandboxProvider
+
+        deletion_timestamp = datetime(2026, 10, 8, 10, tzinfo=timezone.utc)
+        mock_workload["metadata"]["deletionTimestamp"] = deletion_timestamp.isoformat()
+        mock_workload["status"] = {"phase": "Pending", "ready": 0}
+        provider = k8s_service.workload_provider
+        provider.list_workloads.return_value = [mock_workload]
+        provider.get_workload.return_value = mock_workload
+        provider.get_status.side_effect = BatchSandboxProvider(MagicMock()).get_status
+        provider.get_expiration.return_value = datetime.now(timezone.utc) + timedelta(hours=1)
+
+        request = ListSandboxesRequest(
+            filter=SandboxFilter(state=["Stopping"]), pagination=PaginationRequest(page=1, page_size=20)
+        )
+        response = k8s_service.list_sandboxes(request)
+        assert response.pagination.total_items == 1
+        assert len(response.items) == 1
+        sandbox = k8s_service.get_sandbox("test-sandbox-123")
+        for result in (response.items[0], sandbox):
+            assert result.status.state == "Stopping"
+            assert result.status.reason == "DELETING"
+            assert result.status.last_transition_at == deletion_timestamp
+
+        request.filter.state = ["Pending"]
+        assert not k8s_service.list_sandboxes(request).items
+
     
     def test_list_all_sandboxes_succeeds(self, k8s_service, mock_workload):
         k8s_service.workload_provider.list_workloads.return_value = [mock_workload]
@@ -2508,6 +2557,33 @@ class TestListSandboxes:
         assert response.items[0].platform is None
 
 class TestRenewExpiration:
+
+    @pytest.mark.parametrize(
+        "delta_seconds",
+        [-600, 0, 600, 7200],
+        ids=["shorten", "unchanged", "extend", "above-create-limit"],
+    )
+    def test_renew_sets_future_timestamp_without_create_limit(
+        self, k8s_service, mock_workload, delta_seconds
+    ):
+        from opensandbox_server.api.schema import RenewSandboxExpirationRequest
+
+        k8s_service.app_config.server.max_sandbox_timeout_seconds = 3600
+        current_expiration = datetime.now(timezone.utc) + timedelta(minutes=30)
+        new_expiration = current_expiration + timedelta(seconds=delta_seconds)
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_expiration.return_value = current_expiration
+
+        response = k8s_service.renew_expiration(
+            "test-sandbox-id", RenewSandboxExpirationRequest(expiresAt=new_expiration)
+        )
+
+        assert response.expires_at == new_expiration
+        k8s_service.workload_provider.update_expiration.assert_called_once_with(
+            sandbox_id="test-sandbox-id",
+            namespace=k8s_service.namespace,
+            expires_at=new_expiration,
+        )
     
     def test_renew_expiration_succeeds(self, k8s_service, mock_workload):
         new_expiration = datetime.now(timezone.utc) + timedelta(hours=2)

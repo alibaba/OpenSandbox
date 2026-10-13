@@ -26,6 +26,7 @@ from datetime import timedelta
 
 import httpx
 
+from opensandbox._httpx import build_async_redirect_client_options
 from opensandbox.adapters.converter.command_execution import (
     build_run_command_request_body as _build_run_command_request_body,
 )
@@ -115,6 +116,7 @@ class CommandsAdapter(Commands):
         self._client = Client(
             base_url=base_url,
             timeout=timeout,
+            follow_redirects=self.connection_config.follow_redirects,
         )
 
         # Inject httpx client (adapter-owned)
@@ -123,6 +125,7 @@ class CommandsAdapter(Commands):
             headers=headers,
             timeout=timeout,
             transport=self.connection_config.transport,
+            **build_async_redirect_client_options(self.connection_config, base_url),
         )
         self._client.set_async_httpx_client(self._httpx_client)
 
@@ -144,6 +147,7 @@ class CommandsAdapter(Commands):
                 pool=None,
             ),
             transport=unwrap_retry_transport(self.connection_config.transport),
+            **build_async_redirect_client_options(self.connection_config, base_url),
         )
 
     async def _get_client(self):

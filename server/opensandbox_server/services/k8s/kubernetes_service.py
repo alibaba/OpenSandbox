@@ -664,6 +664,20 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
             },
         )
 
+    def _ensure_idle_policy_support(self, request: CreateSandboxRequest) -> None:
+        """Refuse the OSEP-0024 idle policy on pod sandboxes (fsb backend only)."""
+        if request.lifecycle is not None and request.lifecycle.idle_policy is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": SandboxErrorCodes.INVALID_PARAMETER,
+                    "message": (
+                        "lifecycle.idlePolicy is only supported by the fast-sandbox "
+                        "backend; pod sandboxes are never auto-paused or auto-woken."
+                    ),
+                },
+            )
+
     def _ensure_pool_ref_exists(self, pool_ref: str) -> None:
         """Validate that the referenced Pool exists before creating a BatchSandbox."""
         try:
@@ -1026,6 +1040,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
         self._ensure_secure_access_support(request)
         self._ensure_network_policy_support(request)
         self._ensure_image_auth_support(request)
+        self._ensure_idle_policy_support(request)
 
         sandbox_id = self.generate_sandbox_id()
 

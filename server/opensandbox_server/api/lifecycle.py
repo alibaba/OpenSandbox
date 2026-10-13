@@ -375,8 +375,9 @@ def renew_sandbox_expiration(
     """
     Renew sandbox expiration.
 
-    Renews the absolute expiration time of a sandbox.
-    The new expiration time must be in the future and after the current expiresAt time.
+    Sets the absolute expiration time of a sandbox to the supplied future timestamp.
+    This may shorten, preserve, or extend the current expiration.
+    The creation-time limit server.max_sandbox_timeout_seconds does not apply.
 
     Args:
         sandbox_id: Unique sandbox identifier

@@ -30,6 +30,7 @@ from typing import TypedDict
 
 import httpx
 
+from opensandbox._httpx import build_async_redirect_client_options
 from opensandbox.adapters.converter.exception_converter import (
     ExceptionConverter,
 )
@@ -40,6 +41,7 @@ from opensandbox.adapters.converter.response_handler import (
     extract_request_id,
     handle_api_error,
 )
+from opensandbox.adapters.filesystem_identity import filesystem_identity_path
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import InvalidArgumentException, SandboxApiException
 from opensandbox.models.filesystem import (
@@ -92,7 +94,8 @@ class FilesystemAdapter(Filesystem):
     FILESYSTEM_DOWNLOAD_PATH = "/files/download"
 
     def __init__(
-        self, connection_config: ConnectionConfig, execd_endpoint: SandboxEndpoint
+        self, connection_config: ConnectionConfig, execd_endpoint: SandboxEndpoint,
+        *, _identity_prefix: str = "",
     ) -> None:
         """
         Initialize the filesystem service adapter.
@@ -103,6 +106,7 @@ class FilesystemAdapter(Filesystem):
         """
         self.connection_config = connection_config
         self.execd_endpoint = execd_endpoint
+        self._identity_prefix = _identity_prefix
         from opensandbox.api.execd import Client
 
         base_url = self._get_execd_base_url()
@@ -115,17 +119,27 @@ class FilesystemAdapter(Filesystem):
             headers=headers,
             timeout=timeout,
             transport=self.connection_config.transport,
+            **build_async_redirect_client_options(self.connection_config, base_url),
         )
 
         self._client = Client(
             base_url=base_url,
             timeout=timeout,
+            follow_redirects=self.connection_config.follow_redirects,
         )
         self._client.set_async_httpx_client(self._httpx_client)
 
+    def with_identity(self, uid: int, gid: int) -> "FilesystemAdapter":
+        """Create an independent filesystem client with explicit Linux credentials."""
+        return FilesystemAdapter(
+            self.connection_config,
+            self.execd_endpoint,
+            _identity_prefix=filesystem_identity_path(uid, gid),
+        )
+
     def _get_execd_base_url(self) -> str:
         protocol = self.connection_config.protocol
-        return f"{protocol}://{self.execd_endpoint.endpoint}"
+        return f"{protocol}://{self.execd_endpoint.endpoint.rstrip('/')}{self._identity_prefix}"
 
     async def _get_httpx_client(self) -> httpx.AsyncClient:
         """Return adapter-owned httpx client for execd."""
@@ -137,8 +151,7 @@ class FilesystemAdapter(Filesystem):
 
     def _get_execd_url(self, path: str) -> str:
         """Build URL for execd endpoint."""
-        protocol = self.connection_config.protocol
-        return f"{protocol}://{self.execd_endpoint.endpoint}{path}"
+        return f"{self._get_execd_base_url()}{path}"
 
     async def read_file(
         self,
@@ -319,7 +332,11 @@ class FilesystemAdapter(Filesystem):
 
             multipart_parts.append(("file", (entry.path, content, content_type)))
 
-        return await client.post(url, files=multipart_parts)
+        return await client.post(
+            url,
+            files=multipart_parts,
+            follow_redirects=False,
+        )
 
     async def _write_files_chunked(
         self,
@@ -404,6 +421,7 @@ class FilesystemAdapter(Filesystem):
             url,
             content=_body(),
             headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+            follow_redirects=False,
         )
 
     async def write_file(

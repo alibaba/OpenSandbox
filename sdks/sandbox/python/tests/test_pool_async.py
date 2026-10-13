@@ -827,10 +827,37 @@ async def test_async_default_warmup_owns_transport_while_manager_uses_shared(
         assert manager_configs[0]._owns_transport
         assert sandbox_configs[0]._owns_transport
         assert sandbox_configs[0].retry_policy.max_retries == 0
+        assert sandbox_configs[0].disable_metrics is True
         another_warmup_config = pool._connection_for_warmup_create()
         assert another_warmup_config is not sandbox_configs[0]
         assert another_warmup_config.transport is None
         assert another_warmup_config._owns_transport
+        assert another_warmup_config.disable_metrics is True
+    finally:
+        await pool.shutdown(False)
+
+
+@pytest.mark.asyncio
+async def test_async_warmup_connection_disables_metrics_with_shared_transport() -> None:
+    transport = _AsyncTransport()
+    connection_config = ConnectionConfig(transport=transport)
+    pool = SandboxPoolAsync(
+        pool_name="pool",
+        owner_id="owner-1",
+        max_idle=0,
+        state_store=InMemoryAsyncPoolStateStore(),
+        connection_config=connection_config,
+        creation_spec=PoolCreationSpec(image="ubuntu:22.04"),
+        sandbox_manager_factory=lambda config: _manager_factory(FakeAsyncManager()),
+        sandbox_factory=FakeAsyncSandbox,  # type: ignore[arg-type]
+    )
+    await pool.start()
+    try:
+        warmup_config = pool._connection_for_warmup_create()
+        assert warmup_config is not connection_config
+        assert warmup_config.disable_metrics is True
+        assert warmup_config.transport is transport
+        assert connection_config.disable_metrics is False
     finally:
         await pool.shutdown(False)
 

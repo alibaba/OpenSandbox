@@ -404,5 +404,5 @@ kubectl delete namespace opensandbox-dataplane
 - [Kubernetes Overview](/architecture/control-plane/operator) — Operator features and CRDs
 - [Pause & Resume](/guides/pause-resume) — Snapshot-based pause/resume on Kubernetes
 - [Secure Container](/guides/secure-container) — gVisor and Kata on Kubernetes
-- [Network Isolation](/architecture/network/network-isolation) — Egress policy design for Kubernetes
+- [Network Isolation on Kubernetes](/guides/network-isolation) — Egress policy design for Kubernetes
 - [Helm charts source](https://github.com/opensandbox-group/OpenSandbox/tree/main/manifests/charts) — Chart sources and values reference

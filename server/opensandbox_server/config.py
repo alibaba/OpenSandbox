@@ -265,6 +265,78 @@ class RenewIntentConfig(BaseModel):
     )
 
 
+class IdlePauseRedisConfig(BaseModel):
+    """Redis settings for idle-pause activity tracking (OSEP-0024)."""
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "When true, the idle sweeper reads activity keys and pause locks "
+            "from Redis. Required for auto-pause."
+        ),
+    )
+    dsn: Optional[str] = Field(
+        default=None,
+        description=(
+            'Redis DSN (e.g. "redis://127.0.0.1:6379/0"). '
+            "Required when redis.enabled is true."
+        ),
+    )
+    lock_ttl_seconds: int = Field(
+        default=30,
+        ge=1,
+        description="TTL of the per-sandbox pause admission lock (SET NX EX).",
+    )
+
+    @model_validator(mode="after")
+    def require_dsn_when_redis_enabled(self) -> "IdlePauseRedisConfig":
+        if self.enabled and (self.dsn is None or not str(self.dsn).strip()):
+            raise ValueError(
+                "[idle_pause] redis.dsn must be set when redis.enabled is true."
+            )
+        return self
+
+
+class IdlePauseConfig(BaseModel):
+    """Auto-pause for opted-in fast sandboxes after X seconds of inactivity.
+
+    OSEP-0024. Only sandboxes that declare ``lifecycle.idlePolicy`` at create
+    time are ever auto-paused or auto-woken; absent the field this feature is
+    a no-op regardless of these switches.
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Master switch: enables the idle sweeper (and server-side activity "
+            "registry access). Off by default."
+        ),
+    )
+    sweep_interval_seconds: int = Field(
+        default=15,
+        ge=1,
+        description="Period between idle sweeps per server replica.",
+    )
+    activity_ttl_seconds: int = Field(
+        default=1800,
+        ge=30,
+        description=(
+            "TTL of per-sandbox activity keys. Must stay >= the largest accepted "
+            "idlePolicy.idleTimeoutSeconds (30-86400, enforced at create time) so "
+            "a present-but-stale key always implies idle-by-value. Keep the ingress "
+            "--activity-ttl-seconds equal to this value."
+        ),
+    )
+    redis: IdlePauseRedisConfig = Field(
+        default_factory=IdlePauseRedisConfig,
+        description=(
+            "Redis used for activity keys and pause locks. In TOML, set keys under "
+            "the same [idle_pause] table as redis.enabled, redis.dsn, "
+            "redis.lock_ttl_seconds (dotted keys)."
+        ),
+    )
+
+
 _KEY_ID_RE = re.compile(r"^[0-9a-z]$")
 
 
@@ -609,7 +681,8 @@ class ServerConfig(BaseModel):
         default=None,
         ge=60,
         description=(
-            "Maximum allowed sandbox TTL in seconds for requests that specify timeout. "
+            "Maximum allowed sandbox TTL in seconds for create requests that specify timeout. "
+            "Does not apply to renew-expiration requests or cap total sandbox lifetime. "
             "Omit from config to disable the server-side upper bound."
         ),
     )
@@ -1199,7 +1272,12 @@ class SecureRuntimeConfig(BaseModel):
 class DockerConfig(BaseModel):
     network_mode: str = Field(
         default="host",
-        description="Docker network mode for sandbox containers (host, bridge, or a custom user-defined network name).",
+        description=(
+            "Network attachment for sandbox containers: 'host', 'bridge', 'none', 'pasta', "
+            "'slirp4netns', or the name of an existing user-defined network. 'pasta' / "
+            "'slirp4netns' are container-runtime user-mode networks (podman) that the host "
+            "reaches through the published ports; egress/networkPolicy still requires 'bridge'."
+        ),
     )
     api_timeout: Optional[int] = Field(
         default=None,
@@ -1470,6 +1548,13 @@ class AppConfig(BaseModel):
         default_factory=RenewIntentConfig,
         description="Auto-renew sandbox expiration when reverse-proxy access is observed.",
     )
+    idle_pause: IdlePauseConfig = Field(
+        default_factory=IdlePauseConfig,
+        description=(
+            "Auto-pause opted-in fast sandboxes after inactivity (OSEP-0024). "
+            "Off by default."
+        ),
+    )
     otel: OtelConfig = Field(
         default_factory=OtelConfig,
         description="OpenTelemetry export for SDK metrics ingestion (Phase 1: create latency).",
@@ -1654,6 +1739,8 @@ __all__ = [
     "AppConfig",
     "RenewIntentConfig",
     "RenewIntentRedisConfig",
+    "IdlePauseConfig",
+    "IdlePauseRedisConfig",
     "ServerConfig",
     "LogConfig",
     "RuntimeConfig",

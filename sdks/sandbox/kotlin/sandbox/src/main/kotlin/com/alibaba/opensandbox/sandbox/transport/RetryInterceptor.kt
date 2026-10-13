@@ -97,7 +97,10 @@ class RetryInterceptor
                 var effectiveChain = chain
                 val perAttemptMs = computePerAttemptTimeoutMs(elapsedBefore)
                 if (perAttemptMs != null) {
-                    val ms = perAttemptMs.toInt().coerceAtLeast(1)
+                    // A remaining deadline above Int.MAX_VALUE millis overflows toInt()
+                    // into a negative value; cap it at OkHttp's limit instead of
+                    // collapsing the per-attempt timeouts to ~1ms.
+                    val ms = minOf(perAttemptMs, Int.MAX_VALUE.toLong()).toInt()
                     effectiveChain = effectiveChain.withConnectTimeout(ms, TimeUnit.MILLISECONDS)
                     effectiveChain = effectiveChain.withReadTimeout(ms, TimeUnit.MILLISECONDS)
                     effectiveChain = effectiveChain.withWriteTimeout(ms, TimeUnit.MILLISECONDS)

@@ -80,13 +80,25 @@ class TestSandboxLifecycle:
             )
 
     def test_create_request_rejects_lifecycle_with_pool_ref(self):
-        with pytest.raises(ValidationError, match="lifecycle cannot be used together with poolRef"):
+        # OSEP-0024: lifecycle hooks conflict with pool mode, but the
+        # hooks-free idlePolicy container is allowed through.
+        with pytest.raises(
+            ValidationError,
+            match="lifecycle hooks cannot be used together with poolRef",
+        ):
             CreateSandboxRequest(
                 extensions={"poolRef": "default/pool"},
                 lifecycle=SandboxLifecycle(
                     preStart=LifecycleHook(command=["true"]),
                 ),
             )
+
+        request = CreateSandboxRequest(
+            extensions={"poolRef": "default/pool"},
+            lifecycle=SandboxLifecycle(idlePolicy={"idleTimeoutSeconds": 300, "onIdle": "pause"}),
+        )
+        assert request.lifecycle is not None
+        assert request.lifecycle.idle_policy is not None
 
     @pytest.mark.parametrize(
         ("hook", "expected"),

@@ -74,6 +74,11 @@ export interface IsolatedSessionsAdapterOptions {
   fetch?: typeof fetch;
   /** Unbounded-timeout fetch for SSE streaming (run endpoint). Falls back to `fetch`. */
   sseFetch?: typeof fetch;
+  /**
+   * No-overall-timeout fetch for uploads of caller-provided bodies. See
+   * `ConnectionConfig.uploadFetch`. Falls back to `fetch`.
+   */
+  uploadFetch?: typeof fetch;
   headers?: Record<string, string>;
 }
 
@@ -98,6 +103,7 @@ class IsolationSessionHandle implements IsolationSession {
         baseUrl: this.adapter.opts.baseUrl,
         sessionId: this._info.session_id,
         fetch: this.adapter.opts.fetch,
+        uploadFetch: this.adapter.opts.uploadFetch,
         headers: this.adapter.opts.headers,
       });
     }

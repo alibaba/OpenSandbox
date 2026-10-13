@@ -57,6 +57,17 @@ public sealed class Sandbox : IAsyncDisposable
     public ISandboxFiles Files { get; }
 
     /// <summary>
+    /// Returns an independent filesystem client using explicit Linux credentials.
+    /// Unsupported servers fail without falling back to the default identity.
+    /// </summary>
+    public ISandboxFiles FilesWithIdentity(uint uid, uint gid)
+    {
+        if (Files is not IIdentitySandboxFiles adapter)
+            throw new NotSupportedException("The selected filesystem adapter does not support execution identity.");
+        return adapter.WithIdentity(uid, gid);
+    }
+
+    /// <summary>
     /// Gets the health check service.
     /// </summary>
     public IExecdHealth Health { get; }
@@ -771,7 +782,9 @@ public sealed class Sandbox : IAsyncDisposable
     }
 
     /// <summary>
-    /// Renews the sandbox expiration time.
+    /// Sets the sandbox expiration to the current time plus timeoutSeconds.
+    /// This may shorten or extend the remaining lifetime. The creation-time
+    /// server timeout limit does not apply.
     /// </summary>
     /// <param name="timeoutSeconds">The new timeout in seconds from now.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

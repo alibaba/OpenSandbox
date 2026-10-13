@@ -43,6 +43,11 @@ class CompositeSandboxService(SandboxService, ExtensionService):
         self._kubernetes = kubernetes
         self._fsb = fsb
 
+    @property
+    def fsb_service(self) -> FastSandboxService:
+        """The fsb backend, for background integrations."""
+        return self._fsb
+
     def _backend(self, sandbox_id: str) -> KubernetesSandboxService | FastSandboxService:
         return self._fsb if sandbox_id.startswith("fsb-") else self._kubernetes
 

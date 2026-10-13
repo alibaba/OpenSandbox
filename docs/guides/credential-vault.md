@@ -500,6 +500,24 @@ curl -fsS https://api.example.com/v1/projects/123/variables
 - Keep fake environment variables when a CLI refuses to start without a key; the
   vault-injected header is what authenticates the outbound request.
 
+## Path Ambiguity Guard
+
+The sidecar inspects the request path only for requests that would receive
+injected credentials. A request is rejected with `403` when its path contains
+dot-segments (`..`) or backslashes (`\`, `%5c`) at any percent-decoding depth,
+or when percent-decoding does not converge within the guard's iteration bound —
+these are traversal or path-confusion primitives that legitimate clients do not
+send.
+
+Encoded slashes (`%2f`, including nested forms like `%252f`) are allowed when
+every decoding depth of the path matches the same credential binding. This
+keeps legitimate encoded wire formats working — npm scoped registry paths
+(`/@scope%2fname`) and artifact-store download URLs whose coordinates are
+double-encoded (for example `pkg%252F1.0`, as produced by some internal pypi
+proxies) — while a path whose decoding would cross a binding boundary is still
+rejected before any credential is injected. Requests outside every binding
+scope pass through untouched.
+
 ## Migrating From `ports`
 
 The `match.ports` field is deprecated. Port is now derived from scheme (`https`→443, `http`→80). Only ports 80 and 443 are supported; non-standard values are rejected with a validation error.
@@ -511,3 +529,109 @@ If you have existing bindings that use `ports` to narrow scope, migrate them to 
 | `schemes: ["http", "https"], ports: [443]` | `schemes: ["https"]` |
 | `schemes: ["http", "https"], ports: [80]` | `schemes: ["http"]` |
 | `schemes: ["https"], ports: [443]` | `schemes: ["https"]` (remove `ports`) |
+
+## Experimental Live Credential-Bound Admission (OSEP-0023)
+
+::: warning Experimental boundary
+The live credential-bound loop is an internal sidecar experiment, not a
+supported deployment mode. It is documented here to bound what the current
+implementation actually does; the gate remains off by default and no public
+configuration surface is added.
+:::
+
+When the experimental revision runtime is enabled, the sidecar installs an
+immutable decision snapshot into the mitmproxy child over a private
+authenticated IPC channel and admits traffic per connection and per request:
+
+- **Decisions come only from the installed snapshot.** Unbound HTTPS passes
+  through opaquely; bound hosts are decrypted only with a registry admission.
+  Unknown, bootstrapping, or mismatched state denies — the mode never falls
+  back to decrypt-all or dynamic pass-through.
+- **Sticky recovery, no same-sidecar restart.** Any terminal outcome with
+  unknown external effects (a mutation whose remote result cannot be
+  confirmed, a session cleanup failure, an unexpected child exit) latches a
+  permanent recovery-required state: readiness drops, outstanding bootstrap
+  tickets are invalidated, nft writes are quiesced, and quarantine is attempted.
+  Packet isolation is established only when quarantine is confirmed. The same
+  sidecar cannot bootstrap a fresh revision session afterwards; a whole-sidecar
+  restart is not a verified safe recovery procedure.
+- **Request admission and cutover.** A vault mutation is applied to the live
+  receiver first and published publicly only after exact confirmation.
+  A rendered snapshot exceeding the IPC size limit is rejected with HTTP 400
+  before transmission; the current vault and sidecar remain available.
+  In-flight requests finish on their admitted revision; new requests on a
+  connection whose host was removed are fenced immediately (403), and the
+  retired transport is force-closed at the drain deadline. Deleting the vault
+  affects new requests and new connections; a retired connection can never be
+  revived by re-adding the host. Already-admitted requests may finish only
+  inside the bounded drain window — deletion does not recall requests the
+  remote origin already received or revoke credentials already delivered
+  remotely.
+- **Policy updates share the revision barrier.** Existing
+  `POST`/`PUT`/`PATCH`/`DELETE /policy` operations and automatic
+  `deny.always` / `allow.always` reloads validate the complete Policy/Vault pair.
+  A policy that would deny any active binding is rejected before file, nft or
+  receiver effects. A policy-only update preserves the public Vault revision,
+  pinned credential bytes and bindings; it does not reread credential sources.
+  Its commit order is optional user-policy file persistence, nft application,
+  exact receiver confirmation, then Go proxy/base publication and API success.
+  Reload skips user-policy persistence and publishes the accepted loader view
+  only after receiver confirmation. Subsequent Vault writes and bootstraps use
+  the committed internal Policy epoch rather than resetting it to zero.
+- **Policy visibility and failure.** Disk, nft and receiver updates are not
+  instantaneously atomic: new nft rules may affect traffic before receiver
+  confirmation. A receiver failure after successful nft application requires
+  sticky recovery, quarantine and exact-child cleanup, even if the receiver
+  definitively rejected the candidate. Replaying old nft rules or restoring
+  the file cannot prove that new connections or requests were undone.
+  Unavailable or unconfirmed revision updates and recovery-blocked writes
+  return a fixed, sanitized 503; the initial file/nft error may still be 500.
+  Validation failures before effects do not themselves require recovery.
+- **Policy no-ops and retries.** A DELETE with no matching target and an
+  unchanged always-rule reload do not advance the internal Policy epoch, but
+  cannot bypass recovery checks. Other committed writes, including equal
+  content or a loader-detected rewrite, can advance the epoch and initiate
+  another drain. No public epoch, Policy idempotency key or new SDK method is
+  added. `GET /policy` reports the last Go-published user policy, not an
+  in-progress transaction, always-rule overlay or packet-isolation status.
+- **Drain accounting.** Retired transports carry a bounded retirement
+  deadline (default 30 seconds, internal range 1–300). The drain sweep pages
+  expired transports and closes them; a failed close is retried on the next
+  sweep rather than extending the deadline. An HTTP 101 protocol upgrade
+  (including WebSocket) retains its request admission until the connection
+  disconnects, so credential rotation and policy-only changes also drain an
+  upgraded transport even when its host remains bound. API success waits for
+  publication and retirement-deadline registration, not for the 30-second
+  window to elapse. Repeated updates never extend an older request's earliest
+  deadline. A still-covered connection may admit new-revision requests, but
+  closing it for an expired old request also interrupts those newer requests.
+  A still-covered idle connection with no old request is not retired solely
+  because the Policy epoch changes. Sweep scheduling and failed-close retries
+  can delay actual closure; this is not a deadline for opaque or direct-IP
+  connections outside the registry.
+- **ECH is opaque pass-through.** A ClientHello carrying the
+  `encrypted_client_hello` extension (0xfe0d), including GREASE forms, is
+  forwarded untouched as an opaque tunnel without decryption;
+  uninspectable ClientHello data denies. The implementation does
+  not decrypt the inner ClientHello and does not guarantee that an
+  ECH-enabled origin handshake succeeds.
+- **HTTP/1 authority gate.** On a decrypted connection every request must
+  carry exactly one syntactically strict `Host` header equal to the
+  intercepted SNI and the admission binding (port omitted or 443). A
+  conflicting absolute-form target, a CONNECT authority-form inside the
+  stream, missing/duplicate/malformed Host values, and HTTP/2 requests are
+  rejected before any credential can be injected.
+- **`ssl_insecure` is refused in live mode.** The launcher and the addon
+  reject an insecure-upstream configuration when the live admission bundle is
+  active; the legacy installation-only receiver keeps its existing behavior.
+- **Scope.** This mode is scoped to the internal sidecar profile:
+  Docker DNS + nft enforcement, exact-host HTTPS on port 443, HTTP/1.1
+  origin-form or matching absolute-form requests, and inline credentials
+  injected as headers. HTTP/2, the fast-sandbox profile and recovery across a
+  complete sidecar replacement remain out of scope. Dynamic DNS learning and
+  Kubernetes deployments are not covered by this experiment's evidence.
+  Policy participation is part of this implementation; its acceptance evidence
+  is recorded separately from the earlier live-Vault checks below.
+
+The task-level acceptance record for this experiment lives in
+[Live Vault Acceptance](/guides/live-vault-acceptance).

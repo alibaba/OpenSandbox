@@ -210,14 +210,45 @@ class RevisionRuntimeTest(unittest.TestCase):
             self.system.load(None)
 
         receiver = self.system._revision_receiver
+        self.assertEqual(type(receiver).__name__, "InstallationReceiver")
+        registry = receiver._publisher.registry
+        self.assertEqual(registry._view.revision, receiver.readback())
+        self.assertEqual(registry.count, 0)
         revision_error = receiver.readback.__func__.__globals__["RevisionError"]
         self.system.done()
         self.assertIsNone(self.system._revision_server)
         self.assertIsNone(self.system._revision_receiver)
         self.assertFalse(os.path.exists(self.path))
+        self.assertTrue(registry._closed)
+        self.assertIsNone(registry._view)
         with self.assertRaises(revision_error):
             receiver.readback()
         self.system.done()
+
+    def test_server_start_failure_fences_joint_owner_without_exposing_session(self):
+        import revision_ipc
+        from revision_publication import InstallationReceiver
+
+        owners = []
+        def construct(*args, **kwargs):
+            owner = InstallationReceiver(*args, **kwargs)
+            owners.append(owner)
+            return owner
+
+        with (
+            mock.patch.dict(os.environ, self.configured_env(), clear=True),
+            mock.patch("revision_publication.InstallationReceiver", side_effect=construct),
+            mock.patch.object(revision_ipc, "Server", side_effect=RuntimeError(TOKEN)),
+        ):
+            self.system = load_system()
+            with self.assertRaisesRegex(SystemExit, "^credential proxy: invalid revision runtime configuration$"):
+                self.system.load(None)
+        self.assertEqual(len(owners), 1)
+        self.assertTrue(owners[0]._publisher.registry._closed)
+        self.assertTrue(owners[0]._publisher._receiver._closed)
+        self.assertIsNone(self.system._revision_receiver)
+        self.assertIsNone(self.system._revision_server)
+
 
 
 @unittest.skipUnless(MITMDUMP, "mitmdump is not installed")

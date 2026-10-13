@@ -28,6 +28,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.SetPermiss
 import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.WriteEntry
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxEndpoint
 import com.alibaba.opensandbox.sandbox.domain.services.Filesystem
+import com.alibaba.opensandbox.sandbox.domain.services.IdentityFilesystem
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.FilesystemConverter.toApiPermissionMap
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.FilesystemConverter.toApiRenameFileItems
 import com.alibaba.opensandbox.sandbox.infrastructure.adapters.converter.FilesystemConverter.toApiReplaceFileContentMap
@@ -62,13 +63,18 @@ import java.nio.charset.Charset
 internal class FilesystemAdapter(
     private val httpClientProvider: HttpClientProvider,
     private val execdEndpoint: SandboxEndpoint,
-) : Filesystem {
+) : IdentityFilesystem {
     companion object {
         private const val FILESYSTEM_UPLOAD_PATH = "/files/upload"
         private const val FILESYSTEM_DOWNLOAD_PATH = "/files/download"
     }
 
     private val logger = LoggerFactory.getLogger(FilesystemAdapter::class.java)
+    private val unscopedEndpoint =
+        execdEndpoint.endpoint
+            .substringBefore("/v1/filesystem/")
+            .trimEnd('/')
+            .removeSuffix("/v1/filesystem")
     private val api =
         FilesystemApi(
             "${httpClientProvider.config.protocol}://${execdEndpoint.endpoint}",
@@ -83,6 +89,26 @@ internal class FilesystemAdapter(
                 .build(),
         )
 
+    override fun withIdentity(
+        uid: Long,
+        gid: Long,
+    ): Filesystem {
+        require(uid in 0..IdentityFilesystem.MAX_IDENTITY_ID) {
+            "uid must be between 0 and ${IdentityFilesystem.MAX_IDENTITY_ID}"
+        }
+        require(gid in 0..IdentityFilesystem.MAX_IDENTITY_ID) {
+            "gid must be between 0 and ${IdentityFilesystem.MAX_IDENTITY_ID}"
+        }
+        return FilesystemAdapter(
+            httpClientProvider,
+            SandboxEndpoint(
+                endpoint = unscopedEndpoint.trimEnd('/') + "/v1/filesystem/$uid/$gid",
+                headers = execdEndpoint.headers,
+                origin = execdEndpoint.origin,
+            ),
+        )
+    }
+
     override fun readFile(
         path: String,
         encoding: String,
@@ -92,7 +118,7 @@ internal class FilesystemAdapter(
     ): String {
         try {
             val request = buildDownloadRequest(path, range, offset, limit)
-            httpClientProvider.httpClient.newCall(request).execute().use { response ->
+            httpClientProvider.transferClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw response.toSandboxApiException { statusCode, body ->
                         "Failed to read file. Status code: $statusCode, Body: $body"
@@ -116,7 +142,7 @@ internal class FilesystemAdapter(
     ): ByteArray {
         try {
             val request = buildDownloadRequest(path, range, offset, limit)
-            httpClientProvider.httpClient.newCall(request).execute().use { response ->
+            httpClientProvider.transferClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw response.toSandboxApiException { statusCode, body ->
                         "Failed to read file. Status code: $statusCode, Body: $body"
@@ -138,7 +164,7 @@ internal class FilesystemAdapter(
     ): InputStream {
         try {
             val request = buildDownloadRequest(path, range, offset, limit)
-            val response = httpClientProvider.httpClient.newCall(request).execute()
+            val response = httpClientProvider.transferClient.newCall(request).execute()
 
             if (!response.isSuccessful) {
                 try {
@@ -217,7 +243,7 @@ internal class FilesystemAdapter(
                     .post(builder.build())
                     .build()
 
-            httpClientProvider.httpClient.newCall(request).execute().use { response ->
+            httpClientProvider.transferClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw response.toSandboxApiException { statusCode, body ->
                         "Failed to write files. Status code: $statusCode, Body: $body"

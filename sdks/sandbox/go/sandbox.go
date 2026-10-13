@@ -463,7 +463,9 @@ func (s *Sandbox) Ping(ctx context.Context) error {
 	return s.execd.Ping(ctx)
 }
 
-// Renew extends the sandbox's expiration by the given duration from now.
+// Renew sets the sandbox's expiration to the given duration from now.
+// This may shorten or extend the remaining lifetime. The creation-time
+// server timeout limit does not apply.
 func (s *Sandbox) Renew(ctx context.Context, duration time.Duration) (*RenewExpirationResponse, error) {
 	return s.lifecycle.RenewExpiration(ctx, s.id, time.Now().Add(duration))
 }

@@ -1150,7 +1150,8 @@ class SandboxPoolAsync:
 
     def _connection_for_warmup_create(self) -> ConnectionConfig:
         if self._pool_transport_owner is None:
-            return self._pool_connection_config or self._connection_config
+            base = self._pool_connection_config or self._connection_config
+            return base.model_copy(update={"disable_metrics": True})
         # Match the Kotlin staged-warmup ownership model: temporary warmup
         # sandboxes get their own transports, while manager/acquire resources
         # use the pool-wide shared transport. Thousands of unique endpoint
@@ -1159,6 +1160,7 @@ class SandboxPoolAsync:
             update={
                 "transport": None,
                 "retry_policy": RetryPolicy.disabled(),
+                "disable_metrics": True,
             }
         )
         config._owns_transport = True

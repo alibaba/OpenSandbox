@@ -426,6 +426,12 @@ func (r *BatchSandboxReconciler) persistRuntimeView(
 	batchSbx *sandboxv1alpha1.BatchSandbox,
 	view runtimeView,
 ) (time.Duration, []error) {
+	// Task cleanup runs before persistence and must continue during deletion.
+	// Its runtime view no longer describes a live sandbox, so do not publish it.
+	if batchSbx.DeletionTimestamp != nil {
+		return 0, nil
+	}
+
 	var aggErrors []error
 	log := logf.FromContext(ctx)
 	if err := r.patchBatchSandboxEndpoints(ctx, batchSbx, view.endpointIPs); err != nil {

@@ -52,6 +52,16 @@ func NewRouter(accessToken string) *gin.Engine {
 	r.POST("/internal/init", withInit(func(c *controller.InitController) { c.Init() }))
 	r.GET("/ready", withInit(func(c *controller.InitController) { c.Ready() }))
 
+	registerFilesystemRoutes(r.Group(""))
+	registerFilesystemRoutes(r.Group("/v1/filesystem/:uid/:gid", filesystemIdentityMiddleware()))
+
+	registerExecutionRoutes(r)
+	return r
+}
+
+// Both entrypoints use the same handlers. Identity-scoped requests are
+// intercepted before any filesystem access and dispatched to a child process.
+func registerFilesystemRoutes(r *gin.RouterGroup) {
 	files := r.Group("/files")
 	{
 		files.DELETE("", withFilesystem(func(c *controller.FilesystemController) { c.RemoveFiles() }))
@@ -71,6 +81,9 @@ func NewRouter(accessToken string) *gin.Engine {
 		directories.DELETE("", withFilesystem(func(c *controller.FilesystemController) { c.RemoveDirs() }))
 	}
 
+}
+
+func registerExecutionRoutes(r *gin.Engine) {
 	code := r.Group("/code")
 	{
 		code.POST("", withCode(func(c *controller.CodeInterpretingController) { c.RunCode() }))
@@ -136,7 +149,6 @@ func NewRouter(accessToken string) *gin.Engine {
 		isolated.GET("/capabilities", withIsolated(func(c *controller.IsolatedSessionController) { c.Capabilities() }))
 	}
 
-	return r
 }
 
 func withFilesystem(fn func(*controller.FilesystemController)) gin.HandlerFunc {

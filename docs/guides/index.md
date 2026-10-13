@@ -17,5 +17,10 @@ Check the [SDK capability matrix](/sdks/#capability-coverage) for language suppo
 - [Chained upstream proxy](/guides/egress-upstream-proxy)
 - [Secure access](/guides/secure-access)
 - [Secure container runtimes](/guides/secure-container)
+- [Network isolation on Kubernetes](/guides/network-isolation)
 - [Multi-tenancy](/guides/multi-tenancy)
 - [Windows sandboxes](/guides/windows-sandbox)
+
+## Operations
+
+- [Telemetry](/guides/telemetry)

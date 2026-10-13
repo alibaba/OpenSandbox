@@ -279,6 +279,12 @@ osb command interrupt <sandbox-id> <execution-id> -o json
 Foreground `command run` accepts `-o raw`; background execution accepts
 `table`, `json`, or `yaml`.
 
+Background execution metadata is returned only after execd confirms startup.
+An execution error or a stream that ends before this confirmation makes the CLI
+exit non-zero without printing success metadata. A successful background start
+does not mean the process has finished; use `command status` and `command logs`
+to check its eventual result.
+
 Persistent shell session:
 
 ```bash
@@ -454,12 +460,12 @@ Supported targets:
 
 | Target | Install location |
 | --- | --- |
-| `claude` | `./.claude/skills/` or `~/.claude/skills/` |
+| `claude` | `./.claude/skills/<name>/SKILL.md` or `~/.claude/skills/<name>/SKILL.md` |
 | `cursor` | `./.cursor/rules/` or `~/.cursor/rules/` |
 | `codex` | `./.codex/skills/<name>/SKILL.md` or `~/.codex/skills/<name>/SKILL.md` |
-| `copilot` | `./.github/copilot-instructions.md` or `~/.github/copilot-instructions.md` |
+| `copilot` | `./.github/copilot-instructions.md` or `~/.copilot/copilot-instructions.md` |
 | `windsurf` | `./.windsurfrules` or `~/.windsurfrules` |
-| `cline` | `./.clinerules` or `~/.clinerules` |
+| `cline` | `./.clinerules` or `~/.cline/rules/opensandbox-<name>.md` |
 | `opencode` | `./.agents/skills/<name>/SKILL.md` or `~/.agents/skills/<name>/SKILL.md` |
 
 Common flows:

@@ -14,13 +14,19 @@ janitor, node installer, runtime-agent + DART), `server` and
 `ingress-gateway`. The only env-owned manifests left are the kind cluster
 config and the SandboxPool resource.
 
-The last `up` stage creates one sandbox through the server API, reaches
-the in-sandbox execd `/ping` through the signed gateway route, and deletes
-it again. The environment is all-or-nothing: running fast-sandbox without
-the OpenSandbox layers is not a supported shape of this script.
+The last `up` stages drive the server through the opensandbox CLI (`osb`,
+installed fresh from PyPI into the workspace unless `OSB_BIN` is set):
+create a sandbox from the golden-image template, reach the in-sandbox
+execd `/ping` through the signed gateway route, and delete it again. Raw
+HTTP calls remain only where the CLI has no equivalent (networkpolicy
+replace, metadata merge-patch, snapshot re-entry fence). The environment
+is all-or-nothing: running fast-sandbox without the OpenSandbox layers is
+not a supported shape of this script.
 
 Requires a bare-metal Linux host with KVM (`/dev/kvm`), Docker, Go ≥ 1.25,
 cgroup v2, and `sudo` for the XFS StateRoot loop mount and sysctl bump.
+The CLI install requires `uv` (it manages its own ≥ 3.10 interpreter), or
+set `OSB_BIN` to a preinstalled `osb` binary.
 Full operational notes (topology, latency characteristics, production
 caveats): `fast-sandbox/docs/guides/firecracker-integration-env.md`.
 
@@ -31,12 +37,30 @@ caveats): `fast-sandbox/docs/guides/firecracker-integration-env.md`.
 ./scripts/fast-sandbox-env/integration-env.sh status    # component / pool / DART / OpenSandbox health
 ./scripts/fast-sandbox-env/integration-env.sh pool      # re-apply the pool only
 ./scripts/fast-sandbox-env/integration-env.sh sdk-e2e   # Python SDK e2e suite against the live stack
+./scripts/fast-sandbox-env/integration-env.sh idle-e2e  # OSEP-0024 idle-pause/wake suite (needs IDLE_PAUSE=1 up)
 ./scripts/fast-sandbox-env/integration-env.sh down      # teardown, host left clean
 ```
+
+### Idle-pause / wake-on-access profile (OSEP-0024)
+
+`IDLE_PAUSE=1 ./scripts/fast-sandbox-env/integration-env.sh up` additionally
+deploys an ephemeral Redis (`manifests/idle-pause/redis.yaml`, before the
+server — the sweeper connects at startup), enables the server `[idle_pause]`
+sweeper (5s sweep) and the gateway's `--activity-enabled` + `--wake-enabled`,
+and runs an `idle-pause / wake-on-access` verify stage: an opted-in sandbox
+(`lifecycle.idlePolicy`, X=30s) is auto-paused with zero traffic, and the next
+gateway request wakes it (parked while the restore completes). The
+`idle-e2e` action then runs the SDK suite
+(`tests/python/tests/test_fsb_idle_pause_e2e.py`) covering auto-pause,
+wake-on-access through the SDK's wake retry contract, and the no-idlePolicy
+compatibility invariant. Sandboxes without `lifecycle.idlePolicy` are never
+auto-paused or auto-woken regardless of the profile.
 
 After `up`, point any OpenSandbox SDK at `http://127.0.0.1:18080` with the
 `OPEN-SANDBOX-API-KEY: fast-sandbox-env` header; sandbox endpoints are
 signed `f1.*` header routes served by the gateway at `http://127.0.0.1:18081`.
+The installed CLI works against the same stack, e.g.
+`OPEN_SANDBOX_DOMAIN=127.0.0.1:18080 OPEN_SANDBOX_API_KEY=fast-sandbox-env osb sandbox list`.
 
 The `up` verify stages are also available as Python SDK e2e tests
 (template create → gateway ping → networkpolicy convergence, lifecycle
@@ -168,3 +192,4 @@ Before upgrading an existing environment, run `down` with the previous script.
 | `RUSTFS_AK` / `RUSTFS_SK` | `integration-env` / `integration-env-secret` | local S3 credentials |
 | `RUSTFS_ENDPOINT` | auto-discovered kind-network IP on port `9000` | endpoint used by the fast-sandbox and OpenSandbox components |
 | `XFS_STATEROOT` / `XFS_SIZE` | `1` / `24G` | reflink StateRoot on/off, virtual size |
+| `OSB_PACKAGE` / `OSB_BIN` | `opensandbox-cli` / — | opensandbox CLI for the verify stages: latest from PyPI into the workspace venv, or a preinstalled `osb` binary |

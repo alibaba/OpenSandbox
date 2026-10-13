@@ -39,7 +39,7 @@ When using the `opensandbox` umbrella chart, set `fast-sandbox.runtime.stateRoot
 Set the chart value to the same directory used as the helper's mountpoint.
 Prepare this mount **before deploying the runtime DaemonSet** on each node.
 Otherwise, drain the node's sandboxes and restart the runtime Pods after mounting:
-an already-running container may continue seeing the old filesystem.
+an already-running sandbox may continue seeing the old filesystem.
 
 Prefer a dedicated XFS data disk with reflink enabled. For a **new, empty device**,
 after verifying its identity and that it contains no required data:

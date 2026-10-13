@@ -43,6 +43,7 @@ from opensandbox_server.services.k8s.snapshot_runtime import (
 )
 from opensandbox_server.services.snapshot_models import SnapshotState
 from opensandbox_server.services.snapshot_runtime import (
+    SNAPSHOT_CREATE_CONFLICT_REASON,
     SnapshotRuntimePreflightError,
     SnapshotRuntimeStatus,
 )
@@ -110,6 +111,9 @@ class FastSandboxSnapshotRuntime:
     def supports_create_snapshot(self) -> bool:
         return True
 
+    def supports_synchronous_create(self) -> bool:
+        return True
+
     def create_snapshot_unsupported_message(self) -> str:
         return ""
 
@@ -157,6 +161,14 @@ class FastSandboxSnapshotRuntime:
                 message=f"Failed to create fsb snapshot {snapshot_name}: source sandbox not found: {exc}",
             )
         except FastPathError as exc:
+            if exc.code == "FAILED_PRECONDITION":
+                # Re-entry fence: the sandbox is already held by another
+                # snapshot's dump window. Conflict semantics, not a failure.
+                return SnapshotRuntimeStatus(
+                    state=SnapshotState.FAILED,
+                    reason=SNAPSHOT_CREATE_CONFLICT_REASON,
+                    message=f"Failed to create fsb snapshot {snapshot_name}: {exc}",
+                )
             return SnapshotRuntimeStatus(
                 state=SnapshotState.FAILED,
                 reason="snapshot_runtime_create_failed",

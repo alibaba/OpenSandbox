@@ -44,8 +44,9 @@ const (
 )
 
 var (
-	ErrNotFound = errors.New("credential vault not found")
-	ErrExists   = errors.New("credential vault already exists")
+	ErrNotFound         = errors.New("credential vault not found")
+	ErrExists           = errors.New("credential vault already exists")
+	ErrRevisionConflict = errors.New("credential vault revision conflict")
 
 	headerFieldNamePattern = regexp.MustCompile(`^[A-Za-z0-9!#$%&'*+\-.^_` + "`" + `|~]+$`)
 	hostnameLabelPattern   = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
@@ -253,7 +254,7 @@ func (v *Store) Patch(req MutationRequest, pol *policy.NetworkPolicy) (State, er
 		return State{}, ErrNotFound
 	}
 	if req.ExpectedRevision != nil && *req.ExpectedRevision != v.revision {
-		return State{}, fmt.Errorf("expectedRevision %d does not match current revision %d", *req.ExpectedRevision, v.revision)
+		return State{}, fmt.Errorf("%w: expectedRevision %d does not match current revision %d", ErrRevisionConflict, *req.ExpectedRevision, v.revision)
 	}
 
 	nextRevision := v.revision + 1
@@ -1215,7 +1216,7 @@ func WriteError(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case errors.Is(err, ErrExists):
 		http.Error(w, err.Error(), http.StatusConflict)
-	case strings.Contains(err.Error(), "expectedRevision"):
+	case errors.Is(err, ErrRevisionConflict):
 		http.Error(w, err.Error(), http.StatusConflict)
 	default:
 		http.Error(w, err.Error(), http.StatusBadRequest)

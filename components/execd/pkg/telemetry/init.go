@@ -40,6 +40,7 @@ var (
 	executionDuration        metric.Float64Histogram
 	filesystemOperationDurMs metric.Float64Histogram
 	isolationRunDurationMs   metric.Float64Histogram
+	oomKills                 metric.Int64Counter
 )
 
 func Init(ctx context.Context) (shutdown func(context.Context) error, err error) {
@@ -100,7 +101,7 @@ func registerExecdMetrics() error {
 
 	_, err = meter.Float64ObservableGauge(
 		"execd.system.cpu.usage",
-		metric.WithDescription("System-wide CPU usage percentage"),
+		metric.WithDescription("Sandbox CPU usage percentage (sandbox cgroup when limited, host fallback)"),
 		metric.WithUnit("%"),
 		metric.WithFloat64Callback(func(ctx context.Context, obs metric.Float64Observer) error {
 			obs.Observe(systemCPUUsagePercent(), metric.WithAttributes(sharedAttrs()...))
@@ -113,7 +114,7 @@ func registerExecdMetrics() error {
 
 	_, err = meter.Int64ObservableGauge(
 		"execd.system.memory.usage_bytes",
-		metric.WithDescription("System memory used bytes"),
+		metric.WithDescription("Sandbox memory working set bytes, excluding reclaimable file cache (sandbox cgroup when limited, host fallback)"),
 		metric.WithUnit("By"),
 		metric.WithInt64Callback(func(ctx context.Context, obs metric.Int64Observer) error {
 			obs.Observe(systemMemoryUsageBytes(), metric.WithAttributes(sharedAttrs()...))
@@ -150,6 +151,15 @@ func registerExecdMetrics() error {
 			obs.Observe(udpCount, metric.WithAttributes(append(base, attribute.String("protocol", "udp"))...))
 			return nil
 		}),
+	)
+	if err != nil {
+		return err
+	}
+
+	oomKills, err = meter.Int64Counter(
+		"execd.system.oom.kills",
+		metric.WithDescription("OOM kills observed in the sandbox cgroup"),
+		metric.WithUnit("{kill}"),
 	)
 	if err != nil {
 		return err

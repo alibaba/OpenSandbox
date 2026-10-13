@@ -22,6 +22,7 @@ import pytest
 
 from opensandbox_server.services.fast_sandbox.fastpath_client import (
     FastPathClient,
+    FastPathError,
     FastPathNotFound,
 )
 from opensandbox_server.services.fast_sandbox.generated import fastpath_pb2 as pb2
@@ -34,7 +35,10 @@ from opensandbox_server.services.fast_sandbox.snapshot_runtime import (
 )
 from opensandbox_server.services.k8s.snapshot_runtime import build_public_snapshot_name
 from opensandbox_server.services.snapshot_models import SnapshotState
-from opensandbox_server.services.snapshot_runtime import SnapshotRuntimePreflightError
+from opensandbox_server.services.snapshot_runtime import (
+    SNAPSHOT_CREATE_CONFLICT_REASON,
+    SnapshotRuntimePreflightError,
+)
 
 SNAPSHOT_ID = "11111111-2222-4333-8444-555555555555"
 SANDBOX_ID = "fsb-aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
@@ -135,6 +139,11 @@ def test_supports_create_snapshot() -> None:
     assert runtime.supports_create_snapshot() is True
 
 
+def test_supports_synchronous_create() -> None:
+    runtime, _, _ = _runtime()
+    assert runtime.supports_synchronous_create() is True
+
+
 def test_preflight_raises_when_source_sandbox_is_missing() -> None:
     fastpath = FakeFastPathClient()
     fastpath.get_sandbox_error = FastPathNotFound("NOT_FOUND", "no sandbox")
@@ -170,6 +179,21 @@ def test_create_snapshot_maps_fastpath_errors_to_failed() -> None:
 
     assert status.state == SnapshotState.FAILED
     assert status.reason == "snapshot_runtime_create_failed"
+
+
+def test_create_snapshot_maps_failed_precondition_to_conflict() -> None:
+    fastpath = FakeFastPathClient()
+    fastpath.create_error = FastPathError(
+        "FAILED_PRECONDITION",
+        'Sandbox already has snapshot "osb-snap-other"',
+    )
+    runtime, _, _ = _runtime(fastpath=fastpath)
+
+    status = runtime.create_snapshot(SNAPSHOT_ID, SANDBOX_ID)
+
+    assert status.state == SnapshotState.FAILED
+    assert status.reason == SNAPSHOT_CREATE_CONFLICT_REASON
+    assert "already has snapshot" in (status.message or "")
 
 
 def test_inspect_maps_succeeded_phase_to_ready_with_template_name_image() -> None:

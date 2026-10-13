@@ -394,6 +394,166 @@ def test_http_create_calls_fastpath_with_ready_completion(http_fsb):
     assert fake.create_time_remaining > service._k8s.fastpath_wait_ready_seconds
 
 
+def _annotation_api(service: FastSandboxService) -> Mock:
+    return service._cr_reader._kubernetes()._custom_objects_api  # type: ignore[return-value]
+
+
+def test_http_create_persists_idle_policy_annotation(http_fsb):
+    client, fake, service = http_fsb
+    api = _annotation_api(service)
+
+    response = client.post(
+        "/v1/sandboxes",
+        json={
+            "image": {"uri": "python:3.11"},
+            "entrypoint": ["python"],
+            "timeout": 3600,
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+            "lifecycle": {
+                "idlePolicy": {"idleTimeoutSeconds": 300, "onIdle": "pause"},
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    sandbox_id = response.json()["id"]
+    api.patch_namespaced_custom_object.assert_called_once()
+    kwargs = api.patch_namespaced_custom_object.call_args.kwargs
+    assert kwargs["group"] == "sandbox.fast.io"
+    assert kwargs["version"] == "v1alpha2"
+    assert kwargs["namespace"] == "ns-1"
+    assert kwargs["name"] == sandbox_id
+    annotation = kwargs["body"]["metadata"]["annotations"]["sandbox.opensandbox.io/idle-policy"]
+    assert json.loads(annotation) == {
+        "idleTimeoutSeconds": 300,
+        "onIdle": "pause",
+        "wakeOnAccess": True,
+    }
+
+
+def test_http_create_wake_only_policy_annotation(http_fsb):
+    client, fake, service = http_fsb
+    api = _annotation_api(service)
+
+    response = client.post(
+        "/v1/sandboxes",
+        json={
+            "image": {"uri": "python:3.11"},
+            "entrypoint": ["python"],
+            "timeout": 3600,
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+            "lifecycle": {"idlePolicy": {"wakeOnAccess": False}},
+        },
+    )
+
+    assert response.status_code == 202
+    annotation = (
+        api.patch_namespaced_custom_object.call_args.kwargs["body"]["metadata"][
+            "annotations"
+        ]["sandbox.opensandbox.io/idle-policy"]
+    )
+    assert json.loads(annotation) == {"wakeOnAccess": False}
+
+
+def test_http_create_probe_policy_annotation_applies_default_timeout(http_fsb):
+    client, fake, service = http_fsb
+    api = _annotation_api(service)
+
+    response = client.post(
+        "/v1/sandboxes",
+        json={
+            "image": {"uri": "python:3.11"},
+            "entrypoint": ["python"],
+            "timeout": 3600,
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+            "lifecycle": {
+                "idlePolicy": {
+                    "idleTimeoutSeconds": 300,
+                    "onIdle": "pause",
+                    "activeProbe": {"port": 8080, "path": "/active"},
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    annotation = (
+        api.patch_namespaced_custom_object.call_args.kwargs["body"]["metadata"][
+            "annotations"
+        ]["sandbox.opensandbox.io/idle-policy"]
+    )
+    assert json.loads(annotation) == {
+        "idleTimeoutSeconds": 300,
+        "onIdle": "pause",
+        "wakeOnAccess": True,
+        "activeProbe": {"port": 8080, "path": "/active", "timeoutSeconds": 2},
+    }
+
+
+def test_http_create_without_idle_policy_skips_annotation_write(http_fsb):
+    client, fake, service = http_fsb
+    api = _annotation_api(service)
+
+    response = client.post(
+        "/v1/sandboxes",
+        json={
+            "image": {"uri": "python:3.11"},
+            "entrypoint": ["python"],
+            "timeout": 3600,
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+        },
+    )
+
+    assert response.status_code == 202
+    api.patch_namespaced_custom_object.assert_not_called()
+
+
+def test_http_create_rejects_idle_timeout_above_activity_ttl(http_fsb):
+    client, fake, service = http_fsb
+    api = _annotation_api(service)
+
+    response = client.post(
+        "/v1/sandboxes",
+        json={
+            "image": {"uri": "python:3.11"},
+            "entrypoint": ["python"],
+            "timeout": 3600,
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+            "lifecycle": {
+                "idlePolicy": {"idleTimeoutSeconds": 3000, "onIdle": "pause"},
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert "activity_ttl_seconds" in response.json()["detail"]["message"]
+    assert fake.last_create is None  # rejected before any side effect
+    api.patch_namespaced_custom_object.assert_not_called()
+
+
+def test_http_create_survives_idle_policy_annotation_write_failure(http_fsb):
+    client, fake, service = http_fsb
+    api = _annotation_api(service)
+    api.patch_namespaced_custom_object.side_effect = ApiException(status=403)
+
+    response = client.post(
+        "/v1/sandboxes",
+        json={
+            "image": {"uri": "python:3.11"},
+            "entrypoint": ["python"],
+            "timeout": 3600,
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+            "lifecycle": {
+                "idlePolicy": {"idleTimeoutSeconds": 300, "onIdle": "pause"},
+            },
+        },
+    )
+
+    # A failed policy write must not fail the create; sandbox stays unpolicied.
+    assert response.status_code == 202
+    assert fake.last_create is not None
+
+
 def test_http_create_recovers_an_ambiguous_post_persistence_failure(http_fsb):
     client, fake, _ = http_fsb
     fake.abort_create_with = grpc.StatusCode.INTERNAL
@@ -864,6 +1024,41 @@ async def test_mixed_create_keeps_legacy_semantics(persisted_fsb):
     request = Mock(template_id=None)
     assert await service.create_sandbox(request) is legacy.create_sandbox.return_value
     legacy.create_sandbox.assert_awaited_once_with(request)
+
+
+@pytest.mark.parametrize(
+    "delta_seconds",
+    [-600, 0, 600, 10800],
+    ids=["shorten", "unchanged", "extend", "above-create-limit"],
+)
+def test_http_renew_sets_future_timestamp_without_create_limit(http_fsb, delta_seconds):
+    client, fake, _ = http_fsb
+    response = client.post(
+        "/v1/sandboxes",
+        json={
+            "image": {"uri": "python:3.11"},
+            "entrypoint": ["python"],
+            "timeout": 1800,
+            "resourceLimits": {"cpu": "500m", "memory": "512Mi"},
+        },
+    )
+    assert response.status_code == 202
+    sandbox_id = response.json()["id"]
+    cr = fake.crs[("ns-1", sandbox_id)]
+    current_expiration = datetime.fromisoformat(cr["spec"]["expireTime"])
+    new_expiration = current_expiration + timedelta(seconds=delta_seconds)
+
+    renewed = client.post(
+        f"/v1/sandboxes/{sandbox_id}/renew-expiration",
+        json={"expiresAt": new_expiration.isoformat()},
+    )
+
+    assert renewed.status_code == 200
+    assert datetime.fromisoformat(
+        renewed.json()["expiresAt"].replace("Z", "+00:00")
+    ) == new_expiration
+    assert fake.last_update.expires_at_unix_seconds == int(new_expiration.timestamp())
+    assert datetime.fromisoformat(cr["spec"]["expireTime"]) == new_expiration
 
 
 def test_http_renew_and_delete_use_uid_fences(http_fsb):

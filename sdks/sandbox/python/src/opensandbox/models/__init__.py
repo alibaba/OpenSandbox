@@ -55,6 +55,7 @@ from opensandbox.models.isolated import (
 )
 from opensandbox.models.sandboxes import (
     PVC,
+    ActivityProbe,
     Credential,
     CredentialAuth,
     CredentialBinding,
@@ -71,6 +72,7 @@ from opensandbox.models.sandboxes import (
     CredentialVaultState,
     CustomHeaderEntry,
     Host,
+    IdlePolicy,
     InlineCredentialSource,
     LifecycleHook,
     NetworkPolicy,
@@ -138,6 +140,8 @@ __all__ = [
     "LifecycleHook",
     "PeriodicLifecycleHook",
     "SandboxLifecycle",
+    "IdlePolicy",
+    "ActivityProbe",
     "Credential",
     "CredentialMatch",
     "CustomHeaderEntry",

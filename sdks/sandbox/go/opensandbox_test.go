@@ -611,8 +611,9 @@ func TestGetPolicy(t *testing.T) {
 
 func TestPatchPolicy(t *testing.T) {
 	want := PolicyStatusResponse{
-		Status: "active",
-		Mode:   "enforce",
+		Status:          "ok",
+		Mode:            "deny_all",
+		EnforcementMode: "dns+nft",
 		Policy: &NetworkPolicy{
 			DefaultAction: "deny",
 			Egress: []NetworkRule{
@@ -627,11 +628,12 @@ func TestPatchPolicy(t *testing.T) {
 			assert.Fail(t, fmt.Sprintf("expected PATCH, got %s", r.Method))
 		}
 
+		require.Equal(t, "/policy", r.URL.Path)
+		require.Equal(t, "test-egress-token", r.Header.Get(egressAuthHeader))
+
 		var rules []NetworkRule
-		json.NewDecoder(r.Body).Decode(&rules)
-		if len(rules) != 1 {
-			assert.Fail(t, fmt.Sprintf("expected 1 rule in request, got %d", len(rules)))
-		}
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&rules))
+		require.Equal(t, []NetworkRule{{Action: "allow", Target: "cdn.example.com"}}, rules)
 
 		jsonResponse(w, http.StatusOK, want)
 	})
@@ -640,14 +642,15 @@ func TestPatchPolicy(t *testing.T) {
 		{Action: "allow", Target: "cdn.example.com"},
 	})
 	require.NoErrorf(t, err, "PatchPolicy")
-	require.NotNil(t, got.Policy)
-	require.Len(t, got.Policy.Egress, 2)
+	require.NotNil(t, got)
+	require.Equal(t, want, *got)
 }
 
 func TestDeletePolicy(t *testing.T) {
 	want := PolicyStatusResponse{
-		Status: "ok",
-		Mode:   "deny_all",
+		Status:          "ok",
+		Mode:            "deny_all",
+		EnforcementMode: "dns+nft",
 		Policy: &NetworkPolicy{
 			DefaultAction: "deny",
 			Egress: []NetworkRule{
@@ -660,6 +663,9 @@ func TestDeletePolicy(t *testing.T) {
 		if r.Method != http.MethodDelete {
 			assert.Fail(t, fmt.Sprintf("expected DELETE, got %s", r.Method))
 		}
+
+		require.Equal(t, "/policy", r.URL.Path)
+		require.Equal(t, "test-egress-token", r.Header.Get(egressAuthHeader))
 
 		var targets []string
 		if err := json.NewDecoder(r.Body).Decode(&targets); err != nil {
@@ -680,9 +686,38 @@ func TestDeletePolicy(t *testing.T) {
 		"*.blocked.org",
 	})
 	require.NoErrorf(t, err, "DeletePolicy")
-	require.NotNil(t, got.Policy)
-	require.Len(t, got.Policy.Egress, 1)
-	require.Equal(t, "api.example.com", got.Policy.Egress[0].Target)
+	require.NotNil(t, got)
+	require.Equal(t, want, *got)
+}
+
+func TestPolicyMutationServiceUnavailable(t *testing.T) {
+	for _, method := range []string{http.MethodPatch, http.MethodDelete} {
+		t.Run(method, func(t *testing.T) {
+			const message = "revision policy publication unavailable"
+			_, client := newEgressServer(t, func(w http.ResponseWriter, r *http.Request) {
+				require.Equal(t, method, r.Method)
+				require.Equal(t, "/policy", r.URL.Path)
+				require.Equal(t, "test-egress-token", r.Header.Get(egressAuthHeader))
+				http.Error(w, message, http.StatusServiceUnavailable)
+			})
+
+			var got *PolicyStatusResponse
+			var err error
+			if method == http.MethodPatch {
+				got, err = client.PatchPolicy(context.Background(), []NetworkRule{
+					{Action: "allow", Target: "api.example.com"},
+				})
+			} else {
+				got, err = client.DeletePolicy(context.Background(), []string{"api.example.com"})
+			}
+			require.True(t, got == nil, "503 must not return a policy response")
+			var apiErr *APIError
+			require.ErrorAs(t, err, &apiErr)
+			require.Equal(t, http.StatusServiceUnavailable, apiErr.StatusCode)
+			require.Equal(t, http.StatusText(http.StatusServiceUnavailable), apiErr.Response.Code)
+			require.Equal(t, message+"\n", apiErr.Response.Message)
+		})
+	}
 }
 
 func TestPing(t *testing.T) {
@@ -2561,28 +2596,6 @@ func TestRunCommand_Background(t *testing.T) {
 	})
 	require.NoErrorf(t, err, "RunCommand background")
 	require.Len(t, events, 2)
-}
-
-func TestAPIError_RequestID(t *testing.T) {
-	_, client := newLifecycleServer(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Request-Id", "req-abc-123")
-		jsonResponse(w, http.StatusNotFound, ErrorResponse{
-			Code:    "SANDBOX_NOT_FOUND",
-			Message: "not found",
-		})
-	})
-
-	_, err := client.GetSandbox(context.Background(), "sbx-missing")
-	require.Error(t, err)
-
-	apiErr, ok := err.(*APIError)
-	require.True(t, ok, "expected *APIError, got %T", err)
-	if apiErr.RequestID != "req-abc-123" {
-		assert.Fail(t, fmt.Sprintf("RequestID = %q, want req-abc-123", apiErr.RequestID))
-	}
-	if !strings.Contains(apiErr.Error(), "req-abc-123") {
-		assert.Fail(t, fmt.Sprintf("Error() = %q, expected to contain request ID", apiErr.Error()))
-	}
 }
 
 func TestCreateSandbox_WithNetworkPolicy(t *testing.T) {

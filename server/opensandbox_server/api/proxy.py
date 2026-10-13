@@ -67,9 +67,15 @@ SERVER_GENERATED_RESPONSE_HEADERS = {
 ACCESS_RENEW_HEADER = "opensandbox-access-renew"  # "OpenSandbox-Access-Renew"
 ACCESS_RENEW_SKIP_VALUE = "skip"
 
+# OSEP-0024 activity-probe sentinel; the sweeper is the only issuer.
+# Stripped on this hop so a proxy-path client cannot suppress recording at
+# the ingress.
+SKIP_ACTIVITY_HEADER = "opensandbox-skip-activity"  # "OpenSandbox-Skip-Activity"
+
 # Hop-control headers consumed by the proxy itself; never forwarded upstream.
 PROXY_CONTROL_HEADERS = {
     ACCESS_RENEW_HEADER,
+    SKIP_ACTIVITY_HEADER,
 }
 
 SENSITIVE_HEADERS = {

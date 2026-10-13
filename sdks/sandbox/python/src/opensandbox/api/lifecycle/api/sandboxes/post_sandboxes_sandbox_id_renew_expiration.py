@@ -113,7 +113,10 @@ def sync_detailed(
 ) -> Response[ErrorResponse | RenewSandboxExpirationResponse]:
     """Renew sandbox expiration
 
-     Renew the absolute expiration time of a sandbox.
+     Set the absolute expiration time of a sandbox to the supplied future timestamp.
+    This may shorten, preserve, or extend the current expiration.
+    The server configuration `server.max_sandbox_timeout_seconds` applies only
+    to `timeout` on creation and does not limit this operation.
 
     Args:
         sandbox_id (str):
@@ -147,7 +150,10 @@ def sync(
 ) -> ErrorResponse | RenewSandboxExpirationResponse | None:
     """Renew sandbox expiration
 
-     Renew the absolute expiration time of a sandbox.
+     Set the absolute expiration time of a sandbox to the supplied future timestamp.
+    This may shorten, preserve, or extend the current expiration.
+    The server configuration `server.max_sandbox_timeout_seconds` applies only
+    to `timeout` on creation and does not limit this operation.
 
     Args:
         sandbox_id (str):
@@ -176,7 +182,10 @@ async def asyncio_detailed(
 ) -> Response[ErrorResponse | RenewSandboxExpirationResponse]:
     """Renew sandbox expiration
 
-     Renew the absolute expiration time of a sandbox.
+     Set the absolute expiration time of a sandbox to the supplied future timestamp.
+    This may shorten, preserve, or extend the current expiration.
+    The server configuration `server.max_sandbox_timeout_seconds` applies only
+    to `timeout` on creation and does not limit this operation.
 
     Args:
         sandbox_id (str):
@@ -208,7 +217,10 @@ async def asyncio(
 ) -> ErrorResponse | RenewSandboxExpirationResponse | None:
     """Renew sandbox expiration
 
-     Renew the absolute expiration time of a sandbox.
+     Set the absolute expiration time of a sandbox to the supplied future timestamp.
+    This may shorten, preserve, or extend the current expiration.
+    The server configuration `server.max_sandbox_timeout_seconds` applies only
+    to `timeout` on creation and does not limit this operation.
 
     Args:
         sandbox_id (str):

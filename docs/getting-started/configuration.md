@@ -64,6 +64,23 @@ If `server.api_key` is empty, the server runs without authentication. In non-int
 
 For the full configuration reference with all keys and defaults, see the [server configuration.md](https://github.com/opensandbox-group/OpenSandbox/blob/main/server/configuration.md).
 
+## Sandbox Expiration
+
+`server.max_sandbox_timeout_seconds` limits the `timeout` supplied when creating
+a sandbox. If configured, it must be at least `60` seconds; omit it to disable
+the creation-time upper bound. It does not limit renewal requests or the total
+lifetime of a sandbox.
+
+`POST /v1/sandboxes/{sandboxId}/renew-expiration` sets an absolute `expiresAt`.
+Despite the endpoint name, it can shorten, preserve, or extend the current
+expiration, provided the requested timestamp is still in the future. A timestamp
+beyond `now + max_sandbox_timeout_seconds` is also accepted.
+
+Duration-based SDK `renew()` methods calculate the target as `now + duration`,
+not `current expiresAt + duration`. For example, renewing for five minutes when
+thirty minutes remain moves expiration earlier. Callers that require extension
+only must account for the current expiration before choosing a target.
+
 ## Kubernetes Creation Wait
 
 For the BatchSandbox and agent-sandbox providers, the server waits for the workload
@@ -107,5 +124,5 @@ Once the server is running, interactive API docs are available at:
 
 - [Secure Container Runtime](/guides/secure-container) — gVisor, Kata, and Firecracker configuration
 - [Credential Vault](/guides/credential-vault) — Secure credential injection
-- [Network Isolation](/architecture/network/network-isolation) — Egress policy design
+- [Network Isolation on Kubernetes](/guides/network-isolation) — Egress policy design
 - [Kubernetes Deployment](/deployment/) — Kubernetes-specific setup

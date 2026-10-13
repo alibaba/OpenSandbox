@@ -56,6 +56,8 @@ Execution modes:
 - **Foreground** returns the output as a live Server-Sent-Events stream while the command runs.
 - **Background** returns immediately; you poll status and retrieve incremental logs. Completed background output stays retrievable for 24 hours, and running commands are never cleaned up.
 
+Foreground `stdout` and `stderr` event text preserves the command's line endings (`\n`, `\r`, or `\r\n`). Concatenate event text for each stream to reconstruct its output; the last event may be an unterminated fragment.
+
 Sessions use Bash when the image provides it and fall back to POSIX `sh` on minimal images — commands sent to a fallback session must be `sh`-compatible. Windows sandboxes are supported (environment names are case-insensitive; batch files require shell syntax).
 
 ## Code execution
@@ -75,6 +77,42 @@ The sharing model is deliberate: exactly one **holder** owns the keyboard, and a
 ## Files and directories
 
 One API covers the whole filesystem tree: stream files in and out, list and search directories, inspect and change permissions, replace file contents, move and remove paths. The file APIs in every sandbox SDK are a thin wrapper over these endpoints.
+
+### Filesystem execution identity
+
+On Linux, a trusted backend can select the identity performing ordinary file
+operations by prefixing the file API path with `/v1/filesystem/{uid}/{gid}`.
+Both IDs are required decimal integers between 0 and 4294967294. For example,
+`GET /v1/filesystem/1001/1001/files/download?path=/workspace/session-b/result.txt`
+reads the file as UID 1001 with primary GID 1001. The same prefix supports all
+ordinary file and directory operations, including uploads, metadata, search,
+replacement, rename, deletion, and permission changes.
+
+Each request runs in a separate worker process with the selected credentials.
+Supplementary groups come from the selected user's system account; an unknown
+numeric UID has no supplementary groups. Account or group lookup failures other
+than an unknown UID fail the request. The worker never inherits Execd's
+supplementary groups as a fallback. Execd must have permission to establish the
+requested credentials; failure does not retry the operation as Execd.
+Relative paths resolve from `/`, and `~` uses the selected account's home
+directory (or `/` for an unknown UID). Workers do not inherit Execd's environment.
+
+Linux checks path traversal, parent directory access, file access, and metadata
+changes under that identity. Upload `owner`, `group`, and `mode` remain target
+metadata and cannot grant the worker additional privileges. Requests with
+different identities can run concurrently without changing Execd's credentials.
+
+To share a sandbox between conversations, provision a separate user and workspace
+for each conversation, allow the desired read access, and reserve directory write
+access for the owner. Deletion and rename permissions depend on the parent
+directory, so read-only file modes alone are insufficient. Keep sandbox API
+credentials in the trusted backend that selects these identities. This feature
+does not provide a separate mount namespace or a tenant isolation boundary.
+
+The existing `/files` and `/directories` routes retain their default identity.
+The identity-prefixed routes require Linux and a supporting Execd version. Older
+servers return an unsupported route instead of silently ignoring identity
+options; clients must not fall back to the unprefixed routes.
 
 ## Isolated sessions
 
@@ -111,4 +149,4 @@ Sandboxes can be pre-warmed in pools and reused across allocations. Execd makes 
 
 ## Observability
 
-Execd exposes local CPU and memory metrics as a snapshot and as a live stream, and exports OpenTelemetry metrics when the platform configures an endpoint — attributed to your sandbox ID and allocation. See [component telemetry](/guides/component-telemetry) for how export is configured.
+Execd exposes local CPU and memory metrics as a snapshot and as a live stream, and exports OpenTelemetry metrics when the platform configures an endpoint — attributed to your sandbox ID and allocation. See [telemetry](/guides/telemetry#execd) for the metric list and how export is configured.

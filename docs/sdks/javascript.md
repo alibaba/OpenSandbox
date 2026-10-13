@@ -317,6 +317,26 @@ await sandbox.files.deleteDirectories(["/tmp/demo"]);
 For binary files, pass a `Uint8Array` to `writeFiles()` and read with `readBytes()`
 or `readBytesStream()`. Read options support `offset` and `limit` for partial downloads.
 
+#### File operations with an explicit identity
+
+Bind a filesystem client to a Linux UID and GID:
+
+```ts
+const files = sandbox.filesWithIdentity(1001, 2000);
+```
+
+The bound client exposes the usual file operations and shares the sandbox
+connection, authentication, and endpoint routing headers. The existing file
+client retains its default identity. Select the UID/GID separately for command
+execution.
+
+This requires Linux and an Execd version that supports filesystem execution
+identity. Unsupported servers return an error; requests never fall back to the
+default filesystem routes. Keep sandbox credentials and identity selection in
+the trusted backend. Linux filesystem permissions apply; this feature does not
+create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd)
+for permission and workspace provisioning details.
+
 ### 5. Endpoints
 
 `getEndpoint()` returns an endpoint **without a scheme** (for example `"localhost:44772"`). Use `getEndpointUrl()` if you want a ready-to-use absolute URL (for example `"http://localhost:44772"`).
@@ -452,6 +472,7 @@ The `ConnectionConfig` class manages API server connection settings.
 
 ::: info Runtime Notes
 - In browsers, the SDK uses the global `fetch` implementation.
+- `requestTimeoutSeconds` bounds the wait for a response: it stops applying once the response headers arrive (streaming responses are not cut off). It never caps a healthy file upload body, which can legitimately take longer than the timeout; on Node.js a stalled upload, or an upload that gets no response headers within the timeout once the body has been sent, is aborted instead of hanging (the Go SDK's `ResponseHeaderTimeout` contract).
 - In Node.js, every `Sandbox` and `SandboxManager` clones the base `ConnectionConfig` via `withTransportIfMissing()`, so each instance gets an isolated `undici` keep-alive pool. Call `sandbox.close()` or `manager.close()` when you are done so the SDK can release the associated agent.
 :::
 
