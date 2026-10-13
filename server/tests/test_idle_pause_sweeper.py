@@ -637,6 +637,7 @@ def _async_returning(value):
 def _idle_pause_config():
     from opensandbox_server.config import (
         AppConfig,
+        AutomationConfig,
         IdlePauseConfig,
         IdlePauseRedisConfig,
         RuntimeConfig,
@@ -644,9 +645,11 @@ def _idle_pause_config():
 
     return AppConfig(
         runtime=RuntimeConfig(type="kubernetes", execd_image="x"),
-        idle_pause=IdlePauseConfig(
-            enabled=True,
-            redis=IdlePauseRedisConfig(enabled=True, dsn="redis://127.0.0.1:6379/5"),
+        automation=AutomationConfig(
+            idle_pause=IdlePauseConfig(
+                enabled=True,
+                redis=IdlePauseRedisConfig(dsn="redis://127.0.0.1:6379/5"),
+            )
         ),
     )
 

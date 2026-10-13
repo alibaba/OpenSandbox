@@ -184,7 +184,7 @@ class FastSandboxService(SandboxService, ExtensionService):
                         ),
                     )
                 ),
-                activity_ttl_seconds=self._app_config.idle_pause.activity_ttl_seconds,
+                activity_ttl_seconds=self._app_config.automation.idle_pause.activity_ttl_seconds,
             )
         except ValueError as exc:
             raise HTTPException(

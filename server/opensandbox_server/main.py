@@ -207,7 +207,7 @@ async def lifespan(app: FastAPI):
         app.state.renew_intent_consumer,
     )
 
-    if app_config.idle_pause.enabled:
+    if app_config.automation.idle_pause.enabled:
         # Namespace list is re-resolved by the sweeper every sweep.
         app.state.idle_pause_sweeper = await start_idle_pause_sweeper(
             app_config,

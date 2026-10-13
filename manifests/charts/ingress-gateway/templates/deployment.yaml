@@ -87,7 +87,7 @@ spec:
             - "--fastpath-endpoint={{ .Values.gateway.fastpathEndpoint }}"
             {{- end }}
             {{- if .Values.gateway.activity.enabled }}
-            # OSEP-0024 activity tracking (same Redis as the server's [idle_pause]).
+            # OSEP-0024 activity tracking (same Redis as the server's [automation.idle_pause]).
             - "--activity-enabled=true"
             - "--activity-redis-dsn={{ .Values.gateway.activity.redisDsn }}"
             - "--activity-min-interval={{ .Values.gateway.activity.minInterval }}"

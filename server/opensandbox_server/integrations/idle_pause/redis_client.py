@@ -46,8 +46,8 @@ async def connect_idle_pause_redis_from_config(
     Raises RedisError/OSError/ValueError — the caller degrades to
     "sweeper not started".
     """
-    ip = app_config.idle_pause
-    if not ip.enabled or not ip.redis.enabled:
+    ip = app_config.automation.idle_pause
+    if not ip.enabled:
         return None
 
     dsn = ip.redis.dsn

@@ -44,6 +44,7 @@ def test_sanitize_dsn_unparsable_degrades_to_placeholder():
 async def test_connect_closes_client_when_ping_fails():
     from opensandbox_server.config import (
         AppConfig,
+        AutomationConfig,
         IdlePauseConfig,
         IdlePauseRedisConfig,
         RuntimeConfig,
@@ -54,9 +55,11 @@ async def test_connect_closes_client_when_ping_fails():
 
     cfg = AppConfig(
         runtime=RuntimeConfig(type="kubernetes", execd_image="x"),
-        idle_pause=IdlePauseConfig(
-            enabled=True,
-            redis=IdlePauseRedisConfig(enabled=True, dsn="redis://127.0.0.1:6379/0"),
+        automation=AutomationConfig(
+            idle_pause=IdlePauseConfig(
+                enabled=True,
+                redis=IdlePauseRedisConfig(dsn="redis://127.0.0.1:6379/0"),
+            )
         ),
     )
     client = MagicMock()

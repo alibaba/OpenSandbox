@@ -268,18 +268,11 @@ class RenewIntentConfig(BaseModel):
 class IdlePauseRedisConfig(BaseModel):
     """Redis settings for idle-pause activity tracking (OSEP-0024)."""
 
-    enabled: bool = Field(
-        default=False,
-        description=(
-            "When true, the idle sweeper reads activity keys and pause locks "
-            "from Redis. Required for auto-pause."
-        ),
-    )
     dsn: Optional[str] = Field(
         default=None,
         description=(
             'Redis DSN (e.g. "redis://127.0.0.1:6379/0"). '
-            "Required when redis.enabled is true."
+            "Required when idle_pause.enabled is true."
         ),
     )
     lock_ttl_seconds: int = Field(
@@ -287,14 +280,6 @@ class IdlePauseRedisConfig(BaseModel):
         ge=1,
         description="TTL of the per-sandbox pause admission lock (SET NX EX).",
     )
-
-    @model_validator(mode="after")
-    def require_dsn_when_redis_enabled(self) -> "IdlePauseRedisConfig":
-        if self.enabled and (self.dsn is None or not str(self.dsn).strip()):
-            raise ValueError(
-                "[idle_pause] redis.dsn must be set when redis.enabled is true."
-            )
-        return self
 
 
 class IdlePauseConfig(BaseModel):
@@ -330,9 +315,37 @@ class IdlePauseConfig(BaseModel):
     redis: IdlePauseRedisConfig = Field(
         default_factory=IdlePauseRedisConfig,
         description=(
-            "Redis used for activity keys and pause locks. In TOML, set keys under "
-            "the same [idle_pause] table as redis.enabled, redis.dsn, "
+            "Redis used for activity keys and pause locks; the sweeper cannot "
+            "run without it. In TOML, set keys under the same "
+            "[automation.idle_pause] table as redis.dsn, "
             "redis.lock_ttl_seconds (dotted keys)."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def require_redis_dsn_when_enabled(self) -> "IdlePauseConfig":
+        if self.enabled and (
+            self.redis.dsn is None or not str(self.redis.dsn).strip()
+        ):
+            raise ValueError(
+                "[automation.idle_pause] redis.dsn must be set when "
+                "enabled is true."
+            )
+        return self
+
+
+class AutomationConfig(BaseModel):
+    """Umbrella for server-side lifecycle automation features.
+
+    Today this hosts idle auto-pause (OSEP-0024); future automation features
+    join as sibling sub-tables.
+    """
+
+    idle_pause: IdlePauseConfig = Field(
+        default_factory=IdlePauseConfig,
+        description=(
+            "Idle auto-pause / auto-wake for opted-in fast sandboxes "
+            "(OSEP-0024). Off by default."
         ),
     )
 
@@ -1548,11 +1561,11 @@ class AppConfig(BaseModel):
         default_factory=RenewIntentConfig,
         description="Auto-renew sandbox expiration when reverse-proxy access is observed.",
     )
-    idle_pause: IdlePauseConfig = Field(
-        default_factory=IdlePauseConfig,
+    automation: AutomationConfig = Field(
+        default_factory=AutomationConfig,
         description=(
-            "Auto-pause opted-in fast sandboxes after inactivity (OSEP-0024). "
-            "Off by default."
+            "Lifecycle automation for fast sandboxes: idle auto-pause today "
+            "(OSEP-0024). Off by default."
         ),
     )
     otel: OtelConfig = Field(
@@ -1739,6 +1752,7 @@ __all__ = [
     "AppConfig",
     "RenewIntentConfig",
     "RenewIntentRedisConfig",
+    "AutomationConfig",
     "IdlePauseConfig",
     "IdlePauseRedisConfig",
     "ServerConfig",

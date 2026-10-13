@@ -531,12 +531,12 @@ async def start_idle_pause_sweeper(
 ) -> Optional[IdlePauseSweeper]:
     """Build and start the sweeper, or return ``None`` when it must not run.
 
-    Requires ``[idle_pause].enabled``, the fsb (kubernetes) runtime, and a
+    Requires ``[automation.idle_pause].enabled``, the fsb (kubernetes) runtime, and a
     Redis connection (malformed DSN degrades the same way — fail toward
     "not pausing"). A client created here is closed by the sweeper's
     ``stop()``; a caller-supplied client stays the caller's.
     """
-    if not app_config.idle_pause.enabled:
+    if not app_config.automation.idle_pause.enabled:
         return None
     if app_config.runtime.type != "kubernetes":
         logger.info("idle_pause disabled for non-kubernetes runtime (fsb backend only)")
@@ -560,10 +560,10 @@ async def start_idle_pause_sweeper(
             return None
         owned_redis = redis_client is not None
         if redis_client is None:
-            logger.info("idle_pause redis disabled; sweeper not started")
+            logger.info("idle_pause redis dsn missing; sweeper not started")
             return None
 
-    ip = app_config.idle_pause
+    ip = app_config.automation.idle_pause
     registry = ActivityRegistry(redis_client, activity_ttl_seconds=ip.activity_ttl_seconds)
     # OSEP-0024: the server actor records an activity observation on create
     # and resume so the idle clock restarts from the lifecycle transition.
