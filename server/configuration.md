@@ -116,7 +116,7 @@ Configuration for the server-side reverse-proxy routes.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `network_mode` | string | `"host"` | Docker network attachment for sandbox containers: **`host`**, **`bridge`**, or a **custom user-defined network name**. Egress sidecar + `networkPolicy` require **`bridge`** (see [Egress](#egress)). |
+| `network_mode` | string | `"host"` | Network attachment for sandbox containers: **`host`**, **`bridge`**, **`none`**, **`pasta`**, **`slirp4netns`**, or a **custom user-defined network name**. `pasta` / `slirp4netns` are passed through to runtimes that support them (podman) and are the fallback where bridge networking (netavark/nftables) is unavailable. Egress sidecar + `networkPolicy` require **`bridge`** (see [Egress](#egress)). |
 | `api_timeout` | integer \| omitted | `null` | Docker API timeout in **seconds**. If unset, the code uses default **180** s where applicable. |
 | `host_ip` | string \| omitted | `null` | Hostname or IP used when **rewriting** bridge-mode endpoint URLs (e.g. server runs in Docker and clients need a host-reachable address). Often `host.docker.internal` or the host LAN IP on Linux. |
 | `drop_capabilities` | list of strings | See `config.py` | Linux capabilities **dropped** from sandbox containers (security hardening). |

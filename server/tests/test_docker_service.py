@@ -976,6 +976,62 @@ async def test_network_policy_requires_egress_image(mock_docker):
 
 @pytest.mark.asyncio
 @patch("opensandbox_server.services.docker.docker_service.docker")
+async def test_container_runtime_network_modes_are_not_treated_as_user_defined(mock_docker):
+    """`pasta` / `slirp4netns` / `none` are runtime network modes, not user-defined networks.
+
+    They must be passed through to the container runtime instead of being looked up as a
+    Docker network (podman has no `pasta` network driver and rejects a network with that
+    name), which is what makes them usable where bridge networking is unavailable.
+    """
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    for mode in ("pasta", "slirp4netns", "none"):
+        cfg = _app_config()
+        cfg.docker.network_mode = mode
+        service = DockerSandboxService(config=cfg)
+
+        assert service.network_mode == mode
+        assert service._is_user_defined_network() is False
+        service._validate_network_exists()  # must not raise for runtime network modes
+
+    mock_client.networks.get.assert_not_called()
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker_service.docker")
+async def test_network_policy_rejects_container_runtime_network_modes(mock_docker):
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+
+    for mode in ("pasta", "slirp4netns", "none"):
+        cfg = _app_config()
+        cfg.docker.network_mode = mode
+        cfg.egress = EgressConfig(image="egress:latest")
+        service = DockerSandboxService(config=cfg)
+
+        request = CreateSandboxRequest(
+            image=ImageSpec(uri="python:3.11"),
+            timeout=120,
+            resourceLimits=ResourceLimits(root={}),
+            env={},
+            metadata={},
+            entrypoint=["python"],
+            networkPolicy=NetworkPolicy(default_action="deny", egress=[]),
+        )
+
+        with pytest.raises(HTTPException) as exc:
+            await service.create_sandbox(request)
+
+        assert exc.value.status_code == status.HTTP_400_BAD_REQUEST
+        assert exc.value.detail["code"] == SandboxErrorCodes.INVALID_PARAMETER
+        assert mode in exc.value.detail["message"]
+
+
+@pytest.mark.asyncio
+@patch("opensandbox_server.services.docker.docker_service.docker")
 async def test_credential_proxy_requires_dns_nft_mode(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []
