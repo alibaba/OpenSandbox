@@ -114,6 +114,20 @@ def _parse_memory_gi(value: str | None) -> float | None:
     return num / 1024
 
 
+def _audit_metadata(metadata: dict[str, str] | None) -> dict[str, str] | None:
+    """Sandbox metadata is the label map stored on lifecycle history rows."""
+    if not metadata:
+        return None
+    labels: dict[str, str] = {}
+    for key, value in metadata.items():
+        if value is None:
+            continue
+        name = str(key).strip()
+        if name:
+            labels[name] = str(value)
+    return labels or None
+
+
 def _ensure_utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
@@ -144,6 +158,7 @@ def schedule_lifecycle_audit_create(
         memory_limit=memory_limit,
         cpu_cores=cpu_cores,
         memory_gi=memory_gi,
+        metadata=_audit_metadata(request.metadata or response.metadata),
     )
 
 
@@ -166,6 +181,7 @@ def schedule_lifecycle_audit_delete(
             image_uri=_image_uri_from_sandbox(final_sandbox),
             lifecycle_created_at=_ensure_utc(final_sandbox.created_at),
             expires_at=_ensure_utc(final_sandbox.expires_at),
+            metadata=_audit_metadata(final_sandbox.metadata),
         )
     else:
         background_tasks.add_task(

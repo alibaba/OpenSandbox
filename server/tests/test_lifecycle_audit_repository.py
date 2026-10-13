@@ -160,3 +160,38 @@ def test_upsert_created_preserves_expires_at_when_incoming_null(
         assert row["expires_at"] == expires
     finally:
         repo.close()
+
+
+def test_upsert_created_stores_metadata_labels(postgresql_dsn: str) -> None:
+    _truncate_history(postgresql_dsn)
+    repo = _repo(postgresql_dsn)
+    try:
+        sandbox_id = "sbx-metadata-labels"
+        created = datetime(2026, 4, 1, 9, 0, 0, tzinfo=timezone.utc)
+        labels = {"env": "prod", "app": "zpert"}
+
+        repo.upsert_created(
+            sandbox_id=sandbox_id,
+            tenant_name="t4",
+            namespace="ns4",
+            state="Running",
+            image_uri="img:4",
+            lifecycle_created_at=created,
+            expires_at=created + timedelta(hours=1),
+            metadata=labels,
+        )
+        repo.mark_deleted(
+            sandbox_id,
+            tenant_name="t4",
+            namespace="ns4",
+            final_state="Terminated",
+            image_uri="img:4",
+            lifecycle_created_at=created,
+            expires_at=created + timedelta(hours=1),
+        )
+
+        row = _fetch_row(postgresql_dsn, sandbox_id)
+        assert row is not None
+        assert row["metadata"] == labels
+    finally:
+        repo.close()

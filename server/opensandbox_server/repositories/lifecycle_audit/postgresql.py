@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 from psycopg.rows import dict_row
@@ -83,6 +84,7 @@ class PostgreSQLLifecycleAuditRepository:
                     memory_limit TEXT,
                     cpu_cores DOUBLE PRECISION,
                     memory_gi DOUBLE PRECISION,
+                    metadata JSONB,
                     first_recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
@@ -96,6 +98,9 @@ class PostgreSQLLifecycleAuditRepository:
             )
             conn.execute(
                 f"ALTER TABLE {_HISTORY_TABLE} ADD COLUMN IF NOT EXISTS create_request JSONB"
+            )
+            conn.execute(
+                f"ALTER TABLE {_HISTORY_TABLE} ADD COLUMN IF NOT EXISTS metadata JSONB"
             )
 
     def upsert_created(
@@ -112,6 +117,7 @@ class PostgreSQLLifecycleAuditRepository:
         memory_limit: str | None = None,
         cpu_cores: float | None = None,
         memory_gi: float | None = None,
+        metadata: dict[str, str] | None = None,
     ) -> None:
         now = datetime.now(timezone.utc)
         t = _HISTORY_TABLE
@@ -121,12 +127,12 @@ class PostgreSQLLifecycleAuditRepository:
                 INSERT INTO {t} (
                     sandbox_id, tenant_name, namespace, state, image_uri,
                     lifecycle_created_at, expires_at, source,
-                    cpu_limit, memory_limit, cpu_cores, memory_gi,
+                    cpu_limit, memory_limit, cpu_cores, memory_gi, metadata,
                     first_recorded_at, last_seen_at
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, 'server-lifecycle',
-                    %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s::jsonb,
                     %s, %s
                 )
                 ON CONFLICT (sandbox_id) DO UPDATE SET
@@ -153,6 +159,7 @@ class PostgreSQLLifecycleAuditRepository:
                     ),
                     cpu_cores = COALESCE(EXCLUDED.cpu_cores, {t}.cpu_cores),
                     memory_gi = COALESCE(EXCLUDED.memory_gi, {t}.memory_gi),
+                    metadata = COALESCE(EXCLUDED.metadata, {t}.metadata),
                     last_seen_at = EXCLUDED.last_seen_at,
                     source = CASE
                         WHEN {t}.source IS NOT NULL AND {t}.source <> 'server-lifecycle'
@@ -172,6 +179,7 @@ class PostgreSQLLifecycleAuditRepository:
                     memory_limit,
                     cpu_cores,
                     memory_gi,
+                    json.dumps(metadata) if metadata else None,
                     now,
                     now,
                 ),
@@ -187,6 +195,7 @@ class PostgreSQLLifecycleAuditRepository:
         image_uri: str | None,
         lifecycle_created_at: datetime | None,
         expires_at: datetime | None,
+        metadata: dict[str, str] | None = None,
     ) -> None:
         now = datetime.now(timezone.utc)
         t = _HISTORY_TABLE
@@ -196,11 +205,11 @@ class PostgreSQLLifecycleAuditRepository:
                 INSERT INTO {t} (
                     sandbox_id, tenant_name, namespace, state, image_uri,
                     lifecycle_created_at, expires_at, ended_at, deleted_at,
-                    source, first_recorded_at, last_seen_at
+                    source, metadata, first_recorded_at, last_seen_at
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    'server-lifecycle', %s, %s
+                    'server-lifecycle', %s::jsonb, %s, %s
                 )
                 ON CONFLICT (sandbox_id) DO UPDATE SET
                     tenant_name = COALESCE(NULLIF(EXCLUDED.tenant_name, ''), {t}.tenant_name),
@@ -213,6 +222,7 @@ class PostgreSQLLifecycleAuditRepository:
                     expires_at = COALESCE(EXCLUDED.expires_at, {t}.expires_at),
                     ended_at = COALESCE({t}.ended_at, EXCLUDED.ended_at),
                     deleted_at = COALESCE({t}.deleted_at, EXCLUDED.deleted_at),
+                    metadata = COALESCE(EXCLUDED.metadata, {t}.metadata),
                     last_seen_at = EXCLUDED.last_seen_at,
                     wall_clock_seconds = COALESCE(
                         {t}.wall_clock_seconds,
@@ -243,6 +253,7 @@ class PostgreSQLLifecycleAuditRepository:
                     expires_at,
                     now,
                     now,
+                    json.dumps(metadata) if metadata else None,
                     now,
                     now,
                 ),
