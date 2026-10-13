@@ -1833,7 +1833,38 @@ idle_pause_verify() {
 		|| fail "in-guest probe check failed: $(printf '%s' "$exec_out" | head -c 300)"
 	[[ "$exec_out" == *false* ]] \
 		|| fail "in-guest probe answered unexpected body: $(printf '%s' "$exec_out" | head -c 300)"
-	wait_for "activeProbe not-active pause" 300 sandbox_paused
+
+	# Replicate the sweeper's probe exactly: signed 8080 route + sentinel.
+	local probe_route probe_resp
+	probe_route="$(osb_api sandbox endpoint "$id3" --port 8080 -o json 2>/dev/null \
+		| jq -r '.headers["OpenSandbox-Ingress-To"] // empty')"
+	[[ -n "$probe_route" ]] || fail "activeProbe: no signed route for port 8080"
+	probe_resp="$(curl -fsS -m 10 -H "OpenSandbox-Ingress-To: $probe_route" \
+		-H "OpenSandbox-Skip-Activity: skip" "$GATEWAY_URL/active" 2>&1)" \
+		|| fail "gateway-level probe GET failed: $(printf '%s' "$probe_resp" | head -c 300)"
+	[[ "$probe_resp" == *false* ]] \
+		|| fail "gateway-level probe answered unexpected body: $(printf '%s' "$probe_resp" | head -c 300)"
+	pass "activeProbe: gateway-level probe answers not-active (sentinel carried)"
+
+	# Pause phase; on timeout dump the sweeper's decision inputs.
+	t0="$(now_ms)"
+	while :; do
+		sandbox_paused && break
+		if (( $(now_ms) - t0 >= 300000000000 )); then
+			log "verify (idle-pause): probe pause timeout; decision inputs:"
+			log "verify (idle-pause): redis keys: $(kubectl -n "$OSB_NS" exec deploy/idle-pause-redis -- \
+				redis-cli --scan --pattern 'opensandbox:*' 2>/dev/null | tr '\n' ' ')"
+			log "verify (idle-pause): activity=$(kubectl -n "$OSB_NS" exec deploy/idle-pause-redis -- \
+				redis-cli GET "opensandbox:activity:$id3" 2>/dev/null | tr -d '\n') \
+				tombstone=$(kubectl -n "$OSB_NS" exec deploy/idle-pause-redis -- \
+				redis-cli GET "opensandbox:idlep:unknown:$id3" 2>/dev/null | tr -d '\n')"
+			kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=200 2>/dev/null \
+				| grep "idle_pause" | tail -15 > "$WORK/idlep-server-failure.log" || true
+			log "verify (idle-pause): server idle_pause lines in $WORK/idlep-server-failure.log"
+			fail "activeProbe sandbox did not pause within 300s"
+		fi
+		sleep 5
+	done
 	sleep 3
 	kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=400 > "$WORK/idlep-server.log" 2>/dev/null || true
 	if grep -q "event=pause_issued" "$WORK/idlep-server.log" \
