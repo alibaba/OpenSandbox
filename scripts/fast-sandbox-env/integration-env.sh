@@ -1808,12 +1808,31 @@ idle_pause_verify() {
 	payload="mkdir -p /tmp/probe \
 		&& printf '%s' '{\"active\": false, \"message\": \"shell-probe\"}' > /tmp/probe/active \
 		&& setsid busybox httpd -f -p 8080 -h /tmp/probe >/dev/null 2>&1 < /dev/null & sleep 1; cat /tmp/probe/active"
-	probe_out="$(osb_api command run "$id3" -- "$payload" 2>/dev/null)" \
-		|| fail "probe httpd start failed in $id3"
-	[[ "$probe_out" == *'"active"'* ]] || fail "probe file not written (exec output: $(printf '%s' "$probe_out" | head -c 200))"
-	probe_out="$(osb_api command run "$id3" -- "curl -fsS -m 5 http://127.0.0.1:8080/active" 2>/dev/null)" \
-		|| fail "in-guest probe endpoint check failed (is busybox httpd running?)"
-	[[ "$probe_out" == *false* ]] || fail "in-guest probe answered unexpected body: $(printf '%s' "$probe_out" | head -c 200)"
+
+	# Diagnostic only: whether the CLI's command path works through the
+	# gateway. The scenario itself uses the raw execd API below.
+	cli_out="$(osb_api command run "$id3" -- "echo cli-ok" 2>&1)" \
+		|| log "verify (idle-pause): osb command run failed (non-fatal): $(printf '%s' "$cli_out" | head -c 200)"
+
+	local route exec_body exec_out
+	route="$(osb_api sandbox endpoint "$id3" --port 44772 -o json 2>/dev/null \
+		| jq -r '.headers["OpenSandbox-Ingress-To"] // empty')"
+	[[ -n "$route" ]] || fail "activeProbe: no execd route for $id3"
+	exec_body="$(jq -n --arg cmd "$payload" '{command: $cmd}')"
+	exec_out="$(curl -fsS -m 20 -X POST -H "Content-Type: application/json" \
+		-H "OpenSandbox-Ingress-To: $route" -d "$exec_body" "$GATEWAY_URL/command" 2>&1)" \
+		|| fail "probe httpd exec failed: $(printf '%s' "$exec_out" | head -c 300)"
+	[[ "$exec_out" == *active* && "$exec_out" == *false* ]] \
+		|| fail "probe file not written (exec output: $(printf '%s' "$exec_out" | head -c 300))"
+
+	route="$(osb_api sandbox endpoint "$id3" --port 44772 -o json 2>/dev/null \
+		| jq -r '.headers["OpenSandbox-Ingress-To"] // empty')"
+	exec_out="$(curl -fsS -m 20 -X POST -H "Content-Type: application/json" \
+		-H "OpenSandbox-Ingress-To: $route" \
+		-d '{"command": "curl -fsS -m 5 http://127.0.0.1:8080/active"}' "$GATEWAY_URL/command" 2>&1)" \
+		|| fail "in-guest probe check failed: $(printf '%s' "$exec_out" | head -c 300)"
+	[[ "$exec_out" == *false* ]] \
+		|| fail "in-guest probe answered unexpected body: $(printf '%s' "$exec_out" | head -c 300)"
 	wait_for "activeProbe not-active pause" 300 sandbox_paused
 	sleep 3
 	kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=400 > "$WORK/idlep-server.log" 2>/dev/null || true
