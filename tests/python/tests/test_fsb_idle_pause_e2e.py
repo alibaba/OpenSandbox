@@ -288,7 +288,8 @@ class TestFsbIdlePauseE2E:
             result = await sandbox.commands.run(
                 "mkdir -p /tmp/probe && printf '{\"active\": true}' "
                 "> /tmp/probe/active "
-                "&& (busybox httpd -f -p 8080 -h /tmp/probe >/dev/null 2>&1 &)"
+                "&& (setsid python3 -m http.server 8080 --directory /tmp/probe "
+                ">/dev/null 2>&1 < /dev/null &)"
             )
             assert result.error is None
 
