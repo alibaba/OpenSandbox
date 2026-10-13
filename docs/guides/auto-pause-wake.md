@@ -114,7 +114,7 @@ The policy is desired state: validated updates take effect on the next read, wit
 | `idleTimeoutSeconds` | int 30–86400 | — | Idle threshold **X**. Required together with `onIdle`. Create is rejected with `400` if `X > activity_ttl_seconds`. |
 | `onIdle` | enum | — | Only `pause` today. The field exists so a future action (e.g. `terminate`) stays additive. |
 | `wakeOnAccess` | bool | `true` | Within a declared policy, `false` opts out of wake: traffic never resumes the sandbox (permanent `503`), only `POST /sandboxes/{id}/resume` does. |
-| `activeProbe` | object | — | App-defined activity probe — see below. All three sub-fields required when present. |
+| `activeProbe` | object | — | App-defined activity probe — see below. **Auto-pause only:** requires `idleTimeoutSeconds` (a wake-only policy is never probed, so the create is rejected with `400`); all three sub-fields required when present. |
 
 **Wake-only policy**: omit `idleTimeoutSeconds` and `onIdle`, keep `wakeOnAccess: true`. The sandbox is never auto-paused, but a (manually) paused sandbox wakes on traffic.
 
@@ -122,7 +122,7 @@ The policy is desired state: validated updates take effect on the next read, wit
 
 ### The activity probe
 
-Ingress observation cannot see work that generates no inbound traffic — a request that started a 20-minute in-sandbox computation, a background poller. `activeProbe` lets the application veto such a pause:
+Ingress observation cannot see work that generates no inbound traffic — a request that started a 20-minute in-sandbox computation, a background poller. `activeProbe` lets the application veto such a pause (it is auto-pause only: it must be declared together with `idleTimeoutSeconds`):
 
 ```json
 "activeProbe": {
@@ -223,7 +223,7 @@ Exhaustion raises `SandboxWakeTimeoutException`.
 | Paused-and-expired sandbox returns 404 | Absolute expiry passed while paused | Expected — pausing does not extend expiry; compose with renew-on-access |
 | Clients see plain 503 (no marker) on a paused sandbox | `wakeOnAccess: false`, no declared policy, or `--wake-enabled=false` | Check the three activation parties |
 | Wake latency above P95 target | Cross-node restore (artifact fetch + full materialization) | Size Y from the cluster's actual resume distribution; checkpoint-affinity scheduling is future work |
-| Pauses/wakes flapping | Traffic period ≈ X | Raise X; watch `flap.ratio` |
+| Pauses/wakes flapping | Traffic period ≈ X | Raise X; track pauses followed by a quick wake per sandbox (the flap ratio is derived, not an emitted instrument — see [Monitoring](#operating-the-feature)) |
 
 ## Reference
 

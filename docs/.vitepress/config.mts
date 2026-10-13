@@ -151,7 +151,7 @@ export default defineConfig({
               link: "/architecture/network/single-host-network",
             },
             {
-              text: "Auto-Pause and Wake-on-Access",
+              text: "Auto-Pause & Wake-on-Access",
               link: "/architecture/network/auto-pause-wake-on-access",
             },
           ],
