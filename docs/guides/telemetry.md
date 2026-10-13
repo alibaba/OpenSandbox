@@ -16,7 +16,7 @@ tracing are covered separately in [SDK observability](/sdks/observability).
 | [Kubernetes controller](#kubernetes-controller) | `opensandbox/controller` | Allocator histograms, capacity gauges (+ controller-runtime endpoint) |
 | [Execd](#execd) | `opensandbox/execd` | HTTP, execution, filesystem, system resources, OOM, isolation |
 | [Egress sidecar](#egress-sidecar) | `opensandbox/egress` | DNS, policy, nftables, node/process resources |
-| [Ingress gateway](#ingress-gateway) | `opensandbox-ingress-<version>` | HTTP/routing, upstream dial, network readiness shadow, host |
+| [Ingress gateway](#ingress-gateway) | `opensandbox-ingress-<version>` | HTTP/routing, upstream dial, network readiness shadow, wake-on-access, host |
 | [Node agent](#node-agent) | `opensandbox.nodeagent.*` | Log pipeline records, bytes, drops, retries, queue depth, sink latency |
 
 ## Shared OTLP configuration for Go components
@@ -227,8 +227,8 @@ controller_allocator_schedule_duration_seconds{namespace="default",pool_name="po
 
 ## Execd
 
-Meter: `opensandbox/execd` · Default service name: `opensandbox-execd`
-(configurable via `OTEL_SERVICE_NAME`).
+Meter: `opensandbox/execd` · Service name: `opensandbox-execd-<version>` (fixed
+by execd; `OTEL_SERVICE_NAME` is not read).
 
 | Metric | Type | Unit | Attributes | Meaning |
 |---|---|---|---|---|
@@ -292,7 +292,6 @@ described [above](#export-endpoints) applies.
 
 ```bash
 export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT="http://otel-collector:4318"
-export OTEL_SERVICE_NAME="opensandbox-execd"
 ```
 
 ## Egress sidecar
@@ -500,6 +499,21 @@ Reported for the most recent complete window; tuned by the
 | `ingress.network.shadow.distinct_signal_targets` | Observable Gauge | — | Distinct targets with timeout/unreachable results |
 | `ingress.network.shadow.qualified` | Observable Gauge | — | 1 when the window has enough samples |
 | `ingress.network.shadow.degraded` | Observable Gauge | — | 1 when the qualified window is degraded |
+
+### Wake-on-access (OSEP-0024)
+
+Emitted when wake-on-access is enabled. Restore saturation, parking-lot shedding,
+policy gate failures, and Redis write drops are the signals to watch.
+
+| Metric | Type | Unit | Attributes | Description |
+|---|---|---|---|---|
+| `ingress.wake.flights` | Counter | — | `outcome` (`triggered`/`joined`/`none`) | Wake flight count by outcome |
+| `ingress.park.active` | UpDownCounter | — | - | Currently parked requests |
+| `ingress.park.wait.duration` | Histogram | `s` | `outcome` (`served`/`budget_exhausted`/`canceled`/`error`) | Per-parked-request wait duration; buckets are sized around the default 5s park budget (a ~200ms same-node resume vs a near-exhaustion wait) |
+| `ingress.park.shed` | Counter | — | - | Requests shed because the parking lot was full |
+| `ingress.wake.restore.active` | UpDownCounter | — | - | Wake flights currently holding a restore permit (the concurrent-restore gauge) |
+| `ingress.idlep.policy.reads` | Counter | — | `outcome` (`allowed`/`denied`/`error`) | Idle-policy gate outcomes; sustained `error` means an RBAC or apiserver problem |
+| `ingress.activity.writes_dropped` | Counter | — | - | Activity observations dropped before reaching Redis |
 
 ### Host metrics (Linux only; 0 elsewhere)
 
