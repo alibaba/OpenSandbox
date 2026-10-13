@@ -26,6 +26,10 @@ jobs:
     if: needs.changes.outputs.relevant == 'true'
     runs-on: kvm
     timeout-minutes: 180
+    env:
+      # Full-stack profile: Redis + server [idle_pause] + gateway
+      # activity/wake flags, multi-round idle-pause verify, idle-e2e.
+      IDLE_PAUSE: "1"
     steps:
       # actions/checkout always executes as the runner user; the script
       # steps below run as root and leave root-owned files (venv, pycache)
@@ -51,9 +55,13 @@ jobs:
       - name: Run integration tests
         run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh up --auto-clean
 
-      - name: Run SDK e2e
+      - name: Run base SDK e2e
         timeout-minutes: 30
         run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh sdk-e2e
+
+      - name: Run idle-pause SDK e2e
+        timeout-minutes: 45
+        run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh idle-e2e
 
       # Collect the env's own failure dump ($WORK/logs/failure-*.txt: kind
       # nodes/pods, controller / firecracker-runtime / fastlet / builder /
