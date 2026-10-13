@@ -190,7 +190,6 @@ class TestFsbIdlePauseE2E:
             pause_times: list[float] = []
             wake_times: list[float] = []
             for rnd in range(1, IDLE_ROUNDS + 1):
-                # Pause phase: the clock starts at the last activity.
                 t0 = time.monotonic()
                 await _wait_until(
                     lambda: _state_is(manager, sandbox.id, "Paused"),
@@ -199,7 +198,6 @@ class TestFsbIdlePauseE2E:
                 )
                 pause_times.append(time.monotonic() - t0)
 
-                # Wake phase: traffic alone must restore and serve.
                 t1 = time.monotonic()
                 await _wake_and_run(
                     sandbox.id, connection_config, f"wake-r{rnd}-ok"

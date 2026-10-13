@@ -1723,8 +1723,6 @@ idle_pause_verify() {
 	printf -v joined_att '%s/' "${attempts[@]}"
 	pass "idle-pause ${rounds} rounds: pause=${joined_pause%?} wake=${joined_wake%?} placement.attempt=${joined_att%?}"
 
-	# Scenario: wakeOnAccess=false — auto-pause still happens, traffic
-	# never wakes, only the resume API does.
 	local main_id="$VERIFY_ID" created2 id2 payload
 	log "verify (idle-pause): scenario wakeOnAccess=false"
 	created2="$(server_api POST /sandboxes "$(jq -n \
@@ -1750,12 +1748,8 @@ idle_pause_verify() {
 	wait_for "wakeOnAccess=false sandbox deleted" 120 verify_sandbox_gone
 	VERIFY_ID="$main_id"
 
-	# Scenario: Redis unavailable — sweeps skip entirely (no pauses), then
-	# recovery pauses via the missing-key tombstone (restart lost the
-	# ephemeral activity key).
 	log "verify (idle-pause): scenario redis down"
-	# The sandbox may have auto-paused during the previous scenario's idle
-	# window; the wake records activity and leaves it Running.
+	# The previous scenario may have left it Paused.
 	idle_wake_wait "pre-redis-down wake"
 	t0="$(now_ms)"
 	kubectl -n "$OSB_NS" scale deploy/idle-pause-redis --replicas=0 >/dev/null
@@ -1771,8 +1765,6 @@ idle_pause_verify() {
 	wait_for "tombstone pause after redis recovery" 300 sandbox_paused
 	pass "redis recovery: missing-key tombstone paused after the full idle window"
 
-	# Scenario: FLUSHALL — data loss must delay, never accelerate. The
-	# sandbox is Paused here; wake it, flush, and time the next pause.
 	idle_wake_wait "post-flushall wake"
 	t0="$(now_ms)"
 	kubectl -n "$OSB_NS" exec deploy/idle-pause-redis -- redis-cli FLUSHALL >/dev/null 2>&1 \

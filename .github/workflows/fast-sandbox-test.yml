@@ -27,10 +27,8 @@ jobs:
     runs-on: kvm
     timeout-minutes: 180
     env:
-      # Full-stack profile: Redis + server [idle_pause] + gateway
-      # activity/wake flags, multi-round idle-pause verify, idle-e2e.
+      # Full-stack profile (single round while scenarios stabilize).
       IDLE_PAUSE: "1"
-      # Single round while the idle-pause scenarios stabilize.
       IDLE_PAUSE_ROUNDS: "1"
     steps:
       # actions/checkout always executes as the runner user; the script

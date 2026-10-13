@@ -356,17 +356,15 @@ jobs:
         run: |
           kind delete cluster --name "${KIND_CLUSTER}" || true
 
-  # Full fast-sandbox stack on the same KVM runner as
-  # fast-sandbox-test.yml, with the OSEP-0024 idle-pause profile:
-  # base e2e + idle-pause/wake e2e; nightly/dispatch only.
+  # Full fast-sandbox stack (OSEP-0024 idle-pause profile included);
+  # nightly/dispatch only, KVM runner.
   fast-sandbox-full-stack:
     name: Fast Sandbox Full-Stack E2E (KVM)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: kvm
     timeout-minutes: 180
     env:
-      # One declaration covers up / idle-e2e / failure diagnostics alike;
-      # each step forwards it through sudo -E.
+      # Covers up, both e2e steps, and the failure diagnostics.
       IDLE_PAUSE: "1"
     steps:
       # actions/checkout always executes as the runner user; the script
