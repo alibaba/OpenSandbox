@@ -22,6 +22,7 @@ import { AdminTenantSelect, ALL_TENANTS, tenantFilterToQuery } from '../componen
 import type { Sandbox } from '../api/types';
 import { consoleTagTableCellProps, SandboxStateTag, TenantTag } from '../components/SemanticTags';
 import { formatDuration, SANDBOX_STATES, sandboxDisplayName } from '../utils/format';
+import { sandboxShellPath } from '../utils/shellPath';
 
 export function AdminSandboxesPage() {
   const [loading, setLoading] = useState(false);
@@ -102,6 +103,11 @@ export function AdminSandboxesPage() {
           >
             诊断
           </Link>
+          {r.status?.state === 'Running' ? (
+            <Link to={sandboxShellPath(r.id, r.tenant)}>Shell</Link>
+          ) : (
+            <Typography.Text type="secondary">Shell</Typography.Text>
+          )}
         </Space>
       ),
     },

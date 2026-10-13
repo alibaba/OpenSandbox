@@ -5,7 +5,7 @@ description: Optional React console and FastAPI BFF for sandbox lifecycle operat
 
 # Developer Console
 
-OpenSandbox includes an **optional** developer console under [`console/`](https://github.com/opensandbox-group/OpenSandbox/tree/main/console) in the monorepo. It provides a web UI for common lifecycle tasks (list, create, renew, delete, endpoints, diagnostics) without putting API keys in the browser.
+OpenSandbox includes an **optional** developer console under [`console/`](https://github.com/opensandbox-group/OpenSandbox/tree/main/console) in the monorepo. It provides a web UI for common lifecycle tasks (list, create, renew, delete, endpoints, diagnostics, and an interactive shell) without putting API keys in the browser.
 
 This guide is the **published entry point**. Detailed BFF configuration, API notes, and Kubernetes examples live next to the code:
 
@@ -30,6 +30,8 @@ This guide is the **published entry point**. Detailed BFF configuration, API not
 Browser → Console Web (static) → Console BFF (/api) → Lifecycle API (/v1)
                                       ↓
                               tenants.toml (same as server)
+                                      ↓
+                              execd PTY (shell only, after endpoint lookup)
 ```
 
 ## Minimum deployment

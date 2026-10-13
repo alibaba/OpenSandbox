@@ -11,6 +11,7 @@
 | `BFF_COOKIE_SECURE` | no | Set `true` behind HTTPS |
 | `BFF_CORS_ORIGINS` | no | Comma-separated SPA origins. Default `http://localhost:5173`. `*` is rejected because session cookies use credentials |
 | `BFF_HTTP_TIMEOUT_SECONDS` | no | Upstream timeout; default `30` |
+| `BFF_EXECD_PROTOCOL` | no | Scheme for execd endpoints that omit one. Empty follows `LIFECYCLE_API_BASE` (`http` or `https`) |
 
 ### Optional: node-agent integration
 
