@@ -82,6 +82,11 @@ class DockerRuntimeMixin:
                         "name": f"sandbox-execd-{uuid4()}",
                         "detach": True,
                         "auto_remove": False,
+                        # Pass the configured network mode explicitly. Without it the Docker
+                        # API falls back to `bridge`, which fails on hosts where netavark
+                        # cannot apply its ruleset (e.g. rootless podman in WSL2) even when
+                        # the sandbox itself is configured for a working mode like `pasta`.
+                        "network_mode": self.network_mode,
                     }
                     if docker_platform is not None:
                         create_kwargs["platform"] = docker_platform
