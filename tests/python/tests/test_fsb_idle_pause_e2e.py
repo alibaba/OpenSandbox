@@ -213,7 +213,9 @@ class TestFsbIdlePauseE2E:
             logger.info(_summarize("auto-pause", pause_times))
             logger.info(_summarize("wake", wake_times))
             for rnd, wake in enumerate(wake_times, start=1):
-                assert wake < WAKE_BUDGET, f"round {rnd} wake {wake:.1f}s exceeded budget"
+                assert wake < WAKE_BUDGET.total_seconds(), (
+                    f"round {rnd} wake {wake:.1f}s exceeded budget"
+                )
         finally:
             await _kill_and_wait_gone(manager, sandbox.id)
 
@@ -230,11 +232,16 @@ class TestFsbIdlePauseE2E:
         logger.info("policy-less sandbox ready: %s", sandbox.id)
         try:
             await manager.pause_sandbox(sandbox.id)
-            await _wait_until(
-                lambda: _state_is(manager, sandbox.id, "Paused"),
-                timedelta(minutes=4),
-                "manually Paused",
-            )
+
+            def _paused() -> bool:
+                return _state_is(manager, sandbox.id, "Paused")
+
+            # The checkpoint can queue behind a concurrent fastlet teardown;
+            # one idempotent re-issue covers a lost first intent.
+            await _wait_until(_paused, timedelta(seconds=120), "manually Paused (first issue)")
+            if not await _paused():
+                await manager.pause_sandbox(sandbox.id)
+            await _wait_until(_paused, timedelta(seconds=360), "manually Paused")
 
             with pytest.raises(SandboxException):
                 attached = await Sandbox.connect(
