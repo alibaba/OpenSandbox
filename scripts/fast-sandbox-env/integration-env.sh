@@ -1247,6 +1247,9 @@ resolve_gateway_address() {
 	[[ -n "$node_ip" ]] || die "cannot resolve the kind node IP for the gateway address"
 	GATEWAY_ADDRESS="$node_ip:$GATEWAY_HOST_PORT"
 	GATEWAY_URL="http://$GATEWAY_ADDRESS"
+	# Proxy env must not intercept node-IP traffic (curl, osb/httpx).
+	export NO_PROXY="${NO_PROXY:+$NO_PROXY,}$node_ip"
+	export no_proxy="${no_proxy:+$no_proxy,}$node_ip"
 	log "gateway address: $GATEWAY_ADDRESS (server announces this to clients and probes)"
 }
 
@@ -1392,8 +1395,8 @@ opensandbox_up() {
 	# the gRPC connection.
 	wait_for "server /health on 127.0.0.1:$SERVER_HOST_PORT" 60 \
 		curl -fsS -m 5 "$SERVER_URL/health"
-	wait_for "gateway /status.ok on 127.0.0.1:$GATEWAY_HOST_PORT" 60 \
-		curl -fsS -m 5 "$GATEWAY_URL/status.ok"
+	wait_for "gateway /status.ok on $GATEWAY_ADDRESS" 60 \
+		curl -fsS -m 5 --noproxy "*" "$GATEWAY_URL/status.ok"
 	pass "server + ingress gateway up (fsb runtime, gateway routes signed with key 'a')"
 }
 
