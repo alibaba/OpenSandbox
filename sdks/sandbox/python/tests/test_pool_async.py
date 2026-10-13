@@ -235,6 +235,122 @@ async def test_async_failed_start_finishes_cleanup_before_propagating(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_stage", ["manager", "transport"])
+@pytest.mark.parametrize("startup_failure", ["cancelled", "exception"])
+@pytest.mark.parametrize(
+    "cleanup_failure_order",
+    ["no_cancel", "after_cancel", "before_cancel_resumes", "timeout"],
+)
+async def test_async_failed_start_preserves_cancellation_when_cleanup_fails(
+    cleanup_stage: str,
+    startup_failure: str,
+    cleanup_failure_order: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = InMemoryAsyncPoolStateStore()
+    start_entered = asyncio.Event()
+    fail_start = asyncio.Event()
+    cleanup_entered = asyncio.Event()
+    finish_cleanup = asyncio.Event()
+    startup_error = RuntimeError("state store unavailable")
+    cleanup_error = RuntimeError("provider close failed")
+    original_close = ConnectionConfig.close_transport_if_owned
+
+    async def failing_set_max_idle(*args: Any, **kwargs: Any) -> None:
+        start_entered.set()
+        await fail_start.wait()
+        raise startup_error
+
+    async def fail_cleanup_once() -> None:
+        if not cleanup_entered.is_set():
+            cleanup_entered.set()
+            await finish_cleanup.wait()
+            raise cleanup_error
+
+    async def close_transport(config: ConnectionConfig) -> None:
+        if cleanup_stage == "transport":
+            await fail_cleanup_once()
+        await original_close(config)
+
+    class FailingManager(FakeAsyncManager):
+        async def close(self) -> None:
+            if cleanup_stage == "manager":
+                await fail_cleanup_once()
+            await super().close()
+
+    manager = FailingManager()
+    monkeypatch.setattr(store, "set_max_idle", failing_set_max_idle)
+    monkeypatch.setattr(ConnectionConfig, "close_transport_if_owned", close_transport)
+    pool = _create_pool(max_idle=0, store=store, manager=manager)
+    propagated_cancellations: list[asyncio.CancelledError] = []
+
+    async def start_pool() -> None:
+        try:
+            await pool.start()
+        except asyncio.CancelledError as exc:
+            # Python 3.10 wait_for can copy this exception and drop its cause.
+            propagated_cancellations.append(exc)
+            raise
+
+    startup = asyncio.create_task(start_pool())
+    timeout_waiter: asyncio.Task[None] | None = None
+    try:
+        await asyncio.wait_for(start_entered.wait(), timeout=2)
+        if startup_failure == "cancelled":
+            startup.cancel()
+        else:
+            fail_start.set()
+        await asyncio.wait_for(cleanup_entered.wait(), timeout=2)
+
+        if cleanup_failure_order in ("after_cancel", "before_cancel_resumes"):
+            for _ in range(2):
+                startup.cancel("cancel during cleanup")
+                await asyncio.sleep(0)
+                assert not startup.done(), "startup exited before cleanup finished"
+            if cleanup_failure_order == "before_cancel_resumes":
+                # Queue cleanup first so it fails before the caller resumes.
+                finish_cleanup.set()
+            startup.cancel("cancel during cleanup")
+            if cleanup_failure_order == "after_cancel":
+                await asyncio.sleep(0)
+                assert not startup.done(), "startup exited before cleanup finished"
+        elif cleanup_failure_order == "timeout":
+            timeout_waiter = asyncio.create_task(asyncio.wait_for(startup, timeout=0))
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            assert not timeout_waiter.done()
+
+        finish_cleanup.set()
+        if cleanup_failure_order == "no_cancel":
+            with pytest.raises(RuntimeError) as raised_error:
+                await asyncio.wait_for(startup, timeout=2)
+            assert raised_error.value is cleanup_error
+        elif timeout_waiter is not None:
+            with pytest.raises(asyncio.TimeoutError) as raised_timeout:
+                await asyncio.wait_for(timeout_waiter, timeout=2)
+            assert isinstance(raised_timeout.value.__cause__, asyncio.CancelledError)
+        else:
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(startup, timeout=2)
+        if cleanup_failure_order != "no_cancel":
+            assert len(propagated_cancellations) == 1
+            cancellation = propagated_cancellations[0]
+            assert cancellation.__cause__ is cleanup_error
+            if cleanup_failure_order != "timeout":
+                assert cancellation.args == ("cancel during cleanup",)
+            assert startup.cancelled()
+    finally:
+        fail_start.set()
+        finish_cleanup.set()
+        if not startup.done():
+            startup.cancel()
+        await asyncio.gather(startup, return_exceptions=True)
+        if timeout_waiter is not None:
+            await asyncio.gather(timeout_waiter, return_exceptions=True)
+        await asyncio.wait_for(pool.shutdown(False), timeout=5)
+
+
+@pytest.mark.asyncio
 async def test_async_acquire_fail_fast_empty_raises_pool_empty() -> None:
     pool = _create_pool(max_idle=0)
     await pool.start()

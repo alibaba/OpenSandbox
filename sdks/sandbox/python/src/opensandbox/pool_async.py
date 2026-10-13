@@ -1357,12 +1357,17 @@ class SandboxPoolAsync:
         # cancels again while closing startup-owned resources.
         task = asyncio.create_task(cleanup())
         cancellation: asyncio.CancelledError | None = None
-        while not task.done():
-            try:
-                await asyncio.shield(task)
-            except asyncio.CancelledError as exc:
-                cancellation = cancellation or exc
-        await task
+        try:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError as exc:
+                    cancellation = cancellation or exc
+            await task
+        except Exception as exc:
+            if cancellation is not None:
+                raise cancellation from exc
+            raise
         if cancellation is not None:
             raise cancellation
 
