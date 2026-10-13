@@ -356,10 +356,11 @@ jobs:
         run: |
           kind delete cluster --name "${KIND_CLUSTER}" || true
 
-  # OSEP-0024 idle-pause/wake e2e on the same KVM runner as
-  # fast-sandbox-test.yml; nightly/dispatch only.
-  fsb-idle-pause-e2e:
-    name: Fast Sandbox Idle-Pause/Wake E2E (OSEP-0024)
+  # Full fast-sandbox stack on the same KVM runner as
+  # fast-sandbox-test.yml, with the OSEP-0024 idle-pause profile:
+  # base e2e + idle-pause/wake e2e; nightly/dispatch only.
+  fast-sandbox-full-stack:
+    name: Fast Sandbox Full-Stack E2E (KVM)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: kvm
     timeout-minutes: 180
@@ -384,6 +385,10 @@ jobs:
       - name: Run integration tests (idle-pause profile)
         run: sudo -E env "PATH=$PATH" "IDLE_PAUSE=1" ./scripts/fast-sandbox-env/integration-env.sh up --auto-clean
 
+      - name: Run base SDK e2e
+        timeout-minutes: 30
+        run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh sdk-e2e
+
       - name: Run idle-pause SDK e2e
         timeout-minutes: 45
         run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh idle-e2e
@@ -404,7 +409,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: fsb-idle-pause-diagnostics-${{ github.run_attempt }}
+          name: fast-sandbox-full-stack-diagnostics-${{ github.run_attempt }}
           path: diagnostics/
           retention-days: 7
 
