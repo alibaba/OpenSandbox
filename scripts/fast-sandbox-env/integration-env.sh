@@ -1239,6 +1239,7 @@ dart_source_counters() { # pod -> "<source> <value>" lines
 redis_up() {
 	# The sweeper connects at startup, so Redis must precede the server.
 	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping Redis"; return 0; }
+	touch "$WORK/idle-pause"
 	kubectl apply -n "$OSB_NS" -f "$MANIFESTS_DIR/idle-pause/redis.yaml" >/dev/null
 	wait_for "idle-pause Redis deployment ready" 120 \
 		kubectl -n "$OSB_NS" rollout status deploy/idle-pause-redis --timeout=10s
@@ -1886,7 +1887,9 @@ sdk_e2e() {
 }
 
 idle_e2e() {
-	[[ "$IDLE_PAUSE" == "1" ]] || die "idle-e2e requires the idle-pause profile (IDLE_PAUSE=1 up)"
+	if [[ "$IDLE_PAUSE" != "1" && ! -f "$WORK/idle-pause" ]]; then
+		die "idle-e2e requires the idle-pause profile (IDLE_PAUSE=1 up)"
+	fi
 	kind get clusters 2>/dev/null | grep -x "$KIND_CLUSTER" >/dev/null \
 		|| die "cluster $KIND_CLUSTER is not up (run up first)"
 	curl -fsS -m 5 "$SERVER_URL/health" >/dev/null 2>&1 \

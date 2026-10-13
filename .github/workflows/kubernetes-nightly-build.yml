@@ -390,7 +390,7 @@ jobs:
 
       - name: Run idle-pause SDK e2e
         timeout-minutes: 45
-        run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh idle-e2e
+        run: sudo -E env "PATH=$PATH" "IDLE_PAUSE=1" ./scripts/fast-sandbox-env/integration-env.sh idle-e2e
 
       # Collect the env's own failure dump ($WORK/logs/failure-*.txt) plus
       # live status, BEFORE teardown removes the cluster.
