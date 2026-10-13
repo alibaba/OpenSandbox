@@ -45,8 +45,9 @@ caveats): `fast-sandbox/docs/guides/firecracker-integration-env.md`.
 
 `IDLE_PAUSE=1 ./scripts/fast-sandbox-env/integration-env.sh up` additionally
 deploys an ephemeral Redis (`manifests/idle-pause/redis.yaml`, before the
-server — the sweeper connects at startup), enables the server `[idle_pause]`
-sweeper (5s sweep) and the gateway's `--activity-enabled` + `--wake-enabled`,
+server — the sweeper connects at startup), enables the server
+`[automation.idle_pause]` sweeper (5s sweep) and the gateway's
+`--activity-enabled` + `--wake-enabled`,
 and runs an `idle-pause / wake-on-access` verify stage: an opted-in sandbox
 (`lifecycle.idlePolicy`, X=30s) is auto-paused with zero traffic, and the next
 gateway request wakes it (parked while the restore completes). The

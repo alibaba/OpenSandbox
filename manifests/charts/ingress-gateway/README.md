@@ -28,7 +28,7 @@ Kubernetes: `>=1.21.1-0`
 | fullnameOverride | string | `"opensandbox-ingress-gateway"` | Resource names and app.kubernetes.io/name are fixed to this value, independent of release name (keeps names stable across releases). |
 | gateway.activity.enabled | bool | `false` | Enable activity recording. |
 | gateway.activity.minInterval | string | `"5s"` | Min interval between activity writes for the same sandbox. |
-| gateway.activity.redisDsn | string | `"redis://127.0.0.1:6379/0"` | Redis DSN; must match the server's [idle_pause] redis.dsn. |
+| gateway.activity.redisDsn | string | `"redis://127.0.0.1:6379/0"` | Redis DSN; must match the server's [automation.idle_pause] redis.dsn. |
 | gateway.activity.ttlSeconds | int | `1800` | TTL for activity keys; keep equal to the server's activity_ttl_seconds. |
 | gateway.affinity | object | `{}` | Affinity for the gateway pod. |
 | gateway.containerSecurityContext | object | `{}` | Container-level security context for the gateway container. |

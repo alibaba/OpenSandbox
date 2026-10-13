@@ -57,8 +57,9 @@
 #   XFS_STATEROOT / XFS_SIZE  reflink StateRoot on/off and virtual size
 #   OSB_PACKAGE / OSB_BIN  opensandbox CLI for the verify stages (latest from PyPI / preinstalled binary)
 #   SKIP_TOOL_INSTALL / SKIP_LEFTOVER_CLEAN / INOTIFY_VALUE
-#   IDLE_PAUSE=1     OSEP-0024 idle-pause/wake profile: Redis, server [idle_pause],
-#                    gateway activity+wake flags, idle-pause verify stage
+#   IDLE_PAUSE=1     OSEP-0024 idle-pause/wake profile: Redis, server
+#                    [automation.idle_pause], gateway activity+wake flags,
+#                    idle-pause verify stage
 #   IDLE_PAUSE_ROUNDS  auto-pause/wake rounds in the verify stage and idle-e2e (default 3)
 #   IDLE_PAUSE_PARK_BUDGET  gateway wake park budget (default 5s; set e.g. 100ms to
 #                    force every wake through the marked-503 + client-retry path)
@@ -154,7 +155,7 @@ IMG_INGRESS="${INGRESS_IMAGE:-docker.io/opensandbox/ingress:env}"
 FASTPATH_ENDPOINT="fast-sandbox-fastpath.opensandbox-system.svc:9090"
 SERVER_API_KEY="fast-sandbox-env"
 
-# OSEP-0024 profile: Redis + server [idle_pause] + gateway activity/wake flags.
+# OSEP-0024 profile: Redis + server [automation.idle_pause] + gateway activity/wake flags.
 IDLE_PAUSE="${IDLE_PAUSE:-0}"
 REDIS_IMAGE="${REDIS_IMAGE:-redis:7-alpine}"
 REDIS_RELEASE="idle-pause-redis"
@@ -1299,14 +1300,13 @@ fastpath_wait_ready_seconds = 30.0
 template_s3_publish_secret = "sandbox-oss-credentials"
 TOML
 	if [[ "$IDLE_PAUSE" == "1" ]]; then
-		# Dotted keys nest the [idle_pause.redis] table.
+		# Dotted keys nest the redis sub-table.
 		cat >> "$GEN_DIR/osb-server-config.toml" <<TOML
 
-[idle_pause]
+[automation.idle_pause]
 enabled = true
 sweep_interval_seconds = 5
 activity_ttl_seconds = 1800
-redis.enabled = true
 redis.dsn = "$REDIS_DSN"
 redis.lock_ttl_seconds = 30
 TOML
@@ -2105,7 +2105,7 @@ usage: integration-env.sh [--auto-clean] {up|down|status|pool|sdk-e2e|idle-e2e}
            (create -> gateway route -> execd /ping, plus a pause/resume
            round-trip through the checkpoint). The CLI (osb) is installed
            fresh from PyPI unless OSB_BIN points at an existing binary.
-           With IDLE_PAUSE=1: Redis + server [idle_pause] + gateway
+           With IDLE_PAUSE=1: Redis + server [automation.idle_pause] + gateway
            activity/wake flags, plus the idle-pause/wake verify stage
            (IDLE_PAUSE_ROUNDS cycles, per-round timing summary).
   pool     re-apply only the SandboxPool (after editing manifests/pool/)
