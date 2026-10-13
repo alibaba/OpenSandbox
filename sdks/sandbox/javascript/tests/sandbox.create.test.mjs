@@ -698,3 +698,54 @@ test("Sandbox.create metrics synchronous throw does not change create error", as
     }
   );
 });
+
+test("Sandbox.create forwards lifecycle.idlePolicy", async () => {
+  const { adapterFactory, recordedRequests } = createAdapterFactory();
+  const idlePolicy = {
+    idleTimeoutSeconds: 300,
+    onIdle: "pause",
+    wakeOnAccess: true,
+    activeProbe: { port: 8080, path: "/active" },
+  };
+
+  await Sandbox.create({
+    adapterFactory,
+    connectionConfig: { domain: "http://127.0.0.1:8080" },
+    image: "python:3.12",
+    lifecycle: { idlePolicy },
+    skipHealthCheck: true,
+  });
+
+  assert.equal(recordedRequests.length, 1);
+  assert.deepEqual(recordedRequests[0].lifecycle, { idlePolicy });
+});
+
+test("Sandbox.create rejects an invalid idle policy before allocating transport resources", async () => {
+  for (const [idlePolicy, message] of [
+    [{ idleTimeoutSeconds: 29, onIdle: "pause" }, /idleTimeoutSeconds must be an integer between 30 and 86400/],
+    [{ idleTimeoutSeconds: 86401, onIdle: "pause" }, /idleTimeoutSeconds must be an integer between 30 and 86400/],
+    [{ idleTimeoutSeconds: 300 }, /onIdle is required when idleTimeoutSeconds is set/],
+    [{ onIdle: "pause" }, /onIdle must be omitted when idleTimeoutSeconds is omitted/],
+    [{ idleTimeoutSeconds: 300, onIdle: "terminate" }, /onIdle must be "pause"/],
+    [{ wakeOnAccess: false, activeProbe: { port: 8080, path: "/active" } }, /activeProbe requires idleTimeoutSeconds/],
+    [{ idleTimeoutSeconds: 300, onIdle: "pause", activeProbe: { port: 0, path: "/active" } }, /port must be an integer between 1 and 65535/],
+    [{ idleTimeoutSeconds: 300, onIdle: "pause", activeProbe: { port: 8080, path: "active" } }, /path must be an absolute HTTP path/],
+    [{ idleTimeoutSeconds: 300, onIdle: "pause", activeProbe: { port: 8080, path: "/a b" } }, /path must not contain whitespace/],
+    [{ idleTimeoutSeconds: 300, onIdle: "pause", activeProbe: { port: 8080, path: "/active", timeoutSeconds: 11 } }, /timeoutSeconds must be an integer between 1 and 10/],
+  ]) {
+    await assert.rejects(
+      Sandbox.create({
+        adapterFactory: {
+          createLifecycleStack() {
+            throw new Error("transport must not be allocated for an invalid idle policy");
+          },
+        },
+        connectionConfig: { domain: "http://127.0.0.1:8080" },
+        image: "python:3.12",
+        lifecycle: { idlePolicy },
+        skipHealthCheck: true,
+      }),
+      message
+    );
+  }
+});

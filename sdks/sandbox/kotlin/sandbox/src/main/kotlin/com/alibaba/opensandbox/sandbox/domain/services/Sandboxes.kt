@@ -18,6 +18,7 @@ package com.alibaba.opensandbox.sandbox.domain.services
 
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.CreateTemplateRequest
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.CredentialProxyConfig
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.IdlePolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSnapshotInfos
@@ -172,14 +173,16 @@ interface Sandboxes {
      * Creates a sandbox from a fsb golden-image template.
      *
      * Template mode fixes the workload shape on the server: only [metadata],
-     * [networkPolicy] and [extensions] may accompany the [templateId], and the
-     * [timeout] is required.
+     * [networkPolicy], [extensions] and [idlePolicy] may accompany the
+     * [templateId], and the [timeout] is required. The idle policy is
+     * control-plane state (OSEP-0024), not workload shape.
      *
      * @param templateId Unique identifier of a `Succeeded` template owned by the requester
      * @param timeout Sandbox lifetime. Required in template mode.
      * @param metadata User-defined metadata used for management and filtering
      * @param networkPolicy Optional outbound network policy (egress)
      * @param extensions Opaque extension parameters passed through to the server as-is. Prefer namespaced keys
+     * @param idlePolicy Optional idle behavior (OSEP-0024, fast-sandbox only)
      * @return Sandbox creation response containing the sandbox id
      * @throws UnsupportedOperationException if requested from an implementation that does not override this method
      */
@@ -189,6 +192,7 @@ interface Sandboxes {
         metadata: Map<String, String> = emptyMap(),
         networkPolicy: NetworkPolicy? = null,
         extensions: Map<String, String> = emptyMap(),
+        idlePolicy: IdlePolicy? = null,
     ): SandboxCreateResponse =
         throw UnsupportedOperationException(
             "Template-based sandbox creation is not supported by this Sandboxes implementation",

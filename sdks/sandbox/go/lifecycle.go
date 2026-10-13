@@ -92,6 +92,11 @@ func (c *LifecycleClient) ListSandboxes(ctx context.Context, opts ListOptions) (
 
 // CreateSandbox creates a new sandbox from a container image.
 func (c *LifecycleClient) CreateSandbox(ctx context.Context, req CreateSandboxRequest) (*SandboxInfo, error) {
+	if req.Lifecycle != nil {
+		if err := req.Lifecycle.IdlePolicy.Validate(); err != nil {
+			return nil, err
+		}
+	}
 	var resp SandboxInfo
 	if err := c.doRequest(ctx, "POST", "/sandboxes", req, &resp); err != nil {
 		return nil, err

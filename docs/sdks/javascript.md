@@ -102,6 +102,50 @@ const sandbox = await Sandbox.create({
 
 The Server validates `timeoutSeconds`; `preStart` accepts 1–10800 seconds, while `periodic` accepts 1–300 seconds. Both default to 60 seconds when omitted. See [Lifecycle Hooks](/guides/lifecycle-hooks) for timing, failure behavior, and provider limitations.
 
+### Idle policy (auto-pause and wake-on-access)
+
+`lifecycle.idlePolicy` (OSEP-0024, fast-sandbox only) tells the control plane
+to auto-pause the sandbox after `idleTimeoutSeconds` (30–86400) of
+continuously idle ingress-observed traffic, and to wake it on the next request.
+It is control-plane state: it never reaches the guest, is allowed in template
+mode (`Sandbox.createFromTemplate({ idlePolicy })`), and is rejected by
+non-fast-sandbox backends. Omitting it preserves non-automated behavior exactly.
+
+```ts
+const sandbox = await Sandbox.create({
+  connectionConfig: config,
+  image: "ubuntu:24.04",
+  timeoutSeconds: 86400,
+  lifecycle: {
+    idlePolicy: {
+      idleTimeoutSeconds: 300,
+      onIdle: "pause",
+      wakeOnAccess: true,
+    },
+  },
+});
+```
+
+`activeProbe` lets the application veto a pause while real work runs without
+producing ingress traffic: declare an endpoint answering
+`{"active": bool, "message"?: string}` and the server polls it when the sandbox
+is otherwise idle; a busy answer resets the idle clock.
+
+### Wake retry
+
+A request to a paused sandbox may arrive while its restore is still in
+progress. The gateway answers `503` with the `OpenSandbox-Wake: expired`
+header; the transport recognizes it and resends the original request after the
+`Retry-After` delay (safe for any method — the marker proves the request was
+never forwarded). The wake budget defaults to 5 attempts / 60 seconds across
+all wake cycles; when it is exhausted the SDK throws
+`SandboxWakeTimeoutException` (carrying `attempts` and `waitedMs`) while the
+server-side resume continues in the background. Bare `503` responses follow
+the existing rules untouched. Tune it on the connection config:
+`wakeRetryEnabled` (default true), `wakeMaxAttempts` (5),
+`wakeOverallDeadlineSeconds` (60, `null` for unbounded). SSE and upload
+transports bypass wake retry.
+
 ## Client Pool and observability
 
 `SandboxPool` provides in-memory and Redis-backed stores, four acquire policies,

@@ -50,10 +50,58 @@ type RetryConfig struct {
 	// treated as transient for retry decisions. When empty, SDK defaults are
 	// used (429, 502, 503, 504).
 	RetryableStatusCodes []int
+
+	// WakeRetryEnabled controls automatic retry of gateway wake-timeout
+	// responses (OSEP-0024): a 503 carrying the "OpenSandbox-Wake: expired"
+	// marker proves the request was never forwarded, so the original request
+	// is resent for any method after waiting per Retry-After. Bare 503
+	// responses are never affected by this knob. Wake retry requires
+	// WithRetry to be configured; DefaultRetryConfig enables it.
+	WakeRetryEnabled bool
+
+	// WakeMaxAttempts is the maximum number of marked wake-timeout responses
+	// consumed before the wake retry gives up with a SandboxWakeTimeoutError.
+	// Zero falls back to DefaultWakeMaxAttempts.
+	WakeMaxAttempts int
+
+	// WakeOverallDeadline is the wall-clock cap spanning all wake cycles of
+	// one logical request: waits, retries, and request time. Wake retries
+	// never reset it; a next Retry-After that does not fit the remaining
+	// budget ends the wake retry with a SandboxWakeTimeoutError. Zero falls
+	// back to DefaultWakeOverallDeadline; a negative value removes the time
+	// bound (the attempt count still applies).
+	WakeOverallDeadline time.Duration
 }
 
+// DefaultWakeMaxAttempts is the default wake-retry attempt budget.
+const DefaultWakeMaxAttempts = 5
+
+// DefaultWakeOverallDeadline is the default wall-clock cap spanning all wake
+// cycles of one logical request.
+const DefaultWakeOverallDeadline = 60 * time.Second
+
+// wakeMarkerHeader is the gateway-owned OSEP-0024 marker header. The gateway
+// strips it from every upstream response, so its presence on a 503 proves
+// gateway origin: the request was parked and never forwarded, which is what
+// makes any-method retry safe.
+const wakeMarkerHeader = "OpenSandbox-Wake"
+
+// wakeMarkerExpired is the marked value of wakeMarkerHeader.
+const wakeMarkerExpired = "expired"
+
+// retryAfterCap is a fixed operational ceiling for server-supplied
+// Retry-After waits. Not configurable: ignoring a server's back-pressure
+// signal is never a safe default, and the 60s guard only defends against a
+// pathological header.
+const retryAfterCap = 60 * time.Second
+
+// wakeDefaultRetryAfter is the fallback wait when a marked response arrives
+// without a usable Retry-After header; the gateway emits Retry-After: 1.
+const wakeDefaultRetryAfter = time.Second
+
 // DefaultRetryConfig returns a retry configuration suitable for most SDK
-// consumers: 3 retries, 500ms initial backoff, 2x multiplier, 30s cap.
+// consumers: 3 retries, 500ms initial backoff, 2x multiplier, 30s cap, and
+// the OSEP-0024 wake retry enabled (5 attempts / 60s budget).
 func DefaultRetryConfig() RetryConfig {
 	return RetryConfig{
 		MaxRetries:     3,
@@ -67,6 +115,9 @@ func DefaultRetryConfig() RetryConfig {
 			http.StatusServiceUnavailable,
 			http.StatusGatewayTimeout,
 		},
+		WakeRetryEnabled:    true,
+		WakeMaxAttempts:     DefaultWakeMaxAttempts,
+		WakeOverallDeadline: DefaultWakeOverallDeadline,
 	}
 }
 
@@ -196,28 +247,83 @@ func retrySleep(ctx context.Context, d time.Duration) error {
 }
 
 // withRetry executes fn, retrying on transient errors per the client's
-// RetryConfig. If retry is nil or MaxRetries is 0, fn is called once.
+// RetryConfig. If retry is nil, or both MaxRetries and the wake contract are
+// inactive, fn is called once.
+//
+// The OSEP-0024 wake contract is enforced on top of the generic policy: a
+// marked wake-timeout error (503 + "OpenSandbox-Wake: expired") is retried
+// for any method — request bodies are re-marshaled per attempt, so replay is
+// always safe — under its own attempt count and wall-clock budget. Bare 503
+// responses follow the generic rules untouched.
 func (c *Client) withRetry(ctx context.Context, fn func() error) error {
-	if c.retry == nil || c.retry.MaxRetries == 0 {
+	if c.retry == nil || (c.retry.MaxRetries == 0 && !c.retry.WakeRetryEnabled) {
 		return fn()
 	}
 
+	wakeMaxAttempts := c.retry.WakeMaxAttempts
+	if wakeMaxAttempts <= 0 {
+		wakeMaxAttempts = DefaultWakeMaxAttempts
+	}
+	var wakeDeadline time.Duration
+	switch {
+	case c.retry.WakeOverallDeadline < 0:
+		wakeDeadline = -1 // unbounded
+	case c.retry.WakeOverallDeadline == 0:
+		wakeDeadline = DefaultWakeOverallDeadline
+	default:
+		wakeDeadline = c.retry.WakeOverallDeadline
+	}
+
 	var lastErr error
-	for attempt := 0; attempt <= c.retry.MaxRetries; attempt++ {
+	var wakeAttempts int
+	retriesUsed := 0
+	started := time.Now()
+	for {
 		lastErr = fn()
 		if lastErr == nil {
 			return nil
 		}
+
+		var apiErr *APIError
+		if c.retry.WakeRetryEnabled && errors.As(lastErr, &apiErr) && apiErr.WakeExpired {
+			wakeAttempts++
+			elapsed := time.Since(started)
+			wait := apiErr.RetryAfter
+			if wait <= 0 {
+				wait = wakeDefaultRetryAfter
+			}
+			if wait > retryAfterCap {
+				wait = retryAfterCap
+			}
+			// Budget checks bound retries, not a committed resume: the
+			// server-side restore is never canceled by giving up here.
+			exhausted := wakeAttempts >= wakeMaxAttempts
+			if !exhausted && wakeDeadline >= 0 && wait > wakeDeadline-elapsed {
+				exhausted = true
+			}
+			if exhausted {
+				return &SandboxWakeTimeoutError{
+					Attempts: wakeAttempts,
+					Waited:   elapsed,
+					LastErr:  apiErr,
+				}
+			}
+			if err := retrySleep(ctx, wait); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if !isTransientError(lastErr, c.retry) {
 			return lastErr
 		}
-		if attempt == c.retry.MaxRetries {
-			break
+		if retriesUsed >= c.retry.MaxRetries {
+			return lastErr
 		}
-		delay := retryDelay(c.retry, attempt, lastErr)
+		retriesUsed++
+		delay := retryDelay(c.retry, retriesUsed-1, lastErr)
 		if err := retrySleep(ctx, delay); err != nil {
 			return err
 		}
 	}
-	return lastErr
 }

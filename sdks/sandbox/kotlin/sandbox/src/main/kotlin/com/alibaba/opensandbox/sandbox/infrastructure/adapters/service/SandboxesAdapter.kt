@@ -31,6 +31,7 @@ import com.alibaba.opensandbox.sandbox.api.infrastructure.Success
 import com.alibaba.opensandbox.sandbox.api.models.Endpoint
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.CreateTemplateRequest
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.CredentialProxyConfig
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.IdlePolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSnapshotInfos
@@ -328,6 +329,7 @@ internal class SandboxesAdapter(
         metadata: Map<String, String>,
         networkPolicy: NetworkPolicy?,
         extensions: Map<String, String>,
+        idlePolicy: IdlePolicy?,
     ): SandboxCreateResponse {
         logger.info("Creating sandbox from template: {}", templateId)
 
@@ -339,6 +341,7 @@ internal class SandboxesAdapter(
                     metadata = metadata,
                     networkPolicy = networkPolicy,
                     extensions = extensions,
+                    idlePolicy = idlePolicy,
                 )
             val response = api.sandboxesPost(createRequest).toSandboxCreateResponse()
 

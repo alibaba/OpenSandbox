@@ -210,6 +210,11 @@ type SandboxFromTemplateOptions struct {
 	// Extensions for provider-specific parameters.
 	Extensions map[string]string
 
+	// IdlePolicy is the optional idle behavior (OSEP-0024, fast-sandbox
+	// only). Control-plane state, not workload shape, so template mode
+	// accepts it.
+	IdlePolicy *IdlePolicy
+
 	// SkipHealthCheck skips the WaitUntilReady call after creation.
 	SkipHealthCheck bool
 
@@ -227,16 +232,20 @@ type SandboxFromTemplateOptions struct {
 // template and waits for it to be ready.
 //
 // Template mode fixes the workload shape on the server: the entrypoint, env,
-// resources, volumes, platform and lifecycle of the sandbox come from the
-// template's golden image and cannot be overridden here. Only metadata,
-// network policy and extensions may accompany the template ID, and the
-// timeout is required.
+// resources, volumes, platform and lifecycle hooks of the sandbox come from
+// the template's golden image and cannot be overridden here. Only metadata,
+// network policy, extensions and the OSEP-0024 idle policy (control-plane
+// state, not workload shape) may accompany the template ID, and the timeout
+// is required.
 func CreateSandboxFromTemplate(ctx context.Context, config ConnectionConfig, templateID string, opts SandboxFromTemplateOptions) (*Sandbox, error) {
 	if templateID == "" {
 		return nil, &InvalidArgumentError{Field: "templateID", Message: "template ID is required"}
 	}
 	if opts.TimeoutSeconds <= 0 {
 		return nil, &InvalidArgumentError{Field: "TimeoutSeconds", Message: "timeout is required when creating from a template"}
+	}
+	if err := opts.IdlePolicy.Validate(); err != nil {
+		return nil, err
 	}
 
 	lc := config.lifecycleClient()
@@ -249,6 +258,9 @@ func CreateSandboxFromTemplate(ctx context.Context, config ConnectionConfig, tem
 		Metadata:      opts.Metadata,
 		NetworkPolicy: opts.NetworkPolicy,
 		Extensions:    opts.Extensions,
+	}
+	if opts.IdlePolicy != nil {
+		req.Lifecycle = &SandboxLifecycle{IdlePolicy: opts.IdlePolicy}
 	}
 
 	created, err := lc.CreateSandbox(ctx, req)

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace OpenSandbox.Models;
@@ -978,7 +979,171 @@ public class PeriodicLifecycleHook
 }
 
 /// <summary>
-/// Optional lifecycle hooks applied during sandbox creation.
+/// Action taken at the idle threshold. Only <see cref="OnIdleAction.Pause"/>
+/// exists today; the enum keeps future actions additive.
+/// </summary>
+[JsonConverter(typeof(OnIdleActionJsonConverter))]
+public enum OnIdleAction
+{
+    /// <summary>Auto-pause the sandbox when the idle threshold is reached.</summary>
+    Pause
+}
+
+/// <summary>
+/// Serializes <see cref="OnIdleAction"/> as the wire-format string ("pause").
+/// <see cref="JsonStringEnumConverter"/> cannot express per-member wire names
+/// through attributes, so the mapping is explicit; extend this converter when
+/// a new idle action ships.
+/// </summary>
+public sealed class OnIdleActionJsonConverter : JsonConverter<OnIdleAction>
+{
+    /// <inheritdoc />
+    public override OnIdleAction Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        var text = reader.GetString();
+        return text switch
+        {
+            "pause" => OnIdleAction.Pause,
+            _ => throw new JsonException($"Unknown idle action: {text}")
+        };
+    }
+
+    /// <inheritdoc />
+    public override void Write(Utf8JsonWriter writer, OnIdleAction value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(value switch
+        {
+            OnIdleAction.Pause => "pause",
+            _ => throw new JsonException($"Unknown idle action: {value}")
+        });
+    }
+}
+
+/// <summary>
+/// Application-declared activity probe (OSEP-0024).
+/// <para>
+/// Endpoint inside the sandbox that answers <c>{"active": bool, "message"?: string}</c>
+/// with 200 while work is in progress. When the sandbox is otherwise idle, the
+/// server issues <c>GET Path</c> on <c>Port</c>; a busy answer counts as activity
+/// and resets the idle clock, while an explicit "not active", any failure, or a
+/// timeout records nothing.
+/// </para>
+/// </summary>
+public class ActivityProbe
+{
+    private int? _timeoutSeconds;
+
+    /// <summary>
+    /// Gets or sets the sandbox port serving the probe endpoint (1-65535).
+    /// </summary>
+    [JsonPropertyName("port")]
+    public required int Port { get; set; }
+
+    /// <summary>
+    /// Gets or sets the absolute HTTP path of the probe endpoint. Must start
+    /// with "/" and must not contain whitespace or control characters.
+    /// </summary>
+    [JsonPropertyName("path")]
+    public required string Path { get; set; }
+
+    /// <summary>
+    /// Gets or sets the probe request budget in seconds (1-10). The server
+    /// defaults to 2 when omitted.
+    /// </summary>
+    [JsonPropertyName("timeoutSeconds")]
+    public int? TimeoutSeconds
+    {
+        get => _timeoutSeconds;
+        set
+        {
+            if (value is < 1 or > 10)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(value),
+                    value,
+                    "Activity probe TimeoutSeconds must be between 1 and 10.");
+            }
+            _timeoutSeconds = value;
+        }
+    }
+}
+
+/// <summary>
+/// Idle behavior declared by the sandbox (OSEP-0024, fast-sandbox only).
+/// <para>
+/// With <see cref="IdleTimeoutSeconds"/>, the sandbox is auto-paused after that
+/// many seconds without ingress-observed activity. Without it, the policy is
+/// wake-only: the sandbox is never auto-paused, but a (manually) paused sandbox
+/// wakes on access. Omitting the whole policy preserves non-automated behavior
+/// exactly.
+/// </para>
+/// </summary>
+public class IdlePolicy
+{
+    /// <summary>
+    /// Gets or sets the idle threshold X in seconds (30-86400): the sandbox is
+    /// auto-paused after X continuously idle seconds. Required together with
+    /// <see cref="OnIdle"/>; absent together with it means a wake-only policy.
+    /// </summary>
+    [JsonPropertyName("idleTimeoutSeconds")]
+    public int? IdleTimeoutSeconds { get; set; }
+
+    /// <summary>
+    /// Gets or sets the action taken at the idle threshold. Only
+    /// <see cref="OnIdleAction.Pause"/> exists today. Required with, and only
+    /// valid with, <see cref="IdleTimeoutSeconds"/>.
+    /// </summary>
+    [JsonPropertyName("onIdle")]
+    public OnIdleAction? OnIdle { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether incoming traffic may wake the
+    /// sandbox from Paused. Defaults to true when omitted.
+    /// </summary>
+    [JsonPropertyName("wakeOnAccess")]
+    public bool? WakeOnAccess { get; set; }
+
+    /// <summary>
+    /// Gets or sets the application-declared activity probe (relevant only
+    /// with auto-pause). Requires <see cref="IdleTimeoutSeconds"/>.
+    /// </summary>
+    [JsonPropertyName("activeProbe")]
+    public ActivityProbe? ActiveProbe { get; set; }
+
+    /// <summary>
+    /// Validates the policy against the server's create-time rules so invalid
+    /// policies fail fast client-side.
+    /// </summary>
+    public void Validate()
+    {
+        var hasTimeout = IdleTimeoutSeconds.HasValue;
+        if (IdleTimeoutSeconds is < 30 or > 86400)
+        {
+            throw new ArgumentException(
+                "IdlePolicy.IdleTimeoutSeconds must be between 30 and 86400.",
+                nameof(IdleTimeoutSeconds));
+        }
+        if (OnIdle.HasValue && !hasTimeout)
+        {
+            throw new InvalidOperationException(
+                "IdlePolicy.OnIdle must be omitted when IdleTimeoutSeconds is omitted " +
+                "(a policy without a timeout is wake-only).");
+        }
+        if (!OnIdle.HasValue && hasTimeout)
+        {
+            throw new InvalidOperationException(
+                "IdlePolicy.OnIdle is required when IdleTimeoutSeconds is set.");
+        }
+        if (ActiveProbe != null && !hasTimeout)
+        {
+            throw new InvalidOperationException(
+                "IdlePolicy.ActiveProbe requires IdleTimeoutSeconds; the probe is relevant only with auto-pause.");
+        }
+    }
+}
+
+/// <summary>
+/// Optional lifecycle configuration applied during sandbox creation.
 /// </summary>
 public class SandboxLifecycle
 {
@@ -993,6 +1158,14 @@ public class SandboxLifecycle
     /// </summary>
     [JsonPropertyName("periodic")]
     public IReadOnlyList<PeriodicLifecycleHook>? Periodic { get; set; }
+
+    /// <summary>
+    /// Gets or sets the auto-pause and wake-on-access behavior (OSEP-0024).
+    /// Supported only by the fast-sandbox backend; other backends reject the
+    /// field. Control-plane policy: it never reaches the guest.
+    /// </summary>
+    [JsonPropertyName("idlePolicy")]
+    public IdlePolicy? IdlePolicy { get; set; }
 }
 
 /// <summary>

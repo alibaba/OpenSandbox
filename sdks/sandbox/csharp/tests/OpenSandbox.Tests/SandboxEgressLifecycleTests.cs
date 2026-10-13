@@ -197,6 +197,109 @@ public class SandboxEgressLifecycleTests
     }
 
     [Fact]
+    public async Task CreateAsync_ShouldForwardLifecycleIdlePolicy()
+    {
+        var sandboxes = new StubSandboxes();
+        var adapterFactory = new StubAdapterFactory(sandboxes, new StubEgress());
+
+        await using var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+        {
+            Image = "python:3.12",
+            ConnectionConfig = new ConnectionConfig(new ConnectionConfigOptions
+            {
+                Domain = "127.0.0.1:8080",
+                Protocol = ConnectionProtocol.Http
+            }),
+            AdapterFactory = adapterFactory,
+            SkipHealthCheck = true,
+            Diagnostics = new SdkDiagnosticsOptions
+            {
+                LoggerFactory = NullLoggerFactory.Instance
+            },
+            Lifecycle = new SandboxLifecycle
+            {
+                IdlePolicy = new IdlePolicy
+                {
+                    IdleTimeoutSeconds = 300,
+                    OnIdle = OnIdleAction.Pause,
+                    WakeOnAccess = true,
+                    ActiveProbe = new ActivityProbe { Port = 8080, Path = "/active" }
+                }
+            }
+        });
+
+        sandboxes.LastCreateRequest.Should().NotBeNull();
+        var idlePolicy = sandboxes.LastCreateRequest!.Lifecycle!.IdlePolicy;
+        idlePolicy.Should().NotBeNull();
+        idlePolicy!.IdleTimeoutSeconds.Should().Be(300);
+        idlePolicy.OnIdle.Should().Be(OnIdleAction.Pause);
+        idlePolicy.WakeOnAccess.Should().BeTrue();
+        idlePolicy.ActiveProbe!.Port.Should().Be(8080);
+        idlePolicy.ActiveProbe.Path.Should().Be("/active");
+    }
+
+    [Fact]
+    public async Task CreateFromTemplateAsync_ShouldForwardIdlePolicyInsideLifecycle()
+    {
+        var sandboxes = new StubSandboxes();
+        var adapterFactory = new StubAdapterFactory(sandboxes, new StubEgress());
+
+        await using var sandbox = await Sandbox.CreateFromTemplateAsync(new SandboxCreateFromTemplateOptions
+        {
+            TemplateId = "tpl-123",
+            TimeoutSeconds = 600,
+            IdlePolicy = new IdlePolicy
+            {
+                IdleTimeoutSeconds = 300,
+                OnIdle = OnIdleAction.Pause,
+                WakeOnAccess = true
+            },
+            ConnectionConfig = new ConnectionConfig(new ConnectionConfigOptions
+            {
+                Domain = "127.0.0.1:8080",
+                Protocol = ConnectionProtocol.Http
+            }),
+            AdapterFactory = adapterFactory,
+            SkipHealthCheck = true,
+            Diagnostics = new SdkDiagnosticsOptions
+            {
+                LoggerFactory = NullLoggerFactory.Instance
+            }
+        });
+
+        sandboxes.LastCreateRequest.Should().NotBeNull();
+        var forwarded = sandboxes.LastCreateRequest!.Lifecycle;
+        forwarded.Should().NotBeNull();
+        forwarded!.IdlePolicy.Should().NotBeNull();
+        forwarded.IdlePolicy!.IdleTimeoutSeconds.Should().Be(300);
+        forwarded.IdlePolicy.OnIdle.Should().Be(OnIdleAction.Pause);
+        // Template mode must not forward workload-shaping lifecycle fields.
+        forwarded.PreStart.Should().BeNull();
+        forwarded.Periodic.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CreateAsync_ShouldRejectInvalidIdlePolicy()
+    {
+        var act = async () => await Sandbox.CreateAsync(new SandboxCreateOptions
+        {
+            Image = "python:3.12",
+            ConnectionConfig = new ConnectionConfig(new ConnectionConfigOptions
+            {
+                Domain = "127.0.0.1:8080",
+                Protocol = ConnectionProtocol.Http
+            }),
+            SkipHealthCheck = true,
+            Lifecycle = new SandboxLifecycle
+            {
+                IdlePolicy = new IdlePolicy { IdleTimeoutSeconds = 10, OnIdle = OnIdleAction.Pause }
+            }
+        });
+
+        (await act.Should().ThrowAsync<ArgumentException>()).Which.Message.Should().Contain("IdleTimeoutSeconds");
+    }
+
+    [Fact]
     public async Task CreateAsync_ShouldSupportSnapshotRestore()
     {
         var sandboxes = new StubSandboxes();

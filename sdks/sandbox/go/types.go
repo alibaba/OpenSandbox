@@ -19,7 +19,9 @@ package opensandbox
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
 )
 
 // SandboxState represents the high-level lifecycle state of a sandbox.
@@ -161,10 +163,139 @@ type PeriodicLifecycleHook struct {
 	TimeoutSeconds *int     `json:"timeoutSeconds,omitempty"`
 }
 
-// SandboxLifecycle contains optional lifecycle hooks applied during sandbox creation.
+// OnIdlePause is the only idle action supported today (OSEP-0024). The value
+// exists as a named constant so future actions are additive.
+const OnIdlePause = "pause"
+
+const (
+	// IdleTimeoutMinSeconds is the smallest accepted idle threshold X.
+	IdleTimeoutMinSeconds = 30
+	// IdleTimeoutMaxSeconds is the largest accepted idle threshold X.
+	IdleTimeoutMaxSeconds = 86400
+	// ProbeTimeoutMinSeconds is the smallest accepted activity probe timeout.
+	ProbeTimeoutMinSeconds = 1
+	// ProbeTimeoutMaxSeconds is the largest accepted activity probe timeout.
+	ProbeTimeoutMaxSeconds = 10
+)
+
+// ActivityProbe is an application-declared activity probe (OSEP-0024).
+//
+// Endpoint inside the sandbox that answers {"active": bool, "message"?: string}
+// with 200 while work is in progress. When the sandbox is otherwise idle, the
+// server issues GET Path on Port; a busy answer counts as activity and resets
+// the idle clock, while an explicit "not active", any failure, or a timeout
+// records nothing.
+type ActivityProbe struct {
+	Port int `json:"port"`
+	// Path is the absolute HTTP path of the probe endpoint. Must start with
+	// "/" and must not contain whitespace or control characters.
+	Path string `json:"path"`
+	// TimeoutSeconds is the probe request budget in seconds (1-10). The
+	// server defaults to 2 when omitted.
+	TimeoutSeconds *int `json:"timeoutSeconds,omitempty"`
+}
+
+// IdlePolicy declares the idle behavior of a sandbox (OSEP-0024, fast-sandbox
+// only).
+//
+// With IdleTimeoutSeconds, the sandbox is auto-paused after that many seconds
+// without ingress-observed activity. Without it, the policy is wake-only: the
+// sandbox is never auto-paused, but a (manually) paused sandbox wakes on
+// access. Omitting the whole policy preserves non-automated behavior exactly.
+type IdlePolicy struct {
+	// IdleTimeoutSeconds is the idle threshold X in seconds (30-86400):
+	// the sandbox is auto-paused after X continuously idle seconds.
+	// Required together with OnIdle; absent together with it means a
+	// wake-only policy.
+	IdleTimeoutSeconds *int `json:"idleTimeoutSeconds,omitempty"`
+	// OnIdle is the action taken at the idle threshold. Only OnIdlePause
+	// exists today. Required with, and only valid with,
+	// IdleTimeoutSeconds.
+	OnIdle string `json:"onIdle,omitempty"`
+	// WakeOnAccess controls whether incoming traffic may wake the sandbox
+	// from Paused. Defaults to true when omitted.
+	WakeOnAccess *bool `json:"wakeOnAccess,omitempty"`
+	// ActiveProbe is the application-declared activity probe (relevant
+	// only with auto-pause).
+	ActiveProbe *ActivityProbe `json:"activeProbe,omitempty"`
+}
+
+// Validate checks the idle policy against the server's create-time rules so
+// invalid policies fail fast client-side.
+func (p *IdlePolicy) Validate() error {
+	if p == nil {
+		return nil
+	}
+	hasTimeout := p.IdleTimeoutSeconds != nil
+	if hasTimeout {
+		t := *p.IdleTimeoutSeconds
+		if t < IdleTimeoutMinSeconds || t > IdleTimeoutMaxSeconds {
+			return &InvalidArgumentError{
+				Field:   "IdleTimeoutSeconds",
+				Message: fmt.Sprintf("must be an integer between %d and %d, got %d", IdleTimeoutMinSeconds, IdleTimeoutMaxSeconds, t),
+			}
+		}
+	}
+	if p.OnIdle != "" {
+		if !hasTimeout {
+			return &InvalidArgumentError{
+				Field:   "OnIdle",
+				Message: "must be omitted when IdleTimeoutSeconds is omitted (a policy without a timeout is wake-only)",
+			}
+		}
+		if p.OnIdle != OnIdlePause {
+			return &InvalidArgumentError{Field: "OnIdle", Message: fmt.Sprintf("must be %q, got %q", OnIdlePause, p.OnIdle)}
+		}
+	} else if hasTimeout {
+		return &InvalidArgumentError{Field: "OnIdle", Message: "is required when IdleTimeoutSeconds is set"}
+	}
+	if p.ActiveProbe != nil {
+		if !hasTimeout {
+			return &InvalidArgumentError{
+				Field:   "ActiveProbe",
+				Message: "requires IdleTimeoutSeconds; the probe is relevant only with auto-pause",
+			}
+		}
+		if p.ActiveProbe.Port < 1 || p.ActiveProbe.Port > 65535 {
+			return &InvalidArgumentError{
+				Field:   "ActiveProbe.Port",
+				Message: fmt.Sprintf("must be an integer between 1 and 65535, got %d", p.ActiveProbe.Port),
+			}
+		}
+		path := p.ActiveProbe.Path
+		if path == "" {
+			return &InvalidArgumentError{Field: "ActiveProbe.Path", Message: "must be a non-empty absolute HTTP path"}
+		}
+		if len(path) > 512 {
+			return &InvalidArgumentError{Field: "ActiveProbe.Path", Message: "must not exceed 512 characters"}
+		}
+		if !strings.HasPrefix(path, "/") {
+			return &InvalidArgumentError{Field: "ActiveProbe.Path", Message: "must be an absolute HTTP path starting with '/'"}
+		}
+		if strings.ContainsFunc(path, func(r rune) bool {
+			return unicode.IsSpace(r) || r < 0x20 || r == 0x7f
+		}) {
+			return &InvalidArgumentError{Field: "ActiveProbe.Path", Message: "must not contain whitespace or control characters"}
+		}
+		if t := p.ActiveProbe.TimeoutSeconds; t != nil && (*t < ProbeTimeoutMinSeconds || *t > ProbeTimeoutMaxSeconds) {
+			return &InvalidArgumentError{
+				Field:   "ActiveProbe.TimeoutSeconds",
+				Message: fmt.Sprintf("must be an integer between %d and %d, got %d", ProbeTimeoutMinSeconds, ProbeTimeoutMaxSeconds, *t),
+			}
+		}
+	}
+	return nil
+}
+
+// SandboxLifecycle contains optional lifecycle configuration applied during
+// sandbox creation.
 type SandboxLifecycle struct {
 	PreStart *LifecycleHook          `json:"preStart,omitempty"`
 	Periodic []PeriodicLifecycleHook `json:"periodic,omitempty"`
+	// IdlePolicy is the auto-pause and wake-on-access behavior (OSEP-0024).
+	// Supported only by the fast-sandbox backend; other backends reject the
+	// field. Control-plane policy: it never reaches the guest.
+	IdlePolicy *IdlePolicy `json:"idlePolicy,omitempty"`
 }
 
 // CreateSandboxRequest is the request body for creating a new sandbox.
@@ -665,6 +796,11 @@ type APIError struct {
 	// RetryAfter is the server-suggested wait duration from the Retry-After
 	// header. Zero means no suggestion was provided.
 	RetryAfter time.Duration
+
+	// WakeExpired reports whether this 503 carried the gateway-owned
+	// "OpenSandbox-Wake: expired" marker (OSEP-0024): the request was parked
+	// pre-forward and is safe to retry for any method.
+	WakeExpired bool
 }
 
 // Error implements the error interface.

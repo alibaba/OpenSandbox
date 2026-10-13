@@ -38,7 +38,8 @@ public sealed class DefaultAdapterFactory : IAdapterFactory
             options.HttpClientProvider.HttpClient,
             options.LifecycleBaseUrl,
             options.ConnectionConfig.Headers,
-            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"));
+            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"),
+            options.ConnectionConfig.WakeRetry);
 
         EndpointCache? endpointCache = null;
         if (!options.ConnectionConfig.EndpointCacheDisabled)
@@ -65,7 +66,8 @@ public sealed class DefaultAdapterFactory : IAdapterFactory
             options.HttpClientProvider.HttpClient,
             options.ExecdBaseUrl,
             headers,
-            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"));
+            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"),
+            options.ConnectionConfig.WakeRetry);
 
         var health = new HealthAdapter(clientWrapper);
         var metrics = new MetricsAdapter(clientWrapper);
@@ -107,7 +109,8 @@ public sealed class DefaultAdapterFactory : IAdapterFactory
             options.HttpClientProvider.HttpClient,
             options.EgressBaseUrl,
             headers,
-            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"));
+            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"),
+            options.ConnectionConfig.WakeRetry);
 
         var egress = new EgressAdapter(clientWrapper);
         return new EgressStack
@@ -124,7 +127,8 @@ public sealed class DefaultAdapterFactory : IAdapterFactory
             options.HttpClientProvider.HttpClient,
             options.LifecycleBaseUrl,
             options.ConnectionConfig.Headers,
-            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"));
+            options.LoggerFactory.CreateLogger("OpenSandbox.HttpClientWrapper"),
+            options.ConnectionConfig.WakeRetry);
 
         return new NetworkPolicyStack
         {

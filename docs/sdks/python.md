@@ -144,6 +144,55 @@ sandbox = await Sandbox.create(
 
 The Server validates `timeout_seconds`; `pre_start` accepts 1–10800 seconds, while `periodic` accepts 1–300 seconds. Both default to 60 seconds when omitted. See [Lifecycle Hooks](/guides/lifecycle-hooks) for timing, failure behavior, and provider limitations.
 
+### Idle policy (auto-pause and wake-on-access)
+
+`SandboxLifecycle.idle_policy` (OSEP-0024, fast-sandbox only) tells the control
+plane to auto-pause the sandbox after `idle_timeout_seconds` (30–86400) of
+continuously idle ingress-observed traffic, and to wake it on the next request.
+It is control-plane state: it never reaches the guest, is allowed in template
+mode (`Sandbox.create_from_template(idle_policy=...)`), and is rejected by
+non-fast-sandbox backends. Omitting it preserves non-automated behavior exactly.
+
+```python
+sandbox = await Sandbox.create(
+    "ubuntu:24.04",
+    connection_config=config,
+    timeout_seconds=86400,
+    lifecycle=SandboxLifecycle(
+        idle_policy=IdlePolicy(
+            idle_timeout_seconds=300,
+            on_idle="pause",
+            wake_on_access=True,
+        )
+    ),
+)
+```
+
+`active_probe` lets the application veto a pause while real work runs without
+producing ingress traffic: declare an endpoint answering
+`{"active": bool, "message"?: string}` and the server polls it when the sandbox
+is otherwise idle; a busy answer resets the idle clock.
+
+```python
+IdlePolicy(
+    idle_timeout_seconds=300,
+    on_idle="pause",
+    active_probe=ActivityProbe(port=8080, path="/active", timeout_seconds=2),
+)
+```
+
+### Wake retry
+
+A request to a paused sandbox may arrive while its restore is still in
+progress. The gateway answers `503` with the `OpenSandbox-Wake: expired`
+marker; the SDK recognizes it and resends the original request after the
+`Retry-After` delay (safe for any method — the marker proves the request was
+never forwarded). The wake budget defaults to 5 attempts / 60 seconds across
+all wake cycles; when it is exhausted the SDK raises
+`SandboxWakeTimeoutException` (carrying `attempts` and `waited`) while the
+server-side restore continues in the background. Bare `503` responses follow
+the existing retry rules untouched. Streaming (SSE) calls bypass wake retry.
+
 ## Usage Examples
 
 The snippets below use `config` and a live `sandbox` from the quick start. Run

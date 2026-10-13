@@ -16,6 +16,7 @@
 
 package com.alibaba.opensandbox.sandbox.transport
 
+import com.alibaba.opensandbox.sandbox.domain.exceptions.SandboxWakeTimeoutException
 import okhttp3.Interceptor
 import okhttp3.Response
 import org.slf4j.LoggerFactory
@@ -68,6 +69,7 @@ class RetryInterceptor
             val start = System.nanoTime()
             var previousSleep: Duration = Duration.ZERO
             var retriesUsed = 0
+            var wakeAttemptsUsed = 0
             var lastException: IOException? = null
 
             while (true) {
@@ -128,6 +130,48 @@ class RetryInterceptor
 
                 val elapsedAfter = Duration.ofNanos(System.nanoTime() - start)
                 val cancelled = chain.call().isCanceled()
+
+                // OSEP-0024 wake-timeout branch: a 503 carrying the gateway-owned
+                // `OpenSandbox-Wake: expired` marker proves the request was parked
+                // and never forwarded, so the original request is resent for any
+                // method after waiting per `Retry-After` — budget permitting. A
+                // non-replayable body falls back to the bare-503 rules below.
+                if (
+                    policy.wakeRetryEnabled &&
+                    !cancelled &&
+                    exception == null &&
+                    response != null &&
+                    isWakeTimeoutResponse(response.code, response.header(WAKE_MARKER_HEADER)) &&
+                    bodyReplayable
+                ) {
+                    wakeAttemptsUsed += 1
+                    val retryAfter = resolveWakeRetryAfter(response.header("Retry-After"))
+                    val elapsedNow = Duration.ofNanos(System.nanoTime() - start)
+                    if (!shouldRetryWake(wakeAttemptsUsed, policy, elapsedNow, retryAfter)) {
+                        val rawBody =
+                            try {
+                                response.body?.string()
+                            } catch (_: IOException) {
+                                null
+                            }
+                        throw SandboxWakeTimeoutException(
+                            message =
+                                "sandbox wake timeout: restore did not finish within the wake retry budget; " +
+                                    "the request was never forwarded and is safe to retry",
+                            attempts = wakeAttemptsUsed,
+                            waited = elapsedNow,
+                            requestId = response.header("X-Request-ID"),
+                            responseBody = rawBody,
+                        )
+                    }
+                    response.close()
+                    sleeper(retryAfter)
+                    if (Thread.currentThread().isInterrupted) {
+                        throw IOException("call interrupted during wake backoff")
+                    }
+                    continue
+                }
+
                 val retry =
                     shouldRetry(
                         method = method,

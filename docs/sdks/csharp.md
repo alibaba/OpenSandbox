@@ -103,6 +103,53 @@ await using var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
 
 The Server validates `TimeoutSeconds`; `PreStart` accepts 1–10800 seconds, while `Periodic` accepts 1–300 seconds. Both default to 60 seconds when omitted. See [Lifecycle Hooks](/guides/lifecycle-hooks) for timing, failure behavior, and provider limitations.
 
+### Idle policy (auto-pause and wake-on-access)
+
+`SandboxLifecycle.IdlePolicy` (OSEP-0024, fast-sandbox only) tells the control
+plane to auto-pause the sandbox after `IdleTimeoutSeconds` (30–86400) of
+continuously idle ingress-observed traffic, and to wake it on the next request.
+It is control-plane state: it never reaches the guest, is accepted in template
+mode (`SandboxCreateFromTemplateOptions.IdlePolicy`), and is rejected by
+non-fast-sandbox backends. Omitting it preserves non-automated behavior exactly.
+
+```csharp
+var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
+{
+    ConnectionConfig = config,
+    Image = "ubuntu:24.04",
+    Lifecycle = new SandboxLifecycle
+    {
+        IdlePolicy = new IdlePolicy
+        {
+            IdleTimeoutSeconds = 300,
+            OnIdle = OnIdleAction.Pause,
+            WakeOnAccess = true
+        }
+    }
+});
+```
+
+`ActiveProbe` lets the application veto a pause while real work runs without
+producing ingress traffic: declare an endpoint answering
+`{"active": bool, "message"?: string}` and the server polls it when the sandbox
+is otherwise idle; a busy answer resets the idle clock. Invalid policies fail
+fast client-side through `IdlePolicy.Validate()`.
+
+### Wake retry
+
+A request to a paused sandbox may arrive while its restore is still in
+progress. The gateway answers `503` with the `OpenSandbox-Wake: expired`
+header; the HTTP transport recognizes it and resends the original request
+after the `Retry-After` delay (safe for any method — the marker proves the
+request was never forwarded). The wake budget defaults to 5 attempts / 60
+seconds across all wake cycles; when it is exhausted the SDK throws
+`SandboxWakeTimeoutException` (carrying `Attempts` and `Waited`) while the
+server-side resume continues in the background. Bare `503` responses follow
+the existing rules untouched. Tune it on the connection config:
+`WakeRetryEnabled` (default true), `WakeMaxAttempts` (5),
+`WakeOverallDeadlineSeconds` (60, non-positive for unbounded). SSE and file
+stream transports bypass wake retry.
+
 ## Usage Examples
 
 The snippets below use `config` and a live `sandbox` from the quick start. Run

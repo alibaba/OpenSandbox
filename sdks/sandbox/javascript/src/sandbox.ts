@@ -40,6 +40,7 @@ import type {
   CreateSandboxRequest,
   CredentialProxyConfig,
   Endpoint,
+  IdlePolicy,
   NetworkPolicy,
   NetworkRule,
   PlatformSpec,
@@ -52,6 +53,7 @@ import type {
 } from "./models/sandboxes.js";
 import { SandboxOrigin } from "./models/sandboxes.js";
 import { ReadinessBudget, validatePollingInterval } from "./internal/readiness.js";
+import { validateIdlePolicy } from "./internal/idlePolicy.js";
 
 const HOST_PATH_PATTERN = /^([/]|[A-Za-z]:[\\/])/;
 
@@ -307,6 +309,11 @@ export interface SandboxCreateFromTemplateOptions {
    */
   extensions?: Record<string, string>;
   /**
+   * Optional idle behavior (OSEP-0024, fast-sandbox only). Control-plane
+   * state, not workload shape, so template mode accepts it.
+   */
+  idlePolicy?: IdlePolicy;
+  /**
    * Optional signal used to cancel creation and readiness requests.
    */
   signal?: AbortSignal;
@@ -517,6 +524,9 @@ export class Sandbox {
     if (!(opts.skipHealthCheck ?? false) && opts.healthCheckPollingInterval !== undefined) {
       validatePollingInterval(opts.healthCheckPollingInterval);
     }
+    if (opts.lifecycle?.idlePolicy) {
+      validateIdlePolicy(opts.lifecycle.idlePolicy);
+    }
 
     // Validate volumes before allocating transport resources.
     if (opts.volumes) {
@@ -720,9 +730,10 @@ export class Sandbox {
    * Create a new sandbox from a `Succeeded` fsb template.
    *
    * Template mode fixes the workload shape on the server: the entrypoint,
-   * env, resources, volumes, platform and lifecycle of the sandbox come
-   * from the template's golden image and cannot be overridden here. Only
-   * metadata, network policy and extensions may accompany the template id,
+   * env, resources, volumes, platform and lifecycle hooks of the sandbox
+   * come from the template's golden image and cannot be overridden here.
+   * Only metadata, network policy, extensions and the OSEP-0024 idle policy
+   * (control-plane state, not workload shape) may accompany the template id,
    * and the timeout is required.
    *
    * The returned sandbox routes egress policy operations through the
@@ -740,6 +751,9 @@ export class Sandbox {
     }
     if (!(opts.skipHealthCheck ?? false) && opts.healthCheckPollingInterval !== undefined) {
       validatePollingInterval(opts.healthCheckPollingInterval);
+    }
+    if (opts.idlePolicy) {
+      validateIdlePolicy(opts.idlePolicy, "idlePolicy");
     }
     throwIfAborted(opts.signal);
 
@@ -775,6 +789,7 @@ export class Sandbox {
           }
         : undefined,
       extensions: opts.extensions ?? {},
+      ...(opts.idlePolicy == null ? {} : { idlePolicy: opts.idlePolicy }),
     };
 
     let sandboxId: SandboxId | undefined;

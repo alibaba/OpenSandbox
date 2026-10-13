@@ -293,3 +293,52 @@ test("Sandbox.connect keeps the sidecar egress for non-template sandboxes", asyn
     "expected the sidecar egress stack to be created",
   );
 });
+
+test("Sandbox.createFromTemplate forwards the idle policy as lifecycle.idlePolicy", async () => {
+  const { adapterFactory, createdRequests } = createTemplateFactory();
+  const connectionConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" });
+  connectionConfig.withTransportIfMissing = () => connectionConfig;
+
+  await Sandbox.createFromTemplate({
+    adapterFactory,
+    connectionConfig,
+    templateId: "tpl_123",
+    timeoutSeconds: 300,
+    idlePolicy: {
+      idleTimeoutSeconds: 300,
+      onIdle: "pause",
+      wakeOnAccess: true,
+      activeProbe: { port: 8080, path: "/active" },
+    },
+    skipHealthCheck: true,
+  });
+
+  assert.equal(createdRequests.length, 1);
+  // Service-level request carries the idle policy at the top level; the
+  // adapter maps it to `lifecycle.idlePolicy` on the wire (covered in
+  // sandboxes.lifecycle.test.mjs).
+  assert.deepEqual(createdRequests[0].idlePolicy, {
+    idleTimeoutSeconds: 300,
+    onIdle: "pause",
+    wakeOnAccess: true,
+    activeProbe: { port: 8080, path: "/active" },
+  });
+});
+
+test("Sandbox.createFromTemplate rejects an invalid idle policy", async () => {
+  const { adapterFactory } = createTemplateFactory();
+  const connectionConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" });
+  connectionConfig.withTransportIfMissing = () => connectionConfig;
+
+  await assert.rejects(
+    Sandbox.createFromTemplate({
+      adapterFactory,
+      connectionConfig,
+      templateId: "tpl_123",
+      timeoutSeconds: 300,
+      idlePolicy: { idleTimeoutSeconds: 10, onIdle: "pause" },
+      skipHealthCheck: true,
+    }),
+    /idleTimeoutSeconds must be an integer between 30 and 86400/
+  );
+});

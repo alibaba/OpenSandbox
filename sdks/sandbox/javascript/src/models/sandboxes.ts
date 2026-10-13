@@ -485,7 +485,54 @@ export interface PeriodicLifecycleHook extends Record<string, unknown> {
   timeoutSeconds?: number;
 }
 
-/** Extensible container for sandbox lifecycle hooks. */
+/**
+ * Application-declared activity probe (OSEP-0024).
+ *
+ * Endpoint inside the sandbox that answers `{"active": bool, "message"?: string}`
+ * with 200 while work is in progress. When the sandbox is otherwise idle, the
+ * server issues `GET {path}` on `{port}`; a busy answer counts as activity and
+ * resets the idle clock, while an explicit "not active", any failure, or a
+ * timeout records nothing.
+ */
+export interface ActivityProbe extends Record<string, unknown> {
+  /** Sandbox port serving the probe endpoint. */
+  port: number;
+  /**
+   * Absolute HTTP path of the probe endpoint. Must start with `/` and must not
+   * contain whitespace or control characters.
+   */
+  path: string;
+  /** Probe request budget in seconds (1-10). Defaults to 2. */
+  timeoutSeconds?: number;
+}
+
+/**
+ * Idle behavior declared by the sandbox (OSEP-0024, fast-sandbox only).
+ *
+ * With `idleTimeoutSeconds`, the sandbox is auto-paused after that many seconds
+ * without ingress-observed activity. Without it, the policy is wake-only: the
+ * sandbox is never auto-paused, but a (manually) paused sandbox wakes on access.
+ * Omitting the whole policy preserves non-automated behavior exactly.
+ */
+export interface IdlePolicy extends Record<string, unknown> {
+  /**
+   * Idle threshold X in seconds (30-86400): the sandbox is auto-paused after X
+   * continuously idle seconds. Required together with `onIdle`; absent together
+   * with it means a wake-only policy.
+   */
+  idleTimeoutSeconds?: number;
+  /**
+   * Action taken at the idle threshold. Only `pause` exists today. Required
+   * with, and only valid with, `idleTimeoutSeconds`.
+   */
+  onIdle?: "pause";
+  /** Whether incoming traffic may wake the sandbox from `Paused`. Defaults to true. */
+  wakeOnAccess?: boolean;
+  /** Application-declared activity probe (relevant only with auto-pause). */
+  activeProbe?: ActivityProbe;
+}
+
+/** Extensible container for sandbox lifecycle configuration. */
 export interface SandboxLifecycle extends Record<string, unknown> {
   /**
    * Runs after execd is ready and before the user entrypoint on every container
@@ -497,6 +544,12 @@ export interface SandboxLifecycle extends Record<string, unknown> {
    * never overlap; a scheduled run is skipped while its previous run is active.
    */
   periodic?: PeriodicLifecycleHook[];
+  /**
+   * Auto-pause and wake-on-access behavior (OSEP-0024). Supported only by the
+   * fast-sandbox backend; other backends reject the field. Control-plane
+   * policy: it never reaches the guest.
+   */
+  idlePolicy?: IdlePolicy;
 }
 
 export interface CreateSandboxRequest extends Record<string, unknown> {
@@ -537,8 +590,8 @@ export interface CreateSandboxFromTemplateRequest extends Record<string, unknown
    * Succeeded fsb template to create the sandbox from.
    *
    * Template mode fixes the workload shape on the server: only metadata,
-   * network policy and extensions may accompany the template id, and the
-   * timeout is required.
+   * network policy, extensions and the idle policy may accompany the template
+   * id, and the timeout is required.
    */
   templateId: string;
   /**
@@ -550,6 +603,11 @@ export interface CreateSandboxFromTemplateRequest extends Record<string, unknown
    * Optional outbound network policy for the sandbox.
    */
   networkPolicy?: NetworkPolicy;
+  /**
+   * Optional idle behavior (OSEP-0024, fast-sandbox only). Control-plane
+   * state, not workload shape, so template mode accepts it.
+   */
+  idlePolicy?: IdlePolicy;
   /**
    * Opaque extension parameters passed through to the server as-is.
    */

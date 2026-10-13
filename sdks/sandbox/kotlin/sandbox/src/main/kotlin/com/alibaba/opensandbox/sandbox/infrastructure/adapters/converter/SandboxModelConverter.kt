@@ -28,11 +28,14 @@ import com.alibaba.opensandbox.sandbox.api.models.RenewSandboxExpirationRequest
 import com.alibaba.opensandbox.sandbox.api.models.RenewSandboxExpirationResponse
 import com.alibaba.opensandbox.sandbox.api.models.Snapshot
 import com.alibaba.opensandbox.sandbox.api.models.execd.Metrics
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.ActivityProbe
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.CredentialProxyConfig
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Host
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.IdlePolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.OSSFS
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.OnIdleAction
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PVC
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSnapshotInfos
@@ -52,8 +55,10 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SnapshotStatus
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Volume
 import java.time.Duration
 import java.time.OffsetDateTime
+import com.alibaba.opensandbox.sandbox.api.models.ActivityProbe as ApiActivityProbe
 import com.alibaba.opensandbox.sandbox.api.models.CredentialProxyConfig as ApiCredentialProxyConfig
 import com.alibaba.opensandbox.sandbox.api.models.Host as ApiHost
+import com.alibaba.opensandbox.sandbox.api.models.IdlePolicy as ApiIdlePolicy
 import com.alibaba.opensandbox.sandbox.api.models.LifecycleHook as ApiLifecycleHook
 import com.alibaba.opensandbox.sandbox.api.models.NetworkPolicy as ApiNetworkPolicy
 import com.alibaba.opensandbox.sandbox.api.models.NetworkRule as ApiNetworkRule
@@ -307,6 +312,35 @@ internal object SandboxModelConverter {
                         timeoutSeconds = it.timeoutSeconds,
                     )
                 },
+            idlePolicy = idlePolicy?.toApiIdlePolicy(),
+        )
+    }
+
+    /**
+     * Converts Domain IdlePolicy -> API IdlePolicy (OSEP-0024).
+     *
+     * Validation happens in the domain model's builder; this mapping only
+     * translates the values.
+     */
+    internal fun IdlePolicy.toApiIdlePolicy(): ApiIdlePolicy {
+        return ApiIdlePolicy(
+            idleTimeoutSeconds = idleTimeoutSeconds,
+            onIdle =
+                onIdle?.let {
+                    when (it) {
+                        OnIdleAction.PAUSE -> ApiIdlePolicy.OnIdle.pause
+                    }
+                },
+            wakeOnAccess = wakeOnAccess,
+            activeProbe = activeProbe?.toApiActivityProbe(),
+        )
+    }
+
+    private fun ActivityProbe.toApiActivityProbe(): ApiActivityProbe {
+        return ApiActivityProbe(
+            port = port,
+            path = path,
+            timeoutSeconds = timeoutSeconds,
         )
     }
 

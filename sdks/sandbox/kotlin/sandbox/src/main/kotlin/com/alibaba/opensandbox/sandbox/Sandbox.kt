@@ -26,6 +26,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.diagnostics.DiagnosticConte
 import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EGRESS_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.execd.DEFAULT_EXECD_PORT
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.CredentialProxyConfig
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.IdlePolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.NetworkRule
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
@@ -542,6 +543,7 @@ class Sandbox internal constructor(
             metadata: Map<String, String>,
             networkPolicy: NetworkPolicy?,
             extensions: Map<String, String>,
+            idlePolicy: IdlePolicy?,
             connectionConfig: ConnectionConfig,
             healthCheck: ((Sandbox) -> Boolean)?,
             healthCheckPollingInterval: Duration,
@@ -567,6 +569,7 @@ class Sandbox internal constructor(
                                 metadata = metadata,
                                 networkPolicy = networkPolicy,
                                 extensions = extensions,
+                                idlePolicy = idlePolicy,
                             )
                         createdSandboxId = response.id
                         InitializationResult.NewSandbox(response.id)
@@ -1793,6 +1796,7 @@ class Sandbox internal constructor(
          * Optional outbound network policy (egress).
          */
         private var networkPolicy: NetworkPolicy? = null
+        private var idlePolicy: IdlePolicy? = null
 
         /**
          * Optional extension parameters for server-side custom behaviors.
@@ -1889,6 +1893,25 @@ class Sandbox internal constructor(
          */
         fun networkPolicy(networkPolicy: NetworkPolicy): TemplateLauncher {
             this.networkPolicy = networkPolicy
+            return this
+        }
+
+        /**
+         * Sets the OSEP-0024 idle policy (fast-sandbox only). Control-plane
+         * state, not workload shape, so template mode accepts it.
+         */
+        fun idlePolicy(idlePolicy: IdlePolicy): TemplateLauncher {
+            this.idlePolicy = idlePolicy
+            return this
+        }
+
+        /**
+         * Configures the OSEP-0024 idle policy using a fluent configuration block.
+         */
+        fun idlePolicy(configure: IdlePolicy.Builder.() -> Unit): TemplateLauncher {
+            val builder = IdlePolicy.builder()
+            builder.configure()
+            this.idlePolicy = builder.build()
             return this
         }
 
@@ -2026,6 +2049,7 @@ class Sandbox internal constructor(
                 metadata = metadata,
                 networkPolicy = networkPolicy,
                 extensions = extensions,
+                idlePolicy = idlePolicy,
                 connectionConfig = connectionConfig ?: ConnectionConfig.builder().build(),
                 healthCheck = healthCheck,
                 healthCheckPollingInterval = healthCheckPollingInterval,

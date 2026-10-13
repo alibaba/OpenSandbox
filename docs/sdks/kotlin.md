@@ -131,6 +131,51 @@ Sandbox sandbox = Sandbox.builder()
 
 The Server validates `timeoutSeconds`; `preStart` accepts 1–10800 seconds, while `periodic` accepts 1–300 seconds. Both default to 60 seconds when omitted. See [Lifecycle Hooks](/guides/lifecycle-hooks) for timing, failure behavior, and provider limitations.
 
+### Idle policy (auto-pause and wake-on-access)
+
+`SandboxLifecycle.idlePolicy` (OSEP-0024, fast-sandbox only) tells the control
+plane to auto-pause the sandbox after `idleTimeoutSeconds` (30–86400) of
+continuously idle ingress-observed traffic, and to wake it on the next request.
+It is control-plane state: it never reaches the guest, is accepted in template
+mode (`TemplateLauncher.idlePolicy(...)`), and is rejected by non-fast-sandbox
+backends. Omitting it preserves non-automated behavior exactly.
+
+```kotlin
+val sandbox = Sandbox.builder()
+    .connectionConfig(config)
+    .image("ubuntu:24.04")
+    .lifecycle(
+        SandboxLifecycle.builder()
+            .idlePolicy {
+                idleTimeoutSeconds(300)
+                onIdle(OnIdleAction.PAUSE)
+                wakeOnAccess(true)
+            }
+            .build()
+    )
+    .build()
+```
+
+`activeProbe` lets the application veto a pause while real work runs without
+producing ingress traffic: declare an endpoint answering
+`{"active": bool, "message"?: string}` and the server polls it when the sandbox
+is otherwise idle; a busy answer resets the idle clock. Invalid policies fail
+fast in the `IdlePolicy.Builder`.
+
+### Wake retry
+
+A request to a paused sandbox may arrive while its restore is still in
+progress. The gateway answers `503` with the `OpenSandbox-Wake: expired`
+marker; the retry interceptor recognizes it and resends the original request
+after the `Retry-After` delay (safe for any method — the marker proves the
+request was never forwarded). The wake budget defaults to 5 attempts / 60
+seconds across all wake cycles; when it is exhausted the SDK throws
+`SandboxWakeTimeoutException` (carrying `attempts` and `waited`) while the
+server-side resume continues in the background. Bare `503` responses follow
+the existing retry rules untouched. Tune it on `RetryPolicy`:
+`wakeRetryEnabled` (default true), `wakeMaxAttempts` (5),
+`wakeOverallDeadline` (60s, `null` for unbounded).
+
 ## Usage Examples
 
 Use a live `sandbox` and `config` from the quick start, before cleanup. Java
