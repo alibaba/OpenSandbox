@@ -231,6 +231,15 @@ class TestFsbIdlePauseE2E:
         )
         logger.info("policy-less sandbox ready: %s", sandbox.id)
         try:
+            # Settle before pausing: a pause issued while the controller is
+            # still reconciling the initial create loses its intent (the
+            # checkpoint never starts) - see the fast-sandbox upstream issue.
+            await _wait_until(
+                lambda: _state_is(manager, sandbox.id, "Running"),
+                timedelta(minutes=2),
+                "Running before pause",
+            )
+            await asyncio.sleep(2)
             await manager.pause_sandbox(sandbox.id)
 
             def _paused() -> bool:
