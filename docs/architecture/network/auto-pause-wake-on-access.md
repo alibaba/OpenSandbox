@@ -11,7 +11,7 @@ Full proposal: [OSEP-0024](https://github.com/opensandbox-group/OpenSandbox/blob
 
 ## Lifecycle
 
-![Auto-pause and wake-on-access lifecycle](../../public/images/auto-pause-wake-states.png)
+![Auto-pause and wake-on-access lifecycle](../../public/images/auto-pause-wake-lifecycle.svg)
 
 Three properties of this state machine carry most of the design:
 
