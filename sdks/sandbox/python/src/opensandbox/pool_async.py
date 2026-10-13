@@ -222,9 +222,7 @@ class SandboxPoolAsync:
                     name=f"sandbox-pool-heartbeat-{self._config.pool_name}",
                 )
             except (Exception, asyncio.CancelledError):
-                await self._stop_reconcile(wait_for_warmup=True)
-                await self._close_provider()
-                self._lifecycle_state = PoolLifecycleState.STOPPED
+                await self._cleanup_failed_start()
                 raise
 
     async def acquire(
@@ -1348,6 +1346,25 @@ class SandboxPoolAsync:
             logger.warning(
                 f"Async pool primary lock release failed: pool_name={self._config.pool_name} owner_id={self._config.owner_id} error={exc}"
             )
+
+    async def _cleanup_failed_start(self) -> None:
+        async def cleanup() -> None:
+            await self._stop_reconcile(wait_for_warmup=True)
+            await self._close_provider()
+            self._lifecycle_state = PoolLifecycleState.STOPPED
+
+        # Keep the lifecycle lock until cleanup finishes, even if the caller
+        # cancels again while closing startup-owned resources.
+        task = asyncio.create_task(cleanup())
+        cancellation: asyncio.CancelledError | None = None
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as exc:
+                cancellation = cancellation or exc
+        await task
+        if cancellation is not None:
+            raise cancellation
 
     async def _close_provider(self) -> None:
         if self._sandbox_manager is not None:

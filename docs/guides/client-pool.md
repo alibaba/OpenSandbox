@@ -60,7 +60,8 @@ During graceful operation, each pool instance moves through
 non-graceful shutdown can transition directly to `STOPPED`.
 If awaiting Python's `SandboxPoolAsync.start()` is cancelled, it closes
 startup-owned resources and returns to `STOPPED` before propagating
-`CancelledError`. The same instance can then be started again.
+`CancelledError`, even if the caller cancels repeatedly during cleanup.
+The same instance can then be started again.
 Health is tracked separately as `HEALTHY | DEGRADED | DRAINING | STOPPED`; after
 `degraded_threshold` consecutive warmup or reconcile failures the pool enters
 `DEGRADED`. Go applies exponential replenish backoff while degraded. Python,

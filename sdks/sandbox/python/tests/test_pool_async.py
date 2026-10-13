@@ -123,6 +123,118 @@ async def test_async_cancelled_start_cleans_up_and_can_restart(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cleanup_stage", ["release_primary_lock", "manager", "transport"]
+)
+@pytest.mark.parametrize("startup_failure", ["cancelled", "exception"])
+@pytest.mark.parametrize("extra_cancellations", [0, 3])
+async def test_async_failed_start_finishes_cleanup_before_propagating(
+    cleanup_stage: str,
+    startup_failure: str,
+    extra_cancellations: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = InMemoryAsyncPoolStateStore()
+    start_entered = asyncio.Event()
+    fail_start = asyncio.Event()
+    cleanup_entered = asyncio.Event()
+    finish_cleanup = asyncio.Event()
+    blocked = False
+    managers: list[FakeAsyncManager] = []
+    closed_transports: list[httpx.AsyncHTTPTransport] = []
+    startup_error = RuntimeError("state store unavailable")
+    original_set_max_idle = store.set_max_idle
+    original_release_lock = store.release_primary_lock
+    original_close = httpx.AsyncHTTPTransport.aclose
+
+    async def pause_cleanup_once() -> None:
+        nonlocal blocked
+        if not blocked:
+            blocked = True
+            cleanup_entered.set()
+            await finish_cleanup.wait()
+
+    async def failing_set_max_idle(*args: Any, **kwargs: Any) -> None:
+        if not start_entered.is_set():
+            start_entered.set()
+            await fail_start.wait()
+            raise startup_error
+        await original_set_max_idle(*args, **kwargs)
+
+    async def release_lock(*args: Any, **kwargs: Any) -> None:
+        if cleanup_stage == "release_primary_lock":
+            await pause_cleanup_once()
+        return await original_release_lock(*args, **kwargs)
+
+    async def close_transport(transport: httpx.AsyncHTTPTransport) -> None:
+        if cleanup_stage == "transport":
+            await pause_cleanup_once()
+        await original_close(transport)
+        closed_transports.append(transport)
+
+    class BlockingManager(FakeAsyncManager):
+        async def close(self) -> None:
+            if cleanup_stage == "manager":
+                await pause_cleanup_once()
+            await super().close()
+
+    async def manager_factory(config: ConnectionConfig) -> Any:
+        manager = BlockingManager()
+        managers.append(manager)
+        return manager
+
+    monkeypatch.setattr(store, "set_max_idle", failing_set_max_idle)
+    monkeypatch.setattr(store, "release_primary_lock", release_lock)
+    monkeypatch.setattr(httpx.AsyncHTTPTransport, "aclose", close_transport)
+    pool = SandboxPoolAsync(
+        pool_name="pool",
+        max_idle=0,
+        state_store=store,
+        connection_config=ConnectionConfig(),
+        creation_spec=PoolCreationSpec(image="ubuntu:22.04"),
+        sandbox_manager_factory=manager_factory,
+        sandbox_factory=FakeAsyncSandbox,  # type: ignore[arg-type]
+    )
+    startup = asyncio.create_task(pool.start())
+    try:
+        await asyncio.wait_for(start_entered.wait(), timeout=2)
+        if startup_failure == "cancelled":
+            startup.cancel()
+        else:
+            fail_start.set()
+        await asyncio.wait_for(cleanup_entered.wait(), timeout=2)
+        for _ in range(extra_cancellations):
+            startup.cancel()
+            await asyncio.sleep(0)
+            assert not startup.done(), "startup exited before cleanup finished"
+
+        finish_cleanup.set()
+        if startup_failure == "cancelled" or extra_cancellations:
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(startup, timeout=2)
+        else:
+            with pytest.raises(RuntimeError) as raised:
+                await asyncio.wait_for(startup, timeout=2)
+            assert raised.value is startup_error
+
+        assert (await pool.snapshot()).lifecycle_state == PoolLifecycleState.STOPPED
+        assert managers[0].closed
+        assert len(closed_transports) == 1
+        await asyncio.wait_for(pool.start(), timeout=2)
+        assert (await pool.snapshot()).lifecycle_state == PoolLifecycleState.RUNNING
+        assert not managers[-1].closed
+        with pytest.raises(PoolEmptyException):
+            await pool.acquire(policy=AcquirePolicy.FAIL_FAST)
+    finally:
+        fail_start.set()
+        finish_cleanup.set()
+        if not startup.done():
+            startup.cancel()
+        await asyncio.gather(startup, return_exceptions=True)
+        await asyncio.wait_for(pool.shutdown(False), timeout=5)
+
+
+@pytest.mark.asyncio
 async def test_async_acquire_fail_fast_empty_raises_pool_empty() -> None:
     pool = _create_pool(max_idle=0)
     await pool.start()
