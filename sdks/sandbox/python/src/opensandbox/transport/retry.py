@@ -130,7 +130,10 @@ class RetryPolicy:
     """
 
     max_retries: int = 3
-    """Retries after the initial attempt. ``0`` disables retry."""
+    """
+    Retries after the initial attempt. ``0`` disables general retry;
+    wake-timeout retries are governed separately by ``wake_retry_enabled``.
+    """
 
     initial_backoff: timedelta = timedelta(milliseconds=500)
     max_backoff: timedelta = timedelta(seconds=30)

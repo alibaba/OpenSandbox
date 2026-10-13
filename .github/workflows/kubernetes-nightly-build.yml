@@ -363,6 +363,10 @@ jobs:
     name: Fast Sandbox Full-Stack E2E (KVM)
     runs-on: kvm
     timeout-minutes: 180
+    env:
+      # One declaration covers up / idle-e2e / failure diagnostics alike;
+      # each step forwards it through sudo -E.
+      IDLE_PAUSE: "1"
     steps:
       # actions/checkout always executes as the runner user; the script
       # steps below run as root and leave root-owned files (venv, pycache)
@@ -382,7 +386,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Run integration tests (idle-pause profile)
-        run: sudo -E env "PATH=$PATH" "IDLE_PAUSE=1" ./scripts/fast-sandbox-env/integration-env.sh up --auto-clean
+        run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh up --auto-clean
 
       - name: Run base SDK e2e
         timeout-minutes: 30
@@ -390,7 +394,7 @@ jobs:
 
       - name: Run idle-pause SDK e2e
         timeout-minutes: 45
-        run: sudo -E env "PATH=$PATH" "IDLE_PAUSE=1" ./scripts/fast-sandbox-env/integration-env.sh idle-e2e
+        run: sudo -E env "PATH=$PATH" ./scripts/fast-sandbox-env/integration-env.sh idle-e2e
 
       # Collect the env's own failure dump ($WORK/logs/failure-*.txt) plus
       # live status, BEFORE teardown removes the cluster.

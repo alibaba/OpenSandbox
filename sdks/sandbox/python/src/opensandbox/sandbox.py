@@ -685,8 +685,8 @@ class Sandbox:
             metadata: Custom metadata for the sandbox
             network_policy: Optional outbound network policy (egress).
             extensions: Opaque extension parameters passed through to the server as-is.
-            idle_policy: Optional idle behavior (OSEP-0024, fast-sandbox only).
                 Prefer namespaced keys (e.g. ``storage.id``).
+            idle_policy: Optional idle behavior (OSEP-0024, fast-sandbox only).
             connection_config: Connection configuration
             health_check: Custom async health check function
             health_check_polling_interval: Polling interval used while waiting for endpoint publication and readiness/health.

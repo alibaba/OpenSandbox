@@ -123,6 +123,7 @@ class Sandboxes(Protocol):
             metadata: User-defined metadata used for management and filtering
             network_policy: Optional outbound network policy (egress)
             extensions: Opaque extension parameters passed through to the server as-is
+            idle_policy: Optional idle behavior (OSEP-0024, fast-sandbox only)
 
         Returns:
             Sandbox create response

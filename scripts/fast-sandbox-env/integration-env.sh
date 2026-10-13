@@ -1240,7 +1240,10 @@ redis_up() {
 	# The sweeper connects at startup, so Redis must precede the server.
 	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping Redis"; return 0; }
 	touch "$WORK/idle-pause"
-	kubectl apply -n "$OSB_NS" -f "$MANIFESTS_DIR/idle-pause/redis.yaml" >/dev/null
+	mkdir -p "$GEN_DIR"
+	sed "s|image: redis:7-alpine|image: $REDIS_IMAGE|" \
+		"$MANIFESTS_DIR/idle-pause/redis.yaml" > "$GEN_DIR/idle-pause-redis.yaml"
+	kubectl apply -n "$OSB_NS" -f "$GEN_DIR/idle-pause-redis.yaml" >/dev/null
 	wait_for "idle-pause Redis deployment ready" 120 \
 		kubectl -n "$OSB_NS" rollout status deploy/idle-pause-redis --timeout=10s
 	pass "idle-pause Redis up ($REDIS_DSN)"
@@ -1659,6 +1662,7 @@ idle_pause_verify() {
 	local created t0 t1 code i
 	local x=30
 	local rounds="${IDLE_PAUSE_ROUNDS:-3}"
+	[[ "$rounds" =~ ^[1-9][0-9]*$ ]] || die "IDLE_PAUSE_ROUNDS must be a positive integer (got $rounds)"
 	log "verify (idle-pause): creating an opted-in sandbox (idleTimeoutSeconds=$x, rounds=$rounds) via the lifecycle API"
 	t0="$(now_ms)"
 	created="$(server_api POST /sandboxes "$(jq -n \
@@ -2064,13 +2068,13 @@ EOF
 # Allow focused tests to load the stage functions without starting the environment.
 [[ "${BASH_SOURCE[0]}" == "$0" ]] || return 0
 
-	for arg in "$@"; do
-		case "$arg" in
-			--auto-clean) AUTO_CLEAN=1 ;;
-			up|down|status|pool|sdk-e2e|idle-e2e) ACTION="$arg" ;;
-			*) usage ;;
-		esac
-	done
+for arg in "$@"; do
+	case "$arg" in
+		--auto-clean) AUTO_CLEAN=1 ;;
+		up|down|status|pool|sdk-e2e|idle-e2e) ACTION="$arg" ;;
+		*) usage ;;
+	esac
+done
 [[ -n "$ACTION" ]] || usage
 
 mkdir -p "$WORK" "$LOGS_DIR"

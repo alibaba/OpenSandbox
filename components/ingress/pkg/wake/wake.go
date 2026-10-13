@@ -208,14 +208,14 @@ func (w *Waker) Wake(ctx context.Context, target sandbox.EndpointTarget) error {
 	// Opt-in gate: no policy keeps today's permanent 503. Runs before
 	// admission so denial consumes no slot and no permit.
 	if !w.policy.WakeAllowed(ctx, target.Namespace, target.SandboxID) {
-		logFor(target).Warnf("wake denied: paused sandbox has no wake-on-access policy")
+		logFor(target).Debugf("wake denied: paused sandbox has no wake-on-access policy")
 		return fmt.Errorf("%w: sandbox is paused without a wake-on-access policy", sandbox.ErrSandboxNotReady)
 	}
 
 	// Admission precedes flight creation.
 	if !w.lot.tryAcquire() {
 		telemetry.RecordParkShed()
-		logFor(target).Warnf("wake shed: parking lot full")
+		logFor(target).Debugf("wake shed: parking lot full")
 		return ErrParkingLotFull
 	}
 	defer w.lot.release()
