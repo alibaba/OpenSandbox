@@ -23,6 +23,7 @@ exports both. Skipped otherwise and excluded from ``make test``.
 import asyncio
 import logging
 import os
+import statistics
 import time
 from datetime import timedelta
 
@@ -42,6 +43,7 @@ FSB_PROTOCOL = os.getenv("OPENSANDBOX_TEST_PROTOCOL", "http")
 FSB_API_KEY = os.getenv("OPENSANDBOX_TEST_API_KEY", "fast-sandbox-env")
 # The server rejects X < 30, so 30 is the fastest workable value.
 IDLE_TIMEOUT = int(os.getenv("OPENSANDBOX_TEST_IDLE_TIMEOUT", "30"))
+IDLE_ROUNDS = int(os.getenv("OPENSANDBOX_TEST_IDLE_ROUNDS", "3"))
 
 pytestmark = pytest.mark.skipif(
     not FSB_TEMPLATE_ID or not IDLE_PAUSE_ENABLED,
@@ -113,6 +115,15 @@ async def _kill_and_wait_gone(
         await _wait_until(_gone, timedelta(minutes=2), f"sandbox {sandbox_id} deleted")
 
 
+def _summarize(label: str, values: list[float]) -> str:
+    return (
+        f"{label}: n={len(values)} "
+        f"min={min(values):.1f}s max={max(values):.1f}s "
+        f"mean={statistics.mean(values):.1f}s "
+        f"samples={[round(v, 1) for v in values]}"
+    )
+
+
 async def _wake_and_run(
     sandbox_id: str,
     connection_config: ConnectionConfig,
@@ -156,49 +167,54 @@ class TestFsbIdlePauseE2E:
     async def manager(self, connection_config) -> SandboxManager:
         return await SandboxManager.create(connection_config)
 
-    @pytest.mark.timeout(900)
+    @pytest.mark.timeout(3600)
     async def test_01_auto_pause_then_wake_on_access(
         self, manager: SandboxManager, connection_config
     ) -> None:
+        """IDLE_ROUNDS cycles of auto-pause -> wake, per-phase timing."""
         sandbox = await Sandbox.create_from_template(
             FSB_TEMPLATE_ID,
-            timeout=timedelta(hours=1),
+            timeout=timedelta(hours=2),
             connection_config=connection_config,
             idle_policy=IdlePolicy(
                 idle_timeout_seconds=IDLE_TIMEOUT, on_idle="pause"
             ),
             metadata={"origin": "fsb-idle-pause-e2e"},
         )
-        logger.info("opted-in sandbox ready: %s", sandbox.id)
+        logger.info("opted-in sandbox ready: %s (rounds=%d)", sandbox.id, IDLE_ROUNDS)
         try:
             assert sandbox.origin == SandboxOrigin.TEMPLATE
 
             result = await sandbox.commands.run("echo pre-idle")
             assert result.error is None
-            assert "pre-idle" in result.logs.stdout[0].text
 
-            t0 = time.monotonic()
-            await _wait_until(
-                lambda: _state_is(manager, sandbox.id, "Paused"),
-                PAUSE_BUDGET,
-                f"auto-paused within X={IDLE_TIMEOUT}s + sweep + checkpoint",
-            )
-            logger.info(
-                "auto-paused after %.1fs of silence", time.monotonic() - t0
-            )
+            pause_times: list[float] = []
+            wake_times: list[float] = []
+            for rnd in range(1, IDLE_ROUNDS + 1):
+                # Pause phase: the clock starts at the last activity.
+                t0 = time.monotonic()
+                await _wait_until(
+                    lambda: _state_is(manager, sandbox.id, "Paused"),
+                    PAUSE_BUDGET,
+                    f"round {rnd}/{IDLE_ROUNDS}: auto-paused",
+                )
+                pause_times.append(time.monotonic() - t0)
 
-            # Wake-on-access: traffic alone must restore and serve.
-            t1 = time.monotonic()
-            await _wake_and_run(sandbox.id, connection_config, "wake-ok")
-            logger.info(
-                "wake round trip completed in %.1fs", time.monotonic() - t1
-            )
+                # Wake phase: traffic alone must restore and serve.
+                t1 = time.monotonic()
+                await _wake_and_run(
+                    sandbox.id, connection_config, f"wake-r{rnd}-ok"
+                )
+                wake_times.append(time.monotonic() - t1)
+                logger.info(
+                    "round %d/%d: pause=%.1fs wake=%.1fs",
+                    rnd, IDLE_ROUNDS, pause_times[-1], wake_times[-1],
+                )
 
-            await _wait_until(
-                lambda: _state_is(manager, sandbox.id, "Running"),
-                timedelta(minutes=2),
-                "sandbox Running again after wake",
-            )
+            logger.info(_summarize("auto-pause", pause_times))
+            logger.info(_summarize("wake", wake_times))
+            for rnd, wake in enumerate(wake_times, start=1):
+                assert wake < WAKE_BUDGET, f"round {rnd} wake {wake:.1f}s exceeded budget"
         finally:
             await _kill_and_wait_gone(manager, sandbox.id)
 

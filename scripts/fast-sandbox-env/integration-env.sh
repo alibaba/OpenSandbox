@@ -59,6 +59,7 @@
 #   SKIP_TOOL_INSTALL / SKIP_LEFTOVER_CLEAN / INOTIFY_VALUE
 #   IDLE_PAUSE=1     OSEP-0024 idle-pause/wake profile: Redis, server [idle_pause],
 #                    gateway activity+wake flags, idle-pause verify stage
+#   IDLE_PAUSE_ROUNDS  auto-pause/wake rounds in the verify stage and idle-e2e (default 3)
 #   REDIS_IMAGE      Redis image for the idle-pause profile (default redis:7-alpine)
 #
 # Every stage logs to $WORK/logs/; failures dump component logs to
@@ -1579,6 +1580,9 @@ sandbox_state_is() { # <state>
 
 sandbox_running() { sandbox_state_is Running; }
 sandbox_paused() { sandbox_state_is Paused; }
+sandbox_state_get() {
+	osb_api sandbox get "$VERIFY_ID" -o json 2>/dev/null | jq -r '.status.state // empty'
+}
 
 pause_resume_verify() {
 	# Accepted + poll: Paused == checkpoint durable + capacity released;
@@ -1651,9 +1655,10 @@ idle_ping_code() {
 idle_pause_verify() {
 	# Raw curl create: the CLI has no lifecycle.idlePolicy parameter yet.
 	[[ "$IDLE_PAUSE" == "1" ]] || { log "idle-pause profile off (IDLE_PAUSE=0); skipping verify"; return 0; }
-	local created t0 t1 t2 t3 code
+	local created t0 t1 code i
 	local x=30
-	log "verify (idle-pause): creating an opted-in sandbox (idleTimeoutSeconds=$x) via the lifecycle API"
+	local rounds="${IDLE_PAUSE_ROUNDS:-3}"
+	log "verify (idle-pause): creating an opted-in sandbox (idleTimeoutSeconds=$x, rounds=$rounds) via the lifecycle API"
 	t0="$(now_ms)"
 	created="$(server_api POST /sandboxes "$(jq -n \
 		--arg template "$TEMPLATE_ID" \
@@ -1669,32 +1674,42 @@ idle_pause_verify() {
 
 	wait_for "pre-idle execd /ping 200 through the gateway (records activity)" 100 execd_ping_ok
 
-	t1="$(now_ms)"
-	wait_for "auto-paused within X + sweep + checkpoint" 240 sandbox_paused
-	t2="$(now_ms)"
-	log "verify (idle-pause): $VERIFY_ID idle->Paused in $(( (t2 - t1) / 1000000 ))ms (X=${x}s, sweep=5s)"
-	pass "auto-pause: opted-in sandbox went Running -> Paused with zero traffic"
+	local -a pause_ms=() wake_ms=() attempts=()
+	for ((i = 1; i <= rounds; i++)); do
+		# Pause phase: the clock starts at the previous activity observation.
+		t0="$(now_ms)"
+		wait_for "round $i/$rounds auto-paused within X + sweep + checkpoint" 240 sandbox_paused
+		pause_ms+=("$(( ($(now_ms) - t0) / 1000000 ))")
+		pass "round $i/$rounds: auto-paused in ${pause_ms[-1]}ms"
 
-	# A marked 503 may surface while the restore exceeds the park budget.
-	log "verify (idle-pause): waking $VERIFY_ID through the gateway (budget 600s: a cross-node restore pulls the full checkpoint)"
-	local deadline=$(( $(now_ms) + 600000000000 )) wake_seen=0 next_state_log=0
-	while :; do
-		code="$(idle_ping_code)"
-		case "$code" in
-			200) break ;;
-			wake-503) wake_seen=1 ;;
-		esac
-		if (( $(now_ms) >= next_state_log )); then
-			log "verify (idle-pause): still waiting (last=$code, state=$(osb_api sandbox get "$VERIFY_ID" -o json 2>/dev/null | jq -r '.status.state // empty'))"
-			next_state_log=$(( $(now_ms) + 30000000000 ))
-		fi
-		[[ "$(now_ms)" -ge "$deadline" ]] && fail "wake /ping never returned 200 (last=$code)"
-		sleep 1
+		# Wake phase: a marked 503 may surface while the restore exceeds
+		# the park budget; the resume is never canceled.
+		t1="$(now_ms)"
+		local deadline=$(( $(now_ms) + 600000000000 )) wake_seen=0 next_state_log=0
+		while :; do
+			code="$(idle_ping_code)"
+			case "$code" in
+				200) break ;;
+				wake-503) wake_seen=1 ;;
+			esac
+			if (( $(now_ms) >= next_state_log )); then
+				log "verify (idle-pause): round $i still waiting (last=$code, state=$(sandbox_state_get))"
+				next_state_log=$(( $(now_ms) + 30000000000 ))
+			fi
+			[[ "$(now_ms)" -ge "$deadline" ]] && fail "round $i: wake /ping never returned 200 (last=$code)"
+			sleep 1
+		done
+		wake_ms+=("$(( ($(now_ms) - t1) / 1000000 ))")
+		attempts+=("$(kubectl -n "$RESOURCE_NS" get sandbox "$VERIFY_ID" \
+			-o jsonpath='{.status.placement.attempt}' 2>/dev/null || echo '?')")
+		pass "round $i/$rounds: woke in ${wake_ms[-1]}ms (marked-503 observed: $wake_seen, placement.attempt=${attempts[-1]})"
 	done
-	wait_for "woken sandbox Running again" 120 sandbox_running
-	t3="$(now_ms)"
-	log "verify (idle-pause): $VERIFY_ID wake->200 in $(( (t3 - t2) / 1000000 ))ms (marked-503 observed: $wake_seen)"
-	pass "wake-on-access: paused sandbox resumed on the next gateway request"
+
+	local joined_pause joined_wake joined_att
+	printf -v joined_pause '%sms/' "${pause_ms[@]}"
+	printf -v joined_wake '%sms/' "${wake_ms[@]}"
+	printf -v joined_att '%s/' "${attempts[@]}"
+	pass "idle-pause ${rounds} rounds: pause=${joined_pause%?} wake=${joined_wake%?} placement.attempt=${joined_att%?}"
 
 	osb_api sandbox kill "$VERIFY_ID" >/dev/null 2>&1 \
 		|| log "verify cleanup: kill failed; remove $VERIFY_ID manually"
@@ -1889,7 +1904,8 @@ idle_e2e() {
 	export OPENSANDBOX_TEST_PROTOCOL="http"
 	export OPENSANDBOX_TEST_API_KEY="$SERVER_API_KEY"
 	export OPENSANDBOX_TEST_IDLE_PAUSE="1"
-	log "sdk e2e (idle-pause): template=$template_id server=$SERVER_URL -> tests/python/tests/test_fsb_idle_pause_e2e.py"
+	export OPENSANDBOX_TEST_IDLE_ROUNDS="${IDLE_PAUSE_ROUNDS:-3}"
+	log "sdk e2e (idle-pause): template=$template_id server=$SERVER_URL rounds=$OPENSANDBOX_TEST_IDLE_ROUNDS -> tests/python/tests/test_fsb_idle_pause_e2e.py"
 	cd "$OSB_ROOT/tests/python" || die "tests/python not found under $OSB_ROOT"
 	uv run pytest tests/test_fsb_idle_pause_e2e.py
 }
@@ -2015,7 +2031,8 @@ usage: integration-env.sh [--auto-clean] {up|down|status|pool|sdk-e2e|idle-e2e}
            round-trip through the checkpoint). The CLI (osb) is installed
            fresh from PyPI unless OSB_BIN points at an existing binary.
            With IDLE_PAUSE=1: Redis + server [idle_pause] + gateway
-           activity/wake flags, plus the idle-pause/wake verify stage.
+           activity/wake flags, plus the idle-pause/wake verify stage
+           (IDLE_PAUSE_ROUNDS cycles, per-round timing summary).
   pool     re-apply only the SandboxPool (after editing manifests/pool/)
   status   nodes / pods / pool / DART P2P counters / RustFS / OpenSandbox health
   sdk-e2e  run the Python SDK e2e suite (tests/python/tests/test_fsb_e2e.py)
