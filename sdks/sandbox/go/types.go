@@ -272,9 +272,9 @@ func (p *IdlePolicy) Validate() error {
 		if !strings.HasPrefix(path, "/") {
 			return &InvalidArgumentError{Field: "ActiveProbe.Path", Message: "must be an absolute HTTP path starting with '/'"}
 		}
-		if strings.ContainsFunc(path, func(r rune) bool {
+		if strings.IndexFunc(path, func(r rune) bool {
 			return unicode.IsSpace(r) || r < 0x20 || r == 0x7f
-		}) {
+		}) >= 0 {
 			return &InvalidArgumentError{Field: "ActiveProbe.Path", Message: "must not contain whitespace or control characters"}
 		}
 		if t := p.ActiveProbe.TimeoutSeconds; t != nil && (*t < ProbeTimeoutMinSeconds || *t > ProbeTimeoutMaxSeconds) {
