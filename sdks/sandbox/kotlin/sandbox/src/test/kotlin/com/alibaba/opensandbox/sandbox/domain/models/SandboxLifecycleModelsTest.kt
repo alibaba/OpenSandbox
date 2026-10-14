@@ -217,6 +217,15 @@ class SandboxLifecycleModelsTest {
     }
 
     @Test
+    fun `empty idle policy builder fails fast`() {
+        val error =
+            assertThrows(IllegalArgumentException::class.java) {
+                IdlePolicy.builder().build()
+            }
+        assertEquals("IdlePolicy must set at least one field", error.message)
+    }
+
+    @Test
     fun `activity probe validation`() {
         assertThrows(IllegalArgumentException::class.java) {
             ActivityProbe.builder().port(0).path("/active").build()

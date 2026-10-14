@@ -143,6 +143,29 @@ function ensureExecdSessionNote(filePath) {
 
 ensureExecdSessionNote(outFiles.execd);
 
+// openapi-typescript v7 emits properties that carry a schema `default` as
+// required, while the spec treats them as optional (the server applies the
+// default). Relax exactly those properties in the lifecycle output so TS
+// consumers can rely on the documented defaults without passing the fields.
+function relaxDefaultedProperties(filePath) {
+  const body = readFileSync(filePath, "utf8");
+  const replacements = [
+    // IdlePolicy.wakeOnAccess (spec: optional, default true).
+    [/^(\s*)wakeOnAccess: boolean;$/m, "$1wakeOnAccess?: boolean;"],
+    // ActivityProbe.timeoutSeconds (spec: optional, default 2).
+    [/^(\s*)timeoutSeconds: number;$/m, "$1timeoutSeconds?: number;"],
+  ];
+  let updated = body;
+  for (const [pattern, replacement] of replacements) {
+    updated = updated.replace(pattern, replacement);
+  }
+  if (updated !== body) {
+    writeFileSync(filePath, updated, "utf8");
+  }
+}
+
+relaxDefaultedProperties(outFiles.lifecycle);
+
 console.log("\n✅ API type generation completed:");
 console.log(`- ${path.relative(packageRoot, outFiles.execd)}`);
 console.log(`- ${path.relative(packageRoot, outFiles.egress)}`);

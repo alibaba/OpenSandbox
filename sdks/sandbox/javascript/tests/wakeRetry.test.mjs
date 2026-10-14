@@ -37,7 +37,7 @@ const POLICY = { enabled: true, maxAttempts: 5, overallDeadlineSeconds: 60 };
 function markedResponse({
   status = 503,
   marker = WAKE_MARKER_VALUE,
-  retryAfter = "1",
+  retryAfter = "0",
   body = { error: { code: "sandbox_wake_timeout", message: "restore in progress" } },
 } = {}) {
   const headers = new Headers();
@@ -95,7 +95,8 @@ test("wake retry: exhaustion throws SandboxWakeTimeoutException with attempts an
     (err) => {
       assert.ok(err instanceof SandboxWakeTimeoutException);
       assert.equal(err.attempts, 5);
-      assert.ok(err.waitedMs >= 0);
+      // Retry-After: 0 must not trigger the 1s fallback: the wait is immediate.
+      assert.ok(err.waitedMs < 900, `waitedMs=${err.waitedMs}`);
       assert.equal(err.statusCode, 503);
       assert.equal(err.error.code, SandboxError.WAKE_TIMEOUT);
       assert.equal(err.name, "SandboxWakeTimeoutException");
@@ -248,9 +249,25 @@ test("wake retry: null overall deadline removes the time bound (attempts still a
   assert.equal(res.status, 200);
 });
 
+test("wake retry: a set overall deadline binds where the null deadline waits", async () => {
+  // Twin of the null-deadline test: the same 2s wait must exhaust a 1s
+  // budget immediately, proving deadlines bind when set.
+  const { fetch, calls } = stubFetch([markedResponse({ retryAfter: "2" })]);
+  const wrapped = createWakeRetryFetch({
+    baseFetch: fetch,
+    wakeRetry: { enabled: true, maxAttempts: 5, overallDeadlineSeconds: 1 },
+  });
+  await assert.rejects(
+    wrapped("http://example/v1/x", { method: "GET" }),
+    (err) => err instanceof SandboxWakeTimeoutException && err.attempts === 1,
+  );
+  assert.equal(calls.length, 1);
+});
+
 test("wake retry: caller abort during the wait stops retrying", async () => {
   const controller = new AbortController();
-  const { fetch, calls } = stubFetch([markedResponse()]);
+  // A 1s wait gives the abort timer a window to fire during the backoff.
+  const { fetch, calls } = stubFetch([markedResponse({ retryAfter: "1" })]);
   const wrapped = createWakeRetryFetch({ baseFetch: fetch, wakeRetry: POLICY });
   const promise = wrapped("http://example/v1/x", {
     method: "POST",
@@ -387,10 +404,10 @@ test("wake retry: FormData body is never retried", async () => {
   assert.equal(calls.length, 1);
 });
 
-test("wake retry wiring: ConnectionConfig wraps the JSON fetch and leaves the SSE fetch bare", async () => {
+test("wake retry wiring: JSON and SSE transports wrapped, upload transport bare", async () => {
   const originalFetch = globalThis.fetch;
   try {
-    // The JSON transport retries the marked 503: two underlying calls.
+    // JSON transport: marked 503 is retried (2 underlying calls).
     let jsonCalls = 0;
     globalThis.fetch = makeCountingStub(() => ++jsonCalls);
     const jsonConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" }).withTransportIfMissing();
@@ -402,16 +419,31 @@ test("wake retry wiring: ConnectionConfig wraps the JSON fetch and leaves the SS
       await jsonConfig.closeTransport();
     }
 
-    // The SSE transport stays bare: a marked 503 is returned as-is after one call.
+    // SSE transport (commands.run): also wrapped so a waking sandbox is
+    // served instead of failing; an established stream is never re-dispatched
+    // because only the marked 503 connect replays.
     let sseCalls = 0;
     globalThis.fetch = makeCountingStub(() => ++sseCalls);
     const sseConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" }).withTransportIfMissing();
     try {
       const sseRes = await sseConfig.sseFetch("http://127.0.0.1:8080/v1/x", { method: "POST", body: "x" });
-      assert.equal(sseRes.status, 503);
-      assert.equal(sseCalls, 1, "SSE fetch must not retry");
+      assert.equal(sseRes.status, 200);
+      assert.equal(sseCalls, 2, "SSE fetch should retry the marked 503");
     } finally {
       await sseConfig.closeTransport();
+    }
+
+    // Upload transport stays bare: upload bodies are streams and cannot be
+    // replayed — a marked 503 is returned as-is after exactly one call.
+    let uploadCalls = 0;
+    globalThis.fetch = makeCountingStub(() => ++uploadCalls);
+    const uploadConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" }).withTransportIfMissing();
+    try {
+      const uploadRes = await uploadConfig.uploadFetch("http://127.0.0.1:8080/v1/x", { method: "PUT", body: "x" });
+      assert.equal(uploadRes.status, 503);
+      assert.equal(uploadCalls, 1, "upload fetch must not retry");
+    } finally {
+      await uploadConfig.closeTransport();
     }
   } finally {
     globalThis.fetch = originalFetch;
@@ -424,7 +456,10 @@ function makeCountingStub(countNext) {
     if (n === 1) {
       return new Response(JSON.stringify({ error: { code: "sandbox_wake_timeout" } }), {
         status: 503,
-        headers: new Headers({ "OpenSandbox-Wake": "expired", "Retry-After": "0" }),
+        headers: new Headers({
+          [WAKE_MARKER_HEADER]: WAKE_MARKER_VALUE,
+          "Retry-After": "0",
+        }),
       });
     }
     return new Response(null, { status: 200 });

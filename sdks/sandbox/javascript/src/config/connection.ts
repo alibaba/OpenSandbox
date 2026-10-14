@@ -510,20 +510,24 @@ export class ConnectionConfig {
       defaultHeaders: this.headers,
       label: "http",
     });
-    // The wake retry wraps the timed fetch so every attempt gets a fresh
-    // response-header timeout while the wake budget spans attempts. SSE and
-    // upload transports stay unwrapped: an established stream must never be
-    // re-executed, and upload bodies are not replayable.
-    this._fetch = this.wakeRetry.enabled
-      ? createWakeRetryFetch({ baseFetch: timedFetch, wakeRetry: this.wakeRetry })
-      : timedFetch;
-    this._sseFetch = createTimedFetch({
+    const timedSseFetch = createTimedFetch({
       baseFetch,
       timeoutSeconds: 0,
       debug: this.debug,
       defaultHeaders: this.headers,
       label: "sse",
     });
+    // The wake retry wraps the timed fetches so every attempt gets a fresh
+    // response-header timeout while the wake budget spans attempts. The SSE
+    // transport is wrapped too — commands.run() against a paused sandbox must
+    // wake it like any other request; an established stream is never
+    // re-dispatched because only the marked 503 connect replays. The upload
+    // transport stays unwrapped: upload bodies are streams and cannot be
+    // replayed.
+    const wrapWake = (f: typeof fetch): typeof fetch =>
+      this.wakeRetry.enabled ? createWakeRetryFetch({ baseFetch: f, wakeRetry: this.wakeRetry }) : f;
+    this._fetch = wrapWake(timedFetch);
+    this._sseFetch = wrapWake(timedSseFetch);
     this._uploadFetch = createTimedFetch({
       baseFetch: baseUploadFetch,
       timeoutSeconds: 0,

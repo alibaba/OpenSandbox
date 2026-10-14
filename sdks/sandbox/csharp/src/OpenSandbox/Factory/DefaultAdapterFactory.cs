@@ -88,7 +88,8 @@ public sealed class DefaultAdapterFactory : IAdapterFactory
             options.HttpClientProvider.SseHttpClient,
             options.ExecdBaseUrl,
             headers,
-            options.LoggerFactory.CreateLogger("OpenSandbox.IsolatedSessionsAdapter"));
+            options.LoggerFactory.CreateLogger("OpenSandbox.IsolatedSessionsAdapter"),
+            options.ConnectionConfig.WakeRetry);
 
         return new ExecdStack
         {

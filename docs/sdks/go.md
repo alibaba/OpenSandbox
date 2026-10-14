@@ -540,8 +540,9 @@ all wake cycles; when it is exhausted the client returns a
 `*SandboxWakeTimeoutError` (carrying `Attempts` and `Waited`) while the
 server-side resume continues in the background. Bare `503` responses follow
 the existing retry rules untouched. Wake retry is active whenever a
-`WithRetry` config is set and `WakeRetryEnabled` is true
-(`DefaultRetryConfig` enables it); streaming connections bypass wake retry —
+`WithRetry` config is set (`WakeRetryEnabled` defaults to enabled even for
+hand-built configs; pass `WakeRetryDisabled()` to opt out); streaming
+connections bypass wake retry —
 a waking sandbox fails fast with the marked 503 instead of parking the
 connect — matching the other official SDKs, and established streams are
 never re-executed.

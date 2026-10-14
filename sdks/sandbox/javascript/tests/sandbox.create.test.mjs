@@ -721,9 +721,30 @@ test("Sandbox.create forwards lifecycle.idlePolicy", async () => {
 });
 
 test("Sandbox.create rejects an invalid idle policy before allocating transport resources", async () => {
+  // Observe allocation order directly: withTransportIfMissing must never run.
+  const guardedConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" });
+  guardedConfig.withTransportIfMissing = () => {
+    throw new Error("transport must not be allocated for an invalid idle policy");
+  };
+  await assert.rejects(
+    Sandbox.create({
+      adapterFactory: {
+        createLifecycleStack() {
+          throw new Error("lifecycle stack must not be built for an invalid idle policy");
+        },
+      },
+      connectionConfig: guardedConfig,
+      image: "python:3.12",
+      lifecycle: { idlePolicy: { idleTimeoutSeconds: 29, onIdle: "pause" } },
+      skipHealthCheck: true,
+    }),
+    /idleTimeoutSeconds must be an integer/
+  );
+
   for (const [idlePolicy, message] of [
     [{ idleTimeoutSeconds: 29, onIdle: "pause" }, /idleTimeoutSeconds must be an integer between 30 and 86400/],
     [{ idleTimeoutSeconds: 86401, onIdle: "pause" }, /idleTimeoutSeconds must be an integer between 30 and 86400/],
+    [{ idleTimeoutSeconds: 300.5, onIdle: "pause" }, /idleTimeoutSeconds must be an integer between 30 and 86400/],
     [{ idleTimeoutSeconds: 300 }, /onIdle is required when idleTimeoutSeconds is set/],
     [{ onIdle: "pause" }, /onIdle must be omitted when idleTimeoutSeconds is omitted/],
     [{ idleTimeoutSeconds: 300, onIdle: "terminate" }, /onIdle must be "pause"/],

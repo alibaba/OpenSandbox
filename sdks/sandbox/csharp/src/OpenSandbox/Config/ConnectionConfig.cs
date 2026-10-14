@@ -258,7 +258,7 @@ public sealed class ConnectionConfig
         var wakeMaxAttempts = options.WakeMaxAttempts ?? Constants.DefaultWakeMaxAttempts;
         if (wakeMaxAttempts < 1)
         {
-            throw new ArgumentException("WakeMaxAttempts must be >= 1.", nameof(options));
+            throw new ArgumentException("WakeMaxAttempts must be >= 1.", nameof(options.WakeMaxAttempts));
         }
         var wakeDeadlineSeconds = options.WakeOverallDeadlineSeconds ?? Constants.DefaultWakeOverallDeadlineSeconds;
         WakeRetry = new WakeRetryOptions(

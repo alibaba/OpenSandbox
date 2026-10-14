@@ -1319,7 +1319,7 @@ export interface components {
              *     the sandbox.
              * @default true
              */
-            wakeOnAccess: boolean;
+            wakeOnAccess?: boolean;
             /**
              * @description Application-declared activity probe. When the sandbox is
              *     otherwise idle, the server issues `GET {path}` on `{port}`;
@@ -1345,7 +1345,7 @@ export interface components {
              * @description Probe request budget in seconds. The server defaults to 2 when omitted.
              * @default 2
              */
-            timeoutSeconds: number;
+            timeoutSeconds?: number;
         };
         /**
          * @description JSON Merge Patch (RFC 7396) request body for updating sandbox metadata.

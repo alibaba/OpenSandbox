@@ -325,10 +325,12 @@ test("Sandbox.createFromTemplate forwards the idle policy as lifecycle.idlePolic
   });
 });
 
-test("Sandbox.createFromTemplate rejects an invalid idle policy", async () => {
+test("Sandbox.createFromTemplate rejects an invalid idle policy before allocating transport resources", async () => {
   const { adapterFactory } = createTemplateFactory();
   const connectionConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" });
-  connectionConfig.withTransportIfMissing = () => connectionConfig;
+  connectionConfig.withTransportIfMissing = () => {
+    throw new Error("transport must not be allocated for an invalid idle policy");
+  };
 
   await assert.rejects(
     Sandbox.createFromTemplate({

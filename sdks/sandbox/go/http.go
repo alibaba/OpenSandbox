@@ -475,11 +475,13 @@ func (c *Client) doStreamRequest(ctx context.Context, method, path string, body 
 // It captures the Retry-After header for use by the retry loop and the
 // gateway-owned OSEP-0024 wake marker for the wake retry contract.
 func handleError(resp *http.Response) error {
+	retryAfter, retryAfterPresent := parseRetryAfterValue(resp.Header.Get("Retry-After"))
 	apiErr := &APIError{
-		StatusCode:  resp.StatusCode,
-		RequestID:   resp.Header.Get("X-Request-Id"),
-		RetryAfter:  parseRetryAfter(resp),
-		WakeExpired: resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get(wakeMarkerHeader) == wakeMarkerExpired,
+		StatusCode:        resp.StatusCode,
+		RequestID:         resp.Header.Get("X-Request-Id"),
+		RetryAfter:        retryAfter,
+		RetryAfterPresent: retryAfterPresent,
+		WakeExpired:       resp.StatusCode == http.StatusServiceUnavailable && resp.Header.Get(wakeMarkerHeader) == wakeMarkerExpired,
 	}
 	data, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {

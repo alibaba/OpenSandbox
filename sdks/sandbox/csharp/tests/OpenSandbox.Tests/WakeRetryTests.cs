@@ -424,4 +424,73 @@ public class WakeRetryTests
             System.Globalization.CultureInfo.CurrentCulture = originalCulture;
         }
     }
+
+    [Fact]
+    public async Task RetryAfterCapStopsTheRetryWhenItExceedsTheBudget()
+    {
+        // A pathological header (3600s) is capped at 60s; a 59.9s budget must
+        // therefore end the wake retry without waiting.
+        var handler = new ScriptedHandler();
+        handler.EnqueueMarked(retryAfter: "3600");
+        var wrapper = NewWrapper(handler, new WakeRetryOptions(true, 5, TimeSpan.FromSeconds(59.9)));
+
+        var act = async () => await wrapper.PostAsync<JsonElement>("/sandboxes", new { x = 1 });
+
+        var exception = await act.Should().ThrowAsync<SandboxWakeTimeoutException>();
+        exception.Which.Attempts.Should().Be(1);
+        handler.Requests.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task CallerCancellationDuringWakeWaitStopsRetrying()
+    {
+        var handler = new ScriptedHandler();
+        handler.EnqueueMarked(retryAfter: "1");
+        var wrapper = NewWrapper(handler);
+
+        using var cts = new CancellationTokenSource();
+        var act = async () => await wrapper.PostAsync<JsonElement>("/sandboxes", new { x = 1 }, cts.Token);
+        cts.CancelAfter(TimeSpan.FromMilliseconds(50));
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        handler.Requests.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task GetBytesAsyncGoesThroughTheWakeRetry()
+    {
+        // Buffered file downloads are trivially replayable and must wake a
+        // paused sandbox like the JSON reads.
+        var handler = new ScriptedHandler();
+        handler.EnqueueMarked();
+        handler.Enqueue(request => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(new byte[] { 1, 2, 3 })
+        });
+        var wrapper = NewWrapper(handler);
+
+        var bytes = await wrapper.GetBytesAsync("/files/download");
+
+        bytes.Should().Equal(new byte[] { 1, 2, 3 });
+        handler.Requests.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task WakeDisabledClientDoesNotRetryThroughIsolatedSessionFiles()
+    {
+        // The isolated-sessions adapter must honor the client's wake policy:
+        // a disabled client gets the marked 503 after exactly one attempt.
+        var handler = new ScriptedHandler();
+        handler.EnqueueMarked();
+        var wake = new WakeRetryOptions(false, 5, TimeSpan.FromMinutes(1));
+        var wrapper = new HttpClientWrapper(
+            new HttpClient(handler), "http://localhost:8080/v1", wakeRetry: wake);
+        var derived = wrapper.WithBaseUrl("http://localhost:9090/v1");
+
+        var act = async () => await derived.PostAsync<JsonElement>("/session/f/files/x", null);
+
+        var thrown = await act.Should().ThrowAsync<SandboxApiException>();
+        thrown.Which.Should().NotBeOfType<SandboxWakeTimeoutException>();
+        handler.Requests.Should().HaveCount(1);
+    }
 }

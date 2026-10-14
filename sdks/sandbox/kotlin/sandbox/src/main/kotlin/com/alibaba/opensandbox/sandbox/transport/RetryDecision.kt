@@ -170,10 +170,10 @@ internal fun applyRetryAfterCap(retryAfter: Duration?): Duration? {
  * request was parked and never forwarded, which is what makes any-method
  * retry safe.
  */
-const val WAKE_MARKER_HEADER: String = "OpenSandbox-Wake"
+internal const val WAKE_MARKER_HEADER: String = "OpenSandbox-Wake"
 
 /** See [WAKE_MARKER_HEADER]. */
-const val WAKE_MARKER_VALUE: String = "expired"
+internal const val WAKE_MARKER_VALUE: String = "expired"
 
 /**
  * The gateway emits `Retry-After: 1` on wake-timeout responses. Used as the
@@ -202,7 +202,7 @@ internal fun isWakeTimeoutResponse(
  * 1-second fallback when the header is missing or unparseable.
  */
 internal fun resolveWakeRetryAfter(headerValue: String?): Duration =
-    minOf(applyRetryAfterCap(parseRetryAfter(headerValue)) ?: WAKE_DEFAULT_RETRY_AFTER, RETRY_AFTER_CAP)
+    applyRetryAfterCap(parseRetryAfter(headerValue)) ?: WAKE_DEFAULT_RETRY_AFTER
 
 /**
  * Decide whether to retry a gateway wake-timeout response (OSEP-0024).

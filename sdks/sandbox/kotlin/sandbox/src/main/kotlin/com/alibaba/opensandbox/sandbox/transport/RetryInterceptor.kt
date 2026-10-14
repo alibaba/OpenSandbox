@@ -70,6 +70,10 @@ class RetryInterceptor
             var previousSleep: Duration = Duration.ZERO
             var retriesUsed = 0
             var wakeAttemptsUsed = 0
+            // Shared across the generic and wake paths so RetryEvent.attempt
+            // stays monotonic when a request sees both (e.g. a bare 503 retried
+            // once, then a marked wake 503).
+            var attemptsMade = 0
             var lastException: IOException? = null
 
             while (true) {
@@ -128,6 +132,8 @@ class RetryInterceptor
                         classifyIoException(e)
                     }
 
+                attemptsMade += 1
+
                 val elapsedAfter = Duration.ofNanos(System.nanoTime() - start)
                 val cancelled = chain.call().isCanceled()
 
@@ -164,18 +170,31 @@ class RetryInterceptor
                             responseBody = rawBody,
                         )
                     }
+                    // Clamp the wake sleep to the remaining generic
+                    // overallDeadline exactly like the regular path, so a long
+                    // Retry-After cannot push the request past the caller
+                    // budget and surface as a generic deadline error instead
+                    // of the typed wake exception.
+                    var sleepFor = retryAfter
+                    policy.overallDeadline?.let { deadline ->
+                        val remaining = deadline.minus(elapsedNow)
+                        if (sleepFor > remaining) {
+                            sleepFor = if (remaining.isNegative) Duration.ZERO else remaining
+                        }
+                    }
+
                     // Mirror the regular retry path: log and fire onRetry before
                     // each wake sleep so callers with hooks observe the wait.
                     val wakeRequestId = response.header("X-Request-ID")
                     val wakeEvent =
                         RetryEvent(
-                            attempt = wakeAttemptsUsed + 1,
+                            attempt = attemptsMade + 1,
                             retriesUsed = wakeAttemptsUsed,
                             method = method,
                             url = request.url.toString(),
                             cause = RetryCause.WAKE_TIMEOUT,
                             statusCode = response.code,
-                            backoff = retryAfter,
+                            backoff = sleepFor,
                             requestId = wakeRequestId,
                             exception = null,
                         )
@@ -197,7 +216,7 @@ class RetryInterceptor
                     }
 
                     response.close()
-                    sleeper(retryAfter)
+                    sleeper(sleepFor)
                     if (Thread.currentThread().isInterrupted) {
                         throw IOException("call interrupted during wake backoff")
                     }
@@ -251,7 +270,7 @@ class RetryInterceptor
                 val statusCode = response?.code
                 val event =
                     RetryEvent(
-                        attempt = retriesUsed + 2,
+                        attempt = attemptsMade + 1,
                         retriesUsed = retriesUsed,
                         method = method,
                         url = request.url.toString(),

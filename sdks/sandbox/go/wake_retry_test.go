@@ -30,7 +30,7 @@ import (
 func wakeConfig(maxAttempts int, deadline time.Duration) RetryConfig {
 	return RetryConfig{
 		MaxRetries:          0,
-		WakeRetryEnabled:    true,
+		WakeRetryEnabled:    nil, // enabled by default
 		WakeMaxAttempts:     maxAttempts,
 		WakeOverallDeadline: deadline,
 	}
@@ -164,7 +164,7 @@ func TestWakeRetry_DisabledReturnsMarked503(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewLifecycleClient(srv.URL, "key", WithRetry(RetryConfig{MaxRetries: 0}))
+	client := NewLifecycleClient(srv.URL, "key", WithRetry(RetryConfig{MaxRetries: 0, WakeRetryEnabled: WakeRetryDisabled()}))
 	_, err := client.CreateSandbox(context.Background(), CreateSandboxRequest{
 		TemplateID: "tpl_1",
 		Timeout:    intPtr(60),
@@ -189,7 +189,7 @@ func TestWakeRetry_WorksWithoutGenericRetries(t *testing.T) {
 	// MaxRetries == 0: no generic status retries, wake contract still active.
 	client := NewLifecycleClient(srv.URL, "key", WithRetry(RetryConfig{
 		MaxRetries:          0,
-		WakeRetryEnabled:    true,
+		WakeRetryEnabled:    nil, // enabled by default
 		WakeMaxAttempts:     DefaultWakeMaxAttempts,
 		WakeOverallDeadline: DefaultWakeOverallDeadline,
 	}))
@@ -201,9 +201,49 @@ func TestWakeRetry_WorksWithoutGenericRetries(t *testing.T) {
 
 func TestWakeRetry_DefaultRetryConfigEnablesWake(t *testing.T) {
 	cfg := DefaultRetryConfig()
-	require.True(t, cfg.WakeRetryEnabled)
+	require.True(t, cfg.wakeEnabled())
+	if cfg.WakeRetryEnabled != nil {
+		t.Fatalf("WakeRetryEnabled should default to nil, got %v", *cfg.WakeRetryEnabled)
+	}
 	require.Equal(t, DefaultWakeMaxAttempts, cfg.WakeMaxAttempts)
 	require.Equal(t, DefaultWakeOverallDeadline, cfg.WakeOverallDeadline)
+}
+
+func TestWakeRetry_HandBuiltConfigKeepsWakeEnabledByDefault(t *testing.T) {
+	// A config that only sets the generic knobs must keep the wake contract
+	// (nil WakeRetryEnabled means enabled) — a zero-value bool would
+	// otherwise silently disable it.
+	require.True(t, (&RetryConfig{MaxRetries: 5}).wakeEnabled())
+	if (&RetryConfig{MaxRetries: 5, WakeRetryEnabled: WakeRetryDisabled()}).wakeEnabled() {
+		t.Fatalf("explicit WakeRetryDisabled must turn the contract off")
+	}
+}
+
+func TestWakeRetry_ExplicitRetryAfterZeroMeansImmediate(t *testing.T) {
+	// Retry-After: 0 must retry immediately, not park for the 1s default.
+	var attempts atomic.Int32
+	started := time.Now()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.Header().Set(wakeMarkerHeader, wakeMarkerExpired)
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		jsonResponse(w, http.StatusCreated, SandboxInfo{ID: "sbx-1", CreatedAt: time.Now()})
+	}))
+	defer srv.Close()
+
+	client := NewLifecycleClient(srv.URL, "key", WithRetry(wakeConfig(5, time.Minute)))
+	got, err := client.CreateSandbox(context.Background(), CreateSandboxRequest{
+		TemplateID: "tpl_1",
+		Timeout:    intPtr(60),
+	})
+	require.NoError(t, err)
+	require.Equal(t, "sbx-1", got.ID)
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("Retry-After: 0 should retry immediately, waited %v", elapsed)
+	}
 }
 
 func TestWakeRetry_NegativeDeadlineRemovesTimeBound(t *testing.T) {
@@ -223,7 +263,7 @@ func TestWakeRetry_NegativeDeadlineRemovesTimeBound(t *testing.T) {
 
 	client := NewLifecycleClient(srv.URL, "key", WithRetry(RetryConfig{
 		MaxRetries:          0,
-		WakeRetryEnabled:    true,
+		WakeRetryEnabled:    nil, // enabled by default
 		WakeMaxAttempts:     5,
 		WakeOverallDeadline: -1,
 	}))
@@ -424,7 +464,7 @@ func TestWakeRetry_StreamConnectDoesNotParkOnWake(t *testing.T) {
 	client := NewExecdClient(srv.URL, "tok", WithRetry(RetryConfig{
 		MaxRetries:          1,
 		InitialBackoff:      10 * time.Millisecond,
-		WakeRetryEnabled:    true,
+		WakeRetryEnabled:    nil, // enabled by default
 		WakeMaxAttempts:     DefaultWakeMaxAttempts,
 		WakeOverallDeadline: DefaultWakeOverallDeadline,
 	}))

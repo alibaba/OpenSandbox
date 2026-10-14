@@ -248,18 +248,24 @@ internal sealed class HttpClientWrapper
         CancellationToken cancellationToken = default)
     {
         var url = BuildUrl(path, queryParams);
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        ApplyDefaultHeaders(request);
-
-        if (headers != null)
-        {
-            foreach (var header in headers)
+        // Buffered download: the request is trivially replayable, so it goes
+        // through the wake retry like the JSON reads (streaming downloads via
+        // GetStreamAsync stay single-shot).
+        using var response = await SendWithWakeRetryAsync(
+            () =>
             {
-                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-        }
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                var request = new HttpRequestMessage(HttpMethod.Get, url);
+                ApplyDefaultHeaders(request);
+                if (headers != null)
+                {
+                    foreach (var header in headers)
+                    {
+                        request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                    }
+                }
+                return request;
+            },
+            cancellationToken).ConfigureAwait(false);
         await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
     }
@@ -314,7 +320,7 @@ internal sealed class HttpClientWrapper
     {
         return (int)response.StatusCode == 503 &&
                response.Headers.TryGetValues(Constants.WakeMarkerHeader, out var values) &&
-               string.Equals(values.FirstOrDefault(), Constants.WakeMarkerExpired, StringComparison.OrdinalIgnoreCase);
+               string.Equals(values.FirstOrDefault(), Constants.WakeMarkerExpired, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -405,15 +411,24 @@ internal sealed class HttpClientWrapper
                              retryAfter > _wakeRetry.OverallDeadline.Value - elapsed);
             if (exhausted)
             {
-                var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-                var requestId = response.Headers.TryGetValues(Constants.RequestIdHeader, out var ids)
-                    ? ids.FirstOrDefault()
-                    : null;
-                throw new SandboxWakeTimeoutException(
-                    attempts,
-                    elapsed,
-                    requestId: requestId,
-                    rawBody: content);
+                try
+                {
+                    var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                    var requestId = response.Headers.TryGetValues(Constants.RequestIdHeader, out var ids)
+                        ? ids.FirstOrDefault()
+                        : null;
+                    throw new SandboxWakeTimeoutException(
+                        attempts,
+                        elapsed,
+                        requestId: requestId,
+                        rawBody: content);
+                }
+                finally
+                {
+                    // Every other path disposes the response via using; the
+                    // exhaustion throw must not leak the connection either.
+                    response.Dispose();
+                }
             }
 
             _logger.LogInformation(

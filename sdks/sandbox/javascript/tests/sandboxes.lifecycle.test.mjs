@@ -144,23 +144,7 @@ test("createSandbox forwards lifecycle.idlePolicy (OSEP-0024)", async () => {
 });
 
 test("createSandboxFromTemplate forwards the idle policy as lifecycle.idlePolicy", async () => {
-  const requests = [];
-  const adapter = new SandboxesAdapter({
-    async POST(path, options) {
-      assert.equal(path, "/sandboxes");
-      requests.push(JSON.parse(JSON.stringify(options.body)));
-      return {
-        data: {
-          id: "sandbox-1",
-          status: { state: "Running" },
-          entrypoint: ["sleep", "infinity"],
-          createdAt: "2026-08-20T00:00:00Z",
-          expiresAt: null,
-        },
-        response: new Response(null, { status: 202 }),
-      };
-    },
-  });
+  const { adapter, requests } = createAdapter();
 
   await adapter.createSandboxFromTemplate({
     templateId: "tpl_1",
@@ -174,23 +158,7 @@ test("createSandboxFromTemplate forwards the idle policy as lifecycle.idlePolicy
 });
 
 test("createSandboxFromTemplate omits lifecycle when no idle policy is set", async () => {
-  const requests = [];
-  const adapter = new SandboxesAdapter({
-    async POST(path, options) {
-      assert.equal(path, "/sandboxes");
-      requests.push(JSON.parse(JSON.stringify(options.body)));
-      return {
-        data: {
-          id: "sandbox-1",
-          status: { state: "Running" },
-          entrypoint: ["sleep", "infinity"],
-          createdAt: "2026-08-20T00:00:00Z",
-          expiresAt: null,
-        },
-        response: new Response(null, { status: 202 }),
-      };
-    },
-  });
+  const { adapter, requests } = createAdapter();
 
   await adapter.createSandboxFromTemplate({ templateId: "tpl_1", timeout: 3600 });
 

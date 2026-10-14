@@ -120,22 +120,33 @@ export function isWakeTimeoutResponse(response: Response): boolean {
   );
 }
 
-interface Replay {
-  body?: Exclude<NonNullable<RequestInit["body"]>, ReadableStream>;
-  requestInit?: {
-    url: string;
-    method: string;
-    headers: [string, string][];
-  };
-}
+type ReplayableBody = Exclude<NonNullable<RequestInit["body"]>, ReadableStream>;
 
 /**
- * Capture a replayable copy of the request body.
+ * Replay plan for a retryable request.
  *
- * In-memory bodies (strings, buffers, blobs, URLSearchParams) can be
- * re-dispatched as-is; streaming bodies (ReadableStream) and FormData can
- * only be consumed once, so requests carrying them are never retried.
- * Returns `null` when the request cannot be replayed.
+ * - `init` bodies are in-memory values referenced as-is (no copy).
+ * - `request` inputs are cloned before the first send (a consumed Request
+ *   cannot be cloned); the clone's body is buffered lazily, only when a
+ *   marked 503 actually arrives, so no bytes are read for the common
+   * first-attempt path.
+ */
+type Replay =
+  | { kind: "init"; body?: ReplayableBody }
+  | {
+      kind: "request";
+      requestInit: {
+        url: string;
+        method: string;
+        headers: [string, string][];
+      };
+      clone: Request;
+      bufferedBody?: ArrayBuffer;
+    };
+
+/**
+ * Capture the replay plan for a request. Returns `null` when the request
+ * cannot be replayed (streaming bodies, FormData).
  */
 async function captureReplay(
   input: RequestInfo | URL,
@@ -144,24 +155,19 @@ async function captureReplay(
   const body = init?.body;
   if (body == null) {
     if (typeof Request !== "undefined" && input instanceof Request && input.body != null) {
-      // Buffer the Request's body via a clone taken before the first send.
+      const requestInit = {
+        url: input.url,
+        method: input.method,
+        headers: collectHeaders(input.headers),
+      };
       try {
-        const buffered = await input.clone().arrayBuffer();
-        const headers: [string, string][] = [];
-        input.headers.forEach((value, key) => headers.push([key, value]));
-        return {
-          body: buffered,
-          requestInit: {
-            url: input.url,
-            method: input.method,
-            headers,
-          },
-        };
+        // Clone before the first send; materialize the bytes only on retry.
+        return { kind: "request", requestInit, clone: input.clone() };
       } catch {
         return null;
       }
     }
-    return { body: undefined };
+    return { kind: "init", body: undefined };
   }
   if (
     typeof body === "string" ||
@@ -170,9 +176,17 @@ async function captureReplay(
     body instanceof Blob ||
     body instanceof URLSearchParams
   ) {
-    return { body };
+    return { kind: "init", body };
   }
   return null;
+}
+
+function collectHeaders(headers: Headers): [string, string][] {
+  const entries: [string, string][] = [];
+  headers.forEach((value, key) => {
+    entries.push([key, value]);
+  });
+  return entries;
 }
 
 function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
@@ -198,9 +212,12 @@ function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
 /**
  * Wrap a fetch with the OSEP-0024 wake retry contract.
  *
- * On a marked wake-timeout response the original request is resent after
- * waiting per `Retry-After` (any method, replayable bodies only), until the
- * sandbox is `Running` or the policy budget is exhausted; exhaustion throws
+ * The first dispatch always passes the caller's original arguments through
+ * untouched, so Request-level options (credentials, mode, redirect, ...)
+ * behave identically whether or not a wake ever happens. On a marked
+ * wake-timeout response the original request is resent after waiting per
+ * `Retry-After` (any method, replayable bodies only), until the sandbox is
+ * `Running` or the policy budget is exhausted; exhaustion throws
  * {@link SandboxWakeTimeoutException} while the server-side resume continues
  * in the background. Every other response — including a bare 503 — is
  * returned untouched.
@@ -226,30 +243,47 @@ export function createWakeRetryFetch(opts: {
         : undefined) ??
       undefined;
     const replay = await captureReplay(input, init);
-    const startedAt = Date.now();
+    if (replay == null) {
+      // Without a replayable body the request cannot be resent; follow the
+      // SDK's existing (bare 503) rules and never retry.
+      return baseFetch(input, init);
+    }
+
+    // Monotonic clock: wall-clock changes (NTP steps) must not move the
+    // wake budget.
+    const startedAt = performance.now();
     let wakeAttemptsUsed = 0;
-    // The first attempt dispatches the caller's original arguments untouched,
-    // so Request-level options (credentials, mode, redirect, ...) are
-    // preserved even when no wake ever happens; only retries rebuild.
     let firstAttempt = true;
 
-    // Re-dispatch for a retry. Replays rebuild a Request when the original
-    // input was a Request carrying its own body.
+    const materializeBody = async (r: Extract<Replay, { kind: "request" }>): Promise<ArrayBuffer> => {
+      r.bufferedBody ??= await r.clone.arrayBuffer();
+      return r.bufferedBody;
+    };
+
     const dispatchRetry = async (): Promise<Response> => {
-      if (replay == null) {
-        return baseFetch(input, init);
-      }
-      if (replay.requestInit) {
-        const r = replay.requestInit;
-        const retryRequest = new Request(r.url, {
-          method: r.method,
-          headers: r.headers,
-          body: replay.body,
+      if (replay.kind === "request") {
+        const retryInit: RequestInit = {
+          method: replay.requestInit.method,
+          headers: replay.requestInit.headers,
+          body: await materializeBody(replay),
           signal,
-        });
-        const retryInit: RequestInit = { ...init, signal };
-        delete retryInit.body;
-        return baseFetch(retryRequest, retryInit);
+        };
+        // Preserve the Request-level options the caller set on the original
+        // input (the rebuilt Request would otherwise default them).
+        if (typeof Request !== "undefined" && input instanceof Request) {
+          retryInit.credentials = input.credentials;
+          retryInit.mode = input.mode;
+          retryInit.redirect = input.redirect;
+          retryInit.referrer = input.referrer;
+          retryInit.referrerPolicy = input.referrerPolicy;
+          retryInit.integrity = input.integrity;
+          retryInit.cache = input.cache;
+          retryInit.keepalive = input.keepalive;
+        }
+        const retryRequest = new Request(replay.requestInit.url, retryInit);
+        const outerInit: RequestInit = { ...init, signal };
+        delete outerInit.body;
+        return baseFetch(retryRequest, outerInit);
       }
       return baseFetch(input, { ...init, signal, body: replay.body });
     };
@@ -260,14 +294,9 @@ export function createWakeRetryFetch(opts: {
       if (!isWakeTimeoutResponse(res)) {
         return res;
       }
-      // Without a replayable body the request cannot be resent; follow the
-      // SDK's existing (bare 503) rules and return the marked response as-is.
-      if (replay == null) {
-        return res;
-      }
 
       wakeAttemptsUsed += 1;
-      const elapsedMs = Date.now() - startedAt;
+      const elapsedMs = performance.now() - startedAt;
       const remainingMs =
         policy.overallDeadlineSeconds == null
           ? null

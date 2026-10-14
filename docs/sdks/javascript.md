@@ -143,8 +143,11 @@ all wake cycles; when it is exhausted the SDK throws
 server-side resume continues in the background. Bare `503` responses follow
 the existing rules untouched. Tune it on the connection config:
 `wakeRetryEnabled` (default true), `wakeMaxAttempts` (5),
-`wakeOverallDeadlineSeconds` (60, `null` for unbounded). SSE and upload
-transports bypass wake retry.
+`wakeOverallDeadlineSeconds` (60, `null` for unbounded). The SSE transport is
+wrapped too, so `commands.run()` wakes a paused sandbox like any other
+request (an established stream is never re-dispatched — only the marked 503
+connect replays); the upload transport stays bare because upload bodies are
+streams and cannot be replayed.
 
 ## Client Pool and observability
 

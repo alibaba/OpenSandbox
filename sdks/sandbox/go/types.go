@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // SandboxState represents the high-level lifecycle state of a sandbox.
@@ -266,7 +267,7 @@ func (p *IdlePolicy) Validate() error {
 		if path == "" {
 			return &InvalidArgumentError{Field: "ActiveProbe.Path", Message: "must be a non-empty absolute HTTP path"}
 		}
-		if len(path) > 512 {
+		if utf8.RuneCountInString(path) > 512 {
 			return &InvalidArgumentError{Field: "ActiveProbe.Path", Message: "must not exceed 512 characters"}
 		}
 		if !strings.HasPrefix(path, "/") {
@@ -801,6 +802,11 @@ type APIError struct {
 	// "OpenSandbox-Wake: expired" marker (OSEP-0024): the request was parked
 	// pre-forward and is safe to retry for any method.
 	WakeExpired bool
+
+	// RetryAfterPresent reports whether a parseable Retry-After header was
+	// on the response; when false, RetryAfter is zero and consumers apply
+	// their own default wait.
+	RetryAfterPresent bool
 }
 
 // Error implements the error interface.

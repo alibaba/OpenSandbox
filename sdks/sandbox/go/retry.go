@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -55,9 +56,11 @@ type RetryConfig struct {
 	// responses (OSEP-0024): a 503 carrying the "OpenSandbox-Wake: expired"
 	// marker proves the request was never forwarded, so the original request
 	// is resent for any method after waiting per Retry-After. Bare 503
-	// responses are never affected by this knob. Wake retry requires
-	// WithRetry to be configured; DefaultRetryConfig enables it.
-	WakeRetryEnabled bool
+	// responses are never affected by this knob. A nil pointer means
+	// enabled — hand-built configs keep the contract unless they opt out
+	// explicitly via WakeRetryDisabled(). Wake retry requires WithRetry to
+	// be configured.
+	WakeRetryEnabled *bool
 
 	// WakeMaxAttempts is the maximum number of marked wake-timeout responses
 	// consumed before the wake retry gives up with a SandboxWakeTimeoutError.
@@ -79,6 +82,19 @@ const DefaultWakeMaxAttempts = 5
 // DefaultWakeOverallDeadline is the default wall-clock cap spanning all wake
 // cycles of one logical request.
 const DefaultWakeOverallDeadline = 60 * time.Second
+
+// WakeRetryDisabled returns a pointer to false, for callers opting out of
+// the wake retry contract on a hand-built RetryConfig. nil (the zero-value
+// pointer) means enabled.
+func WakeRetryDisabled() *bool {
+	f := false
+	return &f
+}
+
+// wakeEnabled reports the effective wake switch for a config.
+func (r *RetryConfig) wakeEnabled() bool {
+	return r.WakeRetryEnabled == nil || *r.WakeRetryEnabled
+}
 
 // wakeMarkerHeader is the gateway-owned OSEP-0024 marker header. The gateway
 // strips it from every upstream response, so its presence on a 503 proves
@@ -115,7 +131,7 @@ func DefaultRetryConfig() RetryConfig {
 			http.StatusServiceUnavailable,
 			http.StatusGatewayTimeout,
 		},
-		WakeRetryEnabled:    true,
+		WakeRetryEnabled:    nil, // enabled by default
 		WakeMaxAttempts:     DefaultWakeMaxAttempts,
 		WakeOverallDeadline: DefaultWakeOverallDeadline,
 	}
@@ -219,19 +235,33 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 	if resp == nil {
 		return 0
 	}
-	val := resp.Header.Get("Retry-After")
-	if val == "" {
-		return 0
-	}
-	if secs, err := strconv.Atoi(val); err == nil && secs > 0 {
-		return time.Duration(secs) * time.Second
-	}
-	if t, err := http.ParseTime(val); err == nil {
-		if d := time.Until(t); d > 0 {
-			return d
-		}
+	if d, ok := parseRetryAfterValue(resp.Header.Get("Retry-After")); ok {
+		return d
 	}
 	return 0
+}
+
+// parseRetryAfterValue parses a raw Retry-After value (delta-seconds or
+// HTTP-date). ok is true only when the header is present and parseable;
+// an explicit "0" (or a past date) yields (0, true).
+func parseRetryAfterValue(val string) (time.Duration, bool) {
+	if val == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(strings.TrimSpace(val)); err == nil {
+		if secs < 0 {
+			return 0, true
+		}
+		return time.Duration(secs) * time.Second, true
+	}
+	if t, err := http.ParseTime(val); err == nil {
+		if d := time.Until(t); d < 0 {
+			return 0, true
+		} else {
+			return d, true
+		}
+	}
+	return 0, false
 }
 
 // retrySleep waits for d or until ctx is cancelled.
@@ -261,11 +291,12 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 
 // withRetryWake is withRetry with control over the wake contract. Streaming
 // connects pass wakeEnabled=false: an established stream is never re-executed,
-// and a waking sandbox must fail fast with the marked 503 instead of parking
-// the connect for up to the wake budget — matching the other official SDKs,
-// which leave their streaming transports unwrapped.
+// and a waking sandbox is not parked for up to the wake budget — the response
+// falls back to the generic policy's bare-503 rules (retried only when the
+// method/status qualify), matching the other official SDKs, which leave their
+// streaming transports unwrapped.
 func (c *Client) withRetryWake(ctx context.Context, wakeEnabled bool, fn func() error) error {
-	if c.retry == nil || (c.retry.MaxRetries == 0 && !(wakeEnabled && c.retry.WakeRetryEnabled)) {
+	if c.retry == nil || (c.retry.MaxRetries == 0 && !(wakeEnabled && c.retry.wakeEnabled())) {
 		return fn()
 	}
 
@@ -294,12 +325,14 @@ func (c *Client) withRetryWake(ctx context.Context, wakeEnabled bool, fn func() 
 		}
 
 		var apiErr *APIError
-		if wakeEnabled && c.retry.WakeRetryEnabled && errors.As(lastErr, &apiErr) && apiErr.WakeExpired {
+		if wakeEnabled && c.retry.wakeEnabled() && errors.As(lastErr, &apiErr) && apiErr.WakeExpired {
 			wakeAttempts++
 			elapsed := time.Since(started)
-			wait := apiErr.RetryAfter
-			if wait <= 0 {
-				wait = wakeDefaultRetryAfter
+			// An explicit Retry-After of 0 means retry immediately; only a
+			// missing or unparseable header falls back to the 1s default.
+			wait := wakeDefaultRetryAfter
+			if apiErr.RetryAfterPresent {
+				wait = apiErr.RetryAfter
 			}
 			if wait > retryAfterCap {
 				wait = retryAfterCap

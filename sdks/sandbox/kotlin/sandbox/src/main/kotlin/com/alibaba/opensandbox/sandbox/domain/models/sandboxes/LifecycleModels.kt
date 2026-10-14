@@ -171,10 +171,8 @@ class ActivityProbe private constructor(
 }
 
 /** Action taken at the idle threshold. Only [PAUSE] exists today; the enum keeps future actions additive. */
-enum class OnIdleAction(
-    val value: String,
-) {
-    PAUSE("pause"),
+enum class OnIdleAction {
+    PAUSE,
 }
 
 /**
@@ -253,12 +251,19 @@ class IdlePolicy private constructor(
             require(probeValue == null || timeoutValue != null) {
                 "IdlePolicy.activeProbe requires idleTimeoutSeconds; the probe is relevant only with auto-pause"
             }
-            return IdlePolicy(
-                idleTimeoutSeconds = timeoutValue,
-                onIdle = actionValue,
-                wakeOnAccess = wakeOnAccess,
-                activeProbe = probeValue,
-            )
+            val policy =
+                IdlePolicy(
+                    idleTimeoutSeconds = timeoutValue,
+                    onIdle = actionValue,
+                    wakeOnAccess = wakeOnAccess,
+                    activeProbe = probeValue,
+                )
+            // Fail fast like the other builders: a policy with no fields at
+            // all is always a caller mistake, never a valid opt-in.
+            require(!policy.isEmpty) {
+                "IdlePolicy must set at least one field"
+            }
+            return policy
         }
     }
 }
