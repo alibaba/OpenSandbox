@@ -17,7 +17,7 @@ The architecture distinguishes three primary interaction paths:
 
 - **Lifecycle management** (orange arrows): Applications, agents, and operators send lifecycle requests (creating, listing, renewing, pausing, resuming, or deleting sandboxes, as well as managing snapshots and templates) to the FastAPI lifecycle server. The server persists metadata and delegates provisioning and orchestration to the configured runtime backend.
 - **Execution and service access** (blue arrows): For command, file, PTY, and Jupyter code execution, or reaching user workload services, clients bypass lifecycle orchestration and connect directly to resolved endpoints—via direct host/pod addresses, the lifecycle server proxy, or an optional Kubernetes ingress gateway.
-- **Outbound controls** (green arrows): Outbound requests from the sandbox to external APIs, model providers, or web services can be filtered and secured through egress controls (a per-sandbox sidecar for container workloads or a shared Fastlet egress profile for FastSandbox), with support for DNS/nftables policies and optional Credential Vault secret injection.
+- **Outbound controls** (green arrows): Outbound requests from the sandbox to external APIs, model providers, or web services can be filtered and secured through egress controls (a per-sandbox sidecar for container workloads or a shared egress process per Fastlet pod for FastSandbox), with support for DNS/nftables policies and optional Credential Vault secret injection.
 
 Runtime and networking capabilities depend on the selected backend; the diagram shows the shared architecture, not a requirement to deploy every component.
 
@@ -135,7 +135,7 @@ Command and code execution use Server-Sent Events for streaming output. The curr
 - **Policy**: `GET /policy` to inspect the current policy; `PATCH /policy` to mutate rules at runtime.
 - **Credential Vault**: `GET`, `POST`, `PATCH`, and `DELETE` on `/credential-vault` to manage sandbox-local credential bindings and token injection without exposing raw secrets to the workload.
 
-For container backends, callers resolve the sandbox endpoint for the egress sidecar port and connect directly (forwarding endpoint authentication headers when sidecar auth is enabled). For FastSandbox, runtime network policy is managed through the lifecycle API (`/sandboxes/{sandboxId}/networkpolicy`), while the shared Fastlet profile routes policy and per-subject credential vault operations using internal request headers.
+For container backends, callers resolve the sandbox endpoint for the egress sidecar port and connect directly (forwarding endpoint authentication headers when sidecar auth is enabled). For FastSandbox, runtime network policy is managed through the lifecycle API (`/sandboxes/{sandboxId}/networkpolicy`), while the shared egress process (one per Fastlet pod) routes policy and per-subject credential vault operations using internal request headers.
 
 ## 3. Lifecycle Control Plane
 
@@ -248,7 +248,7 @@ In Kubernetes mode, `FastSandboxService` connects OpenSandbox to the external `f
 - **Control Protocol**: Communicates with an external `fast-sandbox` control plane via gRPC FastPath v2 (port 9090).
 - **State**: FastPath owns mutations and live runtime operations; Kubernetes LIST/WATCH reads persisted `sandbox.fast.io/v1alpha2` resources and their observations.
 - **Pause/resume**: Delegates to FastPath, which restores the checkpoint on resume. Clients must resolve endpoints again after restoration.
-- **Networking**: The configured Fastlet pool supplies a shared Egress profile; the adapter sends network policy through FastPath Actions. This differs from attaching a per-sandbox container sidecar. The current server adapter rejects the `credentialProxy.enabled` creation flag and volume mounts on this path.
+- **Networking**: The configured Fastlet pool supplies a shared egress process (one per Fastlet pod); the adapter sends network policy through FastPath Actions. This differs from attaching a per-sandbox container sidecar. The current server adapter rejects the `credentialProxy.enabled` creation flag and volume mounts on this path.
 
 The adapter and endpoint integration live in this repository; FastPath and the microVM runtime are provided by the external platform. See the [service dispatch](https://github.com/opensandbox-group/OpenSandbox/blob/main/server/opensandbox_server/services/composite_service.py) and [FastSandbox adapter](https://github.com/opensandbox-group/OpenSandbox/blob/main/server/opensandbox_server/services/fast_sandbox/service.py) for the implementation boundaries, and the [Fast Sandbox integration](/architecture/fast-sandbox/) documentation for the full design.
 
@@ -306,7 +306,7 @@ Capabilities:
 - Optional sidecar authentication.
 - Optional platform-enforced always-allow and always-deny overlays.
 
-Docker starts the egress sidecar as a separate container and runs the main sandbox container in the sidecar network namespace. Kubernetes container providers append the egress sidecar to the pod spec and drop `NET_ADMIN` from the main sandbox container so only the sidecar mutates network rules. FastSandbox uses the shared Fastlet profile outside the microVM guest, receiving policy actions through FastPath.
+Docker starts the egress sidecar as a separate container and runs the main sandbox container in the sidecar network namespace. Kubernetes container providers append the egress sidecar to the pod spec and drop `NET_ADMIN` from the main sandbox container so only the sidecar mutates network rules. FastSandbox uses the shared egress process (one per Fastlet pod, outside the microVM guest), receiving policy actions through FastPath.
 
 ## 6. Networking and Access
 
@@ -372,7 +372,7 @@ Client
 ```text
 Create request with networkPolicy
   -> server validates runtime-specific network policy settings
-  -> runtime attaches egress sidecar or binds policy actions to shared Fastlet profile
+  -> runtime attaches egress sidecar or binds policy actions to the shared Fastlet egress process
   -> sandbox outbound DNS/network traffic is filtered
   -> FastSandbox clients manage policy via GET/PUT/PATCH/DELETE /v1/sandboxes/{sandboxId}/networkpolicy
   -> container clients resolve the egress endpoint and PATCH /policy

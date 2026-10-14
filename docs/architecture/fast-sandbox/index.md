@@ -12,7 +12,7 @@ The adapter and endpoint integration live in this repository. FastPath, the Fast
 ## How it fits
 
 - **Backend selection**: Fast Sandbox is not a separate `runtime.type`. Under `runtime.type = "kubernetes"`, `CompositeSandboxService` routes create requests carrying `templateId` to `FastSandboxService`, and dispatches operations on existing `fsb-` prefixed sandbox IDs to it. Image- and snapshot-based requests keep using the Kubernetes workload providers.
-- **Control protocol**: the server and ingress talk to the fast-sandbox control plane (FastPath v2) over gRPC. FastPath owns mutations and live runtime operations; reads of persisted state use Kubernetes LIST/WATCH on `sandbox.fast.io` custom resources.
+- **Control protocol**: the server and ingress talk to the fast-sandbox control plane (FastPath v2) over gRPC. gRPC ends at FastPath: the FastPath/Reconciler-to-Fastlet control protocol is JSON over HTTP (`/api/v2/fastlet/*`). FastPath owns mutations and live runtime operations; reads of persisted state use Kubernetes LIST/WATCH on `sandbox.fast.io` custom resources.
 - **Tenancy**: a tenant provider maps each authenticated tenant to a fast-sandbox namespace; request-scoped operations resolve it from context, background work falls back to a lookup by sandbox ID.
 
 ![Fast Sandbox architecture](../../public/images/fast-sandbox-architecture.svg)
