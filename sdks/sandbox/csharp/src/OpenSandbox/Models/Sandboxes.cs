@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -1138,6 +1139,41 @@ public class IdlePolicy
         {
             throw new InvalidOperationException(
                 "IdlePolicy.ActiveProbe requires IdleTimeoutSeconds; the probe is relevant only with auto-pause.");
+        }
+        if (ActiveProbe != null)
+        {
+            var probe = ActiveProbe;
+            if (probe.Port < 1 || probe.Port > 65535)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(ActiveProbe),
+                    probe.Port,
+                    "ActivityProbe.Port must be between 1 and 65535.");
+            }
+            if (string.IsNullOrEmpty(probe.Path))
+            {
+                throw new ArgumentException(
+                    "ActivityProbe.Path must be a non-empty absolute HTTP path.",
+                    nameof(ActiveProbe));
+            }
+            if (probe.Path.Length > 512)
+            {
+                throw new ArgumentException(
+                    "ActivityProbe.Path must not exceed 512 characters.",
+                    nameof(ActiveProbe));
+            }
+            if (!probe.Path.StartsWith("/", StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "ActivityProbe.Path must be an absolute HTTP path starting with '/'.",
+                    nameof(ActiveProbe));
+            }
+            if (probe.Path.Any(c => char.IsWhiteSpace(c) || c < 0x20 || c == 0x7f))
+            {
+                throw new ArgumentException(
+                    "ActivityProbe.Path must not contain whitespace or control characters.",
+                    nameof(ActiveProbe));
+            }
         }
     }
 }

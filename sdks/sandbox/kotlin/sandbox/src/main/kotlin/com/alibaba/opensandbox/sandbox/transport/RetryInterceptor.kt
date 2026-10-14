@@ -164,6 +164,38 @@ class RetryInterceptor
                             responseBody = rawBody,
                         )
                     }
+                    // Mirror the regular retry path: log and fire onRetry before
+                    // each wake sleep so callers with hooks observe the wait.
+                    val wakeRequestId = response.header("X-Request-ID")
+                    val wakeEvent =
+                        RetryEvent(
+                            attempt = wakeAttemptsUsed + 1,
+                            retriesUsed = wakeAttemptsUsed,
+                            method = method,
+                            url = request.url.toString(),
+                            cause = RetryCause.WAKE_TIMEOUT,
+                            statusCode = response.code,
+                            backoff = retryAfter,
+                            requestId = wakeRequestId,
+                            exception = null,
+                        )
+                    logger.warn(
+                        "wake retrying {} {}: attempt={} cause={} status=503 backoff={}ms request_id={}",
+                        wakeEvent.method,
+                        wakeEvent.url,
+                        wakeEvent.attempt,
+                        wakeEvent.cause.value,
+                        wakeEvent.backoff.toMillis(),
+                        wakeEvent.requestId,
+                    )
+                    policy.onRetry?.let { hook ->
+                        try {
+                            hook(wakeEvent)
+                        } catch (e: Exception) {
+                            logger.warn("RetryPolicy.onRetry callback raised", e)
+                        }
+                    }
+
                     response.close()
                     sleeper(retryAfter)
                     if (Thread.currentThread().isInterrupted) {

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using OpenSandbox.Config;
@@ -67,13 +68,18 @@ internal sealed class HttpClientWrapper
         _baseUrl = baseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(baseUrl));
         _defaultHeaders = defaultHeaders ?? new Dictionary<string, string>();
         _logger = logger ?? NullLogger.Instance;
-        _wakeRetry = wakeRetry ?? new WakeRetryOptions(true, 5, TimeSpan.FromSeconds(60));
+        _wakeRetry =
+            wakeRetry ??
+            new WakeRetryOptions(
+                enabled: true,
+                maxAttempts: Constants.DefaultWakeMaxAttempts,
+                overallDeadline: TimeSpan.FromSeconds(Constants.DefaultWakeOverallDeadlineSeconds));
     }
 
     public string BaseUrl => _baseUrl;
 
     public HttpClientWrapper WithBaseUrl(string baseUrl) =>
-        new(_httpClient, baseUrl, _defaultHeaders, _logger);
+        new(_httpClient, baseUrl, _defaultHeaders, _logger, _wakeRetry);
 
     public async Task<T> GetAsync<T>(
         string path,
@@ -330,9 +336,23 @@ internal sealed class HttpClientWrapper
                 {
                     parsed = seconds <= 0 ? TimeSpan.Zero : TimeSpan.FromSeconds(seconds);
                 }
-                else if (DateTimeOffset.TryParse(trimmed, out var date))
+                else if (
+                    // HTTP dates are fixed-format RFC1123; parse with the
+                    // invariant culture (with a loose invariant fallback) so
+                    // hosts running a non-Gregorian culture still parse them.
+                    DateTimeOffset.TryParseExact(
+                        trimmed,
+                        "R",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out var exact) ||
+                    DateTimeOffset.TryParse(
+                        trimmed,
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out exact))
                 {
-                    var delta = date - DateTimeOffset.UtcNow;
+                    var delta = exact - DateTimeOffset.UtcNow;
                     parsed = delta < TimeSpan.Zero ? TimeSpan.Zero : delta;
                 }
             }

@@ -228,12 +228,16 @@ export function createWakeRetryFetch(opts: {
     const replay = await captureReplay(input, init);
     const startedAt = Date.now();
     let wakeAttemptsUsed = 0;
+    // The first attempt dispatches the caller's original arguments untouched,
+    // so Request-level options (credentials, mode, redirect, ...) are
+    // preserved even when no wake ever happens; only retries rebuild.
+    let firstAttempt = true;
 
-    // Dispatch one attempt. Replays rebuild a Request when the original
+    // Re-dispatch for a retry. Replays rebuild a Request when the original
     // input was a Request carrying its own body.
-    const dispatch = async (): Promise<Response> => {
+    const dispatchRetry = async (): Promise<Response> => {
       if (replay == null) {
-        return baseFetch(input, { ...init, signal });
+        return baseFetch(input, init);
       }
       if (replay.requestInit) {
         const r = replay.requestInit;
@@ -251,7 +255,8 @@ export function createWakeRetryFetch(opts: {
     };
 
     while (true) {
-      const res = await dispatch();
+      const res = firstAttempt ? await baseFetch(input, init) : await dispatchRetry();
+      firstAttempt = false;
       if (!isWakeTimeoutResponse(res)) {
         return res;
       }

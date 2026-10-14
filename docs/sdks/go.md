@@ -541,8 +541,10 @@ all wake cycles; when it is exhausted the client returns a
 server-side resume continues in the background. Bare `503` responses follow
 the existing retry rules untouched. Wake retry is active whenever a
 `WithRetry` config is set and `WakeRetryEnabled` is true
-(`DefaultRetryConfig` enables it); SSE streaming setup shares the contract
-before the stream is established, and established streams are never re-executed.
+(`DefaultRetryConfig` enables it); streaming connections bypass wake retry —
+a waking sandbox fails fast with the marked 503 instead of parking the
+connect — matching the other official SDKs, and established streams are
+never re-executed.
 
 ## Fsb Template Management
 

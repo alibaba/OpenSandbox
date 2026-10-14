@@ -125,7 +125,12 @@ internal object TemplateModelConverter {
             metadata = metadata,
             networkPolicy = networkPolicy?.toApiNetworkPolicy(),
             extensions = extensions,
-            lifecycle = idlePolicy?.let { ApiSandboxLifecycle(idlePolicy = it.toApiIdlePolicy()) },
+            // Same guard as the standard create path: an empty policy is
+            // omitted rather than serialized as `"idlePolicy": {}`.
+            lifecycle =
+                idlePolicy?.takeUnless { it.isEmpty }?.let { idlePolicyValue ->
+                    ApiSandboxLifecycle(idlePolicy = idlePolicyValue.toApiIdlePolicy())
+                },
         )
     }
 

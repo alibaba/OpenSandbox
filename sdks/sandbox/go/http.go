@@ -421,7 +421,7 @@ func (c *Client) doRequestOnce(ctx context.Context, method, path string, body an
 func (c *Client) doStreamRequest(ctx context.Context, method, path string, body any, handler EventHandler) error {
 	var resp *http.Response
 
-	connectErr := c.withRetry(ctx, func() error {
+	connectErr := c.withRetryWake(ctx, false, func() error {
 		var bodyReader io.Reader
 		if body != nil {
 			buf, err := json.Marshal(body)

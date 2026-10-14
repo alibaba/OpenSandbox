@@ -401,3 +401,40 @@ func TestCreateSandboxFromTemplate_RejectsInvalidIdlePolicy(t *testing.T) {
 func intPtr(v int) *int { return &v }
 
 func boolPtr(v bool) *bool { return &v }
+
+func TestWakeRetry_StreamConnectDoesNotParkOnWake(t *testing.T) {
+	// The other SDKs leave streaming transports unwrapped: a marked 503 while
+	// establishing a stream must fail fast instead of parking the connect for
+	// up to the wake budget. Generic retries still apply.
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := attempts.Add(1)
+		if n == 1 {
+			w.Header().Set(wakeMarkerHeader, wakeMarkerExpired)
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("event: stdout\ndata: hello\n\n"))
+	}))
+	defer srv.Close()
+
+	client := NewExecdClient(srv.URL, "tok", WithRetry(RetryConfig{
+		MaxRetries:          1,
+		InitialBackoff:      10 * time.Millisecond,
+		WakeRetryEnabled:    true,
+		WakeMaxAttempts:     DefaultWakeMaxAttempts,
+		WakeOverallDeadline: DefaultWakeOverallDeadline,
+	}))
+
+	var events []StreamEvent
+	err := client.RunCommand(context.Background(), RunCommandRequest{Command: "echo hello"}, func(event StreamEvent) error {
+		events = append(events, event)
+		return nil
+	})
+	require.NoErrorf(t, err, "expected success after generic stream retry, got")
+	require.Equal(t, 2, int(attempts.Load()))
+	require.Len(t, events, 1)
+}

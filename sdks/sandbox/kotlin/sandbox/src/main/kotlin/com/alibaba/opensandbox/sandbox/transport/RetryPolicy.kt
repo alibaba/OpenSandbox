@@ -48,6 +48,7 @@ enum class RetryCause(val value: String) {
     STATUS_503("status_503"),
     STATUS_504("status_504"),
     STATUS_OTHER("status_other"),
+    WAKE_TIMEOUT("wake_timeout"),
     ;
 
     companion object {

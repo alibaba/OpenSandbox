@@ -877,4 +877,33 @@ class SandboxesAdapterTest {
                 .jsonPrimitive.content,
         )
     }
+
+    @Test
+    fun `createSandboxFromTemplate omits an empty idle policy like the standard path`() {
+        val responseBody =
+            """
+            {
+                "id": "550e8400-e29b-41d4-a716-446655440000",
+                "status": { "state": "Running" },
+                "createdAt": "2023-01-01T10:00:00Z",
+                "entrypoint": ["bash"]
+            }
+            """.trimIndent()
+        mockWebServer.enqueue(MockResponse().setBody(responseBody).setResponseCode(201))
+
+        sandboxesAdapter.createSandboxFromTemplate(
+            templateId = "tpl_123",
+            timeout = Duration.ofSeconds(600),
+            metadata = emptyMap(),
+            networkPolicy = null,
+            extensions = emptyMap(),
+            idlePolicy = IdlePolicy.builder().build(),
+        )
+
+        val payload = Json.parseToJsonElement(mockWebServer.takeRequest().body.readUtf8()).jsonObject
+        // The generated client encodes defaults, so an unset lifecycle renders
+        // as an explicit null — exactly like the standard create path.
+        val lifecycleElement = payload["lifecycle"]
+        assertTrue(lifecycleElement == null || lifecycleElement is JsonNull)
+    }
 }

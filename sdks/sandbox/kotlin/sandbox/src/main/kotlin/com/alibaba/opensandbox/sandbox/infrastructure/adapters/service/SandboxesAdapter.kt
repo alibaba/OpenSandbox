@@ -323,6 +323,26 @@ internal class SandboxesAdapter(
         }
     }
 
+    /**
+     * Delegates the previous template signature to the idle-policy overload,
+     * preserving behavior for five-argument call sites.
+     */
+    override fun createSandboxFromTemplate(
+        templateId: String,
+        timeout: Duration,
+        metadata: Map<String, String>,
+        networkPolicy: NetworkPolicy?,
+        extensions: Map<String, String>,
+    ): SandboxCreateResponse =
+        createSandboxFromTemplate(
+            templateId = templateId,
+            timeout = timeout,
+            metadata = metadata,
+            networkPolicy = networkPolicy,
+            extensions = extensions,
+            idlePolicy = null,
+        )
+
     override fun createSandboxFromTemplate(
         templateId: String,
         timeout: Duration,

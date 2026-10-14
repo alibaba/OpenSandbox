@@ -205,4 +205,29 @@ class WakeRetryInterceptorTest {
         // A wake-only policy still requires the interceptor.
         assertTrue(RetryPolicy(maxRetries = 0).wrapsTransport())
     }
+
+    @Test
+    fun `wake retry logs and fires onRetry with WAKE_TIMEOUT cause`() {
+        server.enqueue(marked())
+        server.enqueue(MockResponse().setResponseCode(200))
+
+        val events = mutableListOf<RetryEvent>()
+        val policy =
+            RetryPolicy(
+                maxRetries = 0,
+                wakeRetryEnabled = true,
+                wakeMaxAttempts = 5,
+                wakeOverallDeadline = Duration.ofSeconds(60),
+                onRetry = { events.add(it) },
+            )
+        val code = post(client(policy), "x".toRequestBody()).use { it.code }
+
+        assertEquals(200, code)
+        assertEquals(1, events.size)
+        val event = events.single()
+        assertEquals(RetryCause.WAKE_TIMEOUT, event.cause)
+        assertEquals(503, event.statusCode)
+        assertEquals(2, event.attempt)
+        assertEquals(1, event.retriesUsed)
+    }
 }

@@ -347,4 +347,81 @@ public class WakeRetryTests
         idlePolicy.GetProperty("onIdle").GetString().Should().Be("pause");
         lifecycle.TryGetProperty("preStart", out _).Should().BeFalse();
     }
+
+    [Fact]
+    public async Task WithBaseUrlCarriesWakeRetryOptions()
+    {
+        // FilesystemAdapter.WithIdentity derives its wrapper via WithBaseUrl;
+        // derived wrappers must keep the configured wake policy instead of
+        // silently falling back to defaults.
+        var handler = new ScriptedHandler();
+        handler.EnqueueMarked();
+        handler.EnqueueOk();
+        var wrapper = NewWrapper(handler, new WakeRetryOptions(true, 5, TimeSpan.FromMinutes(1)));
+        var derived = wrapper.WithBaseUrl("http://localhost:8080/v1");
+
+        var result = await derived.PostAsync<JsonElement>("/sandboxes", new { x = 1 });
+
+        result.GetProperty("id").GetString().Should().Be("sbx-1");
+        handler.Requests.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void IdlePolicyValidateChecksProbePortAndPath()
+    {
+        new IdlePolicy
+            {
+                IdleTimeoutSeconds = 300,
+                OnIdle = OnIdleAction.Pause,
+                ActiveProbe = new ActivityProbe { Port = 0, Path = "/active" }
+            }
+            .Invoking(p => p.Validate()).Should().Throw<ArgumentOutOfRangeException>();
+        new IdlePolicy
+            {
+                IdleTimeoutSeconds = 300,
+                OnIdle = OnIdleAction.Pause,
+                ActiveProbe = new ActivityProbe { Port = 8080, Path = "active" }
+            }
+            .Invoking(p => p.Validate()).Should().Throw<ArgumentException>();
+        new IdlePolicy
+            {
+                IdleTimeoutSeconds = 300,
+                OnIdle = OnIdleAction.Pause,
+                ActiveProbe = new ActivityProbe { Port = 8080, Path = "/a b" }
+            }
+            .Invoking(p => p.Validate()).Should().Throw<ArgumentException>();
+        new IdlePolicy
+            {
+                IdleTimeoutSeconds = 300,
+                OnIdle = OnIdleAction.Pause,
+                ActiveProbe = new ActivityProbe { Port = 65535, Path = "/active" }
+            }
+            .Invoking(p => p.Validate()).Should().NotThrow();
+    }
+
+    [Fact]
+    public async Task HttpDateRetryAfterParsesUnderNonGregorianCulture()
+    {
+        // RFC1123 dates are culture-invariant; a host culture with a
+        // non-Gregorian calendar (ar-SA) must not degrade parsing to the 1s
+        // fallback in a way that breaks the retry decision.
+        var originalCulture = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("ar-SA");
+            var handler = new ScriptedHandler();
+            handler.EnqueueMarked(retryAfter: DateTime.UtcNow.AddMilliseconds(50).ToString("R"));
+            handler.EnqueueOk();
+            var wrapper = NewWrapper(handler);
+
+            var result = await wrapper.PostAsync<JsonElement>("/sandboxes", new { x = 1 });
+
+            result.GetProperty("id").GetString().Should().Be("sbx-1");
+            handler.Requests.Should().HaveCount(2);
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = originalCulture;
+        }
+    }
 }

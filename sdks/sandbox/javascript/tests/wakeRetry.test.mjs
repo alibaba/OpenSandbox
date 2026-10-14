@@ -341,3 +341,92 @@ test("ConnectionConfig rejects invalid wake retry options", () => {
     /wakeOverallDeadlineSeconds must be a positive number or null/,
   );
 });
+
+test("wake retry: first dispatch passes the caller's original Request untouched", async () => {
+  const seen = [];
+  const baseFetch = async (input, init) => {
+    seen.push({ input, init });
+    if (seen.length === 1) {
+      return markedResponse();
+    }
+    return new Response(null, { status: 200 });
+  };
+  const wrapped = createWakeRetryFetch({ baseFetch, wakeRetry: POLICY });
+
+  const originalRequest = new Request("http://example/v1/sandboxes", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-custom": "keep-me" },
+    body: JSON.stringify({ image: "python:3.12" }),
+  });
+  const res = await wrapped(originalRequest);
+
+  assert.equal(res.status, 200);
+  assert.equal(seen.length, 2);
+  // The first dispatch must be the caller's exact Request object, with the
+  // caller's init passed through unmodified, so Request-level options survive
+  // even when no wake ever happens.
+  assert.equal(seen[0].input, originalRequest);
+  assert.equal(seen[0].init, undefined);
+  // Retries rebuild from the buffered copy with method, headers and body kept.
+  assert.ok(seen[1].input instanceof Request);
+  assert.equal(seen[1].input.url, "http://example/v1/sandboxes");
+  assert.equal(seen[1].input.method, "POST");
+  assert.equal(seen[1].input.headers.get("x-custom"), "keep-me");
+  assert.equal(await seen[1].input.text(), JSON.stringify({ image: "python:3.12" }));
+});
+
+test("wake retry: FormData body is never retried", async () => {
+  const { fetch, calls } = stubFetch([markedResponse()]);
+  const wrapped = createWakeRetryFetch({ baseFetch: fetch, wakeRetry: POLICY });
+
+  const form = new FormData();
+  form.set("file", new Blob(["x"]), "f.txt");
+  const res = await wrapped("http://example/v1/x", { method: "POST", body: form });
+
+  assert.equal(res.status, 503);
+  assert.equal(calls.length, 1);
+});
+
+test("wake retry wiring: ConnectionConfig wraps the JSON fetch and leaves the SSE fetch bare", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    // The JSON transport retries the marked 503: two underlying calls.
+    let jsonCalls = 0;
+    globalThis.fetch = makeCountingStub(() => ++jsonCalls);
+    const jsonConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" }).withTransportIfMissing();
+    try {
+      const jsonRes = await jsonConfig.fetch("http://127.0.0.1:8080/v1/x", { method: "POST", body: "x" });
+      assert.equal(jsonRes.status, 200);
+      assert.equal(jsonCalls, 2, "JSON fetch should retry the marked 503");
+    } finally {
+      await jsonConfig.closeTransport();
+    }
+
+    // The SSE transport stays bare: a marked 503 is returned as-is after one call.
+    let sseCalls = 0;
+    globalThis.fetch = makeCountingStub(() => ++sseCalls);
+    const sseConfig = new ConnectionConfig({ domain: "http://127.0.0.1:8080" }).withTransportIfMissing();
+    try {
+      const sseRes = await sseConfig.sseFetch("http://127.0.0.1:8080/v1/x", { method: "POST", body: "x" });
+      assert.equal(sseRes.status, 503);
+      assert.equal(sseCalls, 1, "SSE fetch must not retry");
+    } finally {
+      await sseConfig.closeTransport();
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function makeCountingStub(countNext) {
+  return async () => {
+    const n = countNext();
+    if (n === 1) {
+      return new Response(JSON.stringify({ error: { code: "sandbox_wake_timeout" } }), {
+        status: 503,
+        headers: new Headers({ "OpenSandbox-Wake": "expired", "Retry-After": "0" }),
+      });
+    }
+    return new Response(null, { status: 200 });
+  };
+}

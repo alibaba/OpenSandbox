@@ -749,3 +749,51 @@ test("Sandbox.create rejects an invalid idle policy before allocating transport 
     );
   }
 });
+
+test("Sandbox.create accepts idle policy boundaries and wake-only shapes", async () => {
+  const { adapterFactory, recordedRequests } = createAdapterFactory();
+
+  const policies = [
+    // Valid timeout boundaries.
+    { idleTimeoutSeconds: 30, onIdle: "pause" },
+    { idleTimeoutSeconds: 86400, onIdle: "pause" },
+    // Wake-only shapes: never auto-paused, wakes on access.
+    {},
+    { wakeOnAccess: false },
+    // Probe boundaries.
+    {
+      idleTimeoutSeconds: 300,
+      onIdle: "pause",
+      activeProbe: { port: 1, path: "/active" },
+    },
+    {
+      idleTimeoutSeconds: 300,
+      onIdle: "pause",
+      activeProbe: { port: 65535, path: "/active", timeoutSeconds: 1 },
+    },
+    {
+      idleTimeoutSeconds: 300,
+      onIdle: "pause",
+      activeProbe: { port: 8080, path: "/active", timeoutSeconds: 10 },
+    },
+  ];
+
+  for (const idlePolicy of policies) {
+    await Sandbox.create({
+      adapterFactory,
+      connectionConfig: { domain: "http://127.0.0.1:8080" },
+      image: "python:3.12",
+      lifecycle: { idlePolicy },
+      skipHealthCheck: true,
+    });
+  }
+
+  assert.equal(recordedRequests.length, policies.length);
+  for (let i = 0; i < policies.length; i++) {
+    assert.deepEqual(
+      recordedRequests[i].lifecycle,
+      { idlePolicy: policies[i] },
+      `policy #${i} should be forwarded as-is`
+    );
+  }
+});

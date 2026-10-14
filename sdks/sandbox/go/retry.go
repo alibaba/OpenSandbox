@@ -256,7 +256,16 @@ func retrySleep(ctx context.Context, d time.Duration) error {
 // always safe — under its own attempt count and wall-clock budget. Bare 503
 // responses follow the generic rules untouched.
 func (c *Client) withRetry(ctx context.Context, fn func() error) error {
-	if c.retry == nil || (c.retry.MaxRetries == 0 && !c.retry.WakeRetryEnabled) {
+	return c.withRetryWake(ctx, true, fn)
+}
+
+// withRetryWake is withRetry with control over the wake contract. Streaming
+// connects pass wakeEnabled=false: an established stream is never re-executed,
+// and a waking sandbox must fail fast with the marked 503 instead of parking
+// the connect for up to the wake budget — matching the other official SDKs,
+// which leave their streaming transports unwrapped.
+func (c *Client) withRetryWake(ctx context.Context, wakeEnabled bool, fn func() error) error {
+	if c.retry == nil || (c.retry.MaxRetries == 0 && !(wakeEnabled && c.retry.WakeRetryEnabled)) {
 		return fn()
 	}
 
@@ -285,7 +294,7 @@ func (c *Client) withRetry(ctx context.Context, fn func() error) error {
 		}
 
 		var apiErr *APIError
-		if c.retry.WakeRetryEnabled && errors.As(lastErr, &apiErr) && apiErr.WakeExpired {
+		if wakeEnabled && c.retry.WakeRetryEnabled && errors.As(lastErr, &apiErr) && apiErr.WakeExpired {
 			wakeAttempts++
 			elapsed := time.Since(started)
 			wait := apiErr.RetryAfter
