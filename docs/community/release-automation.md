@@ -76,9 +76,8 @@ The workflow then runs:
 | tag | `release-X.Y.Z` + `sdks/sandbox/go/vX.Y.Z` minted on `C_bom`, GitHub Release created with the notes and BOM |
 
 A failed release never mints its git tag or GitHub Release, so the
-release feed never shows a partial release; the weekly scheduled
-dry-run (`dry_run=true`) keeps the fan-out healthy
-between release windows.
+release feed never shows a partial release; dispatch a dry run
+(`dry_run=true`) to keep the fan-out healthy between release windows.
 
 ### Dry runs
 
