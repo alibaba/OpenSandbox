@@ -480,7 +480,10 @@ against the BOM bundled with the CLI.
 - **BOM schema** (`specs/schemas/umbrella-release.schema.json`) validated in CI.
 - **Consistency scan unit test**: every listed path updated on
   `C_build`; no coverage outside the list.
-- **Weekly dry-run** (`dry_run: true` on `main`) to catch fan-out regressions.
+- **On-demand dry-run** (manual `workflow_dispatch` with
+  `dry_run: true`) to catch fan-out regressions; the former weekly
+  Wednesday schedule was removed, so dispatch a rehearsal before each
+  release window.
 - **Atomicity**: a synthetic build-leg failure aborts before any
   publish, chart release, or tag.
 - **Verify-then-continue**: per ecosystem, a synthetic verification

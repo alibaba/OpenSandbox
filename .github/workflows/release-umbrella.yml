@@ -346,8 +346,10 @@ jobs:
   packages:
     name: SDK / CLI / server packages
     needs: [resolve, preflight, scan, bom]
-    # publish fires only after the BOM PR has merged — never against a partial release
-    if: ${{ !cancelled() && needs.scan.result == 'success' && needs.bom.result == 'success' }}
+    # a skipped BOM (e.g. an image leg failed) still rehearses package
+    # builds, but publish fires only after the BOM PR has merged —
+    # never against a partial release
+    if: ${{ !cancelled() && needs.scan.result == 'success' && (needs.bom.result == 'success' || needs.bom.result == 'skipped') }}
     # the called workflow's jobs declare id-token/attestations
     permissions:
       contents: read
