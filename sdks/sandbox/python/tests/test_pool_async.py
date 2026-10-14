@@ -235,7 +235,7 @@ async def test_async_failed_start_finishes_cleanup_before_propagating(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("cleanup_stage", ["manager", "transport"])
+@pytest.mark.parametrize("cleanup_stage", ["reconcile", "manager", "transport"])
 @pytest.mark.parametrize("startup_failure", ["cancelled", "exception"])
 @pytest.mark.parametrize(
     "cleanup_failure_order",
@@ -253,10 +253,15 @@ async def test_async_failed_start_preserves_cancellation_when_cleanup_fails(
     cleanup_entered = asyncio.Event()
     finish_cleanup = asyncio.Event()
     startup_error = RuntimeError("state store unavailable")
-    cleanup_error = RuntimeError("provider close failed")
+    cleanup_error = RuntimeError(f"{cleanup_stage} cleanup failed")
+    original_set_max_idle = store.set_max_idle
     original_close = ConnectionConfig.close_transport_if_owned
+    managers: list[FakeAsyncManager] = []
 
     async def failing_set_max_idle(*args: Any, **kwargs: Any) -> None:
+        if start_entered.is_set():
+            await original_set_max_idle(*args, **kwargs)
+            return
         start_entered.set()
         await fail_start.wait()
         raise startup_error
@@ -278,10 +283,30 @@ async def test_async_failed_start_preserves_cancellation_when_cleanup_fails(
                 await fail_cleanup_once()
             await super().close()
 
-    manager = FailingManager()
+    async def manager_factory(config: ConnectionConfig) -> Any:
+        manager = FailingManager()
+        managers.append(manager)
+        return manager
+
     monkeypatch.setattr(store, "set_max_idle", failing_set_max_idle)
     monkeypatch.setattr(ConnectionConfig, "close_transport_if_owned", close_transport)
-    pool = _create_pool(max_idle=0, store=store, manager=manager)
+    pool = SandboxPoolAsync(
+        pool_name="pool",
+        max_idle=0,
+        state_store=store,
+        connection_config=ConnectionConfig(),
+        creation_spec=PoolCreationSpec(image="ubuntu:22.04"),
+        sandbox_manager_factory=manager_factory,
+        sandbox_factory=FakeAsyncSandbox,  # type: ignore[arg-type]
+    )
+    original_stop_reconcile = pool._stop_reconcile
+
+    async def stop_reconcile(*args: Any, **kwargs: Any) -> None:
+        await original_stop_reconcile(*args, **kwargs)
+        if cleanup_stage == "reconcile":
+            await fail_cleanup_once()
+
+    monkeypatch.setattr(pool, "_stop_reconcile", stop_reconcile)
     propagated_cancellations: list[asyncio.CancelledError] = []
 
     async def start_pool() -> None:
@@ -294,8 +319,10 @@ async def test_async_failed_start_preserves_cancellation_when_cleanup_fails(
 
     startup = asyncio.create_task(start_pool())
     timeout_waiter: asyncio.Task[None] | None = None
+    transport_owner: ConnectionConfig | None = None
     try:
         await asyncio.wait_for(start_entered.wait(), timeout=2)
+        transport_owner = pool._pool_transport_owner
         if startup_failure == "cancelled":
             startup.cancel()
         else:
@@ -339,6 +366,14 @@ async def test_async_failed_start_preserves_cancellation_when_cleanup_fails(
             if cleanup_failure_order != "timeout":
                 assert cancellation.args == ("cancel during cleanup",)
             assert startup.cancelled()
+
+        assert (await pool.snapshot()).lifecycle_state == PoolLifecycleState.STOPPED
+        await asyncio.wait_for(pool.start(), timeout=2)
+        assert (await pool.snapshot()).lifecycle_state == PoolLifecycleState.RUNNING
+        assert len(managers) == 2
+        assert not managers[-1].closed
+        with pytest.raises(PoolEmptyException):
+            await pool.acquire(policy=AcquirePolicy.FAIL_FAST)
     finally:
         fail_start.set()
         finish_cleanup.set()
@@ -348,6 +383,12 @@ async def test_async_failed_start_preserves_cancellation_when_cleanup_fails(
         if timeout_waiter is not None:
             await asyncio.gather(timeout_waiter, return_exceptions=True)
         await asyncio.wait_for(pool.shutdown(False), timeout=5)
+        # A failed close can leave the first run's resources open; the fixture
+        # owns their final cleanup even after a restart replaces the provider.
+        for manager in managers:
+            await manager.close()
+        if transport_owner is not None:
+            await transport_owner.close_transport_if_owned()
 
 
 @pytest.mark.asyncio

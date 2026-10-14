@@ -1349,9 +1349,11 @@ class SandboxPoolAsync:
 
     async def _cleanup_failed_start(self) -> None:
         async def cleanup() -> None:
-            await self._stop_reconcile(wait_for_warmup=True)
-            await self._close_provider()
-            self._lifecycle_state = PoolLifecycleState.STOPPED
+            try:
+                await self._stop_reconcile(wait_for_warmup=True)
+                await self._close_provider()
+            finally:
+                self._lifecycle_state = PoolLifecycleState.STOPPED
 
         # Keep the lifecycle lock until cleanup finishes, even if the caller
         # cancels again while closing startup-owned resources.
