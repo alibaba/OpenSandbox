@@ -40,10 +40,14 @@ def create_lifecycle_audit_repository(
     dsn = postgresql_config.dsn
     if dsn is None:
         raise ValueError("Lifecycle audit requires store.postgresql.dsn.")
+    # Keep the audit pool small, but never below the configured minimum.
+    # ConnectionPool rejects min_size > max_size.
+    max_pool_size = min(5, postgresql_config.max_pool_size)
+    min_pool_size = min(postgresql_config.min_pool_size, max_pool_size)
     return PostgreSQLLifecycleAuditRepository(
         dsn.get_secret_value(),
-        min_pool_size=postgresql_config.min_pool_size,
-        max_pool_size=min(5, postgresql_config.max_pool_size),
+        min_pool_size=min_pool_size,
+        max_pool_size=max_pool_size,
         connect_timeout_seconds=postgresql_config.connect_timeout_seconds,
         pool_timeout_seconds=postgresql_config.pool_timeout_seconds,
     )

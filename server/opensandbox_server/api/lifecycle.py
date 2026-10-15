@@ -53,6 +53,7 @@ from opensandbox_server.services.constants import (
 )
 from opensandbox_server.services.factory import create_sandbox_service
 from opensandbox_server.services.lifecycle_audit import (
+    load_sandbox_for_audit_delete,
     schedule_lifecycle_audit_create,
     schedule_lifecycle_audit_delete,
 )
@@ -283,11 +284,9 @@ def delete_sandbox(
     Raises:
         HTTPException: If sandbox not found or deletion fails
     """
-    final_sandbox: Sandbox | None = None
-    try:
-        final_sandbox = sandbox_service.get_sandbox(sandbox_id)
-    except HTTPException:
-        final_sandbox = None
+    final_sandbox = load_sandbox_for_audit_delete(
+        lambda: sandbox_service.get_sandbox(sandbox_id)
+    )
     sandbox_service.delete_sandbox(sandbox_id)
     schedule_lifecycle_audit_delete(background_tasks, sandbox_id, final_sandbox)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

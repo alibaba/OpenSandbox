@@ -159,7 +159,12 @@ class PostgreSQLLifecycleAuditRepository:
                     ),
                     cpu_cores = COALESCE(EXCLUDED.cpu_cores, {t}.cpu_cores),
                     memory_gi = COALESCE(EXCLUDED.memory_gi, {t}.memory_gi),
-                    metadata = COALESCE(EXCLUDED.metadata, {t}.metadata),
+                    metadata = CASE
+                        WHEN {t}.deleted_at IS NOT NULL
+                            OR {t}.state IN ('Terminated', 'Failed')
+                        THEN {t}.metadata
+                        ELSE COALESCE(EXCLUDED.metadata, {t}.metadata)
+                    END,
                     last_seen_at = EXCLUDED.last_seen_at,
                     source = CASE
                         WHEN {t}.source IS NOT NULL AND {t}.source <> 'server-lifecycle'
@@ -199,22 +204,27 @@ class PostgreSQLLifecycleAuditRepository:
     ) -> None:
         now = datetime.now(timezone.utc)
         t = _HISTORY_TABLE
+        anchor = lifecycle_created_at or now
+        if anchor.tzinfo is None:
+            anchor = anchor.replace(tzinfo=timezone.utc)
+        wall_clock_seconds = max(0, int((now - anchor).total_seconds()))
         with self._pool.connection() as conn:
             conn.execute(
                 f"""
                 INSERT INTO {t} (
                     sandbox_id, tenant_name, namespace, state, image_uri,
                     lifecycle_created_at, expires_at, ended_at, deleted_at,
-                    source, metadata, first_recorded_at, last_seen_at
+                    wall_clock_seconds, source, metadata,
+                    first_recorded_at, last_seen_at
                 ) VALUES (
                     %s, %s, %s, %s, %s,
                     %s, %s, %s, %s,
-                    'server-lifecycle', %s::jsonb, %s, %s
+                    %s, 'server-lifecycle', %s::jsonb, %s, %s
                 )
                 ON CONFLICT (sandbox_id) DO UPDATE SET
                     tenant_name = COALESCE(NULLIF(EXCLUDED.tenant_name, ''), {t}.tenant_name),
                     namespace = COALESCE(NULLIF(EXCLUDED.namespace, ''), {t}.namespace),
-                    state = 'Terminated',
+                    state = EXCLUDED.state,
                     image_uri = COALESCE(EXCLUDED.image_uri, {t}.image_uri),
                     lifecycle_created_at = COALESCE(
                         EXCLUDED.lifecycle_created_at, {t}.lifecycle_created_at
@@ -253,6 +263,7 @@ class PostgreSQLLifecycleAuditRepository:
                     expires_at,
                     now,
                     now,
+                    wall_clock_seconds,
                     json.dumps(metadata) if metadata else None,
                     now,
                     now,

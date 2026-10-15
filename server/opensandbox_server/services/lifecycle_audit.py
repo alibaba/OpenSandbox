@@ -18,17 +18,108 @@ from __future__ import annotations
 
 import logging
 import re
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 
-from opensandbox_server.api.schema import CreateSandboxRequest, CreateSandboxResponse, Sandbox
+from opensandbox_server.api.schema import (
+    CreateSandboxRequest,
+    CreateSandboxResponse,
+    ResourceLimits,
+    Sandbox,
+)
 from opensandbox_server.config import get_config
 from opensandbox_server.repositories.lifecycle_audit.factory import get_lifecycle_audit_repository
 from opensandbox_server.tenants.context import get_current_tenant
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class LifecycleAuditShape:
+    """Image and resource limits the runtime actually scheduled."""
+
+    image_uri: str | None
+    resource_limits: ResourceLimits | None
+
+
+_audit_shape: ContextVar[LifecycleAuditShape | None] = ContextVar(
+    "lifecycle_audit_shape",
+    default=None,
+)
+
+
+def publish_lifecycle_audit_shape(
+    *,
+    image_uri: str | None,
+    resource_limits: ResourceLimits | None,
+) -> None:
+    """Remember the scheduled shape until the create route records the audit."""
+    _audit_shape.set(
+        LifecycleAuditShape(image_uri=image_uri, resource_limits=resource_limits)
+    )
+
+
+def take_lifecycle_audit_shape() -> LifecycleAuditShape | None:
+    shape = _audit_shape.get()
+    _audit_shape.set(None)
+    return shape
+
+
+def shape_from_pool_manifest(pool: dict[str, Any]) -> LifecycleAuditShape:
+    """Read the sandbox container from a Pool CR. Caller limits are not used."""
+    template = (pool.get("spec") or {}).get("template") or {}
+    spec = template.get("spec") or {}
+    containers = spec.get("containers") or []
+    container: dict[str, Any] | None = None
+    if isinstance(containers, list):
+        for item in containers:
+            if isinstance(item, dict) and item.get("name") == "sandbox":
+                container = item
+                break
+        if container is None:
+            container = next((item for item in containers if isinstance(item, dict)), None)
+    image_uri = None
+    resource_limits = None
+    if isinstance(container, dict):
+        raw_image = container.get("image")
+        image_uri = str(raw_image) if raw_image else None
+        raw_limits = (container.get("resources") or {}).get("limits") or {}
+        if isinstance(raw_limits, dict):
+            root: dict[str, str] = {}
+            if raw_limits.get("cpu") is not None:
+                root["cpu"] = str(raw_limits["cpu"])
+            if raw_limits.get("memory") is not None:
+                root["memory"] = str(raw_limits["memory"])
+            if root:
+                resource_limits = ResourceLimits(root=root)
+    return LifecycleAuditShape(image_uri=image_uri, resource_limits=resource_limits)
+
+
+def shape_from_template_spec(
+    source_image: str | None,
+    resource_limits: dict[str, Any] | None,
+) -> LifecycleAuditShape:
+    """Guest shape baked into a template. Defaults match the template CRD."""
+    from opensandbox_server.services.templates.template_service import (
+        DEFAULT_MEMORY,
+        DEFAULT_VCPU,
+    )
+
+    limits = resource_limits or {}
+    return LifecycleAuditShape(
+        image_uri=source_image or None,
+        resource_limits=ResourceLimits(
+            root={
+                "cpu": str(limits.get("cpu") or DEFAULT_VCPU),
+                "memory": str(limits.get("memory") or DEFAULT_MEMORY),
+            }
+        ),
+    )
+
 
 _MEMORY_RE = re.compile(
     r"^(\d+(?:\.\d+)?)\s*(Ki|Mi|Gi|Ti|K|M|G|T)?$",
@@ -65,15 +156,21 @@ def _image_uri_from_sandbox(sandbox: Sandbox | None) -> str | None:
     return str(uri) if uri else None
 
 
-def _limits_from_request(request: CreateSandboxRequest) -> tuple[str | None, str | None, float | None, float | None]:
-    limits = request.resource_limits.root if request.resource_limits is not None else None
-    if not limits:
+def _limits_from_resource_limits(
+    limits: ResourceLimits | None,
+) -> tuple[str | None, str | None, float | None, float | None]:
+    root = limits.root if limits is not None else None
+    if not root:
         return None, None, None, None
-    cpu = limits.get("cpu")
-    memory = limits.get("memory")
+    cpu = root.get("cpu")
+    memory = root.get("memory")
     cpu_s = str(cpu) if cpu is not None else None
     mem_s = str(memory) if memory is not None else None
     return cpu_s, mem_s, _parse_cpu_cores(cpu_s), _parse_memory_gi(mem_s)
+
+
+def _limits_from_request(request: CreateSandboxRequest) -> tuple[str | None, str | None, float | None, float | None]:
+    return _limits_from_resource_limits(request.resource_limits)
 
 
 def _parse_cpu_cores(value: str | None) -> float | None:
@@ -95,23 +192,28 @@ def _parse_memory_gi(value: str | None) -> float | None:
     if not value:
         return None
     raw = value.strip()
+    # Integer quantities, including a bare byte count, follow parse_memory_limit.
+    from opensandbox_server.services.helpers import parse_memory_limit
+
+    nbytes = parse_memory_limit(raw)
+    if nbytes is not None:
+        return nbytes / (1024**3)
     m = _MEMORY_RE.match(raw)
     if not m:
-        try:
-            return float(raw) / (1024**3)
-        except ValueError:
-            return None
+        return None
     num = float(m.group(1))
     unit = (m.group(2) or "").upper()
     if unit in ("KI", "K"):
         return num * 1024 / (1024**3)
-    if unit in ("MI", "M", ""):
+    if unit in ("MI", "M"):
         return num / 1024
+    if unit == "":
+        return num / (1024**3)
     if unit in ("GI", "G"):
         return num
     if unit in ("TI", "T"):
         return num * 1024
-    return num / 1024
+    return num / (1024**3)
 
 
 def _audit_metadata(metadata: dict[str, str] | None) -> dict[str, str] | None:
@@ -136,22 +238,41 @@ def _ensure_utc(dt: datetime | None) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+def load_sandbox_for_audit_delete(load: Callable[[], Sandbox]) -> Sandbox | None:
+    """Read the pre-delete sandbox only when audit will store it."""
+    if not lifecycle_audit_enabled():
+        return None
+    try:
+        return load()
+    except HTTPException:
+        return None
+
+
 def schedule_lifecycle_audit_create(
     background_tasks: BackgroundTasks,
     request: CreateSandboxRequest,
     response: CreateSandboxResponse,
 ) -> None:
+    # Always consume a published shape so it cannot leak into a later request.
+    shape = take_lifecycle_audit_shape()
     if not lifecycle_audit_enabled():
         return
     tenant_name, namespace = _tenant_context()
-    cpu_limit, memory_limit, cpu_cores, memory_gi = _limits_from_request(request)
+    if shape is not None:
+        image_uri = shape.image_uri
+        cpu_limit, memory_limit, cpu_cores, memory_gi = _limits_from_resource_limits(
+            shape.resource_limits
+        )
+    else:
+        image_uri = _image_uri_from_request(request)
+        cpu_limit, memory_limit, cpu_cores, memory_gi = _limits_from_request(request)
     background_tasks.add_task(
         _record_create,
         sandbox_id=response.id,
         tenant_name=tenant_name,
         namespace=namespace,
         state=response.status.state if response.status else None,
-        image_uri=_image_uri_from_request(request),
+        image_uri=image_uri,
         lifecycle_created_at=_ensure_utc(response.created_at),
         expires_at=_ensure_utc(response.expires_at),
         cpu_limit=cpu_limit,

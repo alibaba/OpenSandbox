@@ -195,3 +195,62 @@ def test_upsert_created_stores_metadata_labels(postgresql_dsn: str) -> None:
         assert row["metadata"] == labels
     finally:
         repo.close()
+
+
+def test_delete_insert_keeps_failed_state_and_duration(postgresql_dsn: str) -> None:
+    _truncate_history(postgresql_dsn)
+    repo = _repo(postgresql_dsn)
+    try:
+        sandbox_id = "sbx-delete-first"
+        created = datetime.now(timezone.utc) - timedelta(seconds=90)
+        repo.mark_deleted(
+            sandbox_id,
+            tenant_name="t5",
+            namespace="ns5",
+            final_state="Failed",
+            image_uri="img:5",
+            lifecycle_created_at=created,
+            expires_at=created + timedelta(hours=1),
+            metadata={"final": "yes"},
+        )
+        row = _fetch_row(postgresql_dsn, sandbox_id)
+        assert row is not None
+        assert row["state"] == "Failed"
+        assert row["wall_clock_seconds"] is not None
+        assert 80 <= row["wall_clock_seconds"] <= 120
+    finally:
+        repo.close()
+
+
+def test_late_create_keeps_terminal_metadata(postgresql_dsn: str) -> None:
+    _truncate_history(postgresql_dsn)
+    repo = _repo(postgresql_dsn)
+    try:
+        sandbox_id = "sbx-late-metadata"
+        created = datetime(2026, 5, 1, 9, 0, 0, tzinfo=timezone.utc)
+        repo.mark_deleted(
+            sandbox_id,
+            tenant_name="t6",
+            namespace="ns6",
+            final_state="Terminated",
+            image_uri="img:6",
+            lifecycle_created_at=created,
+            expires_at=created + timedelta(hours=1),
+            metadata={"final": "yes"},
+        )
+        repo.upsert_created(
+            sandbox_id=sandbox_id,
+            tenant_name="t6",
+            namespace="ns6",
+            state="Running",
+            image_uri="img:6",
+            lifecycle_created_at=created,
+            expires_at=created + timedelta(hours=1),
+            metadata={"stale": "create"},
+        )
+        row = _fetch_row(postgresql_dsn, sandbox_id)
+        assert row is not None
+        assert row["state"] == "Terminated"
+        assert row["metadata"] == {"final": "yes"}
+    finally:
+        repo.close()
