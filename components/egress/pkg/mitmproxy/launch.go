@@ -255,6 +255,15 @@ func buildMitmdumpArgs(cfg Config) []string {
 	if strings.TrimSpace(cfg.ListenHost) != "" {
 		args = append(args, "--listen-host", cfg.ListenHost)
 	}
+	if host == listenHostLoopback {
+		// #2221: iptables REDIRECT rewrites the client source to the sandbox's own address, so
+		// on clusters with globally-routable Pod CIDRs mitm's default block_global=true classifies
+		// every redirected connection as a public client and resets it at accept. The loopback
+		// bind already keeps this listener unreachable from outside the netns, so block_global
+		// protects nothing here — turn it off. Non-loopback listeners (fast-sandbox's shared
+		// 0.0.0.0 listener) keep the default true.
+		args = append(args, "--set", "block_global=false")
+	}
 
 	if trustDir := strings.TrimSpace(os.Getenv(constants.EnvMitmproxyUpstreamTrustDir)); trustDir != "" {
 		args = append(args, "--set", "ssl_verify_upstream_trusted_confdir="+trustDir)

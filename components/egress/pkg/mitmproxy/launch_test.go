@@ -54,10 +54,22 @@ func TestBuildMitmdumpArgsNoUserScripts(t *testing.T) {
 	require.Equal(t, 1, count)
 }
 
+func TestBuildMitmdumpArgsLoopbackDisablesBlockGlobal(t *testing.T) {
+	// #2221: with iptables REDIRECT the client source is the sandbox's own address, so on
+	// clusters with globally-routable Pod CIDRs mitm's default block_global=true kills every
+	// redirected connection at accept. A loopback-bound listener is unreachable from outside
+	// the netns anyway, so nothing is lost by turning block_global off for it.
+	args := buildMitmdumpArgs(Config{ListenPort: 18081})
+	require.Contains(t, args, "block_global=false")
+}
+
 func TestBuildMitmdumpArgsFastSandboxListenHost(t *testing.T) {
 	args := buildMitmdumpArgs(Config{ListenPort: 18081, ListenHost: "0.0.0.0"})
 	require.Contains(t, args, "--listen-host")
 	require.Contains(t, args, "0.0.0.0")
+	// The shared 0.0.0.0 listener is reachable from the Pod network, so it must keep
+	// mitm's block_global=true protection: only loopbound-bound listeners opt out.
+	require.NotContains(t, args, "block_global=false")
 }
 
 func TestBuildMitmdumpArgsSingleUserScript(t *testing.T) {
