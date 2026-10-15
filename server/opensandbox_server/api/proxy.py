@@ -136,7 +136,7 @@ def _build_proxy_target_url(
 _PROXY_RAW_PREFIX_RE = re.compile(rb"^(/v1)?/sandboxes/[^/]+/proxy/\d+")
 
 
-def _raw_proxy_suffix(scope: Scope, fallback: str) -> str:
+def _raw_proxy_suffix(scope: Scope, fallback: str) -> str | None:
     """The request line's path suffix, percent-escapes intact.
 
     The route's ``full_path`` parameter arrives percent-DECODED (and
@@ -148,14 +148,30 @@ def _raw_proxy_suffix(scope: Scope, fallback: str) -> str:
     decoded route parameter) is used only when the scope carries no
     recognizable raw path, so the proxy still works under servers that omit
     it.
+
+    Returns ``None`` when the port is not followed by a literal slash or the
+    end of the path — an encoded slash there (``44772%2F@host/...``) would
+    put the attacker's bytes first in the target URL, and httpx re-parses
+    the result with the sandbox endpoint as userinfo and the smuggled host
+    as authority. Callers reject the request.
     """
     raw = scope.get("raw_path")
     if isinstance(raw, str):
         raw = raw.encode("latin-1")
     if isinstance(raw, bytes):
+        # Mounted deployments include the ASGI root_path in raw_path even
+        # though Starlette strips it from the decoded route path.
+        root_path = scope.get("root_path") or ""
+        if root_path:
+            root_bytes = root_path.encode("latin-1")
+            if raw.startswith(root_bytes):
+                raw = raw[len(root_bytes):]
         match = _PROXY_RAW_PREFIX_RE.match(raw)
         if match is not None:
-            return raw[match.end():].decode("latin-1")
+            suffix = raw[match.end():]
+            if suffix == b"" or suffix.startswith(b"/"):
+                return suffix.decode("latin-1")
+            return None
     normalized = fallback.lstrip("/")
     return f"/{normalized}" if normalized else ""
 
@@ -416,6 +432,11 @@ async def _proxy_http_request(
         path_suffix = f"/{full_path.lstrip('/')}" if full_path else ""
     else:
         path_suffix = _raw_proxy_suffix(request.scope, full_path)
+        if path_suffix is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Malformed proxy path: the port must be followed by a literal slash.",
+            )
     target_url = _build_proxy_target_url(endpoint, path_suffix, query_string, websocket=False)
     client: httpx.AsyncClient = request.app.state.http_client
 
@@ -649,9 +670,17 @@ async def _proxy_websocket_request(
 
     _schedule_proxy_renew(websocket, sandbox_id)
     query_string = _raw_query_string(websocket.scope)
+    path_suffix = _raw_proxy_suffix(websocket.scope, full_path)
+    if path_suffix is None:
+        await _fail_client_websocket(
+            websocket,
+            status.WS_1008_POLICY_VIOLATION,
+            "Malformed proxy path: the port must be followed by a literal slash.",
+        )
+        return
     target_url = _build_proxy_target_url(
         endpoint,
-        _raw_proxy_suffix(websocket.scope, full_path),
+        path_suffix,
         query_string,
         websocket=True,
     )

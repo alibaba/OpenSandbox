@@ -537,6 +537,57 @@ def test_proxy_forwards_path_percent_escapes_untouched(
     assert httpx.URL(fake_client.built["url"]).raw_path == expected_backend_path.encode("ascii")
 
 
+# An encoded slash after the port must not reach the forwarder: the raw
+# suffix would begin with %2F, and httpx re-parses the resulting URL with the
+# sandbox endpoint as userinfo and the smuggled host as authority (SSRF).
+def test_proxy_rejects_encoded_slash_after_port(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False, use_proxy_host: bool = False) -> Endpoint:
+            return Endpoint(endpoint="10.57.1.91:40109")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(status_code=200, chunks=[b"ok"])
+    _set_http_client(client, fake_client)
+
+    response = client.get(
+        "/v1/sandboxes/sbx-123/proxy/44772%2F@169.254.169.254/latest",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    assert fake_client.built is None
+
+
+def test_raw_proxy_suffix_helper_shapes() -> None:
+    from opensandbox_server.api.proxy import _raw_proxy_suffix
+
+    # root_path-prefixed deployments: raw_path carries the mount prefix that
+    # Starlette already stripped from the decoded route path.
+    assert _raw_proxy_suffix(
+        {
+            "raw_path": b"/opensandbox/v1/sandboxes/sbx-123/proxy/44772/api/contents/a%2Fb",
+            "root_path": "/opensandbox",
+        },
+        "api/contents/a/b",
+    ) == "/api/contents/a%2Fb"
+    # An encoded slash after the port is rejected (None), not forwarded.
+    assert _raw_proxy_suffix(
+        {"raw_path": b"/v1/sandboxes/sbx-123/proxy/44772%2F@169.254.169.254/latest"},
+        "",
+    ) is None
+    # The port at the end of the path is the root proxy route: empty suffix.
+    assert _raw_proxy_suffix(
+        {"raw_path": b"/v1/sandboxes/sbx-123/proxy/44772"},
+        "",
+    ) == ""
+
+
 def test_proxy_forwards_filtered_headers_and_query(
     client: TestClient,
     auth_headers: dict,
