@@ -18,6 +18,7 @@ HTTP and WebSocket proxy routes for reaching services inside sandboxes via the l
 
 import hmac
 import logging
+import re
 from collections.abc import AsyncIterator, Mapping
 from typing import Optional
 from urllib.parse import urlsplit
@@ -108,26 +109,70 @@ router = APIRouter(tags=["Sandboxes"])
 
 def _build_proxy_target_url(
     endpoint: Endpoint,
-    full_path: str,
+    path_suffix: str,
     query_string: str,
     *,
     websocket: bool = False,
 ) -> str:
     """Build the backend URL from an endpoint plus optional path/query suffix.
 
-    The raw query is appended as-is for both HTTP and WebSocket. Passing it to httpx
-    via ``params=`` would re-serialize it: repeated keys get regrouped, valueless keys
-    gain ``=``, non-UTF-8 escapes become U+FFFD and ``%20`` turns into ``+``.
+    Both suffixes are appended as-is, untouched: the raw query for both HTTP
+    and WebSocket (passing it to httpx via ``params=`` would re-serialize it:
+    repeated keys get regrouped, valueless keys gain ``=``, non-UTF-8 escapes
+    become U+FFFD and ``%20`` turns into ``+``), and the percent-escaped path
+    straight off the request line (``raw_path``), so the sandbox receives the
+    same URL bytes the client sent (#2227).
     """
     scheme = "ws" if websocket else "http"
     base = endpoint.endpoint.rstrip("/")
-    normalized_path = full_path.lstrip("/")
     url = f"{scheme}://{base}"
-    if normalized_path:
-        url = f"{url}/{normalized_path}"
+    if path_suffix:
+        url = f"{url}{path_suffix}"
     if query_string:
         url = f"{url}?{query_string}"
     return url
+
+
+_PROXY_RAW_PREFIX_RE = re.compile(rb"^(/v1)?/sandboxes/[^/]+/proxy/\d+")
+
+
+def _raw_proxy_suffix(scope: Scope, fallback: str) -> str:
+    """The request line's path suffix, percent-escapes intact.
+
+    The route's ``full_path`` parameter arrives percent-DECODED (and
+    non-UTF-8 escapes become U+FFFD), so building the target URL from it
+    forwards a different URL than the client sent: ``%2F`` flattens, a
+    decoded ``?``/``#`` becomes a live separator, ``%25`` degrades, and
+    decoded ``..`` collapses (#2227). The ASGI scope keeps the wire bytes in
+    ``raw_path``; the suffix is cut from those instead. ``fallback`` (the
+    decoded route parameter) is used only when the scope carries no
+    recognizable raw path, so the proxy still works under servers that omit
+    it.
+    """
+    raw = scope.get("raw_path")
+    if isinstance(raw, str):
+        raw = raw.encode("latin-1")
+    if isinstance(raw, bytes):
+        match = _PROXY_RAW_PREFIX_RE.match(raw)
+        if match is not None:
+            return raw[match.end():].decode("latin-1")
+    normalized = fallback.lstrip("/")
+    return f"/{normalized}" if normalized else ""
+
+
+def _raw_query_string(scope: Scope) -> str:
+    """The request line's query, as received.
+
+    Starlette re-derives ``request.url.query`` from the decoded path, so a
+    percent-decoded ``?`` inside the path resurfaces as a phantom query
+    (#2227). The scope's ``query_string`` is the wire truth.
+    """
+    query = scope.get("query_string")
+    if isinstance(query, bytes):
+        return query.decode("latin-1")
+    if isinstance(query, str):
+        return query
+    return ""
 
 
 def _filter_proxy_headers(
@@ -364,8 +409,14 @@ async def _proxy_http_request(
     )
     _verify_secure_access(endpoint, request.headers)
     _schedule_proxy_renew(request, sandbox_id)
-    query_string = request.url.query
-    target_url = _build_proxy_target_url(endpoint, full_path, query_string, websocket=False)
+    query_string = _raw_query_string(request.scope)
+    if internal:
+        # Server-managed routes pass a literal path, not one taken off the
+        # request line; nothing to preserve.
+        path_suffix = f"/{full_path.lstrip('/')}" if full_path else ""
+    else:
+        path_suffix = _raw_proxy_suffix(request.scope, full_path)
+    target_url = _build_proxy_target_url(endpoint, path_suffix, query_string, websocket=False)
     client: httpx.AsyncClient = request.app.state.http_client
 
     try:
@@ -597,10 +648,10 @@ async def _proxy_websocket_request(
         return
 
     _schedule_proxy_renew(websocket, sandbox_id)
-    query_string = websocket.url.query or ""
+    query_string = _raw_query_string(websocket.scope)
     target_url = _build_proxy_target_url(
         endpoint,
-        full_path,
+        _raw_proxy_suffix(websocket.scope, full_path),
         query_string,
         websocket=True,
     )

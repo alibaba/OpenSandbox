@@ -492,6 +492,51 @@ def test_proxy_method_not_allowed_lists_all_supported_methods(
     }
 
 
+# Percent escapes in the proxied path must reach the sandbox byte for byte
+# (issue #2227): the route param arrives percent-DECODED (and non-UTF-8
+# escapes become U+FFFD), so deriving the target URL from it re-encodes a
+# different URL -- `%2F` flattens, decoded `?`/`#` become live separators,
+# `%25` degrades, and decoded `..` collapses. The forwarder must use the
+# wire bytes from the ASGI raw_path instead.
+@pytest.mark.parametrize(
+    ("request_suffix", "expected_backend_path"),
+    [
+        ("api/contents/a%2Fb.txt", "/api/contents/a%2Fb.txt"),
+        ("api/contents/a%3Fb.txt", "/api/contents/a%3Fb.txt"),
+        ("api/contents/a%23b.txt", "/api/contents/a%23b.txt"),
+        ("api/contents/100%25.txt", "/api/contents/100%25.txt"),
+        ("api/contents/caf%E9.txt", "/api/contents/caf%E9.txt"),
+        ("api/contents/a/%2E%2E/b", "/api/contents/a/%2E%2E/b"),
+    ],
+)
+def test_proxy_forwards_path_percent_escapes_untouched(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+    request_suffix: str,
+    expected_backend_path: str,
+) -> None:
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False, use_proxy_host: bool = False) -> Endpoint:
+            return Endpoint(endpoint="10.57.1.91:40109")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+
+    fake_client = _FakeAsyncClient()
+    fake_client.response = _FakeStreamingResponse(status_code=200, chunks=[b"ok"])
+    _set_http_client(client, fake_client)
+
+    response = client.get(f"/v1/sandboxes/sbx-123/proxy/44772/{request_suffix}", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert fake_client.built is not None
+    assert fake_client.built["url"] == f"http://10.57.1.91:40109{expected_backend_path}"
+    # The send side must preserve the escapes too: httpx keeps valid
+    # percent-escapes and does not collapse escaped dot segments.
+    assert httpx.URL(fake_client.built["url"]).raw_path == expected_backend_path.encode("ascii")
+
+
 def test_proxy_forwards_filtered_headers_and_query(
     client: TestClient,
     auth_headers: dict,
@@ -1345,6 +1390,43 @@ def test_proxy_websocket_relays_messages_and_forwards_safe_headers(
     assert lowered_headers["x-forwarded-for"] == "testclient"
     assert lowered_headers["opensandbox-ingress-to"] == "sbx-123-44772"
     assert lowered_headers["x-trace"] == "trace-ws"
+
+
+@pytest.mark.parametrize(
+    ("request_suffix", "expected_ws_path"),
+    [
+        ("ws/a%2Fb", "/ws/a%2Fb"),
+        ("ws/a%23b", "/ws/a%23b"),
+    ],
+)
+def test_proxy_websocket_forwards_path_percent_escapes_untouched(
+    client: TestClient,
+    auth_headers: dict,
+    monkeypatch,
+    request_suffix: str,
+    expected_ws_path: str,
+) -> None:
+    # #2227: the WebSocket route's decoded path parameter mangles escapes the
+    # same way the HTTP one does; the backend URI must come from the wire
+    # bytes, and the query must not be re-derived from the decoded path.
+    class StubService:
+        @staticmethod
+        def get_endpoint(sandbox_id: str, port: int, resolve_internal: bool = False, use_proxy_host: bool = False) -> Endpoint:
+            return Endpoint(endpoint="10.57.1.91:40109")
+
+    monkeypatch.setattr(lifecycle, "sandbox_service", StubService())
+    backend = _FakeBackendWebSocket()
+    connector = _FakeWebSocketConnector(backend)
+    monkeypatch.setattr(proxy_api.websockets, "connect", connector)
+
+    with client.websocket_connect(
+        f"/v1/sandboxes/sbx-123/proxy/44772/{request_suffix}?token=abc",
+        headers=auth_headers,
+    ) as websocket:
+        assert websocket.receive_text() == "backend-ready"
+
+    call = connector.calls[0]
+    assert call["uri"] == f"ws://10.57.1.91:40109{expected_ws_path}?token=abc"
 
 
 @pytest.mark.parametrize(
