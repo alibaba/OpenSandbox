@@ -19,7 +19,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -115,27 +114,16 @@ func removeRulesByTarget(rules []policy.EgressRule, targets []string) (kept, rem
 	return kept, removed
 }
 
-// mergeKey: (lowercased target, sorted ports, sorted port ranges) —
-// differently-scoped rules must not evict each other.
+// mergeKey: (lowercased target, canonical port interval set) — differently-
+// scoped rules must not evict each other, equivalently-scoped ones must.
 func mergeKey(r policy.EgressRule) string {
 	key := strings.ToLower(r.Target)
-	if len(r.Ports) > 0 {
-		ports := append([]int(nil), r.Ports...)
-		sort.Ints(ports)
-		portStrs := make([]string, len(ports))
-		for i, port := range ports {
-			portStrs[i] = strconv.Itoa(port)
+	if scope := r.PortScope(); len(scope) > 0 {
+		parts := make([]string, len(scope))
+		for i, rg := range scope {
+			parts[i] = strconv.Itoa(rg.Lo) + "-" + strconv.Itoa(rg.Hi)
 		}
-		key += "|ports=" + strings.Join(portStrs, ",")
-	}
-	if len(r.PortRanges) > 0 {
-		ranges := append([]policy.PortRange(nil), r.PortRanges...)
-		sort.Slice(ranges, func(i, j int) bool { return ranges[i].Lo < ranges[j].Lo })
-		rangeStrs := make([]string, len(ranges))
-		for i, rg := range ranges {
-			rangeStrs[i] = strconv.Itoa(rg.Lo) + "-" + strconv.Itoa(rg.Hi)
-		}
-		key += "|portRanges=" + strings.Join(rangeStrs, ",")
+		key += "|ports=" + strings.Join(parts, ",")
 	}
 	return key
 }

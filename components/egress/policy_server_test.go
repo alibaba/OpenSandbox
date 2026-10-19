@@ -507,6 +507,17 @@ func TestHandlePatch_PortRangesAreMergeKeyed(t *testing.T) {
 
 	patch(`[{"action":"allow","target":"10.0.0.5","portRanges":[{"start":1,"end":7999},{"start":9000,"end":9100}]}]`)
 	require.Len(t, proxy.updated.Egress, 3, "range order does not change the merge key")
+
+	patch(`[{"action":"deny","target":"10.0.0.5","portRanges":[{"start":8000,"end":8000}]}]`)
+	require.Len(t, proxy.updated.Egress, 3, "a single-port range replaces the equivalent ports rule")
+
+	patch(`[{"action":"deny","target":"10.0.0.5","portRanges":[{"start":1,"end":4000},{"start":4001,"end":7999}]}]`)
+	require.Len(t, proxy.updated.Egress, 3, "adjacent subranges replace the equivalent single range")
+	for _, r := range proxy.updated.Egress {
+		if len(r.PortScope()) == 1 && r.PortScope()[0] == (policy.PortRange{Lo: 1, Hi: 7999}) {
+			require.Equal(t, policy.ActionDeny, r.Action, "the patched action wins")
+		}
+	}
 }
 
 func TestMaxEgressRulesFromEnv(t *testing.T) {

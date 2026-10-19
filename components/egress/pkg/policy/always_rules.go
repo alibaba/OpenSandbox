@@ -169,6 +169,16 @@ func parsePortRangeToken(token string) (PortRange, error) {
 	return PortRange{Lo: lo, Hi: hi}, nil
 }
 
+// PortScope returns the rule's ports and port ranges as one merged, sorted
+// interval set, so equivalent encodings compare equal. Nil means all ports.
+func (r EgressRule) PortScope() []PortRange {
+	ranges := append([]PortRange(nil), r.PortRanges...)
+	for _, p := range r.Ports {
+		ranges = append(ranges, PortRange{Lo: p, Hi: p})
+	}
+	return mergeRanges(ranges)
+}
+
 // mergeRanges sorts and coalesces overlapping or adjacent ranges.
 func mergeRanges(ranges []PortRange) []PortRange {
 	if len(ranges) == 0 {
