@@ -114,6 +114,39 @@ func (c *Controller) combinedOutputFileName(session string) string {
 	return filepath.Join(c.commandOutputDir(), session+".output")
 }
 
+// truncateCommandOutputFile releases the data blocks of a regular output file
+// before it is unlinked. A forked child that inherited the output descriptor
+// keeps the unlinked inode alive and can keep appending to it, so truncating
+// first reclaims what was already written. Missing files and non-regular files
+// (including symlinks) are left alone.
+func truncateCommandOutputFile(path string) {
+	linfo, err := os.Lstat(path)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn("command output: stat %s: %v", path, err)
+		}
+		return
+	}
+	if !linfo.Mode().IsRegular() {
+		return
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			log.Warn("command output: open %s for truncate: %v", path, err)
+		}
+		return
+	}
+	defer file.Close()
+	// The path may have been swapped for a symlink between Lstat and open.
+	if info, err := file.Stat(); err != nil || !os.SameFile(linfo, info) {
+		return
+	}
+	if err := file.Truncate(0); err != nil {
+		log.Warn("command output: truncate %s: %v", path, err)
+	}
+}
+
 func removeCommandOutputFiles(paths ...string) {
 	seen := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
@@ -124,6 +157,7 @@ func removeCommandOutputFiles(paths ...string) {
 			continue
 		}
 		seen[path] = struct{}{}
+		truncateCommandOutputFile(path)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			log.Warn("command output: remove %s: %v", path, err)
 		}

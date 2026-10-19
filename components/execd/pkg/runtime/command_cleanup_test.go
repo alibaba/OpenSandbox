@@ -191,3 +191,45 @@ func TestCleanupFinishedCommandsRetainsRunningAndRecentCommands(t *testing.T) {
 	require.NotNil(t, c.getCommandKernel("recent"))
 	require.NotNil(t, c.getCommandKernel("running"))
 }
+
+func TestRemoveCommandOutputFilesTruncatesBeforeUnlink(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("open files cannot be unlinked on Windows")
+	}
+
+	path := filepath.Join(t.TempDir(), "session.stderr")
+	// A forked child that inherited the output fd keeps the inode alive after
+	// unlink; emulate it by holding an open descriptor.
+	held, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	require.NoError(t, err)
+	defer held.Close()
+	_, err = held.Write(make([]byte, 64*1024))
+	require.NoError(t, err)
+
+	removeCommandOutputFiles(path)
+
+	require.NoFileExists(t, path)
+	info, err := held.Stat()
+	require.NoError(t, err)
+	require.Zero(t, info.Size(), "data blocks must be released even while another fd holds the unlinked file")
+}
+
+func TestRemoveCommandOutputFilesDoesNotTruncateSymlinkTarget(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("symlink creation needs privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	require.NoError(t, os.WriteFile(target, []byte("keep"), 0o600))
+	link := filepath.Join(dir, "session.stdout")
+	require.NoError(t, os.Symlink(target, link))
+
+	removeCommandOutputFiles(link, filepath.Join(dir, "missing.stderr"))
+
+	_, err := os.Lstat(link)
+	require.True(t, os.IsNotExist(err))
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "keep", string(content))
+}
