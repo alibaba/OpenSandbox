@@ -15,6 +15,7 @@
 package isolation
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -60,10 +61,43 @@ func (b *BindView) rel(path string) (string, error) {
 	if cleaned == b.dest {
 		return ".", nil
 	}
+	// b.dest+"/" would be "//" for a "/" destination, which no cleaned
+	// absolute path starts with; the root bind serves everything.
+	if b.dest == "/" {
+		return strings.TrimPrefix(cleaned, "/"), nil
+	}
 	if strings.HasPrefix(cleaned, b.dest+"/") {
 		return strings.TrimPrefix(cleaned, b.dest+"/"), nil
 	}
 	return "", ErrPathOutsideOverlays
+}
+
+// rejectSymlinked denies rel paths with any symlinked component under the
+// source. session.run writes land live in a rw bind source, so sandbox code
+// can plant a link pointing outside the allowed source; mutating through
+// it would follow the link out of the bind (#2297 review).
+func (b *BindView) rejectSymlinked(rel string) error {
+	if rel == "." || rel == "" {
+		return nil
+	}
+	check := b.view.UpperDir
+	for _, seg := range strings.Split(filepath.Clean(rel), "/") {
+		if seg == "" || seg == "." {
+			continue
+		}
+		check = filepath.Join(check, seg)
+		info, err := os.Lstat(check)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink target denied: %s", check)
+		}
+	}
+	return nil
 }
 
 func (b *BindView) Stat(path string) (os.FileInfo, error) {
@@ -103,6 +137,9 @@ func (b *BindView) Remove(path string) error {
 	if err != nil {
 		return err
 	}
+	if err := b.rejectSymlinked(rel); err != nil {
+		return err
+	}
 	return b.view.Remove(rel)
 }
 
@@ -111,12 +148,18 @@ func (b *BindView) RemoveAll(path string) error {
 	if err != nil {
 		return err
 	}
+	if err := b.rejectSymlinked(rel); err != nil {
+		return err
+	}
 	return b.view.RemoveAll(rel)
 }
 
 func (b *BindView) MkdirAll(path string, perm os.FileMode) error {
 	rel, err := b.rel(path)
 	if err != nil {
+		return err
+	}
+	if err := b.rejectSymlinked(rel); err != nil {
 		return err
 	}
 	return b.view.MkdirAll(rel, perm)
@@ -131,12 +174,21 @@ func (b *BindView) Rename(oldPath, newPath string) error {
 	if err != nil {
 		return err
 	}
+	if err := b.rejectSymlinked(relOld); err != nil {
+		return err
+	}
+	if err := b.rejectSymlinked(relNew); err != nil {
+		return err
+	}
 	return b.view.Rename(relOld, relNew)
 }
 
 func (b *BindView) Chmod(path string, mode os.FileMode) error {
 	rel, err := b.rel(path)
 	if err != nil {
+		return err
+	}
+	if err := b.rejectSymlinked(rel); err != nil {
 		return err
 	}
 	return b.view.Chmod(rel, mode)
@@ -163,7 +215,17 @@ func (b *BindView) Search(root, pattern string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return b.view.Search(rel, pattern)
+	hits, err := b.view.Search(rel, pattern)
+	if err != nil {
+		return nil, err
+	}
+	// Hits come back relative to the bind source; re-prefix with the
+	// destination so callers routing them back (files search re-stats
+	// each hit) reach this bind instead of the workspace view.
+	for i, hit := range hits {
+		hits[i] = filepath.Join(b.dest, hit)
+	}
+	return hits, nil
 }
 
 func (b *BindView) ReplaceContent(path, old, newStr string) error {

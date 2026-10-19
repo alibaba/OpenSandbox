@@ -906,21 +906,45 @@ func newMergedView(s *isolatedSession) vfs.FS {
 		return isolation.NewMergedView(ov.path, upper, ov.mode, uid, gid)
 	}
 
-	// Binds join the routing alongside overlays: each bind destination
-	// serves the files API through its host source (live in both
-	// directions, ro/rw per the bind flag). With binds present the
-	// single-overlay shortcut is skipped — a bare MergedView would
-	// silently re-root bind paths into the workspace overlay instead of
-	// failing to route them (#2297).
+	// Binds join the routing, mirroring bwrap's mount semantics: argv
+	// order is overlays first (shallow→deep), then binds in option order,
+	// and a later mount shadows earlier ones within its subtree (#2297).
+	// Each bind destination serves the files API through its host source
+	// (live in both directions, ro/rw per the bind flag). With binds
+	// present the single-overlay shortcut is skipped — a bare MergedView
+	// would silently re-root bind paths into the workspace overlay
+	// instead of failing to route them.
+	bindDests := make([]string, 0, len(s.opts.Binds))
 	bindViews := make([]isolation.OverlayView, 0, len(s.opts.Binds))
-	for _, bind := range s.opts.Binds {
+	for i, bind := range s.opts.Binds {
 		dest := bind.Dest
 		if dest == "" {
 			dest = bind.Source
 		}
-		if !filepath.IsAbs(dest) || dest == "/" {
+		if !filepath.IsAbs(dest) {
 			continue
 		}
+		dest = filepath.Clean(dest)
+		// A later bind whose destination covers this one shadows it.
+		shadowed := false
+		for _, later := range s.opts.Binds[i+1:] {
+			laterDest := later.Dest
+			if laterDest == "" {
+				laterDest = later.Source
+			}
+			if !filepath.IsAbs(laterDest) {
+				continue
+			}
+			laterDest = filepath.Clean(laterDest)
+			if laterDest == "/" || dest == laterDest || strings.HasPrefix(dest, laterDest+"/") {
+				shadowed = true
+				break
+			}
+		}
+		if shadowed {
+			continue
+		}
+		bindDests = append(bindDests, dest)
 		bindViews = append(bindViews, isolation.OverlayView{
 			Path: dest,
 			FS:   isolation.NewBindView(dest, bind.Source, bind.ReadOnly, uid, gid),
@@ -939,23 +963,39 @@ func newMergedView(s *isolatedSession) vfs.FS {
 	}
 
 	views := make([]isolation.OverlayView, 0, len(s.overlays)+len(bindViews))
-	relativeBase := 0
-	for i, ov := range s.overlays {
-		if ov.path != "/" && s.overlays[relativeBase].path == "/" {
-			// The first non-root overlay is the base for relative paths.
-			relativeBase = i
+	for _, ov := range s.overlays {
+		ovPath := filepath.Clean(ov.path)
+		// Binds mount after every overlay, so a surviving bind shadows
+		// the overlay routes inside its subtree.
+		shadowed := false
+		for _, dest := range bindDests {
+			if dest == "/" || ovPath == dest || strings.HasPrefix(ovPath, dest+"/") {
+				shadowed = true
+				break
+			}
+		}
+		if shadowed {
+			continue
 		}
 		views = append(views, isolation.OverlayView{
-			Path:         ov.path,
+			Path:         ovPath,
 			FS:           overlayView(ov),
 			RelativeBase: false,
 		})
 	}
 	// Bind destinations never become the relative-path base: relative
-	// paths stay workspace-relative as before. A binds-only session has
-	// no overlay view to mark.
+	// paths stay workspace-relative as before. The first non-root
+	// surviving overlay is the base; a binds-only session has no overlay
+	// view to mark.
 	if len(views) > 0 {
-		views[relativeBase].RelativeBase = true
+		base := 0
+		for i, v := range views {
+			if v.Path != "/" {
+				base = i
+				break
+			}
+		}
+		views[base].RelativeBase = true
 	}
 	views = append(views, bindViews...)
 	return isolation.NewMultiMergedView(views)
