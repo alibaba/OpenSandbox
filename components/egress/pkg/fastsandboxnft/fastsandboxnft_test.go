@@ -918,8 +918,16 @@ func TestApplyPolicy_PlatformFloorExemptFromPortScopedGuard(t *testing.T) {
 	require.NoError(t, a.ApplyPolicy(ctx, s, effective), "the floor alone must not trip the port-scoped guard")
 
 	// Adding a user Ports rule on top trips it again.
-	effective.Egress = append(effective.Egress, policy.EgressRule{Action: policy.ActionAllow, Ports: []int{22}})
-	err = a.ApplyPolicy(ctx, s, effective)
+	withPorts := *effective
+	withPorts.Egress = append(append([]policy.EgressRule(nil), effective.Egress...), policy.EgressRule{Action: policy.ActionAllow, Ports: []int{22}})
+	err = a.ApplyPolicy(ctx, s, &withPorts)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "port-scoped")
+
+	// So does a user PortRanges rule: only FloorPortRanges is exempt.
+	withRanges := *effective
+	withRanges.Egress = append(append([]policy.EgressRule(nil), effective.Egress...), policy.EgressRule{Action: policy.ActionDeny, PortRanges: []policy.PortRange{{Lo: 1, Hi: 1023}}})
+	err = a.ApplyPolicy(ctx, s, &withRanges)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "port-scoped")
 }

@@ -38,15 +38,20 @@ const (
 	targetPortOnly
 )
 
-// PortRange is an inclusive TCP port interval (platform port floor only).
+// PortRange is an inclusive TCP port interval.
 type PortRange struct {
-	Lo int
-	Hi int
+	Lo int `json:"start"`
+	Hi int `json:"end"`
 }
 
 // Contains reports whether port falls inside the range.
 func (r PortRange) Contains(port int) bool {
 	return port >= r.Lo && port <= r.Hi
+}
+
+// covers reports whether every port in o is inside r.
+func (r PortRange) covers(o PortRange) bool {
+	return o.Lo >= r.Lo && o.Hi <= r.Hi
 }
 
 // DefaultDenyPolicy is deny-by-default with an empty egress list.
@@ -72,10 +77,12 @@ type EgressRule struct {
 	// with an empty Target means all destinations. Domain targets with
 	// Ports are rejected by normalizePolicy.
 	Ports []int `json:"ports,omitempty"`
-	// PortRanges is the interval form of Ports, set only by the platform
+	// PortRanges is the interval form of Ports; the two must not overlap.
+	PortRanges []PortRange `json:"portRanges,omitempty"`
+	// FloorPortRanges is PortRanges set only by the platform
 	// port floor (never serialized: the always overlay is re-read from file
-	// on every reload). Enforced like Ports via PortScopedRules.
-	PortRanges []PortRange `json:"-"`
+	// on every reload).
+	FloorPortRanges []PortRange `json:"-"`
 
 	targetKind targetKind
 	ip         netip.Addr
@@ -168,12 +175,13 @@ func normalizePolicy(p *NetworkPolicy) error {
 		}
 
 		r.Target = strings.TrimSpace(r.Target)
-		if err := normalizePorts(r.Ports); err != nil {
+		if err := normalizePorts(r.Ports, r.PortRanges); err != nil {
 			return fmt.Errorf("egress target %q: %w", r.Target, err)
 		}
+		portScoped := len(r.Ports) > 0 || len(r.PortRanges) > 0
 
 		if r.Target == "" {
-			if len(r.Ports) == 0 {
+			if !portScoped {
 				return fmt.Errorf("egress target cannot be empty")
 			}
 			// No target: this rule scopes by port alone, across all destinations.
@@ -191,7 +199,7 @@ func normalizePolicy(p *NetworkPolicy) error {
 			continue
 		}
 		r.targetKind = targetDomain
-		if len(r.Ports) > 0 {
+		if portScoped {
 			return fmt.Errorf("egress target %q: ports are not supported for domain targets yet", r.Target)
 		}
 	}
@@ -201,16 +209,16 @@ func normalizePolicy(p *NetworkPolicy) error {
 // maxPortsPerRule bounds one rule's inline nft dport set size.
 const maxPortsPerRule = 256
 
-// normalizePorts validates a rule's Ports list in place: each value must be a
-// valid TCP port, the list must not exceed maxPortsPerRule, and it must not
-// contain duplicates. An empty list is valid (the rule is simply not
+// normalizePorts validates a rule's Ports and PortRanges in place: each value must be a
+// valid TCP port, the combined list must not exceed maxPortsPerRule, and it must not
+// cover a port twice. An empty list is valid (the rule is simply not
 // port-scoped).
-func normalizePorts(ports []int) error {
-	if len(ports) == 0 {
+func normalizePorts(ports []int, ranges []PortRange) error {
+	if len(ports) == 0 && len(ranges) == 0 {
 		return nil
 	}
-	if len(ports) > maxPortsPerRule {
-		return fmt.Errorf("too many ports (%d), max %d per rule", len(ports), maxPortsPerRule)
+	if n := len(ports) + len(ranges); n > maxPortsPerRule {
+		return fmt.Errorf("too many ports (%d), max %d per rule", n, maxPortsPerRule)
 	}
 	seen := make(map[int]struct{}, len(ports))
 	for _, port := range ports {
@@ -221,6 +229,21 @@ func normalizePorts(ports []int) error {
 			return fmt.Errorf("duplicate port %d", port)
 		}
 		seen[port] = struct{}{}
+	}
+	for i, rg := range ranges {
+		if rg.Lo < 1 || rg.Hi > 65535 || rg.Lo > rg.Hi {
+			return fmt.Errorf("port range %d-%d out of 1-65535 or inverted", rg.Lo, rg.Hi)
+		}
+		for _, port := range ports {
+			if rg.Contains(port) {
+				return fmt.Errorf("port %d overlaps port range %d-%d", port, rg.Lo, rg.Hi)
+			}
+		}
+		for _, prev := range ranges[:i] {
+			if rg.Lo <= prev.Hi && prev.Lo <= rg.Hi {
+				return fmt.Errorf("port range %d-%d overlaps port range %d-%d", rg.Lo, rg.Hi, prev.Lo, prev.Hi)
+			}
+		}
 	}
 	return nil
 }
@@ -255,7 +278,7 @@ func (p *NetworkPolicy) StaticIPSets() (allowV4, allowV6, denyV4, denyV6 []strin
 		return
 	}
 	for _, r := range p.Egress {
-		if len(r.Ports) > 0 || len(r.PortRanges) > 0 {
+		if r.portScoped() {
 			// Port-scoped IP/CIDR rules are enforced separately via
 			// PortScopedRules; including them here would additionally
 			// allow/deny the target on every port, defeating the scoping.
@@ -309,8 +332,18 @@ type PortScopedRule struct {
 	Target string
 	IsV6   bool
 	Ports  []int
-	// Ranges is the interval form of Ports (platform port floor rules).
+	// Ranges is the interval form of Ports.
 	Ranges []PortRange
+}
+
+// portScoped reports whether the rule is constrained by destination port.
+func (r *EgressRule) portScoped() bool {
+	return len(r.Ports) > 0 || len(r.PortRanges) > 0 || len(r.FloorPortRanges) > 0
+}
+
+// IsPortFloor reports whether the rule is a platform port-floor rule.
+func (r *EgressRule) IsPortFloor() bool {
+	return len(r.FloorPortRanges) > 0
 }
 
 // PortScopedRules returns the policy's port-constrained rules split into deny
@@ -324,10 +357,16 @@ func (p *NetworkPolicy) PortScopedRules() (deny, allow []PortScopedRule) {
 		return nil, nil
 	}
 	for _, r := range p.Egress {
-		if len(r.Ports) == 0 && len(r.PortRanges) == 0 {
+		if !r.portScoped() {
 			continue
 		}
-		rule := PortScopedRule{Action: r.Action, Ports: r.Ports, Ranges: r.PortRanges}
+		var ranges []PortRange
+		if n := len(r.PortRanges) + len(r.FloorPortRanges); n > 0 {
+			ranges = make([]PortRange, 0, n)
+			ranges = append(ranges, r.PortRanges...)
+			ranges = append(ranges, r.FloorPortRanges...)
+		}
+		rule := PortScopedRule{Action: r.Action, Ports: r.Ports, Ranges: ranges}
 		switch r.targetKind {
 		case targetIP:
 			rule.Target = r.ip.String()

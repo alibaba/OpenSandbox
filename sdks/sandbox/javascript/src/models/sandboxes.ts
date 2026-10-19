@@ -51,7 +51,15 @@ export type ResourceLimits = Record<string, string>;
 export type NetworkRuleAction = "allow" | "deny";
 
 /**
- * An egress rule: `target`, `ports`, or both. The union encodes that
+ * Inclusive TCP destination port range (`start` <= `end`).
+ */
+export interface PortRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * An egress rule: `target`, `ports`/`portRanges`, or both. The union encodes that
  * invariant at compile time (`target` used to be required).
  *
  * - `target`: FQDN, wildcard domain ("*.example.com"), IP, or CIDR.
@@ -60,12 +68,15 @@ export type NetworkRuleAction = "allow" | "deny";
  *   across all IPv4/IPv6 destinations, but under `defaultAction: deny` the
  *   DNS proxy only matches domain rules, so hostname lookups still fail —
  *   this shape serves direct-IP clients.
+ * - `portRanges`: the interval form of `ports`; the two share the 256-entry
+ *   limit and must not overlap.
  * - A domain `target` combined with `ports` is rejected (domain rules have
  *   no port dimension).
  */
 export type NetworkRule = (
-  | { action: NetworkRuleAction; target: string; ports?: number[] }
-  | { action: NetworkRuleAction; target?: string; ports: number[] }
+  | { action: NetworkRuleAction; target: string; ports?: number[]; portRanges?: PortRange[] }
+  | { action: NetworkRuleAction; target?: string; ports: number[]; portRanges?: PortRange[] }
+  | { action: NetworkRuleAction; target?: string; ports?: number[]; portRanges: PortRange[] }
 ) & Record<string, unknown>;
 
 export interface NetworkPolicy extends Record<string, unknown> {

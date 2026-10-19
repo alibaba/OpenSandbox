@@ -151,6 +151,93 @@ func TestParsePolicy_InvalidPortsRejected(t *testing.T) {
 	}
 }
 
+func TestParsePolicy_PortRangesScopeTarget(t *testing.T) {
+	// The case port ranges exist for: open two ports on a host and deny
+	// every other TCP port on it, ahead of any DNS-learned allow.
+	p, err := ParsePolicy(`{
+		"defaultAction":"deny",
+		"egress":[
+			{"action":"deny","target":"10.0.0.5","portRanges":[
+				{"start":1,"end":7999},{"start":8001,"end":51233},{"start":51235,"end":65535}
+			]},
+			{"action":"allow","target":"10.0.0.5","ports":[8000,51234]},
+			{"action":"allow","portRanges":[{"start":443,"end":443}],"ports":[80]}
+		]
+	}`)
+	require.NoError(t, err)
+
+	deny, allow := p.PortScopedRules()
+	require.Equal(t, []PortScopedRule{{
+		Action: ActionDeny, Target: "10.0.0.5",
+		Ranges: []PortRange{{Lo: 1, Hi: 7999}, {Lo: 8001, Hi: 51233}, {Lo: 51235, Hi: 65535}},
+	}}, deny)
+	require.Equal(t, []PortScopedRule{
+		{Action: ActionAllow, Target: "10.0.0.5", Ports: []int{8000, 51234}},
+		{Action: ActionAllow, Ports: []int{80}, Ranges: []PortRange{{Lo: 443, Hi: 443}}},
+	}, allow)
+
+	allowV4, allowV6, denyV4, denyV6 := p.StaticIPSets()
+	require.Empty(t, allowV4, "a portRanges rule must not grant its target on every port")
+	require.Empty(t, allowV6)
+	require.Empty(t, denyV4, "a portRanges rule must not deny its target on every port")
+	require.Empty(t, denyV6)
+}
+
+func TestParsePolicy_PortRangesRoundTrip(t *testing.T) {
+	raw := `{"egress":[{"action":"deny","target":"10.0.0.5","portRanges":[{"start":1,"end":1023}]}],"defaultAction":"deny"}`
+	p, err := ParsePolicy(raw)
+	require.NoError(t, err)
+	out, err := json.Marshal(p)
+	require.NoError(t, err)
+	require.JSONEq(t, raw, string(out))
+
+	// The platform floor field never reaches the wire.
+	floor := NewPortFloorDenyRule([]PortRange{{Lo: 1, Hi: 79}})
+	out, err = json.Marshal(floor)
+	require.NoError(t, err)
+	require.NotContains(t, string(out), "portRanges")
+	require.NotContains(t, string(out), "79")
+}
+
+func TestParsePolicy_InvalidPortRangesRejected(t *testing.T) {
+	cases := map[string]string{
+		"zero start":         `{"egress":[{"action":"allow","portRanges":[{"start":0,"end":10}]}]}`,
+		"end too large":      `{"egress":[{"action":"allow","portRanges":[{"start":1,"end":65536}]}]}`,
+		"inverted":           `{"egress":[{"action":"allow","portRanges":[{"start":20,"end":10}]}]}`,
+		"missing end":        `{"egress":[{"action":"allow","portRanges":[{"start":20}]}]}`,
+		"overlapping ranges": `{"egress":[{"action":"allow","portRanges":[{"start":1,"end":100},{"start":100,"end":200}]}]}`,
+		"port inside range":  `{"egress":[{"action":"allow","ports":[50],"portRanges":[{"start":1,"end":100}]}]}`,
+		"domain target":      `{"egress":[{"action":"allow","target":"example.com","portRanges":[{"start":1,"end":100}]}]}`,
+	}
+	for name, raw := range cases {
+		_, err := ParsePolicy(raw)
+		require.Errorf(t, err, "%s: expected a port range validation error", name)
+	}
+
+	_, err := ParsePolicy(`{"egress":[{"action":"allow","portRanges":[{"start":1,"end":100},{"start":101,"end":200}]}]}`)
+	require.NoError(t, err, "adjacent ranges do not overlap")
+}
+
+func TestParsePolicy_PortsAndPortRangesShareCap(t *testing.T) {
+	ranges := make([]map[string]int, maxPortsPerRule)
+	for i := range ranges {
+		ranges[i] = map[string]int{"start": i*2 + 1, "end": i*2 + 1}
+	}
+	b, err := json.Marshal(map[string]any{
+		"egress": []map[string]any{{"action": "allow", "portRanges": ranges}},
+	})
+	require.NoError(t, err)
+	_, err = ParsePolicy(string(b))
+	require.NoError(t, err, "exactly maxPortsPerRule ranges must be accepted")
+
+	b, err = json.Marshal(map[string]any{
+		"egress": []map[string]any{{"action": "allow", "portRanges": ranges, "ports": []int{60000}}},
+	})
+	require.NoError(t, err)
+	_, err = ParsePolicy(string(b))
+	require.Error(t, err, "ports and portRanges together must not exceed maxPortsPerRule")
+}
+
 func TestParsePolicy_TooManyPortsRejected(t *testing.T) {
 	ports := make([]int, maxPortsPerRule+1)
 	for i := range ports {

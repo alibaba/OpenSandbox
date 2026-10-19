@@ -338,13 +338,13 @@ func (a *Applier) ApplyPolicy(ctx context.Context, s subject.Subject, pol *polic
 	if pol == nil {
 		pol = policy.DefaultDenyPolicy()
 	}
-	// User port-scoped rules (Ports) would be silently dropped by the fast
+	// User port-scoped rules (Ports, PortRanges) would be silently dropped by the fast
 	// path — a deny rule that stops denying is fail-open — so refuse the
-	// apply. PortRanges-only rules are the platform floor, enforced in the
+	// apply. FloorPortRanges-only rules are the platform floor, enforced in the
 	// master chains, and are exempt.
 	blocked := 0
 	for _, r := range pol.Egress {
-		if len(r.Ports) > 0 {
+		if len(r.Ports) > 0 || len(r.PortRanges) > 0 {
 			blocked++
 		}
 	}

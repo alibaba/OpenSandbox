@@ -115,20 +115,29 @@ func removeRulesByTarget(rules []policy.EgressRule, targets []string) (kept, rem
 	return kept, removed
 }
 
-// mergeKey: (lowercased target, sorted ports) — differently-scoped rules
-// must not evict each other.
+// mergeKey: (lowercased target, sorted ports, sorted port ranges) —
+// differently-scoped rules must not evict each other.
 func mergeKey(r policy.EgressRule) string {
 	key := strings.ToLower(r.Target)
-	if len(r.Ports) == 0 {
-		return key
+	if len(r.Ports) > 0 {
+		ports := append([]int(nil), r.Ports...)
+		sort.Ints(ports)
+		portStrs := make([]string, len(ports))
+		for i, port := range ports {
+			portStrs[i] = strconv.Itoa(port)
+		}
+		key += "|ports=" + strings.Join(portStrs, ",")
 	}
-	ports := append([]int(nil), r.Ports...)
-	sort.Ints(ports)
-	portStrs := make([]string, len(ports))
-	for i, port := range ports {
-		portStrs[i] = strconv.Itoa(port)
+	if len(r.PortRanges) > 0 {
+		ranges := append([]policy.PortRange(nil), r.PortRanges...)
+		sort.Slice(ranges, func(i, j int) bool { return ranges[i].Lo < ranges[j].Lo })
+		rangeStrs := make([]string, len(ranges))
+		for i, rg := range ranges {
+			rangeStrs[i] = strconv.Itoa(rg.Lo) + "-" + strconv.Itoa(rg.Hi)
+		}
+		key += "|portRanges=" + strings.Join(rangeStrs, ",")
 	}
-	return key + "|ports=" + strings.Join(portStrs, ",")
+	return key
 }
 
 func maxEgressRulesFromEnv() int {

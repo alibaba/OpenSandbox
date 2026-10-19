@@ -93,6 +93,25 @@ test("EgressAdapter reads back a target+ports rule unchanged", async () => {
   assert.deepEqual(policy.egress, [{ action: "allow", target: "10.0.0.5", ports: [22, 80] }]);
 });
 
+test("EgressAdapter patches and reads back portRanges unchanged", async () => {
+  const rule = {
+    action: "deny",
+    target: "10.0.0.5",
+    portRanges: [
+      { start: 1, end: 7999 },
+      { start: 8001, end: 65535 },
+    ],
+  };
+  const { client, calls } = createClient({ defaultAction: "deny", egress: [rule] });
+  const adapter = new EgressAdapter(client);
+
+  await adapter.patchRules([rule]);
+  assert.deepEqual(calls[0].options.body, [rule]);
+
+  const policy = await adapter.getPolicy();
+  assert.deepEqual(policy.egress, [rule]);
+});
+
 test("NetworkRule union rejects rules with neither target nor ports at compile time", async () => {
   // Type-level invariant; the runtime check mirrors what tsc enforces so the
   // contract is pinned for plain-JS callers too.

@@ -170,7 +170,7 @@ func freezeEffectivePolicyInputs(inputs effectivePolicyInputs) (effectivePolicyI
 	freezeRules := func(name string, rules []policy.EgressRule, action string) ([]policy.EgressRule, error) {
 		out := make([]policy.EgressRule, len(rules))
 		for i, rule := range rules {
-			if len(rule.PortRanges) > 0 {
+			if rule.IsPortFloor() {
 				// Floor rules: already-validated intervals with no target
 				// string to re-parse; freeze as-is.
 				if rule.Action != action {

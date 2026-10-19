@@ -41,6 +41,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSandboxInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PagedSnapshotInfos
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PaginationInfo
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PlatformSpec
+import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.PortRange
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.RenewalPolicy
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxAllocation
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxCreateResponse
@@ -68,6 +69,7 @@ import com.alibaba.opensandbox.sandbox.api.models.PVC as ApiPVC
 import com.alibaba.opensandbox.sandbox.api.models.PaginationInfo as ApiPaginationInfo
 import com.alibaba.opensandbox.sandbox.api.models.PeriodicLifecycleHook as ApiPeriodicLifecycleHook
 import com.alibaba.opensandbox.sandbox.api.models.PlatformSpec as ApiPlatformSpec
+import com.alibaba.opensandbox.sandbox.api.models.PortRange as ApiPortRange
 import com.alibaba.opensandbox.sandbox.api.models.RenewalPolicy as ApiRenewalPolicy
 import com.alibaba.opensandbox.sandbox.api.models.Sandbox as ApiSandbox
 import com.alibaba.opensandbox.sandbox.api.models.SandboxLifecycle as ApiSandboxLifecycle
@@ -75,6 +77,7 @@ import com.alibaba.opensandbox.sandbox.api.models.SandboxStatus as ApiSandboxSta
 import com.alibaba.opensandbox.sandbox.api.models.Volume as ApiVolume
 import com.alibaba.opensandbox.sandbox.api.models.egress.NetworkPolicy as ApiEgressNetworkPolicy
 import com.alibaba.opensandbox.sandbox.api.models.egress.NetworkRule as ApiEgressNetworkRule
+import com.alibaba.opensandbox.sandbox.api.models.egress.PortRange as ApiEgressPortRange
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.SandboxStatus as DomainSandboxStatus
 
 internal object SandboxModelConverter {
@@ -126,6 +129,7 @@ internal object SandboxModelConverter {
                     // The generated model maps the spec's uniqueItems array to Set;
                     // the domain model keeps List so declaration order survives.
                     ports = rule.ports?.toSet(),
+                    portRanges = rule.portRanges?.map { ApiPortRange(start = it.start, end = it.end) },
                 )
             }
         return ApiNetworkPolicy(
@@ -140,7 +144,12 @@ internal object SandboxModelConverter {
                 NetworkRule.Action.ALLOW -> ApiNetworkRule.Action.allow
                 NetworkRule.Action.DENY -> ApiNetworkRule.Action.deny
             }
-        return ApiNetworkRule(action = action, target = this.target, ports = this.ports?.toSet())
+        return ApiNetworkRule(
+            action = action,
+            target = this.target,
+            ports = this.ports?.toSet(),
+            portRanges = this.portRanges?.map { ApiPortRange(start = it.start, end = it.end) },
+        )
     }
 
     fun NetworkRule.toApiEgressNetworkRule(): ApiEgressNetworkRule {
@@ -149,7 +158,12 @@ internal object SandboxModelConverter {
                 NetworkRule.Action.ALLOW -> ApiEgressNetworkRule.Action.allow
                 NetworkRule.Action.DENY -> ApiEgressNetworkRule.Action.deny
             }
-        return ApiEgressNetworkRule(action = action, target = this.target, ports = this.ports?.toSet())
+        return ApiEgressNetworkRule(
+            action = action,
+            target = this.target,
+            ports = this.ports?.toSet(),
+            portRanges = this.portRanges?.map { ApiEgressPortRange(start = it.start, end = it.end) },
+        )
     }
 
     fun ApiNetworkRule.toDomainNetworkRule(): NetworkRule {
@@ -158,7 +172,7 @@ internal object SandboxModelConverter {
                 ApiNetworkRule.Action.allow -> NetworkRule.Action.ALLOW
                 ApiNetworkRule.Action.deny -> NetworkRule.Action.DENY
             }
-        return toDomainRule(action, this.target, this.ports)
+        return toDomainRule(action, this.target, this.ports, this.portRanges?.map { PortRange(it.start, it.end) })
     }
 
     fun ApiNetworkPolicy.toDomainNetworkPolicy(): NetworkPolicy {
@@ -180,7 +194,7 @@ internal object SandboxModelConverter {
                 ApiEgressNetworkRule.Action.allow -> NetworkRule.Action.ALLOW
                 ApiEgressNetworkRule.Action.deny -> NetworkRule.Action.DENY
             }
-        return toDomainRule(action, this.target, this.ports)
+        return toDomainRule(action, this.target, this.ports, this.portRanges?.map { PortRange(it.start, it.end) })
     }
 
     /**
@@ -194,11 +208,13 @@ internal object SandboxModelConverter {
         action: NetworkRule.Action,
         target: String?,
         ports: Set<Int>?,
+        portRanges: List<PortRange>?,
     ): NetworkRule {
         return NetworkRule.fromWire(
             action,
             target?.takeIf { it.isNotBlank() },
             ports?.takeIf { it.isNotEmpty() }?.toList(),
+            portRanges?.takeIf { it.isNotEmpty() },
         )
     }
 

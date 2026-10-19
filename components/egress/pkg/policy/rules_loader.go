@@ -125,8 +125,8 @@ func (l *AlwaysRuleLoader) SetCurrentRules(deny, allow []EgressRule) {
 
 	// Re-seed the floor here, or a reseed racing startup would briefly
 	// publish without it.
-	l.portsState.rules = cloneRulesKeepingPortRanges(deny)
-	l.denyState.rules = cloneRulesWithoutPortRanges(deny)
+	l.portsState.rules = cloneRulesKeepingPortFloor(deny)
+	l.denyState.rules = cloneRulesWithoutPortFloor(deny)
 	l.allowState.rules = cloneRules(allow)
 }
 
@@ -172,23 +172,23 @@ func cloneRules(in []EgressRule) []EgressRule {
 	return out
 }
 
-// cloneRulesWithoutPortRanges drops floor rules (owned by the ports state).
-func cloneRulesWithoutPortRanges(in []EgressRule) []EgressRule {
+// cloneRulesWithoutPortFloor drops floor rules (owned by the ports state).
+func cloneRulesWithoutPortFloor(in []EgressRule) []EgressRule {
 	out := cloneRules(in)
 	kept := out[:0]
 	for _, r := range out {
-		if len(r.PortRanges) == 0 {
+		if !r.IsPortFloor() {
 			kept = append(kept, r)
 		}
 	}
 	return kept
 }
 
-// cloneRulesKeepingPortRanges keeps only floor rules (seeds the ports state).
-func cloneRulesKeepingPortRanges(in []EgressRule) []EgressRule {
+// cloneRulesKeepingPortFloor keeps only floor rules (seeds the ports state).
+func cloneRulesKeepingPortFloor(in []EgressRule) []EgressRule {
 	var out []EgressRule
 	for _, r := range cloneRules(in) {
-		if len(r.PortRanges) > 0 {
+		if r.IsPortFloor() {
 			out = append(out, r)
 		}
 	}

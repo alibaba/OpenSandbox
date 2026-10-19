@@ -321,7 +321,7 @@ public class EgressAdapterNetworkPolicyTests
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(
             () => adapter.PatchRulesAsync(new[] { new NetworkRule { Action = NetworkRuleAction.Allow } }));
-        Assert.Contains("NetworkRule[0] requires target, ports, or both", ex.Message);
+        Assert.Contains("NetworkRule[0] requires target, ports, or portRanges", ex.Message);
     }
 
     [Fact]
@@ -400,6 +400,130 @@ public class EgressAdapterNetworkPolicyTests
         var request = Assert.Single(handler.Requests);
         using var body = JsonDocument.Parse(request.Body!);
         Assert.Equal(3, body.RootElement.EnumerateArray().Count());
+    }
+
+    private const string OkPolicyWithPortRanges = """
+        {
+          "status": "ok",
+          "policy": {
+            "defaultAction": "deny",
+            "egress": [
+              { "action": "allow", "target": "10.0.0.5", "ports": [8000] },
+              { "action": "deny", "target": "10.0.0.5", "portRanges": [{ "start": 1, "end": 7999 }, { "start": 8001, "end": 65535 }] }
+            ]
+          }
+        }
+        """;
+
+    [Fact]
+    public async Task GetPolicyAsync_PortRanges_ParseAndRoundTrip()
+    {
+        var (adapter, handler) = CreateAdapter(OkPolicyWithPortRanges);
+
+        var policy = await adapter.GetPolicyAsync();
+
+        Assert.Null(policy.Egress![0].PortRanges);
+        var deny = policy.Egress[1];
+        Assert.Equal("10.0.0.5", deny.Target);
+        Assert.Null(deny.Ports);
+        Assert.Equal(new[] { (1, 7999), (8001, 65535) }, deny.PortRanges!.Select(r => (r.Start, r.End)));
+
+        await adapter.PatchRulesAsync(policy.Egress);
+        var patch = Assert.Single(handler.Requests, r => r.Method == HttpMethod.Patch);
+        using var body = JsonDocument.Parse(patch.Body!);
+        var rules = body.RootElement.EnumerateArray().ToList();
+        Assert.False(rules[0].TryGetProperty("portRanges", out _));
+        var ranges = rules[1].GetProperty("portRanges").EnumerateArray().ToList();
+        Assert.Equal(2, ranges.Count);
+        Assert.Equal(8001, ranges[1].GetProperty("start").GetInt32());
+        Assert.Equal(65535, ranges[1].GetProperty("end").GetInt32());
+        Assert.False(rules[1].TryGetProperty("ports", out _));
+    }
+
+    [Theory]
+    [InlineData("""{ "action": "deny", "portRanges": [] }""", "portRanges must not be empty")]
+    [InlineData("""{ "action": "deny", "portRanges": 443 }""", "Invalid portRanges in network rule")]
+    [InlineData("""{ "action": "deny", "portRanges": [{ "start": 1 }] }""", "Invalid port range element")]
+    [InlineData("""{ "action": "deny", "portRanges": [[1, 2]] }""", "Invalid port range element")]
+    public async Task GetPolicyAsync_MalformedPortRanges_ThrowContractError(string rule, string message)
+    {
+        var (adapter, _) = CreateAdapter(
+            $$"""{ "status": "ok", "policy": { "defaultAction": "deny", "egress": [ {{rule}} ] } }""");
+
+        var ex = await Assert.ThrowsAsync<SandboxApiException>(() => adapter.GetPolicyAsync());
+        Assert.Contains(message, ex.Message);
+    }
+
+    [Fact]
+    public async Task PatchRulesAsync_PortRangesOnly_IsPortScoped()
+    {
+        var (adapter, handler) = CreateAdapter(OkResponse);
+
+        await adapter.PatchRulesAsync(new[]
+        {
+            new NetworkRule
+            {
+                Action = NetworkRuleAction.Deny,
+                PortRanges = new List<PortRange> { new() { Start = 6379, End = 6379 }, new() { Start = 10001, End = 10100 } },
+            },
+        });
+
+        using var body = JsonDocument.Parse(Assert.Single(handler.Requests).Body!);
+        var rule = Assert.Single(body.RootElement.EnumerateArray());
+        Assert.False(rule.TryGetProperty("target", out _));
+        Assert.Equal(
+            """[{"start":6379,"end":6379},{"start":10001,"end":10100}]""",
+            rule.GetProperty("portRanges").GetRawText());
+    }
+
+    public static TheoryData<NetworkRule, string> InvalidPortRangeRules => new()
+    {
+        { new NetworkRule { Action = NetworkRuleAction.Deny, PortRanges = new List<PortRange>() }, "has empty portRanges" },
+        { new NetworkRule { Action = NetworkRuleAction.Deny, PortRanges = new List<PortRange> { new() { Start = 0, End = 10 } } }, "port range 0-10 is invalid" },
+        { new NetworkRule { Action = NetworkRuleAction.Deny, PortRanges = new List<PortRange> { new() { Start = 10, End = 65536 } } }, "port range 10-65536 is invalid" },
+        { new NetworkRule { Action = NetworkRuleAction.Deny, PortRanges = new List<PortRange> { new() { Start = 20, End = 10 } } }, "port range 20-10 is invalid" },
+        { new NetworkRule { Action = NetworkRuleAction.Deny, PortRanges = new List<PortRange> { new() { Start = 1, End = 100 }, new() { Start = 50, End = 200 } } }, "port ranges 1-100 and 50-200 overlap" },
+        { new NetworkRule { Action = NetworkRuleAction.Deny, PortRanges = new List<PortRange> { new() { Start = 100, End = 200 }, new() { Start = 1, End = 100 } } }, "port ranges 1-100 and 100-200 overlap" },
+        { new NetworkRule { Action = NetworkRuleAction.Deny, Ports = new List<int> { 150 }, PortRanges = new List<PortRange> { new() { Start = 100, End = 200 } } }, "port 150 overlaps port range 100-200" },
+        { new NetworkRule { Action = NetworkRuleAction.Deny, Target = "example.com", PortRanges = new List<PortRange> { new() { Start = 1, End = 2 } } }, "portRanges are not supported for domain target" },
+        {
+            new NetworkRule
+            {
+                Action = NetworkRuleAction.Deny,
+                Ports = Enumerable.Range(1, 200).ToList(),
+                PortRanges = Enumerable.Range(0, 57).Select(i => new PortRange { Start = 1000 + 2 * i, End = 1000 + 2 * i }).ToList(),
+            },
+            "has 200 ports and 57 portRanges"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidPortRangeRules))]
+    public async Task PatchRulesAsync_InvalidPortRanges_FailFast(NetworkRule rule, string message)
+    {
+        var (adapter, handler) = CreateAdapter(OkResponse);
+
+        var ex = await Assert.ThrowsAsync<ArgumentException>(() => adapter.PatchRulesAsync(new[] { rule }));
+        Assert.Contains(message, ex.Message);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public void NetworkRule_PortRanges_SerializeOnCreatePath()
+    {
+        var rule = new NetworkRule
+        {
+            Action = NetworkRuleAction.Deny,
+            Target = "10.0.0.5",
+            PortRanges = new List<PortRange> { new() { Start = 1, End = 7999 } },
+        };
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(rule));
+        Assert.Equal("""[{"start":1,"end":7999}]""", json.RootElement.GetProperty("portRanges").GetRawText());
+        Assert.False(json.RootElement.TryGetProperty("ports", out _));
+        Assert.False(
+            JsonDocument.Parse(JsonSerializer.Serialize(new NetworkRule { Action = NetworkRuleAction.Allow, Target = "x.org" }))
+                .RootElement.TryGetProperty("portRanges", out _));
     }
 
     private static (EgressAdapter Adapter, CaptureHandler Handler) CreateAdapter(string responseBody)

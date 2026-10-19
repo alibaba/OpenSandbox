@@ -282,6 +282,9 @@ class EgressAdapter(Egress):
             from opensandbox.api.egress.models.network_rule_action import (
                 NetworkRuleAction,
             )
+            from opensandbox.api.egress.models.port_range import (
+                PortRange as ApiPortRange,
+            )
             from opensandbox.api.egress.types import UNSET
 
             response_obj = await patch_policy.asyncio_detailed(
@@ -292,6 +295,11 @@ class EgressAdapter(Egress):
                         # None here means UNSET (omit the field) in the client.
                         target=rule.target if rule.target is not None else UNSET,
                         ports=rule.ports if rule.ports is not None else UNSET,
+                        port_ranges=(
+                            [ApiPortRange(start=r.start, end=r.end) for r in rule.port_ranges]
+                            if rule.port_ranges is not None
+                            else UNSET
+                        ),
                     )
                     for rule in rules
                 ],

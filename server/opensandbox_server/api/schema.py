@@ -117,6 +117,22 @@ class ResourceLimits(RootModel[Dict[str, str]]):
     )
 
 
+MAX_PORTS_PER_RULE = 256
+
+
+class PortRange(BaseModel):
+    """Inclusive TCP destination port range."""
+
+    start: int = Field(..., ge=1, le=65535)
+    end: int = Field(..., ge=1, le=65535)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> "PortRange":
+        if self.start > self.end:
+            raise ValueError(f"PortRange start {self.start} is greater than end {self.end}.")
+        return self
+
+
 class NetworkRule(BaseModel):
     """
     Egress rule: allow/deny a domain, wildcard, IP/CIDR, and/or a set of TCP ports.
@@ -139,6 +155,16 @@ class NetworkRule(BaseModel):
             "Restricts this rule to specific TCP destination ports (1-65535). Omitted target with "
             "ports set applies to all destinations; a domain target with ports is rejected. TCP "
             "only, max 256 ports per rule."
+        ),
+    )
+    port_ranges: Optional[List[PortRange]] = Field(
+        None,
+        alias="portRanges",
+        min_length=1,
+        max_length=MAX_PORTS_PER_RULE,
+        description=(
+            "Inclusive TCP destination port ranges, with the same semantics as `ports`. Entries "
+            "must not overlap `ports` or each other, and count toward the same 256-entry limit."
         ),
     )
 
@@ -168,11 +194,32 @@ class NetworkRule(BaseModel):
 
     @model_validator(mode="after")
     def validate_target_or_ports(self) -> "NetworkRule":
-        if self.target is None and self.ports is None:
-            raise ValueError("NetworkRule requires target, ports, or both.")
-        if self.ports is not None and self.target is not None and not _is_ip_or_cidr(self.target):
+        port_scoped = self.ports is not None or self.port_ranges is not None
+        if self.target is None and not port_scoped:
+            raise ValueError("NetworkRule requires target, ports/portRanges, or both.")
+        if port_scoped and self.target is not None and not _is_ip_or_cidr(self.target):
             raise ValueError("NetworkRule ports are not supported for domain targets yet.")
+        self._validate_port_ranges()
         return self
+
+    def _validate_port_ranges(self) -> None:
+        # nft rejects overlapping members of one interval set.
+        if not self.port_ranges:
+            return
+        total = len(self.ports or []) + len(self.port_ranges)
+        if total > MAX_PORTS_PER_RULE:
+            raise ValueError(
+                f"NetworkRule has {total} ports and portRanges entries, max {MAX_PORTS_PER_RULE} per rule."
+            )
+        for i, rng in enumerate(self.port_ranges):
+            for port in self.ports or []:
+                if rng.start <= port <= rng.end:
+                    raise ValueError(f"NetworkRule port {port} overlaps port range {rng.start}-{rng.end}.")
+            for prev in self.port_ranges[:i]:
+                if rng.start <= prev.end and prev.start <= rng.end:
+                    raise ValueError(
+                        f"NetworkRule port range {rng.start}-{rng.end} overlaps port range {prev.start}-{prev.end}."
+                    )
 
     class Config:
         populate_by_name = True

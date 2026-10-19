@@ -56,6 +56,7 @@ from opensandbox.models.sandboxes import (
     NetworkRule,
     PeriodicLifecycleHook,
     PlatformSpec,
+    PortRange,
     SandboxImageSpec,
     SandboxLifecycle,
 )
@@ -699,6 +700,90 @@ def test_network_rule_rejects_domain_target_with_ports() -> None:
     for target in ("example.com", "*.example.com", "10.0.0.0/255.0.0.0"):
         with pytest.raises(ValidationError):
             NetworkRule(action="allow", target=target, ports=[443])
+
+
+def test_sandbox_model_converter_serializes_port_ranges() -> None:
+    req = SandboxModelConverter.to_api_create_sandbox_request(
+        spec=SandboxImageSpec("python:3.11"),
+        entrypoint=["/bin/sh"],
+        env={},
+        metadata={},
+        timeout=None,
+        resource={},
+        platform=None,
+        network_policy=NetworkPolicy(
+            defaultAction="deny",
+            egress=[
+                NetworkRule(
+                    action="deny",
+                    target="10.0.0.5",
+                    port_ranges=[PortRange(start=1, end=7999), PortRange(start=8001, end=65535)],
+                ),
+                NetworkRule(action="allow", target="10.0.0.5", ports=[8000]),
+            ],
+        ),
+        extensions={},
+        volumes=None,
+    )
+    d = req.to_dict()
+    assert d["networkPolicy"]["egress"] == [
+        {
+            "action": "deny",
+            "target": "10.0.0.5",
+            "portRanges": [{"start": 1, "end": 7999}, {"start": 8001, "end": 65535}],
+        },
+        {"action": "allow", "target": "10.0.0.5", "ports": [8000]},
+    ]
+
+    from opensandbox.api.lifecycle.models.network_policy import (
+        NetworkPolicy as ApiNetworkPolicy,
+    )
+
+    roundtripped = SandboxModelConverter.to_sandbox_network_policy(
+        ApiNetworkPolicy.from_dict(d["networkPolicy"])
+    )
+    assert roundtripped.egress[0].port_ranges == [
+        PortRange(start=1, end=7999),
+        PortRange(start=8001, end=65535),
+    ]
+    assert roundtripped.egress[1].port_ranges is None
+
+
+def test_network_rule_parses_sidecar_port_ranges_wire_shape() -> None:
+    """The egress adapter's get_policy validates the generated client's
+    camelCase dict, so the domain model must accept the `portRanges` alias."""
+    policy = NetworkPolicy.model_validate(
+        {
+            "defaultAction": "deny",
+            "egress": [{"action": "allow", "target": "", "portRanges": [{"start": 443, "end": 443}]}],
+        }
+    )
+    assert policy.egress is not None
+    assert policy.egress[0].target is None
+    assert policy.egress[0].port_ranges == [PortRange(start=443, end=443)]
+
+
+def test_network_rule_rejects_invalid_port_ranges() -> None:
+    bad = (
+        [{"start": 0, "end": 10}],
+        [{"start": 1, "end": 65536}],
+        [{"start": 20, "end": 10}],
+        [],
+        [{"start": 1, "end": 100}, {"start": 100, "end": 200}],
+    )
+    for port_ranges in bad:
+        with pytest.raises(ValidationError):
+            NetworkRule.model_validate({"action": "allow", "target": "10.0.0.5", "portRanges": port_ranges})
+    with pytest.raises(ValidationError):
+        NetworkRule(action="allow", ports=[50], port_ranges=[PortRange(start=1, end=100)])
+    with pytest.raises(ValidationError):
+        NetworkRule(action="allow", target="example.com", port_ranges=[PortRange(start=1, end=100)])
+    with pytest.raises(ValidationError):
+        NetworkRule(
+            action="allow",
+            ports=[60000],
+            port_ranges=[PortRange(start=p, end=p) for p in range(1, 512, 2)],
+        )
 
 
 def test_sandbox_model_converter_omits_empty_lifecycle() -> None:
