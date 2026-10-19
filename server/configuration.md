@@ -111,9 +111,9 @@ Example files: [`example.config.toml`](opensandbox_server/examples/example.confi
 | `api_timeout` | integer \| omitted | `null` | Docker API timeout (s); default 180 when unset. |
 | `host_ip` | string \| omitted | `null` | Host/IP used when rewriting bridge-mode endpoint URLs (e.g. `host.docker.internal`). |
 | `drop_capabilities` | list of strings | See `config.py` | Linux capabilities dropped from sandbox containers. |
-| `apparmor_profile` | string \| omitted | `null` | AppArmor profile name; empty uses Docker default. |
+| `apparmor_profile` | string \| omitted | `null` | AppArmor profile name; empty uses Docker default. Also applied to the execd cache container. |
 | `no_new_privileges` | boolean | `true` | Block privilege escalation. |
-| `seccomp_profile` | string \| omitted | `null` | Seccomp profile name or absolute path; empty uses Docker default. |
+| `seccomp_profile` | string \| omitted | `null` | Seccomp profile name or absolute path; empty uses Docker default. Also applied to the execd cache container (e.g. set `unconfined` on hosts whose default profile blocks execd). |
 | `pids_limit` | integer \| null | `4096` | Max PIDs per sandbox container; `null` disables. |
 | `sandbox_env` | table | `{}` | Env vars injected into every sandbox; create-request keys override same-named ones. |
 | `sandbox_binds` | string[] | `[]` | Bind mounts for every sandbox (`host:container[:mode]`); prepended to request-derived binds. |

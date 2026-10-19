@@ -48,8 +48,7 @@ curl http://127.0.0.1:8080/readyz   # {"ready":true,"reasons":[]}
 
 ## Choose a sink
 
-Exactly one sink target per Agent. Records land under
-`<keyPrefix>/<cluster>/<namespace>/<sandbox_id>/<pod_uid>/` as numbered generations plus a `sandbox.finalized.<revision>.json` completeness marker per stream.
+Exactly one sink target per Agent. Records land under `<keyPrefix>/<cluster>/<namespace>/<sandbox_id>/<pod_uid>/` as numbered generations plus a `sandbox.finalized.<revision>.json` completeness marker per stream.
 
 The examples below use the umbrella-chart key prefix (`opensandbox-node-agent.`); if you installed the standalone chart, drop that prefix.
 

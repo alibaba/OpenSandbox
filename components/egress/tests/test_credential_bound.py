@@ -56,6 +56,36 @@ CONTROL = "control-live-a"
 SUBJECT = "subject-live-a"
 TOKEN = "a" * 43
 
+_SYSTEM_MODULES = (
+    "mitmproxy",
+    "mitmproxy.tls",
+    "credential_bound",
+    "revision_ipc",
+    "revision_publication",
+    "revision_receiver",
+    "tls_registry",
+    "tls_decision",
+    "decision_snapshot",
+    "host_selectors",
+    "static_passthrough",
+)
+
+
+def _isolate_system_modules(test: unittest.TestCase) -> None:
+    # Discovery may already have loaded the real mitmproxy-backed H2 runtime.
+    # Give this fake-context harness a fresh, consistent dependency graph, then
+    # restore the exact cached objects so other tests retain their class identity.
+    saved = {name: sys.modules[name] for name in _SYSTEM_MODULES if name in sys.modules}
+
+    def restore() -> None:
+        for name in _SYSTEM_MODULES:
+            sys.modules.pop(name, None)
+        sys.modules.update(saved)
+
+    test.addCleanup(restore)
+    for name in _SYSTEM_MODULES:
+        sys.modules.pop(name, None)
+
 
 class _Log:
     def __init__(self) -> None:
@@ -254,16 +284,17 @@ def _sort_bindings(bindings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(bindings, key=lambda item: item["name"])
 
 
-def _system_with_live_runtime() -> tuple[Any, Any, Any]:
+def _system_with_live_runtime(static_json="[]") -> tuple[Any, Any, Any]:
     # Load the system module first: it installs the fake mitmproxy package
     # that the mitmscripts modules import at module scope.
     system = _load_system_module()
     from credential_bound import LiveRuntime
     from revision_publication import LiveReceiver
+    from static_passthrough import parse_handoff
 
     receiver = LiveReceiver(
         CONTROL, SUBJECT, max_snapshot_bytes=1 << 20, capacity=64, request_capacity=256,
-        drain_timeout_seconds=1,
+        drain_timeout_seconds=1, static_passthrough=parse_handoff(static_json),
     )
     runtime = LiveRuntime(receiver, identity=(CONTROL, SUBJECT))
     system._live_runtime = runtime
@@ -272,20 +303,13 @@ def _system_with_live_runtime() -> tuple[Any, Any, Any]:
 
 class CredentialBoundTLSTest(unittest.TestCase):
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system, self.receiver, self.runtime = _system_with_live_runtime()
         self._epoch = 0
 
     def tearDown(self) -> None:
         sys.path.remove(str(MITMSCRIPTS))
-        sys.modules.pop("credential_bound", None)
-        sys.modules.pop("revision_ipc", None)
-        sys.modules.pop("revision_publication", None)
-        sys.modules.pop("revision_receiver", None)
-        sys.modules.pop("tls_registry", None)
-        sys.modules.pop("tls_decision", None)
-        sys.modules.pop("decision_snapshot", None)
-        sys.modules.pop("host_selectors", None)
 
     def _install(self, bindings: list[dict[str, Any]], redactions: list[str], revision: int) -> None:
         self._epoch += 1
@@ -336,25 +360,40 @@ class CredentialBoundTLSTest(unittest.TestCase):
         self.assertFalse(data.ignore_connection)
         self.assertTrue(data.client_conn.closed)
 
-    def test_legacy_ignore_hosts_static_passthrough_wins(self) -> None:
-        import mitmproxy as fake_mitmproxy
-
-        fake_mitmproxy.ctx.options.ignore_hosts = ["^ignored\\."]
-
-        class _WithOptions:
-            def __enter__(self) -> None:
-                return None
-
-            def __exit__(self, *_args: object) -> bool:
-                return True
-
-        # ctx is shared per module load; patch the option directly.
-        self.system.ctx.options.ignore_hosts = ["^ignored\\."]
-        self._install([_binding("api", "api.example.com", "token-v1")], ["token-v1"], 1)
+    def test_live_never_uses_dynamic_ignore_hosts(self) -> None:
+        self.system.ctx.options.ignore_hosts = [".*"]
         data = _ClientHelloData("ignored.example.com")
         self.system.tls_clienthello(data)
-        self.assertTrue(data.ignore_connection)
-        self.assertFalse(data.client_conn.closed)
+        self.assertFalse(data.ignore_connection)
+        self.assertTrue(data.client_conn.closed)
+
+    def test_static_hook_uses_original_destination_without_snapshot_or_registry(self) -> None:
+        self.system, self.receiver, self.runtime = _system_with_live_runtime('["*.example.com"]')
+        self.assertIs(self.runtime.static_passthrough, self.receiver.static_passthrough)
+        self.assertIs(self.runtime.static_passthrough, self.receiver._publisher.static_passthrough)
+        for owner in (self.runtime, self.receiver, self.receiver._publisher):
+            with self.assertRaises(AttributeError):
+                owner.static_passthrough = ()
+        for address, expected in ((("192.0.2.1", 443), True), (("192.0.2.1", 80), False),
+                                  (("192.0.2.1", 8443), False), (None, False),
+                                  (("192.0.2.1", True), False), (("192.0.2.1", "443"), False),
+                                  (["192.0.2.1", 443], False), (("", 443), False)):
+            with self.subTest(address=address):
+                data = _ClientHelloData("A.B.Example.com.")
+                data.context.server = types.SimpleNamespace(address=address, peername=None)
+                self.system.tls_clienthello(data)
+                self.assertEqual(data.ignore_connection, expected)
+                self.assertEqual(data.client_conn.closed, not expected)
+                self.assertIsNone(self.runtime.token_for(data.client_conn))
+                self.assertEqual(len(self.runtime.registry._entries), 0)
+        for sni, extensions in ((None, []), ("a.example.com", [(0xFE0D, b"ech")])):
+            data = _ClientHelloData(sni, extensions=extensions)
+            data.context.server = types.SimpleNamespace(address=None)
+            self.system.tls_clienthello(data)
+            self.assertTrue(data.ignore_connection)
+        self.receiver.close()
+        result = self.runtime.admit_tls("a.example.com", destination_port=443)
+        self.assertEqual(result.action, "deny")
 
     def test_registry_exhaustion_closes_new_bound_connection(self) -> None:
         # capacity=64 in setUp: admit 64 connections first.
@@ -381,6 +420,7 @@ class CredentialBoundTLSTest(unittest.TestCase):
 
 class CredentialBoundRequestTest(unittest.TestCase):
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system, self.receiver, self.runtime = _system_with_live_runtime()
         self._epoch = 0
@@ -388,17 +428,6 @@ class CredentialBoundRequestTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         sys.path.remove(str(MITMSCRIPTS))
-        for module in (
-            "credential_bound",
-            "revision_ipc",
-            "revision_publication",
-            "revision_receiver",
-            "tls_registry",
-            "tls_decision",
-            "decision_snapshot",
-            "host_selectors",
-        ):
-            sys.modules.pop(module, None)
 
     def install_revision(self, revision_value: int, token: str) -> None:
         self._epoch += 1
@@ -517,6 +546,7 @@ class CredentialBoundRequestTest(unittest.TestCase):
 
 class CredentialBoundRemovalTest(unittest.TestCase):
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system, self.receiver, self.runtime = _system_with_live_runtime()
         self._epoch = 0
@@ -524,17 +554,6 @@ class CredentialBoundRemovalTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         sys.path.remove(str(MITMSCRIPTS))
-        for module in (
-            "credential_bound",
-            "revision_ipc",
-            "revision_publication",
-            "revision_receiver",
-            "tls_registry",
-            "tls_decision",
-            "decision_snapshot",
-            "host_selectors",
-        ):
-            sys.modules.pop(module, None)
 
     def install_revision(self, revision_value: int, token: str, hosts: list[str]) -> None:
         self._epoch += 1
@@ -625,6 +644,7 @@ def time_time() -> float:
 
 class CredentialBoundSnapshotValidationTest(unittest.TestCase):
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system, self.receiver, self.runtime = _system_with_live_runtime()
         self.conn = _ClientConn(sni="api.example.com")
@@ -633,17 +653,6 @@ class CredentialBoundSnapshotValidationTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         sys.path.remove(str(MITMSCRIPTS))
-        for module in (
-            "credential_bound",
-            "revision_ipc",
-            "revision_publication",
-            "revision_receiver",
-            "tls_registry",
-            "tls_decision",
-            "decision_snapshot",
-            "host_selectors",
-        ):
-            sys.modules.pop(module, None)
 
     def test_revision_disagreement_fails_closed(self) -> None:
         payload = _decision_payload(
@@ -699,6 +708,7 @@ class CredentialBoundSnapshotMemoTest(unittest.TestCase):
     """Pure synthetic snapshots and fake hooks; no receiver or IPC startup."""
 
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system = _load_system_module()
         self.conn = _ClientConn(sni="api.example.com")
@@ -709,7 +719,6 @@ class CredentialBoundSnapshotMemoTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.system.done()
         sys.path.remove(str(MITMSCRIPTS))
-        sys.modules.pop("revision_receiver", None)
 
     def _snapshot(self, revision: int = 1, *, empty: bool = False) -> Any:
         from revision_receiver import Snapshot
@@ -893,6 +902,7 @@ class CredentialBoundEnvTest(unittest.TestCase):
     """configure() validation through the real IPC server path."""
 
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         import tempfile
 
         self.directory = tempfile.TemporaryDirectory(prefix="oscb-", dir="/tmp")
@@ -910,6 +920,7 @@ class CredentialBoundEnvTest(unittest.TestCase):
         env[ENV["control"]] = CONTROL
         env[ENV["subject"]] = SUBJECT
         env[ENV["limit"]] = "1048576"
+        env["OPENSANDBOX_EGRESS_MITMPROXY_PASSTHROUGH_HOSTS"] = "[]"
         env.update(extra)
         return env
 
@@ -929,6 +940,94 @@ class CredentialBoundEnvTest(unittest.TestCase):
             system._live_runtime.close()
         finally:
             system.done()
+
+    def test_native_selectors_and_bad_handoff_never_start_ipc(self) -> None:
+        live = {LIVE_ENV["tls_capacity"]: "64", LIVE_ENV["request_capacity"]: "256",
+                LIVE_ENV["drain_timeout"]: "5"}
+        key = "OPENSANDBOX_EGRESS_MITMPROXY_PASSTHROUGH_HOSTS"
+        cases = [("ignore_hosts", [".*"], "[]", ""),
+                 ("allow_hosts", ["never-matches.example"], "[]", ""),
+                 ("ignore_hosts", [], None, ""), ("ignore_hosts", [], "null", ""),
+                 ("ignore_hosts", [], '["static.example"]', "http://proxy.example:8080")]
+        for option, value, raw, upstream in cases:
+            with self.subTest(option=option, raw=raw):
+                system = _load_system_module()
+                setattr(system.ctx.options, option, value)
+                env = self._env(live)
+                if raw is None:
+                    env.pop(key)
+                else:
+                    env[key] = raw
+                env["OPENSANDBOX_EGRESS_UPSTREAM_PROXY"] = upstream
+                with mock.patch.dict(os_environ(), env, clear=True), mock.patch("revision_ipc.Server.start") as start:
+                    with self.assertRaises(SystemExit):
+                        system.load(None)
+                    start.assert_not_called()
+                self.assertFalse(Path(self.path).exists())
+                self.assertIsNone(system._revision_server)
+                self.assertIsNone(system._live_runtime)
+
+    def test_native_selectors_rejected_on_configure_before_and_after_load(self) -> None:
+        for option in ("ignore_hosts", "allow_hosts"):
+            for value in ([".*"], ("",)):
+                for enabled in (False, True):
+                    system = _load_system_module()
+                    system._live_runtime = object() if enabled else None
+                    setattr(system.ctx.options, option, value)
+                    with mock.patch.dict(os_environ(), {LIVE_ENV["tls_capacity"]: "64"}, clear=True):
+                        with self.assertRaises(SystemExit):
+                            system.configure({option})
+                    system._live_runtime = None
+                    with mock.patch.dict(os_environ(), {}, clear=True):
+                        system.configure({option})  # Legacy options stay supported.
+
+    def test_native_empty_regex_entries_never_start_ipc_on_either_path(self) -> None:
+        system = _load_system_module()
+        import credential_bound
+        from static_passthrough import NATIVE_OPTIONS_ERROR
+
+        live = {LIVE_ENV["tls_capacity"]: "64", LIVE_ENV["request_capacity"]: "256",
+                LIVE_ENV["drain_timeout"]: "5"}
+        actions = (lambda: system.load(None),
+                   lambda: credential_bound.configure(self.path, TOKEN, CONTROL, SUBJECT, 1048576))
+        for option in ("ignore_hosts", "allow_hosts"):
+            for value in (("",), [""]):
+                with self.subTest(option=option, value=value), \
+                        mock.patch.object(system.ctx.options, option, value, create=True), \
+                        mock.patch.dict(os_environ(), self._env(live), clear=True), \
+                        mock.patch("revision_ipc.Server.start") as start:
+                    for action in actions:
+                        with self.assertRaises(SystemExit) as raised:
+                            action()
+                        self.assertEqual(str(raised.exception), NATIVE_OPTIONS_ERROR)
+                    start.assert_not_called()
+                    self.assertFalse(Path(self.path).exists())
+
+    def test_empty_or_absent_native_options_are_valid_on_both_paths(self) -> None:
+        system = _load_system_module()
+        import credential_bound
+
+        for options in (types.SimpleNamespace(),
+                        types.SimpleNamespace(ignore_hosts=(), allow_hosts=()),
+                        types.SimpleNamespace(ignore_hosts=[], allow_hosts=[])):
+            with self.subTest(options=options), mock.patch.object(system.ctx, "options", options):
+                system._validate_live_options()
+                credential_bound.validate_live_options()
+
+    def test_native_option_diagnostics_name_migration_without_values(self) -> None:
+        for option in ("ignore_hosts", "allow_hosts"):
+            system = _load_system_module()
+            setattr(system.ctx.options, option, ["private-sensitive.example"])
+            live = {LIVE_ENV["tls_capacity"]: "64", LIVE_ENV["request_capacity"]: "256",
+                    LIVE_ENV["drain_timeout"]: "5"}
+            with mock.patch.dict(os_environ(), self._env(live), clear=True):
+                for action in (lambda: system.load(None), lambda: system.configure({option})):
+                    with self.assertRaises(SystemExit) as raised:
+                        action()
+                    message = str(raised.exception)
+                    self.assertIn("OPENSANDBOX_EGRESS_MITMPROXY_PASSTHROUGH_HOSTS", message)
+                    self.assertNotIn("private-sensitive.example", message)
+                    self.assertIn("must be empty", message)
 
     def test_partial_live_bundle_fails_closed(self) -> None:
         system = _load_system_module()
@@ -971,23 +1070,13 @@ class CredentialBoundSslInsecureTest(unittest.TestCase):
     """ssl_insecure must never combine with the live admission receiver."""
 
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system, self.receiver, self.runtime = _system_with_live_runtime()
         self._epoch = 0
 
     def tearDown(self) -> None:
         sys.path.remove(str(MITMSCRIPTS))
-        for module in (
-            "credential_bound",
-            "revision_ipc",
-            "revision_publication",
-            "revision_receiver",
-            "tls_registry",
-            "tls_decision",
-            "decision_snapshot",
-            "host_selectors",
-        ):
-            sys.modules.pop(module, None)
         self.system.ctx.options.ssl_insecure = False
 
     def _install_bound(self) -> None:
@@ -1045,6 +1134,7 @@ class CredentialBoundECHTest(unittest.TestCase):
     """ECH extension handling at hook level (real-wire cases in test_ech_wire)."""
 
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system, self.receiver, self.runtime = _system_with_live_runtime()
         self._epoch = 0
@@ -1052,17 +1142,6 @@ class CredentialBoundECHTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         sys.path.remove(str(MITMSCRIPTS))
-        for module in (
-            "credential_bound",
-            "revision_ipc",
-            "revision_publication",
-            "revision_receiver",
-            "tls_registry",
-            "tls_decision",
-            "decision_snapshot",
-            "host_selectors",
-        ):
-            sys.modules.pop(module, None)
 
     def install_bound(self) -> None:
         self._epoch += 1
@@ -1112,6 +1191,7 @@ class CredentialBoundH1AuthorityTest(unittest.TestCase):
     """Strict HTTP/1 authority validation before binding selection."""
 
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system, self.receiver, self.runtime = _system_with_live_runtime()
         self._epoch = 0
@@ -1119,17 +1199,6 @@ class CredentialBoundH1AuthorityTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         sys.path.remove(str(MITMSCRIPTS))
-        for module in (
-            "credential_bound",
-            "revision_ipc",
-            "revision_publication",
-            "revision_receiver",
-            "tls_registry",
-            "tls_decision",
-            "decision_snapshot",
-            "host_selectors",
-        ):
-            sys.modules.pop(module, None)
 
     def install_bound(self) -> None:
         self._epoch += 1
@@ -1252,9 +1321,9 @@ class CredentialBoundH1AuthorityTest(unittest.TestCase):
         )
         self.assertNotIn("Authorization", flow.request.headers)
 
-    def test_http2_denies_in_live_mode(self) -> None:
-        # H2 is outside this phase's scope: the request is denied (killed,
-        # since an H2 body can stream past the local-response size limit).
+    def test_http2_without_instance_adapter_denies_in_live_mode(self) -> None:
+        # H2 cannot acquire a request without the exact raw-identity adapter.
+        # Existing H1 fixtures deliberately do not attach one.
         flow = self._admitted_flow()
         flow.request.http_version = "HTTP/2.0"
         self.system.requestheaders(flow)
@@ -1279,6 +1348,7 @@ class CredentialBoundDrainPagingTest(unittest.TestCase):
     """Drain sweeps page past _DRAIN_PAGE_LIMIT and retry failed closes."""
 
     def setUp(self) -> None:
+        _isolate_system_modules(self)
         sys.path.insert(0, str(MITMSCRIPTS))
         self.system = _load_system_module()
         from credential_bound import LiveRuntime
@@ -1295,17 +1365,6 @@ class CredentialBoundDrainPagingTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         sys.path.remove(str(MITMSCRIPTS))
-        for module in (
-            "credential_bound",
-            "revision_ipc",
-            "revision_publication",
-            "revision_receiver",
-            "tls_registry",
-            "tls_decision",
-            "decision_snapshot",
-            "host_selectors",
-        ):
-            sys.modules.pop(module, None)
 
     def install_bound(self) -> None:
         self._epoch += 1
@@ -1453,6 +1512,38 @@ class CredentialBoundDrainPagingTest(unittest.TestCase):
         self.assertEqual(4, self.runtime.registry.count)
         self.system.client_disconnected(pairs[0][1])
         self.assertEqual(3, self.runtime.registry.count)
+
+
+class CredentialBoundModuleIsolationTest(unittest.TestCase):
+    def test_restores_preloaded_modules_even_when_setup_fails(self) -> None:
+        saved = {name: types.ModuleType(name) for name in _SYSTEM_MODULES}
+        with mock.patch.dict(sys.modules, saved):
+            case = unittest.TestCase()
+            try:
+                with self.assertRaisesRegex(RuntimeError, "synthetic setup failure"):
+                    _isolate_system_modules(case)
+                    for name in _SYSTEM_MODULES:
+                        self.assertNotIn(name, sys.modules)
+                        sys.modules[name] = types.ModuleType(name)
+                    raise RuntimeError("synthetic setup failure")
+            finally:
+                case.doCleanups()
+            for name, module in saved.items():
+                self.assertIs(sys.modules[name], module)
+
+    def test_removes_modules_that_were_not_preloaded(self) -> None:
+        with mock.patch.dict(sys.modules):
+            for name in _SYSTEM_MODULES:
+                sys.modules.pop(name, None)
+            case = unittest.TestCase()
+            try:
+                _isolate_system_modules(case)
+                for name in _SYSTEM_MODULES:
+                    sys.modules[name] = types.ModuleType(name)
+            finally:
+                case.doCleanups()
+            for name in _SYSTEM_MODULES:
+                self.assertNotIn(name, sys.modules)
 
 
 if __name__ == "__main__":

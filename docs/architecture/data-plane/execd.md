@@ -80,39 +80,15 @@ One API covers the whole filesystem tree: stream files in and out, list and sear
 
 ### Filesystem execution identity
 
-On Linux, a trusted backend can select the identity performing ordinary file
-operations by prefixing the file API path with `/v1/filesystem/{uid}/{gid}`.
-Both IDs are required decimal integers between 0 and 4294967294. For example,
-`GET /v1/filesystem/1001/1001/files/download?path=/workspace/session-b/result.txt`
-reads the file as UID 1001 with primary GID 1001. The same prefix supports all
-ordinary file and directory operations, including uploads, metadata, search,
-replacement, rename, deletion, and permission changes.
+On Linux, a trusted backend can select the identity performing ordinary file operations by prefixing the file API path with `/v1/filesystem/{uid}/{gid}`. Both IDs are required decimal integers between 0 and 4294967294. For example, `GET /v1/filesystem/1001/1001/files/download?path=/workspace/session-b/result.txt` reads the file as UID 1001 with primary GID 1001. The same prefix supports all ordinary file and directory operations, including uploads, metadata, search, replacement, rename, deletion, and permission changes.
 
-Each request runs in a separate worker process with the selected credentials.
-Supplementary groups come from the selected user's system account; an unknown
-numeric UID has no supplementary groups. Account or group lookup failures other
-than an unknown UID fail the request. The worker never inherits Execd's
-supplementary groups as a fallback. Execd must have permission to establish the
-requested credentials; failure does not retry the operation as Execd.
-Relative paths resolve from `/`, and `~` uses the selected account's home
-directory (or `/` for an unknown UID). Workers do not inherit Execd's environment.
+Each request runs in a separate worker process with the selected credentials. Supplementary groups come from the selected user's system account; an unknown numeric UID has no supplementary groups. Account or group lookup failures other than an unknown UID fail the request. The worker never inherits Execd's supplementary groups as a fallback. Execd must have permission to establish the requested credentials; failure does not retry the operation as Execd. Relative paths resolve from `/`, and `~` uses the selected account's home directory (or `/` for an unknown UID). Workers do not inherit Execd's environment.
 
-Linux checks path traversal, parent directory access, file access, and metadata
-changes under that identity. Upload `owner`, `group`, and `mode` remain target
-metadata and cannot grant the worker additional privileges. Requests with
-different identities can run concurrently without changing Execd's credentials.
+Linux checks path traversal, parent directory access, file access, and metadata changes under that identity. Upload `owner`, `group`, and `mode` remain target metadata and cannot grant the worker additional privileges. Requests with different identities can run concurrently without changing Execd's credentials.
 
-To share a sandbox between conversations, provision a separate user and workspace
-for each conversation, allow the desired read access, and reserve directory write
-access for the owner. Deletion and rename permissions depend on the parent
-directory, so read-only file modes alone are insufficient. Keep sandbox API
-credentials in the trusted backend that selects these identities. This feature
-does not provide a separate mount namespace or a tenant isolation boundary.
+To share a sandbox between conversations, provision a separate user and workspace for each conversation, allow the desired read access, and reserve directory write access for the owner. Deletion and rename permissions depend on the parent directory, so read-only file modes alone are insufficient. Keep sandbox API credentials in the trusted backend that selects these identities. This feature does not provide a separate mount namespace or a tenant isolation boundary.
 
-The existing `/files` and `/directories` routes retain their default identity.
-The identity-prefixed routes require Linux and a supporting Execd version. Older
-servers return an unsupported route instead of silently ignoring identity
-options; clients must not fall back to the unprefixed routes.
+The existing `/files` and `/directories` routes retain their default identity. The identity-prefixed routes require Linux and a supporting Execd version. Older servers return an unsupported route instead of silently ignoring identity options; clients must not fall back to the unprefixed routes.
 
 ## Isolated sessions
 

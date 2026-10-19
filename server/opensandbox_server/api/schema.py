@@ -19,10 +19,11 @@ This module defines data models based on the OpenAPI specification
 for request/response validation and serialization.
 """
 
+import ipaddress
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, PrivateAttr, RootModel, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, RootModel, field_validator, model_validator
 
 from opensandbox_server.constants import (
     IDLE_TIMEOUT_MAX_SECONDS,
@@ -31,6 +32,28 @@ from opensandbox_server.constants import (
     PROBE_TIMEOUT_MIN_SECONDS,
 )
 from opensandbox_server.constants import OPENSANDBOX_LIFECYCLE
+
+
+def _is_ip_or_cidr(value: str) -> bool:
+    """
+    Mirror policy.go's target-kind detection (netip.ParseAddr/ParsePrefix): a
+    target is IP/CIDR if it parses as either; anything else (including
+    domains) is not.
+    """
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        pass
+    # netip.ParsePrefix rejects netmask notation and scoped prefixes; the
+    # sidecar would classify both as domains, so mirror it.
+    if "/" in value and (not value.partition("/")[2].isdigit() or "%" in value):
+        return False
+    try:
+        ipaddress.ip_network(value, strict=False)
+        return True
+    except ValueError:
+        return False
 
 # ============================================================================
 # Image Specification
@@ -94,15 +117,60 @@ class ResourceLimits(RootModel[Dict[str, str]]):
 
 class NetworkRule(BaseModel):
     """
-    Egress rule: allow/deny a specific domain or wildcard.
+    Egress rule: allow/deny a domain, wildcard, IP/CIDR, and/or a set of TCP ports.
     """
 
     action: str = Field(..., description="Whether to allow or deny matching targets (allow | deny).")
-    target: str = Field(
-        ...,
-        description="FQDN or wildcard domain (e.g., 'example.com', '*.example.com').",
-        min_length=1,
+    target: Optional[str] = Field(
+        None,
+        description=(
+            "FQDN, wildcard domain (e.g., 'example.com', '*.example.com'), IP address, or CIDR. "
+            "May be omitted when `ports` is set; otherwise required. Blank normalizes to omitted "
+            "(the sidecar marshals port-only rules as \"target\": \"\" on read-back)."
+        ),
     )
+    ports: Optional[List[int]] = Field(
+        None,
+        min_length=1,
+        max_length=256,
+        description=(
+            "Restricts this rule to specific TCP destination ports (1-65535). Omitted target with "
+            "ports set applies to all destinations; a domain target with ports is rejected. TCP "
+            "only, max 256 ports per rule."
+        ),
+    )
+
+    @field_validator("target")
+    @classmethod
+    def normalize_target(cls, target: Optional[str]) -> Optional[str]:
+        # Mirror policy.go: trim before classifying.
+        if target is None:
+            return None
+        target = target.strip()
+        return target or None
+
+    @field_validator("ports")
+    @classmethod
+    def validate_ports(cls, ports: Optional[List[int]]) -> Optional[List[int]]:
+        # Mirrors policy.go's normalizePorts.
+        if ports is None:
+            return ports
+        seen: set[int] = set()
+        for port in ports:
+            if port < 1 or port > 65535:
+                raise ValueError(f"NetworkRule port {port} out of range 1-65535.")
+            if port in seen:
+                raise ValueError(f"NetworkRule has duplicate port {port}.")
+            seen.add(port)
+        return ports
+
+    @model_validator(mode="after")
+    def validate_target_or_ports(self) -> "NetworkRule":
+        if self.target is None and self.ports is None:
+            raise ValueError("NetworkRule requires target, ports, or both.")
+        if self.ports is not None and self.target is not None and not _is_ip_or_cidr(self.target):
+            raise ValueError("NetworkRule ports are not supported for domain targets yet.")
+        return self
 
     class Config:
         populate_by_name = True
@@ -140,6 +208,284 @@ class CredentialProxyConfig(BaseModel):
             "transparent MITM unless this option is set."
         ),
     )
+
+    class Config:
+        populate_by_name = True
+
+
+# ============================================================================
+# Credential Vault (server-routed; mirrors specs/egress-api.yaml sidecar shapes)
+# ============================================================================
+
+
+class InlineCredentialSource(BaseModel):
+    type: Literal["inline"] = Field(..., description="Credential source type.")
+    value: str = Field(
+        ...,
+        description="Write-only credential value; never returned on any read.",
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class Credential(BaseModel):
+    name: str = Field(..., min_length=1, description="Unique credential name.")
+    source: InlineCredentialSource = Field(..., description="Credential value source.")
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CredentialSubstitution(BaseModel):
+    """Literal case-sensitive placeholder replacement for selected request surfaces."""
+
+    credential: str = Field(..., min_length=1, description="Credential name used as the replacement value.")
+    placeholder: str = Field(..., min_length=1, description="Literal placeholder to replace.")
+    in_: list[Literal["path", "query", "header", "body"]] = Field(
+        ...,
+        min_length=1,
+        alias="in",
+        description="Request surfaces where the placeholder may be replaced.",
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CustomHeaderEntry(BaseModel):
+    name: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$",
+        description="Header name injected by the binding.",
+    )
+    credential: str = Field(..., min_length=1, description="Credential name whose value is injected.")
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class BearerCredentialAuth(BaseModel):
+    type: Literal["bearer"]
+    credential: str = Field(..., min_length=1, description="Credential name whose value becomes the bearer token.")
+    substitutions: Optional[list[CredentialSubstitution]] = Field(
+        default=None, description="Optional placeholder substitutions scoped to this binding."
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class BasicCredentialAuth(BaseModel):
+    type: Literal["basic"]
+    credential: str = Field(
+        ...,
+        min_length=1,
+        description="Credential containing pre-encoded base64(username:password).",
+    )
+    substitutions: Optional[list[CredentialSubstitution]] = None
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class ApiKeyCredentialAuth(BaseModel):
+    type: Literal["apiKey"]
+    name: str = Field(
+        ...,
+        pattern=r"^[A-Za-z0-9!#$%&'*+\-.^_`|~]+$",
+        description="Header name receiving the API key.",
+    )
+    credential: str = Field(..., min_length=1, description="Credential name whose value is the API key.")
+    substitutions: Optional[list[CredentialSubstitution]] = None
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CustomHeadersCredentialAuth(BaseModel):
+    type: Literal["customHeaders"]
+    headers: list[CustomHeaderEntry] = Field(..., min_length=1, description="Headers injected by this binding.")
+    substitutions: Optional[list[CredentialSubstitution]] = None
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class PassthroughCredentialAuth(BaseModel):
+    type: Literal["passthrough"]
+    substitutions: Optional[list[CredentialSubstitution]] = None
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+CredentialAuth = Annotated[
+    BearerCredentialAuth
+    | BasicCredentialAuth
+    | ApiKeyCredentialAuth
+    | CustomHeadersCredentialAuth
+    | PassthroughCredentialAuth,
+    Field(discriminator="type"),
+]
+
+
+class CredentialMatch(BaseModel):
+    schemes: Optional[list[Literal["https", "http"]]] = Field(
+        default=None, description="Schemes the binding matches; defaults to [https]."
+    )
+    ports: Optional[list[int]] = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated. Port is derived from scheme; other values are rejected with a validation error.",
+    )
+    hosts: list[str] = Field(..., min_length=1, description="Host patterns (FQDN or wildcard domain).")
+    methods: Optional[list[str]] = Field(
+        default=None,
+        description="HTTP methods the binding matches; defaults to GET, POST, PUT, PATCH, DELETE.",
+    )
+    paths: Optional[list[str]] = Field(
+        default=None, description="Path patterns the binding matches; defaults to ['/*']."
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CredentialBinding(BaseModel):
+    name: str = Field(..., min_length=1, description="Unique binding name.")
+    match: CredentialMatch = Field(..., description="Request matcher for credential injection.")
+    auth: CredentialAuth = Field(..., description="Injected credential shape.")
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CredentialVaultCreateRequest(BaseModel):
+    """Create the initial Credential Vault revision (create-only)."""
+
+    credentials: list[Credential] = Field(..., description="Initial credentials (inline sources).")
+    bindings: list[CredentialBinding] = Field(..., description="Initial credential bindings.")
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CredentialMutationSet(BaseModel):
+    add: Optional[list[Credential]] = Field(
+        default=None, description="Credentials to create; fails when a name already exists."
+    )
+    replace: Optional[list[Credential]] = Field(
+        default=None, description="Credentials to replace; fails when a name does not exist."
+    )
+    delete: Optional[list[str]] = Field(
+        default=None, description="Credential names to remove; fails when a name does not exist."
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CredentialBindingMutationSet(BaseModel):
+    add: Optional[list[CredentialBinding]] = Field(
+        default=None, description="Bindings to create; fails when a name already exists."
+    )
+    replace: Optional[list[CredentialBinding]] = Field(
+        default=None, description="Bindings to replace; fails when a name does not exist."
+    )
+    delete: Optional[list[str]] = Field(
+        default=None, description="Binding names to remove; fails when a name does not exist."
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CredentialVaultMutationRequest(BaseModel):
+    """Atomically mutate credentials and bindings (server-side merge commit)."""
+
+    expected_revision: Optional[int] = Field(
+        default=None,
+        alias="expectedRevision",
+        description="Optional optimistic concurrency guard; mismatch fails with 412.",
+    )
+    credentials: Optional[CredentialMutationSet] = Field(
+        default=None, description="Credential mutations (add/replace/delete)."
+    )
+    bindings: Optional[CredentialBindingMutationSet] = Field(
+        default=None, description="Binding mutations (add/replace/delete)."
+    )
+
+    class Config:
+        populate_by_name = True
+        extra = "forbid"
+
+
+class CredentialAuthMetadata(BaseModel):
+    type: str = Field(..., description="Injected credential shape type.")
+    name: Optional[str] = Field(
+        default=None, description="Header name, for the apiKey shape only."
+    )
+
+    class Config:
+        populate_by_name = True
+
+
+class CredentialMetadata(BaseModel):
+    name: str
+    source_type: str = Field(..., alias="sourceType", description="Credential source type.")
+    revision: int
+
+    class Config:
+        populate_by_name = True
+
+
+class CredentialBindingMetadata(BaseModel):
+    name: str
+    revision: int
+    match: Optional[CredentialMatch] = None
+    auth: Optional[CredentialAuthMetadata] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class CredentialVaultState(BaseModel):
+    """Sanitized Credential Vault state — credential values never appear."""
+
+    revision: int
+    credentials: list[CredentialMetadata]
+    bindings: list[CredentialBindingMetadata]
+
+    class Config:
+        populate_by_name = True
+
+
+class CredentialListResponse(BaseModel):
+    revision: int
+    credentials: list[CredentialMetadata]
+
+    class Config:
+        populate_by_name = True
+
+
+class CredentialBindingListResponse(BaseModel):
+    revision: int
+    bindings: list[CredentialBindingMetadata]
 
     class Config:
         populate_by_name = True

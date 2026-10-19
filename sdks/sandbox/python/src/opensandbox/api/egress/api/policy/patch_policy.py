@@ -101,7 +101,9 @@ def sync_detailed(
     This endpoint uses merge semantics:
     - Existing rules remain unless overridden by incoming rules.
     - Incoming rules are applied with higher priority than existing rules.
-    - If multiple incoming rules refer to the same `target`, the first one wins.
+    - If multiple incoming rules resolve to the same match scope (same
+      `target` and the same set of `ports`), the first one wins; rules
+      that differ in `target` or in `ports` coexist.
 
     Args:
         body (list[NetworkRule]):
@@ -137,7 +139,9 @@ def sync(
     This endpoint uses merge semantics:
     - Existing rules remain unless overridden by incoming rules.
     - Incoming rules are applied with higher priority than existing rules.
-    - If multiple incoming rules refer to the same `target`, the first one wins.
+    - If multiple incoming rules resolve to the same match scope (same
+      `target` and the same set of `ports`), the first one wins; rules
+      that differ in `target` or in `ports` coexist.
 
     Args:
         body (list[NetworkRule]):
@@ -168,7 +172,9 @@ async def asyncio_detailed(
     This endpoint uses merge semantics:
     - Existing rules remain unless overridden by incoming rules.
     - Incoming rules are applied with higher priority than existing rules.
-    - If multiple incoming rules refer to the same `target`, the first one wins.
+    - If multiple incoming rules resolve to the same match scope (same
+      `target` and the same set of `ports`), the first one wins; rules
+      that differ in `target` or in `ports` coexist.
 
     Args:
         body (list[NetworkRule]):
@@ -202,7 +208,9 @@ async def asyncio(
     This endpoint uses merge semantics:
     - Existing rules remain unless overridden by incoming rules.
     - Incoming rules are applied with higher priority than existing rules.
-    - If multiple incoming rules refer to the same `target`, the first one wins.
+    - If multiple incoming rules resolve to the same match scope (same
+      `target` and the same set of `ports`), the first one wins; rules
+      that differ in `target` or in `ports` coexist.
 
     Args:
         body (list[NetworkRule]):

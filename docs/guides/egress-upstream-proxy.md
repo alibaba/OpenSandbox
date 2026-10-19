@@ -95,6 +95,8 @@ Compatibility reflects current upstream `main` only:
 | WebSocket (WSS) | Unverified | Dedicated chained-proxy WSS compatibility is not independently verified. |
 | IPv6 Egress | Incomplete | Incomplete Kubernetes dual-stack support; `egress.disable_ipv6` defaults to `true`. |
 
+The default-off experimental OSEP-0023 revision runtime has a narrower live HTTP/2 admission boundary: only the fixed-dependency direct/lazy path is wired, and configured chained upstream proxies remain rejected for that path. Existing HTTP/1 and legacy proxy behavior in the matrix above is unchanged. See the [HTTP/2 integration boundary](/architecture/network/osep-0023-h2-integration) for drain semantics and incomplete client-migration and Linux acceptance.
+
 ## Deployment, rotation, and rollback
 
 - **Application Bounds**: Proxy configuration changes apply only to newly created sandboxes. Existing sidecars retain their creation-time proxy settings.

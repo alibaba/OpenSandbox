@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
+	"github.com/alibaba/opensandbox/egress/pkg/mitmpassthrough"
 	"github.com/stretchr/testify/require"
 )
 
@@ -383,4 +384,48 @@ func TestRevisionIPCConfigRejectsSslInsecureOnlyForLiveAdmission(t *testing.T) {
 	legacy.LiveAdmission = false
 	require.NoError(t, validateRevisionIPCConfig(&legacy))
 	require.NoError(t, validateRevisionIPCConfig(nil))
+}
+
+func TestStaticPassthroughControlledHandoff(t *testing.T) {
+	name := constants.EnvMitmproxyPassthroughHosts
+	base := []string{name + `=["inherited.example"]`, name + `=["duplicate.example"]`, "KEEP=yes"}
+	for _, cfg := range []*RevisionIPCConfig{nil, {}, {LiveAdmission: true}} {
+		env := buildMitmdumpEnv(base, "/tmp", cfg)
+		count := 0
+		for _, entry := range env {
+			if strings.HasPrefix(entry, name+"=") {
+				count++
+				require.Equal(t, name+"=[]", entry)
+			}
+		}
+		if cfg != nil && cfg.LiveAdmission {
+			require.Equal(t, 1, count)
+		} else {
+			require.Zero(t, count)
+		}
+		require.Contains(t, env, "KEEP=yes")
+	}
+}
+
+func TestStaticPassthroughNonemptyHandoffAndChainedProxy(t *testing.T) {
+	frozen, err := mitmpassthrough.Parse(`["B.example.com","a.example.com"]`, true)
+	require.NoError(t, err)
+	cfg := RevisionIPCConfig{SocketPath: "/tmp/receiver.sock", SessionToken: strings.Repeat("a", 32), ControlGeneration: "control", SubjectGeneration: "subject", MaxSnapshotBytes: 4096, LiveAdmission: true, TLSCapacity: 64, RequestCapacity: 256, DrainTimeoutSeconds: 30, StaticPassthrough: frozen}
+	name := constants.EnvMitmproxyPassthroughHosts
+	for i := 0; i < 2; i++ {
+		env := buildMitmdumpEnv([]string{name + "=bad", name + "=bad-again"}, "/tmp", &cfg)
+		count := 0
+		for _, value := range env {
+			if strings.HasPrefix(value, name+"=") {
+				count++
+				require.Equal(t, name+`=["a.example.com","b.example.com"]`, value)
+			}
+		}
+		require.Equal(t, 1, count)
+	}
+	t.Setenv(constants.EnvUpstreamProxy, "http://proxy.example:3128")
+	t.Setenv(constants.EnvMitmproxySslInsecure, "")
+	require.Error(t, validateRevisionIPCConfig(&cfg))
+	cfg.StaticPassthrough = mitmpassthrough.Config{}
+	require.NoError(t, validateRevisionIPCConfig(&cfg))
 }

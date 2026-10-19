@@ -34,6 +34,7 @@ import (
 	"github.com/alibaba/opensandbox/egress/pkg/constants"
 	"github.com/alibaba/opensandbox/egress/pkg/credentialvault"
 	"github.com/alibaba/opensandbox/egress/pkg/log"
+	"github.com/alibaba/opensandbox/egress/pkg/mitmpassthrough"
 	"github.com/alibaba/opensandbox/egress/pkg/mitmproxy"
 	"github.com/alibaba/opensandbox/egress/pkg/nftables"
 	"github.com/alibaba/opensandbox/egress/pkg/policy"
@@ -79,6 +80,18 @@ func startPolicyServer(
 	mitmGate *mitmproxy.HealthGate,
 	quarantineOwners ...*revisionQuarantine,
 ) (*http.Server, *policyServer, error) {
+	liveRevision := constants.IsTruthy(os.Getenv(constants.EnvExperimentalRevisionRuntime))
+	rawPassthrough, passthroughPresent := os.LookupEnv(constants.EnvMitmproxyPassthroughHosts)
+	if passthroughPresent && !liveRevision {
+		return nil, nil, fmt.Errorf("%s requires %s: %w", constants.EnvMitmproxyPassthroughHosts, constants.EnvExperimentalRevisionRuntime, mitmpassthrough.ErrInvalid)
+	}
+	staticPassthrough, err := mitmpassthrough.Parse(rawPassthrough, passthroughPresent)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !staticPassthrough.Empty() && strings.TrimSpace(os.Getenv(constants.EnvUpstreamProxy)) != "" {
+		return nil, nil, fmt.Errorf("%s is incompatible with %s: %w", constants.EnvMitmproxyPassthroughHosts, constants.EnvUpstreamProxy, mitmpassthrough.ErrInvalid)
+	}
 	maxEgressRules := maxEgressRulesFromEnv()
 	if maxEgressRules > 0 {
 		log.Infof("policy API: max egress rules per policy (POST/PATCH) = %d (set %s=0 to disable)", maxEgressRules, constants.EnvMaxEgressRules)
@@ -86,24 +99,30 @@ func startPolicyServer(
 
 	mux := http.NewServeMux()
 	handler := &policyServer{
-		proxy:            proxy,
-		nft:              nft,
-		token:            token,
-		enforcementMode:  enforcementMode,
-		nameserverIPs:    nameserverIPs,
-		policyFile:       strings.TrimSpace(policyFile),
-		maxEgressRules:   maxEgressRules,
-		alwaysLoader:     policy.NewAlwaysRuleLoader(time.Minute),
-		stopAlwaysReload: make(chan struct{}),
-		mitmGate:         mitmGate,
+		proxy:             proxy,
+		staticPassthrough: staticPassthrough,
+		liveRevision:      liveRevision,
+		nft:               nft,
+		token:             token,
+		enforcementMode:   enforcementMode,
+		nameserverIPs:     nameserverIPs,
+		policyFile:        strings.TrimSpace(policyFile),
+		maxEgressRules:    maxEgressRules,
+		alwaysLoader:      policy.NewAlwaysRuleLoader(time.Minute),
+		stopAlwaysReload:  make(chan struct{}),
+		mitmGate:          mitmGate,
 	}
 	if len(quarantineOwners) > 0 {
 		handler.quarantine = quarantineOwners[0]
 	}
-	handler.credentialVault = credentialvault.NewStore(mitmGate, func() bool { return strings.TrimSpace(token) != "" })
+	if liveRevision {
+		handler.credentialVault = credentialvault.NewLiveStore(mitmGate, func() bool { return strings.TrimSpace(token) != "" }, staticPassthrough)
+	} else {
+		handler.credentialVault = credentialvault.NewStore(mitmGate, func() bool { return strings.TrimSpace(token) != "" })
+	}
 	handler.credentialVaultRequireTLS = constants.IsTruthy(os.Getenv(constants.EnvCredentialVaultRequireTLS))
 	handler.setAlwaysRules(alwaysDeny, alwaysAllow)
-	if constants.IsTruthy(os.Getenv(constants.EnvExperimentalRevisionRuntime)) {
+	if liveRevision {
 		handler.mu.Lock()
 		current := proxy.CurrentPolicy()
 		if current == nil {
@@ -183,15 +202,17 @@ func startPolicyServer(
 }
 
 type policyServer struct {
-	proxy           policyUpdater
-	nft             nftApplier
-	server          *http.Server
-	token           string
-	enforcementMode string
-	nameserverIPs   []netip.Addr
-	policyFile      string     // optional persistence; experimental owner uses atomicPolicyFile
-	maxEgressRules  int        // 0 = unlimited; cap len(Egress) for POST/PATCH
-	mu              sync.Mutex // serializes /policy updates with effective-policy reads and Vault writes
+	staticPassthrough mitmpassthrough.Config
+	liveRevision      bool
+	proxy             policyUpdater
+	nft               nftApplier
+	server            *http.Server
+	token             string
+	enforcementMode   string
+	nameserverIPs     []netip.Addr
+	policyFile        string     // optional persistence; experimental owner uses atomicPolicyFile
+	maxEgressRules    int        // 0 = unlimited; cap len(Egress) for POST/PATCH
+	mu                sync.Mutex // serializes /policy updates with effective-policy reads and Vault writes
 
 	alwaysLoader     alwaysRulesLoader
 	stopAlwaysReload chan struct{}

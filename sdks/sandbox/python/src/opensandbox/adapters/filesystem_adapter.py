@@ -548,19 +548,14 @@ class FilesystemAdapter(Filesystem):
     async def replace_contents(self, entries: list[ContentReplaceEntry]) -> None:
         """Replace file contents using auto-generated API."""
         try:
-            from json import JSONDecodeError
-
             from opensandbox.api.execd.api.filesystem import replace_content
 
             client = await self._get_client()
-            try:
-                response_obj = await replace_content.asyncio_detailed(
-                    client=client,
-                    body=FilesystemModelConverter.to_api_replace_content_body(entries),
-                )
-                handle_api_error(response_obj, "Replace contents")
-            except JSONDecodeError:
-                pass
+            response_obj = await replace_content.asyncio_detailed(
+                client=client,
+                body=FilesystemModelConverter.to_api_replace_content_body(entries),
+            )
+            handle_api_error(response_obj, "Replace contents")
 
         except Exception as e:
             logger.error("Failed to replace contents", exc_info=e)

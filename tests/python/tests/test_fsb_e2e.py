@@ -517,6 +517,67 @@ class TestFsbE2E:
         finally:
             await _kill_and_wait_gone(manager, sandbox.id)
 
+    @pytest.mark.timeout(600)
+    async def test_02b_network_policy_rejects_port_scoped_rules(
+        self, manager: SandboxManager, connection_config
+    ) -> None:
+        """Fast-sandbox enforcement does not cover port-scoped rules yet, so
+        the server must fail closed with 400 on both the create-carried
+        policy and the PATCH route instead of silently installing rules the
+        fastlet nft path would ignore (a dropped deny rule fails open)."""
+        logger.info("TEST 2b: fsb networkPolicy rejects port-scoped rules")
+
+        # Create-carried policy: a rule that pairs ports with an IP target is
+        # rejected the same as a port-only rule.
+        with pytest.raises(SandboxApiException) as create_exc:
+            await Sandbox.create_from_template(
+                FSB_TEMPLATE_ID,
+                timeout=timedelta(hours=1),
+                ready_timeout=COLD_READY_TIMEOUT,
+                connection_config=connection_config,
+                metadata={"origin": "fsb-port-scope-reject"},
+                network_policy=NetworkPolicy(
+                    defaultAction="deny",
+                    egress=[NetworkRule(action="allow", target="1.1.1.1", ports=[443])],
+                ),
+            )
+        assert create_exc.value.status_code == 400, (
+            "fsb create with a port-scoped rule must be rejected with 400"
+        )
+
+        # A policy-only sandbox so the PATCH rejection can be asserted
+        # against a live fsb sandbox; killed in the finally block.
+        sandbox = await Sandbox.create_from_template(
+            FSB_TEMPLATE_ID,
+            timeout=timedelta(hours=1),
+            ready_timeout=COLD_READY_TIMEOUT,
+            connection_config=connection_config,
+            metadata={"origin": "fsb-port-scope-reject"},
+            network_policy=NetworkPolicy(
+                defaultAction="deny",
+                egress=[NetworkRule(action="allow", target="example.com")],
+            ),
+        )
+        try:
+            for rules in (
+                [NetworkRule(action="deny", ports=[25])],
+                [NetworkRule(action="allow", target="1.1.1.1", ports=[443])],
+            ):
+                with pytest.raises(SandboxApiException) as patch_exc:
+                    await sandbox.patch_egress_rules(rules)
+                assert patch_exc.value.status_code == 400, (
+                    "fsb PATCH with a port-scoped rule must be rejected with 400"
+                )
+
+            # The rejected PATCHes must not have mutated the policy.
+            policy = await _get_policy_tolerant(sandbox)
+            assert policy is not None
+            assert all(rule.ports is None for rule in policy.egress or [])
+            assert any(rule.target == "example.com" for rule in policy.egress or [])
+            logger.info("fsb port-scoped rejection verified (create + PATCH)")
+        finally:
+            await _kill_and_wait_gone(manager, sandbox.id)
+
     @pytest.mark.timeout(1200)
     async def test_03_pause_resume_round_trip(
         self, manager: SandboxManager, connection_config

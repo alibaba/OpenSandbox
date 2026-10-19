@@ -32,6 +32,7 @@
   <!-- Expose internals to test project and code interpreter SDK -->
   <ItemGroup>
     <InternalsVisibleTo Include="OpenSandbox.Tests" />
+    <InternalsVisibleTo Include="OpenSandbox.NetStandardCompat.Tests" />
     <InternalsVisibleTo Include="OpenSandbox.CodeInterpreter" />
     <InternalsVisibleTo Include="OpenSandbox.CodeInterpreter.Tests" />
   </ItemGroup>

@@ -20,9 +20,9 @@
 //
 //	fastlet action protocol --(SET_BINDING / LIFECYCLE_HOOK / REMOVE_BINDING)-->
 //	  fastSandboxPolicyServer:18080 (loopback): subject lifecycle + deny-first nft,
-//	  policy activation on sandbox.data-plane-ready
-//	proxy route --(UID header)--> fastSandboxPolicyServer:18080 (loopback)
-//	  policy/credential pushes routed per subject (vault memory-only)
+//	  policy activation on sandbox.data-plane-ready (the binding input is the
+//	  policy; the credential vault is egress-held behind the FastPath
+//	  handler-relay, OSEP-0022)
 //	DNS: one shared proxy, per-query policy via source IP dispatch
 //
 // Subject lifecycle is driven entirely by the Fastlet (Sandbox Actions
@@ -62,12 +62,6 @@ import (
 // on the shared dnsproxy.
 func runFastSandboxProfile(ctx context.Context, upstreamSpec *mitmproxy.UpstreamProxySpec) {
 	log.Infof("egress profile: fast-sandbox (multi-sandbox control plane)")
-
-	// Erase any stale mitmproxy CA left on the shared volume (root and the
-	// fast-sandbox mount subdir) by a previous egress generation, so a sandbox's
-	// bootstrap can never install a CA this generation no longer signs with
-	// (upstream issue #1370, fast-sandbox issue #19).
-	mitmproxy.PurgeStaleExportedCA()
 
 	otelShutdown, err := telemetry.Init(ctx)
 	if err != nil {
@@ -115,18 +109,47 @@ func runFastSandboxProfile(ctx context.Context, upstreamSpec *mitmproxy.Upstream
 	log.Infof("fast-sandbox nftables table reset (stale rules cleared)")
 
 	reg := subject.NewRegistry(alwaysDeny, alwaysAllow)
-	pendingTTL := time.Duration(constants.EnvIntOrDefault(constants.EnvPendingPushTTL, constants.DefaultPendingPushTTL)) * time.Second
-	fastSandboxSrv := newFastSandboxPolicyServer(ctx, reg, podNft, pendingTTL)
+	fastSandboxSrv := newFastSandboxPolicyServer(ctx, reg, podNft)
+
+	// Vault persistence (OSEP-0022 stage 2): per-subject vault files under
+	// OPENSANDBOX_EGRESS_VAULT_DIR so an egress restart recovers locally at
+	// SET_BINDING replay. Empty/unset keeps the vault memory-only. Fail fast
+	// on an unusable directory: silently serving memory-only would break the
+	// acked ⇒ durable contract.
+	if vaultDir := strings.TrimSpace(os.Getenv(constants.EnvEgressVaultDir)); vaultDir != "" {
+		vp, err := newVaultPersistence(vaultDir)
+		if err != nil {
+			log.Fatalf("fast-sandbox vault persistence: %v", err)
+		}
+		fastSandboxSrv.SetVaultFiles(vp)
+		log.Infof("fast-sandbox vault persistence enabled at %s (one file per subject, atomic commit protocol)", vaultDir)
+	}
 
 	// Shared mitmproxy (OSEP-0022 A1): one mitmdump in the Pod netns serving
 	// every sandbox. Started BEFORE the HTTP listener so subjects can never
 	// register against a missing interceptor (fail-closed registration); the
 	// per-subject prerouting DNAT is installed by the fast-sandbox server on
-	// registration. A disabled MITM skips the whole block.
+	// registration. A disabled MITM skips the whole block. A pinned-CA failure
+	// is fail-closed scoped to the addon: mitmdump refuses to start, the down
+	// state is surfaced on /healthz and the actions status payload, and the
+	// rest of egress keeps serving policy actions.
 	mitmGate := mitmproxy.NewHealthGate()
 	var fastSandboxMitm *mitmTransparent
-	if mitm, err := startFastSandboxMitmproxyIfEnabled(); err != nil {
-		log.Fatalf("fast-sandbox mitmproxy start failed: %v", err)
+	if mitm, err := startFastSandboxMitmproxyIfEnabled(mitmGate); err != nil {
+		if _, down := mitmGate.DownReason(); !down {
+			// Infrastructure failure (mitmdump binary, user, listen port):
+			// fatal, as before. Only pinned-CA failures are scoped to the
+			// addon-down path below (OSEP-0022).
+			log.Fatalf("fast-sandbox mitmproxy start failed: %v", err)
+		}
+		log.Errorf("fast-sandbox mitmproxy addon down (policy actions keep serving): %v", err)
+		fastSandboxSrv.SetMitm(mitmGate, 0, nil)
+		// MITM down: clear any interception table a previous generation
+		// (running with MITM up) may have left — stale rules would keep
+		// DNATing 80/443 to a now-unserved mitmproxy port (blackhole).
+		if err := iptables.RemoveMitmRedirects(); err != nil {
+			log.Warnf("fast-sandbox mitmproxy: stale redirect table cleanup failed (ignored): %v", err)
+		}
 	} else if mitm != nil {
 		fastSandboxMitm = mitm
 		dports, err := constants.BuildMitmproxyPorts(os.Getenv(constants.EnvMitmproxyExtraPorts))
@@ -207,15 +230,23 @@ func runFastSandboxProfile(ctx context.Context, upstreamSpec *mitmproxy.Upstream
 	log.Infof("fast-sandbox dns proxy listening on %s", dnsAddr)
 
 	httpAddr := envOrDefault(constants.EnvEgressHTTPAddr, constants.DefaultFastSandboxServerAddr)
-	srv := &http.Server{Addr: httpAddr, Handler: fastSandboxSrv.Handler()}
+	// Explicit read timeouts bound a stalled client; the vault relay parses
+	// bodies before taking the server lock, so these are the second line of
+	// defense (all bodies are bounded and small, handlers are quick).
+	srv := &http.Server{
+		Addr:              httpAddr,
+		Handler:           fastSandboxSrv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
 	safego.Go(func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("fast-sandbox policy server error: %v", err)
 		}
 	})
-	log.Infof("fast-sandbox policy server listening on %s (actions + UID-header routed)", httpAddr)
-
-	fastSandboxSrv.StartPendingSweep(ctx)
+	log.Infof("fast-sandbox policy server listening on %s (Sandbox Actions Handler)", httpAddr)
 
 	// Per-subject connection refresh: active TCP connections keep their
 	// dynamic leases alive (bucketed by source IP from the Pod netns
@@ -255,7 +286,23 @@ func runFastSandboxProfile(ctx context.Context, upstreamSpec *mitmproxy.Upstream
 func fastSandboxNftOptions(upstreamSpec *mitmproxy.UpstreamProxySpec) fastsandboxnft.Options {
 	opts := fastSandboxDoHOptions()
 	opts.UpstreamProxy = fastSandboxUpstreamEndpoint(upstreamSpec)
+	opts.PortFloorDenyRanges = fastSandboxPortFloor()
 	return opts
+}
+
+// fastSandboxPortFloor reads reachable.ports.cap and returns its complement
+// as the profile-wide drop intervals. Load errors fail closed (the floor is
+// a platform control, not an optimization); a missing or empty file means
+// no floor.
+func fastSandboxPortFloor() []policy.PortRange {
+	allowed, err := policy.LoadReachablePortsCap()
+	if err != nil {
+		log.Fatalf("failed to load %s: %v", "reachable.ports.cap", err)
+	}
+	if len(allowed) == 0 {
+		return nil
+	}
+	return policy.DenyRangesForAllowedPorts(allowed)
 }
 
 // fastSandboxUpstreamEndpoint translates the validated chained upstream

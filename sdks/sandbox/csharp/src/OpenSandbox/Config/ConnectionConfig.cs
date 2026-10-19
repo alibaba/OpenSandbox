@@ -363,6 +363,25 @@ public sealed class ConnectionConfig
     /// <returns>A new configured HttpClient instance for SSE.</returns>
     public HttpClient CreateSseHttpClient()
     {
+        return CreateStreamingHttpClient();
+    }
+
+    /// <summary>
+    /// Creates a new HttpClient configured for file uploads and downloads.
+    /// This client has no whole-call timeout, because a file transfer can legitimately take
+    /// longer than <see cref="RequestTimeoutSeconds"/> (large files, slow links) and must not
+    /// be aborted while it is still making progress. Callers can bound a transfer through the
+    /// per-call CancellationToken; the SDK still bounds how long a transfer waits for
+    /// response headers, and never bounds a body that keeps making progress.
+    /// </summary>
+    /// <returns>A new configured HttpClient instance for file transfers.</returns>
+    public HttpClient CreateTransferHttpClient()
+    {
+        return CreateStreamingHttpClient();
+    }
+
+    private HttpClient CreateStreamingHttpClient()
+    {
         var handler = new HttpClientHandler
         {
             AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate

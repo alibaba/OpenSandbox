@@ -359,6 +359,21 @@ class DockerContainerOpsMixin:
             resolved[key] = parsed
         return resolved["memory"], resolved["cpu"], resolved["gpu"]
 
+    def _profile_security_opts(self) -> list[str]:
+        """Return the ``security_opt`` entries for the configured AppArmor/seccomp profiles.
+
+        Shared by every container the server creates (sandbox containers and the execd
+        cache container) so that ``[docker] apparmor_profile`` / ``seccomp_profile`` apply
+        uniformly.
+        """
+        docker_cfg = self.app_config.docker
+        opts: list[str] = []
+        if docker_cfg.apparmor_profile:
+            opts.append(f"apparmor={docker_cfg.apparmor_profile}")
+        if docker_cfg.seccomp_profile:
+            opts.append(f"seccomp={docker_cfg.seccomp_profile}")
+        return opts
+
     def _base_host_config_kwargs(
         self,
         mem_limit: Optional[int],
@@ -371,10 +386,7 @@ class DockerContainerOpsMixin:
         docker_cfg = self.app_config.docker
         if docker_cfg.no_new_privileges:
             security_opts.append("no-new-privileges=true")
-        if docker_cfg.apparmor_profile:
-            security_opts.append(f"apparmor={docker_cfg.apparmor_profile}")
-        if docker_cfg.seccomp_profile:
-            security_opts.append(f"seccomp={docker_cfg.seccomp_profile}")
+        security_opts.extend(self._profile_security_opts())
         if security_opts:
             host_config_kwargs["security_opt"] = security_opts
         if docker_cfg.drop_capabilities:

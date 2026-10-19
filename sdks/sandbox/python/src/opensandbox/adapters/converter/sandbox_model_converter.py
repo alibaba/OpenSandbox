@@ -355,7 +355,9 @@ class SandboxModelConverter:
             api_egress = [
                 ApiNetworkRule(
                     action=NetworkRuleAction(rule.action),
-                    target=rule.target,
+                    # None here means UNSET (omit the field) in the client.
+                    target=rule.target if rule.target is not None else UNSET,
+                    ports=rule.ports if rule.ports is not None else UNSET,
                 )
                 for rule in network_policy.egress
             ]
@@ -460,11 +462,13 @@ class SandboxModelConverter:
         from opensandbox.api.lifecycle.models.network_rule_action import (
             NetworkRuleAction,
         )
+        from opensandbox.api.lifecycle.types import UNSET
 
         return [
             ApiNetworkRule(
                 action=NetworkRuleAction(rule.action),
-                target=rule.target,
+                target=rule.target if rule.target is not None else UNSET,
+                ports=rule.ports if rule.ports is not None else UNSET,
             )
             for rule in rules
         ]
@@ -495,7 +499,10 @@ class SandboxModelConverter:
                         Literal["allow", "deny"],
                         getattr(rule.action, "value", rule.action),
                     ),
-                    target=rule.target,
+                    # UNSET means "absent from the JSON body"; the domain
+                    # model spells that as None.
+                    target=rule.target if not isinstance(rule.target, Unset) else None,
+                    ports=rule.ports if not isinstance(rule.ports, Unset) else None,
                 )
                 for rule in api_policy.egress
             ]

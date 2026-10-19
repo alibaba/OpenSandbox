@@ -314,8 +314,13 @@ func buildRuleset(p *policy.NetworkPolicy, opts Options) (string, error) {
 			}
 		}
 	}
+	portDeny, portAllow := p.PortScopedRules()
+	// Port-scoped deny before every allow; port-scoped allow after the
+	// plain deny set, before the dynamic/plain allow sets.
+	writePortScopedRules(&b, portDeny, "drop")
 	fmt.Fprintf(&b, "add rule inet %s %s ip daddr @%s drop\n", tableName, chainName, denyV4Set)
 	fmt.Fprintf(&b, "add rule inet %s %s ip6 daddr @%s drop\n", tableName, chainName, denyV6Set)
+	writePortScopedRules(&b, portAllow, "accept")
 	fmt.Fprintf(&b, "add rule inet %s %s ip daddr @%s accept\n", tableName, chainName, dynAllowV4Set)
 	fmt.Fprintf(&b, "add rule inet %s %s ip6 daddr @%s accept\n", tableName, chainName, dynAllowV6Set)
 	fmt.Fprintf(&b, "add rule inet %s %s ip daddr @%s accept\n", tableName, chainName, allowV4Set)
@@ -332,6 +337,32 @@ func writeElements(b *strings.Builder, setName string, elems []string) {
 		return
 	}
 	fmt.Fprintf(b, "add element inet %s %s { %s }\n", tableName, setName, strings.Join(elems, ", "))
+}
+
+// writePortScopedRules emits one "add rule" line per rule, preserving
+// declaration order. A rule with no Target applies to all destinations
+// (bare "tcp dport { ... }" covers both address families); the dport set
+// mixes ports and lo-hi intervals. TCP only.
+func writePortScopedRules(b *strings.Builder, rules []policy.PortScopedRule, verb string) {
+	for _, r := range rules {
+		members := make([]string, 0, len(r.Ports)+len(r.Ranges))
+		for _, port := range r.Ports {
+			members = append(members, fmt.Sprintf("%d", port))
+		}
+		for _, rg := range r.Ranges {
+			members = append(members, fmt.Sprintf("%d-%d", rg.Lo, rg.Hi))
+		}
+		portsClause := strings.Join(members, ", ")
+		if r.Target == "" {
+			fmt.Fprintf(b, "add rule inet %s %s tcp dport { %s } %s\n", tableName, chainName, portsClause, verb)
+			continue
+		}
+		daddr := "ip daddr"
+		if r.IsV6 {
+			daddr = "ip6 daddr"
+		}
+		fmt.Fprintf(b, "add rule inet %s %s %s %s tcp dport { %s } %s\n", tableName, chainName, daddr, r.Target, portsClause, verb)
+	}
 }
 
 func defaultRunner(ctx context.Context, script string) ([]byte, error) {

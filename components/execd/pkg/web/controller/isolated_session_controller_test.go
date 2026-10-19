@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -425,6 +426,69 @@ func TestBackgroundRun_Endpoints404(t *testing.T) {
 	NewIsolatedSessionController(logsCtx).GetRunLogs()
 	if logsRecorder.Code != http.StatusNotFound {
 		t.Errorf("logs unknown run: status = %d, want 404", logsRecorder.Code)
+	}
+}
+
+func TestIsolatedDownloadFile_RangeHeader(t *testing.T) {
+	previousRunner := isolatedRunner
+	runner, err := runtime.NewIsolatedRunner(
+		runtime.NewController("", ""),
+		lifecycleTestIsolator{},
+		isolation.Config{
+			UpperRoot:     t.TempDir(),
+			UpperMaxBytes: 8 << 30,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolatedRunner = runner
+	t.Cleanup(func() {
+		runner.StopGC()
+		isolatedRunner = previousRunner
+	})
+
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "data.bin"), []byte("0123456789"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := runner.CreateIsolatedSession(&runtime.IsolatedSessionOptions{
+		WorkspacePath: workspace,
+		WorkspaceMode: "rw",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runner.DeleteIsolatedSession(sessionID) })
+
+	tests := []struct {
+		rangeHeader string
+		wantStatus  int
+		wantLength  string
+		wantType    string
+	}{
+		{rangeHeader: "bytes=2-5", wantStatus: http.StatusPartialContent, wantLength: "4", wantType: "application/octet-stream"},
+		// A malformed Range gets a JSON 416 without the file's Content-Length.
+		{rangeHeader: "bytes=abc", wantStatus: http.StatusRequestedRangeNotSatisfiable, wantLength: "", wantType: "application/json; charset=utf-8"},
+	}
+	for _, tt := range tests {
+		ctx, rec := newTestContext(http.MethodGet, "/v1/isolated/session/"+sessionID+"/files/download?path=data.bin", nil)
+		ctx.Params = gin.Params{{Key: "sessionId", Value: sessionID}}
+		ctx.Request.Header.Set("Range", tt.rangeHeader)
+		NewIsolatedSessionController(ctx).DownloadFile()
+
+		if rec.Code != tt.wantStatus {
+			t.Fatalf("Range %q: status = %d, want %d; body: %s", tt.rangeHeader, rec.Code, tt.wantStatus, rec.Body.String())
+		}
+		if got := rec.Header().Get("Content-Length"); got != tt.wantLength {
+			t.Errorf("Range %q: Content-Length = %q, want %q", tt.rangeHeader, got, tt.wantLength)
+		}
+		if got := rec.Header().Get("Content-Type"); got != tt.wantType {
+			t.Errorf("Range %q: Content-Type = %q, want %q", tt.rangeHeader, got, tt.wantType)
+		}
 	}
 }
 

@@ -23,8 +23,7 @@ Install-Package Alibaba.OpenSandbox
 
 ## Quick Start
 
-Run this example in a .NET 8+ console project with implicit usings enabled. It
-creates a sandbox, runs a shell command, and releases remote and local resources.
+Run this example in a .NET 8+ console project with implicit usings enabled. It creates a sandbox, runs a shell command, and releases remote and local resources.
 
 ::: tip
 Before running this example, ensure the OpenSandbox service is running. See the [Getting Started](/getting-started/) guide for startup instructions.
@@ -105,12 +104,7 @@ The Server validates `TimeoutSeconds`; `PreStart` accepts 1–10800 seconds, whi
 
 ### Idle policy (auto-pause and wake-on-access)
 
-`SandboxLifecycle.IdlePolicy` (OSEP-0024, fast-sandbox only) tells the control
-plane to auto-pause the sandbox after `IdleTimeoutSeconds` (30–86400) of
-continuously idle ingress-observed traffic, and to wake it on the next request.
-It is control-plane state: it never reaches the guest, is accepted in template
-mode (`SandboxCreateFromTemplateOptions.IdlePolicy`), and is rejected by
-non-fast-sandbox backends. Omitting it preserves non-automated behavior exactly.
+`SandboxLifecycle.IdlePolicy` (OSEP-0024, fast-sandbox only) tells the control plane to auto-pause the sandbox after `IdleTimeoutSeconds` (30–86400) of continuously idle ingress-observed traffic, and to wake it on the next request. It is control-plane state: it never reaches the guest, is accepted in template mode (`SandboxCreateFromTemplateOptions.IdlePolicy`), and is rejected by non-fast-sandbox backends. Omitting it preserves non-automated behavior exactly.
 
 ```csharp
 var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
@@ -129,33 +123,15 @@ var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
 });
 ```
 
-`ActiveProbe` lets the application veto a pause while real work runs without
-producing ingress traffic: declare an endpoint answering
-`{"active": bool, "message"?: string}` and the server polls it when the sandbox
-is otherwise idle; a busy answer resets the idle clock. Invalid policies fail
-fast client-side through `IdlePolicy.Validate()`.
+`ActiveProbe` lets the application veto a pause while real work runs without producing ingress traffic: declare an endpoint answering `{"active": bool, "message"?: string}` and the server polls it when the sandbox is otherwise idle; a busy answer resets the idle clock. Invalid policies fail fast client-side through `IdlePolicy.Validate()`.
 
 ### Wake retry
 
-A request to a paused sandbox may arrive while its restore is still in
-progress. The gateway answers `503` with the `OpenSandbox-Wake: expired`
-header; the HTTP transport recognizes it and resends the original request
-after the `Retry-After` delay (safe for any method — the marker proves the
-request was never forwarded). The wake budget defaults to 5 attempts / 60
-seconds across all wake cycles; when it is exhausted the SDK throws
-`SandboxWakeTimeoutException` (carrying `Attempts` and `Waited`) while the
-server-side resume continues in the background. Bare `503` responses follow
-the existing rules untouched. Tune it on the connection config:
-`WakeRetryEnabled` (default true), `WakeMaxAttempts` (5),
-`WakeOverallDeadlineSeconds` (60, non-positive for unbounded). SSE and file
-stream transports bypass wake retry.
+A request to a paused sandbox may arrive while its restore is still in progress. The gateway answers `503` with the `OpenSandbox-Wake: expired` header; the HTTP transport recognizes it and resends the original request after the `Retry-After` delay (safe for any method — the marker proves the request was never forwarded). The wake budget defaults to 5 attempts / 60 seconds across all wake cycles; when it is exhausted the SDK throws `SandboxWakeTimeoutException` (carrying `Attempts` and `Waited`) while the server-side resume continues in the background. Bare `503` responses follow the existing rules untouched. Tune it on the connection config: `WakeRetryEnabled` (default true), `WakeMaxAttempts` (5), `WakeOverallDeadlineSeconds` (60, non-positive for unbounded). SSE and file stream transports bypass wake retry.
 
 ## Usage Examples
 
-The snippets below use `config` and a live `sandbox` from the quick start. Run
-them before its cleanup block, with `using OpenSandbox.Models;` at the top of the
-file. Creation examples are alternatives. `await using` releases local clients;
-call `KillAsync()` to terminate sandboxes that are no longer needed.
+The snippets below use `config` and a live `sandbox` from the quick start. Run them before its cleanup block, with `using OpenSandbox.Models;` at the top of the file. Creation examples are alternatives. `await using` releases local clients; call `KillAsync()` to terminate sandboxes that are no longer needed.
 
 ### 1. Lifecycle Management
 
@@ -200,8 +176,7 @@ var manual = await Sandbox.CreateAsync(new SandboxCreateOptions
 ```
 
 ::: info
-`TimeoutSeconds = null` uses the default TTL. Set `ManualCleanup = true` to disable
-automatic expiration.
+`TimeoutSeconds = null` uses the default TTL. Set `ManualCleanup = true` to disable automatic expiration.
 :::
 
 ### Connect to an Existing Sandbox
@@ -218,9 +193,7 @@ await using var connected = await Sandbox.ConnectAsync(new SandboxConnectOptions
 
 ### 2. Custom Health Check
 
-Resolving an endpoint confirms that a route exists; it does not confirm that the
-application on that port is healthy. For service readiness, make a bounded request
-to the application's health endpoint and include the returned endpoint headers.
+Resolving an endpoint confirms that a route exists; it does not confirm that the application on that port is healthy. For service readiness, make a bounded request to the application's health endpoint and include the returned endpoint headers.
 
 Define custom logic to determine whether the sandbox is ready/healthy.
 
@@ -268,8 +241,7 @@ await sandbox.Commands.RunAsync(
 );
 ```
 
-To execute a native program without shell parsing, pass an argument list. On Linux,
-this example prints literal `$HOME` and keeps `hello world` as one argument:
+To execute a native program without shell parsing, pass an argument list. On Linux, this example prints literal `$HOME` and keeps `hello world` as one argument:
 
 ```csharp
 await sandbox.Commands.RunAsync(new[] { "printf", "%s\n", "$HOME", "hello world" });
@@ -338,22 +310,15 @@ finally
 
 #### Persistent environment variables
 
-Set environment variables that the runtime injects into every subsequent command
-and session — without hand-writing shell escaping against the sandbox env file.
+Set environment variables that the runtime injects into every subsequent command and session — without hand-writing shell escaping against the sandbox env file.
 
 ```csharp
 await sandbox.Commands.SetEnvAsync("MY_TOKEN", "it's a safe value");
 ```
 
-Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values without a single quote are
-stored verbatim; values containing a single quote use the env file's
-double-quoted form, in which shell-style `$NAME` sequences may be expanded
-when the runtime loads the file. The env file is append-only: the
-last write for a key wins. Throws `SandboxException` if the sandbox fails to
-persist the variable.
+Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values without a single quote are stored verbatim; values containing a single quote use the env file's double-quoted form, in which shell-style `$NAME` sequences may be expanded when the runtime loads the file. The env file is append-only: the last write for a key wins. Throws `SandboxException` if the sandbox fails to persist the variable.
 
-For filesystem/process isolation within a sandbox, see
-[Isolation Sessions](/guides/isolation-sessions). These are separate from Bash sessions.
+For filesystem/process isolation within a sandbox, see [Isolation Sessions](/guides/isolation-sessions). These are separate from Bash sessions.
 
 ### 4. File Operations
 
@@ -386,8 +351,7 @@ await sandbox.Files.DeleteFilesAsync(new[] { "/tmp/demo/hello.txt" });
 await sandbox.Files.DeleteDirectoriesAsync(new[] { "/tmp/demo" });
 ```
 
-For binary data, use `byte[]` or `Stream` in `WriteEntry.Data`, and download with
-`ReadBytesAsync()` or `ReadBytesStreamAsync()`. Read options support partial downloads.
+For binary data, use `byte[]` or `Stream` in `WriteEntry.Data`, and download with `ReadBytesAsync()` or `ReadBytesStreamAsync()`. Read options support partial downloads.
 
 #### File operations with an explicit identity
 
@@ -397,17 +361,9 @@ Bind a filesystem client to a Linux UID and GID:
 var files = sandbox.FilesWithIdentity(1001, 2000);
 ```
 
-The bound client exposes the usual file operations and shares the sandbox
-connection, authentication, and endpoint routing headers. The existing file
-client retains its default identity. Select the UID/GID separately for command
-execution.
+The bound client exposes the usual file operations and shares the sandbox connection, authentication, and endpoint routing headers. The existing file client retains its default identity. Select the UID/GID separately for command execution.
 
-This requires Linux and an Execd version that supports filesystem execution
-identity. Unsupported servers return an error; requests never fall back to the
-default filesystem routes. Keep sandbox credentials and identity selection in
-the trusted backend. Linux filesystem permissions apply; this feature does not
-create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd)
-for permission and workspace provisioning details.
+This requires Linux and an Execd version that supports filesystem execution identity. Unsupported servers return an error; requests never fall back to the default filesystem routes. Keep sandbox credentials and identity selection in the trusted backend. Linux filesystem permissions apply; this feature does not create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd) for permission and workspace provisioning details.
 
 ### 5. Endpoints
 
@@ -421,9 +377,7 @@ var url = await sandbox.GetEndpointUrlAsync(44772);
 Console.WriteLine(url); // e.g., "http://localhost:44772"
 ```
 
-Forward `endpoint.Headers` on requests to the sandbox service, including any
-secure-access credentials. The health-check example above shows an HTTP request
-to an application listening on the target port.
+Forward `endpoint.Headers` on requests to the sandbox service, including any secure-access credentials. The health-check example above shows an HTTP request to an application listening on the target port.
 
 ### 6. Sandbox Management (Admin)
 
@@ -450,8 +404,7 @@ foreach (var s in list.Items)
 
 ### Resource metrics
 
-Read current sandbox resource usage with `await sandbox.Metrics.GetMetricsAsync()`.
-This is separate from [SDK creation telemetry](/sdks/observability#creation-metrics).
+Read current sandbox resource usage with `await sandbox.Metrics.GetMetricsAsync()`. This is separate from [SDK creation telemetry](/sdks/observability#creation-metrics).
 
 ## Snapshots, templates, and metadata
 
@@ -464,15 +417,9 @@ This is separate from [SDK creation telemetry](/sdks/observability#creation-metr
 | Create from a published template | `Sandbox.CreateFromTemplateAsync` with `SandboxCreateFromTemplateOptions` |
 | Patch metadata | `sandbox.PatchMetadataAsync` or `manager.PatchSandboxMetadataAsync` |
 
-Poll snapshot status before restoring. Template builds are asynchronous; wait
-for `Succeeded` before use. Template-backed creation requires `TimeoutSeconds`
-and inherits workload configuration from the published template.
-Metadata patch values add/replace keys; `null` deletes a key.
-See the [lifecycle contract](/api/#1-sandbox-lifecycle-yml) for backend constraints.
+Poll snapshot status before restoring. Template builds are asynchronous; wait for `Succeeded` before use. Template-backed creation requires `TimeoutSeconds` and inherits workload configuration from the published template. Metadata patch values add/replace keys; `null` deletes a key. See the [lifecycle contract](/api/#1-sandbox-lifecycle-yml) for backend constraints.
 
-Snapshot support depends on the runtime and server configuration. Renew the source
-sandbox first if its remaining TTL may expire during snapshot creation. This example
-waits up to 15 minutes and retains the snapshot for reuse:
+Snapshot support depends on the runtime and server configuration. Renew the source sandbox first if its remaining TTL may expire during snapshot creation. This example waits up to 15 minutes and retains the snapshot for reuse:
 
 ```csharp
 await using var manager = SandboxManager.Create(new SandboxManagerOptions { ConnectionConfig = config });
@@ -524,6 +471,14 @@ await sandbox.PatchMetadataAsync(new Dictionary<string, string?>
 
 The `ConnectionConfig` class manages API server connection settings.
 
+::: info Transfer timeouts
+`RequestTimeoutSeconds` bounds the wait for response headers, not the whole transfer. The deadline starts with the request (so the connect phase is bounded too), is cleared while the request body is written, and is re-armed once the body of the current hop has been sent: a healthy upload or download that keeps making progress is never cut off by it. A download that gets no response headers, or an upload that gets none within the timeout after its body has been sent, fails with a `TaskCanceledException` carrying a `TimeoutException` instead of hanging (the Go SDK's `ResponseHeaderTimeout` contract); a caller cancellation still surfaces as an `OperationCanceledException` with the caller's token. All non-transfer calls keep the whole-call request timeout.
+
+A request body that never finishes being sent, and a response body that stops making progress after the headers have arrived, are bounded only by the `CancellationToken` you pass to the call, so pass one when a transfer needs an end-to-end cap. The upload guarantee assumes the HTTP handler streams the request body (for example `SocketsHttpHandler` on .NET 5+): the default `HttpClientHandler` on .NET Framework buffers the request body before sending it, so a slow but progressing upload can still count against the header timeout there.
+
+A 307/308 redirect resends the request body once per hop. A seekable upload source (`FileStream`, `MemoryStream`, ...) is rewound and resent in full; a non-seekable source cannot be replayed without buffering it, so the upload fails with a clear error instead of sending an empty file part to the redirected endpoint.
+:::
+
 | Parameter | Description | Default | Environment Variable |
 | --- | --- | --- | --- |
 | `ApiKey` | API key for authentication | Optional | `OPEN_SANDBOX_API_KEY` |
@@ -564,11 +519,7 @@ var config2 = new ConnectionConfig(new ConnectionConfigOptions
 
 ### 2. SDK Logging
 
-The SDK uses `Microsoft.Extensions.Logging` abstractions. `SdkDiagnosticsOptions`
-configures local logging; it does not retrieve remote sandbox diagnostic logs or
-events. Use the [CLI or HTTP API](/api/#diagnostics) for those. Client Pool and
-built-in pool warmup tracing are not currently available in C#.
-Install `Microsoft.Extensions.Logging.Console` to use `AddConsole()` below.
+The SDK uses `Microsoft.Extensions.Logging` abstractions. `SdkDiagnosticsOptions` configures local logging; it does not retrieve remote sandbox diagnostic logs or events. Use the [CLI or HTTP API](/api/#diagnostics) for those. Client Pool and built-in pool warmup tracing are not currently available in C#. Install `Microsoft.Extensions.Logging.Console` to use `AddConsole()` below.
 
 ```csharp
 using Microsoft.Extensions.Logging;
@@ -650,11 +601,7 @@ var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
 
 ### 4. Runtime Egress Policy Updates
 
-Runtime egress policy routing depends on the sandbox origin.
-For image-backed sandboxes, the SDK resolves port `18080` and calls the sidecar
-`/policy` API. For template-backed sandboxes (including restored template snapshots),
-the SDK detects `OPEN-SANDBOX-ORIGIN: template` and routes policy operations through
-the lifecycle `/sandboxes/{sandboxId}/networkpolicy` API.
+Runtime egress policy routing depends on the sandbox origin. For image-backed sandboxes, the SDK resolves port `18080` and calls the sidecar `/policy` API. For template-backed sandboxes (including restored template snapshots), the SDK detects `OPEN-SANDBOX-ORIGIN: template` and routes policy operations through the lifecycle `/sandboxes/{sandboxId}/networkpolicy` API.
 
 Patch uses merge semantics:
 - Incoming rules take priority over existing rules with the same `Target`.
@@ -674,11 +621,7 @@ await sandbox.PatchEgressRulesAsync(new[]
 
 ### 5. Credential Vault
 
-Credential Vault requires a sandbox-side egress service and is unavailable for
-template-backed sandboxes. It injects outbound credentials from the egress sidecar while
-keeping real secrets out of sandbox environment variables, commands, files, and
-logs. Create the sandbox with `CredentialProxy` enabled, then write credentials
-and bindings through `sandbox.CredentialVault` or the sandbox helper methods.
+Credential Vault requires a sandbox-side egress service and is unavailable for template-backed sandboxes. It injects outbound credentials from the egress sidecar while keeping real secrets out of sandbox environment variables, commands, files, and logs. Create the sandbox with `CredentialProxy` enabled, then write credentials and bindings through `sandbox.CredentialVault` or the sandbox helper methods.
 
 ```csharp
 var sandbox = await Sandbox.CreateAsync(new SandboxCreateOptions
@@ -726,12 +669,11 @@ await sandbox.CreateCredentialVaultAsync(
     });
 ```
 
-See [Credential Vault](/guides/credential-vault) for auth types, binding
-guidance, and Git/curl examples.
+See [Credential Vault](/guides/credential-vault) for auth types, binding guidance, and Git/curl examples.
 
 ### 6. Timeout and Retry Behavior
 
-- `ConnectionConfig.RequestTimeoutSeconds` controls timeout for SDK HTTP calls.
+- `ConnectionConfig.RequestTimeoutSeconds` controls timeout for SDK HTTP calls. File uploads and downloads are exempt while they keep making progress; the timeout still bounds the connect phase and how long a transfer waits for response headers before failing.
 - `RunCommandOptions.TimeoutSeconds` controls command execution timeout for command runs.
 - `RunInSessionOptions.TimeoutSeconds` controls command execution timeout for session runs.
 - `SandboxCreateOptions.TimeoutSeconds` controls sandbox server-side TTL.
@@ -750,8 +692,7 @@ await using var sandbox = await Sandbox.CreateAsync(options);
 
 ## Error Handling
 
-The SDK throws `SandboxException` (and derived exceptions such as `SandboxApiException`,
-`SandboxReadyTimeoutException`, and `InvalidArgumentException`) when operations fail.
+The SDK throws `SandboxException` (and derived exceptions such as `SandboxApiException`, `SandboxReadyTimeoutException`, and `InvalidArgumentException`) when operations fail.
 
 ```csharp
 try

@@ -121,6 +121,9 @@ internal object SandboxModelConverter {
                             NetworkRule.Action.DENY -> ApiNetworkRule.Action.deny
                         },
                     target = rule.target,
+                    // The generated model maps the spec's uniqueItems array to Set;
+                    // the domain model keeps List so declaration order survives.
+                    ports = rule.ports?.toSet(),
                 )
             }
         return ApiNetworkPolicy(
@@ -135,7 +138,7 @@ internal object SandboxModelConverter {
                 NetworkRule.Action.ALLOW -> ApiNetworkRule.Action.allow
                 NetworkRule.Action.DENY -> ApiNetworkRule.Action.deny
             }
-        return ApiNetworkRule(action = action, target = this.target)
+        return ApiNetworkRule(action = action, target = this.target, ports = this.ports?.toSet())
     }
 
     fun NetworkRule.toApiEgressNetworkRule(): ApiEgressNetworkRule {
@@ -144,7 +147,7 @@ internal object SandboxModelConverter {
                 NetworkRule.Action.ALLOW -> ApiEgressNetworkRule.Action.allow
                 NetworkRule.Action.DENY -> ApiEgressNetworkRule.Action.deny
             }
-        return ApiEgressNetworkRule(action = action, target = this.target)
+        return ApiEgressNetworkRule(action = action, target = this.target, ports = this.ports?.toSet())
     }
 
     fun ApiNetworkRule.toDomainNetworkRule(): NetworkRule {
@@ -153,11 +156,7 @@ internal object SandboxModelConverter {
                 ApiNetworkRule.Action.allow -> NetworkRule.Action.ALLOW
                 ApiNetworkRule.Action.deny -> NetworkRule.Action.DENY
             }
-        return NetworkRule
-            .builder()
-            .action(action)
-            .target(this.target)
-            .build()
+        return toDomainRule(action, this.target, this.ports)
     }
 
     fun ApiNetworkPolicy.toDomainNetworkPolicy(): NetworkPolicy {
@@ -179,11 +178,26 @@ internal object SandboxModelConverter {
                 ApiEgressNetworkRule.Action.allow -> NetworkRule.Action.ALLOW
                 ApiEgressNetworkRule.Action.deny -> NetworkRule.Action.DENY
             }
-        return NetworkRule
-            .builder()
-            .action(action)
-            .target(this.target)
-            .build()
+        return toDomainRule(action, this.target, this.ports)
+    }
+
+    /**
+     * Shared read-back normalization for both lifecycle and egress rules:
+     * the sidecar emits "target": "" for port-only rules and an empty ports
+     * list is contract-invalid, so both are treated as absent. Builds via
+     * the lenient [NetworkRule.fromWire] — read-back must not run write-path
+     * validation.
+     */
+    private fun toDomainRule(
+        action: NetworkRule.Action,
+        target: String?,
+        ports: Set<Int>?,
+    ): NetworkRule {
+        return NetworkRule.fromWire(
+            action,
+            target?.takeIf { it.isNotBlank() },
+            ports?.takeIf { it.isNotEmpty() }?.toList(),
+        )
     }
 
     fun ApiEgressNetworkPolicy.toDomainEgressNetworkPolicy(): NetworkPolicy {

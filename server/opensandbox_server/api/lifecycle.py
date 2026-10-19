@@ -237,7 +237,10 @@ def patch_sandbox_metadata(
     """
     Patch sandbox metadata via JSON Merge Patch (RFC 7396).
     Non-null adds/replaces, null deletes, absent keeps.
-    Read-modify-write without optimistic locking — concurrent PATCH may drop updates.
+    Docker: concurrent PATCH requests apply one after another, last write wins per key.
+    Kubernetes: a PATCH writes back the whole label set it read, with no resourceVersion check,
+    so a concurrent PATCH may revert a value another PATCH changed or resurrect a key it deleted;
+    a PATCH on an fsb sandbox sends only its own keys, fenced by the sandbox UID and generation.
     """
     return sandbox_service.patch_sandbox_metadata(sandbox_id, patch)
 
@@ -246,7 +249,7 @@ def patch_sandbox_metadata(
     "/sandboxes/{sandbox_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
-        204: {"description": "Sandbox successfully deleted"},
+        204: {"description": "Sandbox deletion accepted. Runtime cleanup may still be in progress."},
         401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
         403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
         404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
@@ -261,7 +264,9 @@ def delete_sandbox(
     """
     Delete a sandbox.
 
-    Terminates sandbox execution. The sandbox will transition through Stopping state to Terminated.
+    Request sandbox deletion. Runtime cleanup may continue after the response.
+    For Kubernetes BatchSandbox workloads, queries report Stopping during cleanup
+    and return 404 once the resource is removed.
 
     Args:
         sandbox_id: Unique sandbox identifier

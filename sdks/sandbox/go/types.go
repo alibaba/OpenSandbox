@@ -139,9 +139,18 @@ type NetworkPolicy struct {
 }
 
 // NetworkRule defines a single egress allow/deny rule.
+//
+// Target may be a FQDN, wildcard domain ("*.example.com"), IP, or CIDR. It
+// may be omitted when Ports is set: the rule then scopes by TCP destination
+// port alone, across all IPv4/IPv6 destinations. A domain Target combined
+// with Ports is rejected by the server/sidecar (domain rules have no port
+// dimension). Port limits enforced server-side (this SDK does not
+// pre-validate): each port 1-65535, at most 256 ports per rule, no
+// duplicates.
 type NetworkRule struct {
 	Action string `json:"action"`
-	Target string `json:"target"`
+	Target string `json:"target,omitempty"`
+	Ports  []int  `json:"ports,omitempty"`
 }
 
 // CredentialProxyConfig enables Credential Vault transparent proxy support at

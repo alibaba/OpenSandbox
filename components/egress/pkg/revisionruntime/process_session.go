@@ -27,6 +27,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/alibaba/opensandbox/egress/pkg/mitmpassthrough"
 	"github.com/alibaba/opensandbox/egress/pkg/mitmproxy"
 	"github.com/alibaba/opensandbox/egress/pkg/revision"
 )
@@ -50,6 +51,7 @@ type ProcessSessionConfig struct {
 	MaxSnapshotBytes  int
 	// LiveAdmission and its budgets are copied into the child handoff; the
 	// Python addon selects its live receiver only when they are present.
+	StaticPassthrough   mitmpassthrough.Config
 	LiveAdmission       bool
 	TLSCapacity         int
 	RequestCapacity     int
@@ -175,6 +177,7 @@ func NewProcessSession(cfg ProcessSessionConfig) (*ProcessSession, error) {
 	}
 	if cfg.LiveAdmission {
 		launch.LiveAdmission = true
+		launch.StaticPassthrough = cfg.StaticPassthrough
 		launch.TLSCapacity = cfg.TLSCapacity
 		launch.RequestCapacity = cfg.RequestCapacity
 		launch.DrainTimeoutSeconds = cfg.DrainTimeoutSeconds

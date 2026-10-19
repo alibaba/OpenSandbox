@@ -145,12 +145,42 @@ func (s *AtomicPolicyFile) Save(p *NetworkPolicy) (FileMutationState, error) {
 		return FileUnchanged, atomicFileError("serialize", err)
 	}
 	data = append(data, '\n')
+	return s.SaveRaw(data)
+}
+
+// SaveRaw publishes exact bytes with the same guarantees and three-state
+// classification as Save (the vault persistence shares the machinery).
+// Existing mode and ownership are copied to the temporary inode; a new file is
+// 0600. No path is ever opened with O_TRUNC, and the original is never chmodded.
+func (s *AtomicPolicyFile) SaveRaw(data []byte) (FileMutationState, error) {
 	return s.withDirectory(func(dir *os.File) (FileMutationState, error) {
 		current, err := s.ops.snapshot(dir, s.name, s.path)
 		if err != nil {
 			return FileUnchanged, atomicFileError("snapshot", err)
 		}
 		return s.replace(dir, data, current)
+	})
+}
+
+// Delete durably unlinks the authoritative path: an already-absent path is
+// FileUnchanged with a nil error; a failed unlink or directory sync is
+// FileUnknown (the unlink may still have taken effect).
+func (s *AtomicPolicyFile) Delete() (FileMutationState, error) {
+	return s.withDirectory(func(dir *os.File) (FileMutationState, error) {
+		current, err := s.ops.snapshot(dir, s.name, s.path)
+		if err != nil {
+			return FileUnchanged, atomicFileError("snapshot", err)
+		}
+		if !current.exists {
+			return FileUnchanged, nil
+		}
+		if err := s.ops.remove(dir, s.name); err != nil {
+			return FileUnknown, atomicFileError("unlink", err)
+		}
+		if err := s.ops.syncDir(dir); err != nil {
+			return FileUnknown, atomicFileError("directory-sync", err)
+		}
+		return FileCommitted, nil
 	})
 }
 
@@ -505,7 +535,7 @@ func createAtomicPolicyTemp(dir *os.File, readSecurity func(int) (policyFileSecu
 		if _, err := rand.Read(suffix[:]); err != nil {
 			return nil, err
 		}
-		name := ".policy-" + hex.EncodeToString(suffix[:]) + ".tmp"
+		name := AtomicTempPrefix + hex.EncodeToString(suffix[:]) + AtomicTempSuffix
 		fd, err := unix.Openat(int(dir.Fd()), name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0o600)
 		if errors.Is(err, unix.EEXIST) {
 			continue

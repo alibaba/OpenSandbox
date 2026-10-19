@@ -904,8 +904,10 @@ def test_http_policy_patch_and_delete_match_sidecar_semantics(persisted_fsb):
 def test_policy_rejects_invalid_input_and_other_tenant(persisted_fsb):
     client, fake, _, sandbox_id = persisted_fsb
     url = f"/v1/sandboxes/{sandbox_id}/networkpolicy"
-    for policy in ({"defaultAction": "invalid"}, {"egress": [{"action": "allow", "target": " "}]}):
-        assert client.put(url, json=policy).status_code == 400
+    # defaultAction is validated by the fsb service (400); a blank target is
+    # now rejected earlier by the NetworkRule schema (422).
+    assert client.put(url, json={"defaultAction": "invalid"}).status_code == 400
+    assert client.put(url, json={"egress": [{"action": "allow", "target": " "}]}).status_code == 422
     assert fake.last_update is None
     previous = get_current_tenant()
     try:
@@ -915,6 +917,21 @@ def test_policy_rejects_invalid_input_and_other_tenant(persisted_fsb):
         assert fake.last_update is None
     finally:
         set_current_tenant(previous)
+
+
+def test_policy_rejects_port_scoped_rules(persisted_fsb):
+    """Fast Sandbox enforcement does not cover port-scoped rules yet; accepting
+    them would silently drop deny rules (fail-open), so both PUT and PATCH
+    reject them until the fastlet path catches up."""
+    client, fake, _, sandbox_id = persisted_fsb
+    url = f"/v1/sandboxes/{sandbox_id}/networkpolicy"
+    port_only = {"action": "deny", "ports": [25]}
+    scoped = {"action": "allow", "target": "10.0.0.5", "ports": [22]}
+    assert client.put(url, json={"defaultAction": "deny", "egress": [port_only]}).status_code == 400
+    assert client.put(url, json={"defaultAction": "deny", "egress": [scoped]}).status_code == 400
+    assert client.patch(url, json=[port_only]).status_code == 400
+    assert client.patch(url, json=[scoped]).status_code == 400
+    assert fake.last_update is None
 
 
 def test_legacy_policy_route_preserves_body_for_existing_proxy(http_fsb, monkeypatch):

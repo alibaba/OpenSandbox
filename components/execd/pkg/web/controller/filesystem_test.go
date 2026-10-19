@@ -539,6 +539,38 @@ func TestDownloadFileLineRangeConflict(t *testing.T) {
 	require.Equal(t, model.ErrorCodeInvalidRequest, resp.Code)
 }
 
+func TestDownloadFileRangeHeader(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "data.bin")
+	require.NoError(t, os.WriteFile(target, []byte("0123456789"), 0o644))
+	rawURL := fmt.Sprintf("/files/download?path=%s", url.QueryEscape(target))
+
+	ctx, rec := newTestContext(http.MethodGet, rawURL, nil)
+	ctx.Request.Header.Set("Range", "bytes=2-5")
+	NewFilesystemController(ctx).DownloadFile()
+
+	require.Equal(t, http.StatusPartialContent, rec.Code)
+	require.Equal(t, "2345", rec.Body.String())
+	require.Equal(t, "bytes 2-5/10", rec.Header().Get("Content-Range"))
+	require.Equal(t, "4", rec.Header().Get("Content-Length"))
+
+	// The 416 for a malformed Range is a JSON error. It must not declare the
+	// file's Content-Length, or clients wait for bytes that never arrive.
+	for _, header := range []string{"bytes=abc", "2-5", "bytes=5-2"} {
+		t.Run(header, func(t *testing.T) {
+			ctx, rec := newTestContext(http.MethodGet, rawURL, nil)
+			ctx.Request.Header.Set("Range", header)
+			NewFilesystemController(ctx).DownloadFile()
+
+			require.Equal(t, http.StatusRequestedRangeNotSatisfiable, rec.Code)
+			require.Empty(t, rec.Header().Get("Content-Length"))
+			require.Empty(t, rec.Header().Get("Content-Disposition"))
+			require.Contains(t, rec.Header().Get("Content-Type"), "application/json")
+			var resp model.ErrorResponse
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+		})
+	}
+}
+
 func TestDownloadFileInvalidOffset(t *testing.T) {
 	target := writeTestFileWithLines(t, []string{"line1"})
 	tests := []struct {

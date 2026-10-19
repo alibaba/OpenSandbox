@@ -5,8 +5,7 @@ description: Guides to sandbox lifecycle, isolation, networking, and security.
 
 # Feature Guides
 
-Use these guides to add capabilities to a working [sandbox application](/getting-started/).
-Check the [SDK capability matrix](/sdks/#capability-coverage) for language support.
+Use these guides to add capabilities to a working [sandbox application](/getting-started/). Check the [SDK capability matrix](/sdks/#capability-coverage) for language support.
 
 ## Lifecycle and security
 

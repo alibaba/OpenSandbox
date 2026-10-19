@@ -450,6 +450,37 @@ func TestHandlePatch_DomainCaseOverride(t *testing.T) {
 	require.Equal(t, "example.com", proxy.updated.Egress[0].Target, "expected allow example.com to override")
 }
 
+func TestHandlePatch_DistinctPortScopedRulesCoexist(t *testing.T) {
+	// mergeKey used to fold every target-less rule to the same "" key, so a
+	// second port-only rule silently evicted the first instead of coexisting
+	// with it. Two port-only rules with different Ports must both survive a
+	// single PATCH payload.
+	initial := &policy.NetworkPolicy{DefaultAction: policy.ActionDeny}
+	proxy := &stubProxy{updated: initial}
+	nft := &stubNft{}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+
+	body := `[{"action":"deny","ports":[25]},{"action":"allow","ports":[443,80]}]`
+	req := httptest.NewRequest(http.MethodPatch, "/policy", strings.NewReader(body))
+	w := httptest.NewRecorder()
+
+	srv.handlePolicy(w, req)
+
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode, "expected 200")
+	require.Len(t, proxy.updated.Egress, 2, "both port-scoped rules should be kept, not deduped against each other")
+
+	// A follow-up PATCH adding a third, differently-scoped port rule must not
+	// evict the two already-applied port rules.
+	body2 := `[{"action":"deny","target":"10.0.0.5","ports":[22]}]`
+	req2 := httptest.NewRequest(http.MethodPatch, "/policy", strings.NewReader(body2))
+	w2 := httptest.NewRecorder()
+	srv.handlePolicy(w2, req2)
+
+	require.Equal(t, http.StatusOK, w2.Result().StatusCode, "expected 200")
+	require.Len(t, proxy.updated.Egress, 3, "the two prior port-scoped rules must survive a later unrelated patch")
+}
+
 func TestMaxEgressRulesFromEnv(t *testing.T) {
 	old := os.Getenv(constants.EnvMaxEgressRules)
 	defer func() { _ = os.Setenv(constants.EnvMaxEgressRules, old) }()
@@ -1000,4 +1031,26 @@ type recoveryNoCurrentPolicyProxy struct{ stubProxy }
 
 func (*recoveryNoCurrentPolicyProxy) CurrentPolicy() *policy.NetworkPolicy {
 	panic("legacy nil-nft callback must not request CurrentPolicy")
+}
+
+func TestHandleDelete_PortOnlyRulesViaEmptyTarget(t *testing.T) {
+	// Port-only rules have no target; an explicit empty entry in the DELETE
+	// list addresses them (all of them), so they are not permanently stuck.
+	initial := &policy.NetworkPolicy{
+		DefaultAction: policy.ActionDeny,
+		Egress: []policy.EgressRule{
+			{Action: policy.ActionDeny, Ports: []int{25}},
+			{Action: policy.ActionAllow, Target: "example.com"},
+			{Action: policy.ActionAllow, Ports: []int{53}},
+		},
+	}
+	proxy := &stubProxy{updated: initial}
+	srv := &policyServer{proxy: proxy, nft: &stubNft{}, enforcementMode: "dns+nft"}
+
+	req := httptest.NewRequest(http.MethodDelete, "/policy", strings.NewReader(`["example.com", ""]`))
+	w := httptest.NewRecorder()
+	srv.handlePolicy(w, req)
+
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+	require.Len(t, proxy.updated.Egress, 0, "port-only rules go with the empty entry, domain rule with its target")
 }

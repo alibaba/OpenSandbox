@@ -12,21 +12,107 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Run only build-override shell snippets with fixtures and fake commands."""
+"""Check image pins and build snippets without installing packages or Docker."""
 
+import ast
 import os
-from pathlib import Path
+import re
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
-
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile"
+REQUIREMENTS = DOCKERFILE.parent / "requirements-mitmproxy.txt"
+WORKFLOW = DOCKERFILE.parents[2] / ".github" / "workflows" / "egress-test.yml"
 RUNS = [line[4:] for line in DOCKERFILE.read_text().replace("\\\n", "").splitlines()
         if line.startswith("RUN ")]
 GOPROXY_RUN = next(run for run in RUNS if "go env -w GOPROXY=" in run)
 APT_RUN = next(run for run in RUNS if "APT_MIRROR" in run).split("&& apt-get update", 1)[0]
+H2_CHECK_RUN = next(run for run in RUNS if "dependency_versions_supported" in run)
+H2_CHECK_CODE = shlex.split(H2_CHECK_RUN)[-1]
+
+
+class DockerfileH2DependencyTests(unittest.TestCase):
+    def test_shared_requirements_match_adapter_and_runtime_gates(self):
+        requirements = [line.strip() for line in REQUIREMENTS.read_text().splitlines()
+                        if line.strip() and not line.lstrip().startswith("#")]
+        for source in (DOCKERFILE.parent / "mitmscripts" / "credential_bound_h2.py",
+                       DOCKERFILE.parent / "tests" / "test_credential_bound_h2_runtime.py"):
+            with self.subTest(source=source.name):
+                module = ast.parse(source.read_text())
+                pins = next(ast.literal_eval(node.value) for node in module.body
+                            if isinstance(node, ast.Assign)
+                            and any(isinstance(target, ast.Name) and target.id == "PINS"
+                                    for target in node.targets))
+                self.assertEqual(sorted(requirements),
+                                 sorted(f"{name}=={version}" for name, version in pins.items()))
+
+    def test_docker_installs_copied_shared_requirements(self):
+        dockerfile = DOCKERFILE.read_text()
+        copy = "COPY components/egress/requirements-mitmproxy.txt /tmp/requirements-mitmproxy.txt"
+        install = next(run for run in RUNS if "pip3 install" in run)
+        self.assertLess(dockerfile.index(copy), dockerfile.index("pip3 install"))
+        words = shlex.split(install.split("pip3 install", 1)[1])
+        self.assertEqual(words[words.index("-r") + 1], "/tmp/requirements-mitmproxy.txt")
+        self.assertFalse(any("==" in word for word in words))
+
+    def test_all_workflow_installs_and_caches_use_shared_requirements(self):
+        workflow = WORKFLOW.read_text().replace("\\\n", "")
+        installs = [line for line in workflow.splitlines() if "pip install" in line]
+        self.assertEqual(len(installs), 4)
+        for install in installs:
+            with self.subTest(install=install.strip()):
+                words = shlex.split(install)
+                self.assertEqual(words[words.index("-r") + 1],
+                                 "components/egress/requirements-mitmproxy.txt")
+                self.assertFalse(any("==" in word for word in words))
+        setups = re.findall(r"uses: actions/setup-python@[^\n]+\n(.*?)(?=\n      - name:)",
+                            workflow, re.DOTALL)
+        self.assertEqual(len(setups), 3)
+        self.assertEqual([re.search(r"python-version: '([^']+)'", setup).group(1)
+                          for setup in setups], ["3.10", "3.11", "3.12"])
+        for setup in setups:
+            self.assertIn("cache: pip", setup)
+            self.assertIn("cache-dependency-path: components/egress/requirements-mitmproxy.txt", setup)
+
+    def test_build_checks_copied_adapter_with_its_runtime_gate(self):
+        dockerfile = DOCKERFILE.read_text()
+        self.assertLess(dockerfile.index("COPY components/egress/mitmscripts"),
+                        dockerfile.index("RUN " + H2_CHECK_RUN.split("    &&", 1)[0].rstrip()))
+        words = shlex.split(H2_CHECK_RUN)
+        self.assertEqual(words[-4:-1], ["PYTHONPATH=/var/egress/mitmscripts", "python3", "-c"])
+        for supported in (True, False):
+            with self.subTest(supported=supported):
+                check = Mock(return_value=supported)
+                pins = {"mitmproxy": "11.0.2", "h2": "4.1.0", "hyperframe": "6.0.1"}
+                module = SimpleNamespace(PINS=pins, dependency_versions_supported=check)
+                with (
+                    patch.dict(sys.modules, {"credential_bound_h2": module}),
+                    self.assertRaises(SystemExit) as result,
+                ):
+                    exec(H2_CHECK_CODE, {})  # noqa: S102 - exercise the checked-in Dockerfile's Python check.
+                check.assert_called_once_with()
+                if supported:
+                    self.assertEqual(result.exception.code, 0)
+                else:
+                    diagnostic = result.exception.code
+                    self.assertIn("unsupported H2 runtime", diagnostic)
+                    self.assertIn(f"interpreter={sys.implementation.name}", diagnostic)
+                    self.assertIn(f"sys.version={sys.version!r}", diagnostic)
+                    self.assertIn(f"required CPython 3.10/3.11 and packages={pins}", diagnostic)
+
+    def test_missing_adapter_fails_build_check(self):
+        with (
+            patch.dict(sys.modules, {"credential_bound_h2": None}),
+            self.assertRaises(ModuleNotFoundError),
+        ):
+            exec(H2_CHECK_CODE, {})  # noqa: S102 - exercise the checked-in Dockerfile's Python check.
 
 
 class DockerfileBuildOverrideTests(unittest.TestCase):

@@ -227,10 +227,7 @@ refactor(sdk): simplify filesystem API
 
 ## Coding Standards
 
-Contributions are required to generally comply with the coding standards for
-the language and component they touch. Generated files are excluded where the
-local tool configuration excludes them; update the source specification or
-generator and regenerate those files instead of hand-editing generated output.
+Contributions are required to generally comply with the coding standards for the language and component they touch. Generated files are excluded where the local tool configuration excludes them; update the source specification or generator and regenerate those files instead of hand-editing generated output.
 
 ### Required Style Guides
 
@@ -379,9 +376,7 @@ dotnet build OpenSandbox.CodeInterpreter.sln --configuration Release /warnaserro
 
 ## Build System Standards
 
-OpenSandbox produces native Go binaries for `components/execd`, `components/ingress`,
-`components/egress`, `kubernetes`, and `sdks/sandbox/go`. These build systems must
-preserve caller-provided build flags and only append project-required flags.
+OpenSandbox produces native Go binaries for `components/execd`, `components/ingress`, `components/egress`, `kubernetes`, and `sdks/sandbox/go`. These build systems must preserve caller-provided build flags and only append project-required flags.
 
 ### Build Variables
 
@@ -392,10 +387,7 @@ preserve caller-provided build flags and only append project-required flags.
 
 ### Debug Information
 
-Default project builds must not strip debug information. Do not add `strip`,
-`install -s`, or Go linker flags such as `-s -w` to the default build path.
-Distribution-specific packaging may strip binaries only outside the default
-developer and CI build path.
+Default project builds must not strip debug information. Do not add `strip`, `install -s`, or Go linker flags such as `-s -w` to the default build path. Distribution-specific packaging may strip binaries only outside the default developer and CI build path.
 
 ### Build Dependency Graph
 
@@ -406,19 +398,11 @@ Use package-aware build tools instead of recursive independent builds:
 - JavaScript and TypeScript SDKs use pnpm workspace dependencies.
 - C# SDKs use solution/project references through `dotnet build`.
 
-Subdirectory-specific Make targets may delegate to these tools, but they must not
-replace the build tool's dependency graph with independent recursive directory
-builds where cross-directory dependencies exist.
+Subdirectory-specific Make targets may delegate to these tools, but they must not replace the build tool's dependency graph with independent recursive directory builds where cross-directory dependencies exist.
 
 ### Repeatable Builds
 
-Native Go binary builds include `-trimpath`, `-buildvcs=false`, and `-ldflags`
-with `-buildid= -B none` so that source paths, VCS metadata, and build IDs or
-Mach-O UUIDs do not make binaries differ. For repeatable release metadata, set `SOURCE_DATE_EPOCH`
-or set `BUILD_TIME`, `VERSION`, and `GIT_COMMIT` explicitly before invoking
-Makefile or Docker build scripts. When `SOURCE_DATE_EPOCH` is set and
-`BUILD_TIME` is unset, build scripts derive `BUILD_TIME` from
-`SOURCE_DATE_EPOCH`.
+Native Go binary builds include `-trimpath`, `-buildvcs=false`, and `-ldflags` with `-buildid= -B none` so that source paths, VCS metadata, and build IDs or Mach-O UUIDs do not make binaries differ. For repeatable release metadata, set `SOURCE_DATE_EPOCH` or set `BUILD_TIME`, `VERSION`, and `GIT_COMMIT` explicitly before invoking Makefile or Docker build scripts. When `SOURCE_DATE_EPOCH` is set and `BUILD_TIME` is unset, build scripts derive `BUILD_TIME` from `SOURCE_DATE_EPOCH`.
 
 ## Testing Guidelines
 
@@ -639,8 +623,7 @@ Use GitHub Discussions for:
 
 - **Issues**: Technical problems or bugs
 - **Discussions**: Questions and community support
-- **Security vulnerabilities**: Follow [SECURITY.md](SECURITY.md) and use
-  GitHub private vulnerability reporting. Do not open a public issue.
+- **Security vulnerabilities**: Follow [SECURITY.md](SECURITY.md) and use GitHub private vulnerability reporting. Do not open a public issue.
 - **Code of Conduct reports**: Email conduct@opensandbox.io
 
 ## Additional Resources

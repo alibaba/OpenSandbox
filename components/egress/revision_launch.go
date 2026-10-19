@@ -168,7 +168,7 @@ func newRevisionProcessSession(
 }
 
 func newSidecarRevisionLaunchOwner(server *policyServer) (*revisionLaunchOwner, error) {
-	if !constants.IsTruthy(os.Getenv(constants.EnvExperimentalRevisionRuntime)) {
+	if server == nil && !constants.IsTruthy(os.Getenv(constants.EnvExperimentalRevisionRuntime)) || server != nil && !server.liveRevision {
 		return nil, nil
 	}
 	if server == nil {
@@ -197,6 +197,7 @@ func newSidecarRevisionLaunchOwner(server *policyServer) (*revisionLaunchOwner, 
 			SubjectGeneration:   subjectGeneration,
 			MaxSnapshotBytes:    defaultRevisionMaxSnapshotSize,
 			LiveAdmission:       true,
+			StaticPassthrough:   server.staticPassthrough,
 			TLSCapacity:         constants.EnvIntRange(constants.EnvRevisionTLSCapacity, constants.DefaultRevisionTLSCapacity, 1, 1<<20),
 			RequestCapacity:     constants.EnvIntRange(constants.EnvRevisionRequestCapacity, constants.DefaultRevisionRequestCapacity, 1, 1<<20),
 			DrainTimeoutSeconds: constants.EnvIntRange(constants.EnvRevisionDrainTimeoutSeconds, constants.DefaultRevisionDrainTimeoutSeconds, 1, 300),

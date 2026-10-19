@@ -368,6 +368,7 @@ class LiveRuntimeHarness:
             "OPENSANDBOX_EGRESS_REVISION_TLS_CAPACITY": "64",
             "OPENSANDBOX_EGRESS_REVISION_REQUEST_CAPACITY": "256",
             "OPENSANDBOX_EGRESS_REVISION_DRAIN_TIMEOUT_SECONDS": str(drain_seconds),
+            "OPENSANDBOX_EGRESS_MITMPROXY_PASSTHROUGH_HOSTS": "[]",
         }
 
     def start(self, drain_seconds: int = 1) -> None:
@@ -906,6 +907,7 @@ class LiveSslInsecureStartupTest(unittest.TestCase):
                     "OPENSANDBOX_EGRESS_REVISION_TLS_CAPACITY": "64",
                     "OPENSANDBOX_EGRESS_REVISION_REQUEST_CAPACITY": "256",
                     "OPENSANDBOX_EGRESS_REVISION_DRAIN_TIMEOUT_SECONDS": "5",
+                    "OPENSANDBOX_EGRESS_MITMPROXY_PASSTHROUGH_HOSTS": "[]",
                 }
             )
         args = [

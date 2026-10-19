@@ -16,10 +16,14 @@ def normalized_policy(policy: NetworkPolicy) -> dict:
         raise HTTPException(400, detail="networkPolicy.defaultAction must be allow or deny.")
     rules = []
     for rule in policy.egress:
-        target = rule.target.strip()
+        target = (rule.target or "").strip()
         action = rule.action.strip().lower() or "deny"
         if action not in ("allow", "deny"):
             raise HTTPException(400, detail="networkPolicy rule action must be allow or deny.")
+        if rule.ports:
+            # Not enforceable by the fastlet nft path yet (#2213); accepting
+            # would silently drop deny rules.
+            raise HTTPException(400, detail="networkPolicy ports are not supported for Fast Sandbox policy yet.")
         if not target:
             raise HTTPException(400, detail="networkPolicy rule target cannot be empty.")
         rules.append({"action": action, "target": target})
@@ -48,7 +52,10 @@ def merge_policy_rules(policy: dict, rules: list[NetworkRule]) -> dict:
     """
     incoming: dict[str, dict] = {}
     for rule in rules:
-        target = rule.target.strip()
+        if rule.ports:
+            # Mirrors normalized_policy (#2213).
+            raise HTTPException(400, detail="networkPolicy ports are not supported for Fast Sandbox policy yet.")
+        target = (rule.target or "").strip()
         if target and target not in incoming:
             incoming[target] = {"action": rule.action, "target": target}
     merged: list[dict] = []

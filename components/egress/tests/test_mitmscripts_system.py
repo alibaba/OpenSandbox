@@ -29,6 +29,7 @@ import types
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 from urllib.parse import unquote
 
 
@@ -138,15 +139,17 @@ def _load_system_module() -> Any:
     mitmproxy_tls = types.ModuleType("mitmproxy.tls")
     mitmproxy_tls.ClientHelloData = object
 
-    sys.modules["mitmproxy"] = mitmproxy
-    sys.modules["mitmproxy.tls"] = mitmproxy_tls
-
     path = Path(__file__).parents[1] / "mitmscripts" / "system.py"
     spec = importlib.util.spec_from_file_location("opensandbox_egress_system_addon", path)
     assert spec is not None
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
-    spec.loader.exec_module(module)
+    # The loaded addon retains its fake context; restore real dependency modules
+    # immediately so later H2 tests can import the pinned mitmproxy package.
+    with mock.patch.dict(
+        sys.modules, {"mitmproxy": mitmproxy, "mitmproxy.tls": mitmproxy_tls}
+    ):
+        spec.loader.exec_module(module)
     return module
 
 

@@ -76,6 +76,8 @@ internal sealed class IsolatedSessionsAdapter : IIsolatedSessions
     private const string TailCursorHeader = "EXECD-ISOLATED-TAIL-CURSOR";
 
     private readonly HttpClient _httpClient;
+    private readonly HttpClient? _transferHttpClient;
+    private readonly TimeSpan? _transferHeaderTimeout;
     private readonly HttpClient _sseHttpClient;
     internal readonly string _baseUrl;
     internal readonly IReadOnlyDictionary<string, string> _headers;
@@ -129,9 +131,13 @@ internal sealed class IsolatedSessionsAdapter : IIsolatedSessions
         string baseUrl,
         IReadOnlyDictionary<string, string> headers,
         ILogger logger,
+        HttpClient? transferHttpClient = null,
+        TimeSpan? transferHeaderTimeout = null,
         WakeRetryOptions? wakeRetry = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _transferHttpClient = transferHttpClient;
+        _transferHeaderTimeout = transferHeaderTimeout;
         _sseHttpClient = sseHttpClient ?? throw new ArgumentNullException(nameof(sseHttpClient));
         _baseUrl = baseUrl?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(baseUrl));
         _headers = headers ?? new Dictionary<string, string>();
@@ -378,8 +384,8 @@ internal sealed class IsolatedSessionsAdapter : IIsolatedSessions
         var sessionBaseUrl = $"{_baseUrl}/v1/isolated/session/{Uri.EscapeDataString(sessionId)}";
         var clientWrapper = new HttpClientWrapper(
             _httpClient, sessionBaseUrl, _headers,
-            _logger, _wakeRetry);
-        return new FilesystemAdapter(clientWrapper, _httpClient, sessionBaseUrl, _headers);
+            _logger, _transferHttpClient, _transferHeaderTimeout, _wakeRetry);
+        return new FilesystemAdapter(clientWrapper, sessionBaseUrl, _headers);
     }
 
     private void ApplyHeaders(HttpRequestMessage request)

@@ -50,17 +50,23 @@ export type ResourceLimits = Record<string, string>;
 
 export type NetworkRuleAction = "allow" | "deny";
 
-export interface NetworkRule extends Record<string, unknown> {
-  /**
-   * Whether to allow or deny matching targets.
-   */
-  action: NetworkRuleAction;
-  /**
-   * FQDN or wildcard domain (e.g., "example.com", "*.example.com").
-   * IP/CIDR is not supported in the egress MVP.
-   */
-  target: string;
-}
+/**
+ * An egress rule: `target`, `ports`, or both. The union encodes that
+ * invariant at compile time (`target` used to be required).
+ *
+ * - `target`: FQDN, wildcard domain ("*.example.com"), IP, or CIDR.
+ * - `ports`: TCP destination ports (each 1-65535, at least one, at most 256
+ *   per rule — enforced server-side). Without a target the rule applies
+ *   across all IPv4/IPv6 destinations, but under `defaultAction: deny` the
+ *   DNS proxy only matches domain rules, so hostname lookups still fail —
+ *   this shape serves direct-IP clients.
+ * - A domain `target` combined with `ports` is rejected (domain rules have
+ *   no port dimension).
+ */
+export type NetworkRule = (
+  | { action: NetworkRuleAction; target: string; ports?: number[] }
+  | { action: NetworkRuleAction; target?: string; ports: number[] }
+) & Record<string, unknown>;
 
 export interface NetworkPolicy extends Record<string, unknown> {
   /**
@@ -712,7 +718,8 @@ export interface Endpoint extends Record<string, unknown> {
 export enum SandboxOrigin {
   /**
    * Runs on a fsb golden-image template (no sandbox-side egress sidecar;
-   * egress policy goes through the lifecycle control plane).
+   * egress policy and the Credential Vault go through the lifecycle
+   * control plane).
    */
   TEMPLATE = "template",
   /**

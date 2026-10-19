@@ -237,17 +237,13 @@ See the [MCP README](sdks/mcp/sandbox/python/README.md) for client-specific setu
 
 ## Official Container Images
 
-OpenSandbox release images are published under the same component name in
-three official registries:
+OpenSandbox release images are published under the same component name in three official registries:
 
 - Docker Hub: `docker.io/opensandbox/<component>`
 - GitHub Container Registry: `ghcr.io/opensandbox-group/opensandbox/<component>`
 - Alibaba Cloud Container Registry: `sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/<component>`
 
-Tagged release images are signed keylessly with Cosign and include provenance
-attestations. Pin production images by digest and follow the
-[release verification guide](docs/community/release-verification.md) to verify
-the image against the OpenSandbox GitHub Actions identity before deployment.
+Tagged release images are signed keylessly with Cosign and include provenance attestations. Pin production images by digest and follow the [release verification guide](docs/community/release-verification.md) to verify the image against the OpenSandbox GitHub Actions identity before deployment.
 
 ## Documentation
 

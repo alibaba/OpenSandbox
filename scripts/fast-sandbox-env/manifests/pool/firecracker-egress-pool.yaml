@@ -71,6 +71,19 @@ spec:
         # block IP-direct traffic nor create the subj_ chains.
         - name: OPENSANDBOX_EGRESS_MODE
           value: "dns+nft"
+        # Vault persistence (OSEP-0022 stage 2): one per-subject file under
+        # this directory backs the vault relay ack — an egress restart
+        # recovers locally at SET_BINDING replay, no server re-push. The
+        # volume is the Pod-scoped egress-vault emptyDir below. Unset would
+        # keep the vault memory-only (lost on egress restart).
+        - name: OPENSANDBOX_EGRESS_VAULT_DIR
+          value: /var/lib/opensandbox-egress/vault
+        volumeMounts:
+        - name: egress-vault
+          mountPath: /var/lib/opensandbox-egress
+          # Plaintext v1 posture: the vault volume joins the credential
+          # trust surface. Swap to `medium: Memory` (tmpfs) to keep the
+          # per-subject vault files off node disk.
         # Egress installs nft/iptables rules (DNS redirect + per-subject
         # sets) and marks sockets; NET_ADMIN covers nft/iptables/SO_MARK,
         # NET_RAW covers the raw sockets used for DNS response spoofing.
@@ -93,6 +106,11 @@ spec:
         hostPath:
           path: /run/fast-sandbox/firecracker
           type: DirectoryOrCreate
+      # Pod-scoped vault volume (OSEP-0022 stage 2): survives an egress
+      # container crash/restart (the reload path), dies with the Pod.
+      # medium: Memory would keep the plaintext v1 files off node disk.
+      - name: egress-vault
+        emptyDir: {}
       nodeSelector:
         fast-sandbox.io/firecracker-node: "true"
       # P2P topology: spread the poolMin fastlets one per node so each

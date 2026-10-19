@@ -28,8 +28,7 @@ const (
 // Fast Sandbox profile: the egress control plane serves N sandboxes
 // sharing one host/network domain; sidecar remains the default profile.
 const (
-	EnvEgressProfile  = "OPENSANDBOX_EGRESS_PROFILE"
-	EnvPendingPushTTL = "OPENSANDBOX_EGRESS_PENDING_PUSH_TTL"
+	EnvEgressProfile = "OPENSANDBOX_EGRESS_PROFILE"
 )
 
 const (
@@ -53,13 +52,25 @@ const (
 )
 
 // Fast Sandbox-profile HTTP listener and trust model: the listener binds the Pod
-// netns loopback only; the fastlet proxy and the Fastlet's action dispatcher
-// are the only peers. The proxy injects the UID header that routes a push to
-// its subject; the action dispatcher carries the identity in the envelope.
+// netns loopback only; the Fastlet's action dispatcher is the only peer. The
+// action envelope carries the subject identity — there is no proxy-injected
+// routing header.
+
+// Relay vault surface (OSEP-0022): /vault/{sandboxUid} — the internal
+// server↔egress contract terminated by the FastPath handler-relay. Every op
+// may carry the expectedIncarnation precondition (the owning runtime
+// instance recorded at SET_BINDING); a mismatch is a 412.
 const (
-	EgressSubjectUIDHeader        = "X-Fast-Sandbox-Uid"
-	EgressSubjectGenerationHeader = "X-Fast-Sandbox-Generation"
-	DefaultPendingPushTTL         = 30
+	EgressVaultIncarnationHeader = "X-Fast-Sandbox-Incarnation"
+
+	VaultRelayPathPrefix = "/vault/"
+)
+
+// EnvEgressVaultDir (fast-sandbox profile): directory for the per-subject
+// vault files on the Pod-scoped emptyDir volume. Empty/unset keeps the vault
+// memory-only; the sidecar profile never persists.
+const (
+	EnvEgressVaultDir = "OPENSANDBOX_EGRESS_VAULT_DIR"
 )
 
 const (
@@ -107,6 +118,17 @@ const (
 	// appended to the always-on 80,443. Comma-separated. May change or be
 	// removed without notice.
 	EnvMitmproxyExtraPorts = "OPENSANDBOX_EGRESS_MITMPROXY_EXTRA_PORTS"
+	// EnvMitmCaSeedDir (fast-sandbox profile): read-only seed mount holding the
+	// pool-pinned MITM CA keypair as `tls.crt` (certificate) + `tls.key`
+	// (private key). When transparent MITM is enabled the seed is REQUIRED —
+	// egress copies the pinned pair into the writable confdir before mitmdump
+	// starts and NEVER generates a CA in this profile (OSEP-0022 MITM Trust
+	// Anchor). A missing, empty, or unloadable seed fails the MITM addon
+	// closed (healthz + actions status) while the rest of egress keeps
+	// serving; there is NO fallback to generate-on-start. Only pools that
+	// never enable transparent MITM need no CA and are unaffected by this
+	// variable.
+	EnvMitmCaSeedDir = "OPENSANDBOX_EGRESS_MITM_CA_SEED_DIR"
 
 	// EnvUpstreamProxy: chained upstream proxy endpoint ("http://host:port" or
 	// "https://host:port"). When set, the bundled upstream_proxy.py addon is
@@ -180,3 +202,6 @@ func IsTruthy(v string) bool {
 		return false
 	}
 }
+
+// EnvMitmproxyPassthroughHosts configures live-only static TLS/443 selectors.
+const EnvMitmproxyPassthroughHosts = "OPENSANDBOX_EGRESS_MITMPROXY_PASSTHROUGH_HOSTS"

@@ -106,6 +106,9 @@ docs/
 - Use VitePress custom containers (`::: tip`, `::: warning`, `::: info`) and code groups where appropriate.
 - Build and verify: `cd docs && pnpm docs:build` — must complete with zero errors.
 - The README.md in `docs/` is for docs-site contributors only (how to run dev server), and must stay excluded from the published site.
+- Markdown prose style, for all `.md` files in the repo: do not hard-wrap prose — a sentence or paragraph is written on a single line and editors soft-wrap. One line per list item and per blockquote paragraph.
+- Hard breaks (two trailing spaces or a trailing backslash) are only for intentional rendering, never for prose wrapping. Keep verbatim blocks untouched: code blocks, tables, YAML frontmatter, HTML blocks, ASCII diagrams. Never reflow generated markdown (e.g., helm-docs chart READMEs under `manifests/charts/*/README.md`) — change its source template and regenerate instead.
+- Never insert a blank line inside a paragraph, and never reflow or re-structure unrelated markdown while editing a file. When generating markdown programmatically, join soft-wrapped lines with a single space (no space between adjacent CJK characters).
 
 ## Review Focus
 

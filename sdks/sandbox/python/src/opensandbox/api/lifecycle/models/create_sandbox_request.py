@@ -74,8 +74,12 @@ class CreateSandboxRequest:
                 Mutually exclusive with `image` and `snapshotId`; in template mode
                 the workload shape is fixed by the template's golden image, so
                 `entrypoint`, `env`, `resourceLimits`, `resourceRequests`,
-                `volumes`, `platform`, `credentialProxy`, `secureAccess` and
+                `volumes`, `platform`, `secureAccess` and
                 lifecycle hooks are rejected (400), and `timeout` is required.
+                `credentialProxy` is accepted and ignored: the vault is not
+                carried at create time — it is configured after creation through
+                the server-routed Credential Vault API
+                (`/sandboxes/{sandboxId}/credential-vault`).
                 `lifecycle.idlePolicy` is allowed: it is control-plane state,
                 not workload shape.
                 The template must belong to the requester's tenant and be

@@ -827,6 +827,59 @@ def test_fetch_execd_archive_passes_configured_network_mode(mock_docker):
 
 
 @patch("opensandbox_server.services.docker.docker_service.docker")
+def test_fetch_execd_archive_applies_configured_security_profiles_and_runtime(mock_docker):
+    """The execd cache container must honor the same security settings as sandbox containers.
+
+    It is created before any sandbox container. If it ignored ``[docker] seccomp_profile`` /
+    ``apparmor_profile`` or ``[secure_runtime] docker_runtime``, a host whose default profile
+    blocks the execd image could not be fixed through configuration.
+    """
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.info.return_value = {"OSType": "linux", "Architecture": "amd64"}
+
+    container = MagicMock()
+    container.get_archive.return_value = ([b"payload"], {})
+    mock_client.containers.create.return_value = container
+
+    cfg = _app_config()
+    cfg.docker.seccomp_profile = "unconfined"
+    cfg.docker.apparmor_profile = "my-profile"
+    service = DockerSandboxService(config=cfg)
+    service.docker_runtime = "runsc"
+
+    with patch.object(service, "_docker_operation"):
+        service._fetch_execd_archive()
+
+    kwargs = mock_client.containers.create.call_args.kwargs
+    assert kwargs["security_opt"] == ["apparmor=my-profile", "seccomp=unconfined"]
+    assert kwargs["runtime"] == "runsc"
+
+
+@patch("opensandbox_server.services.docker.docker_service.docker")
+def test_fetch_execd_archive_omits_security_opt_and_runtime_by_default(mock_docker):
+    """Nothing configured means the Docker defaults are kept (backward compatible)."""
+    mock_client = MagicMock()
+    mock_client.containers.list.return_value = []
+    mock_docker.from_env.return_value = mock_client
+    mock_client.info.return_value = {"OSType": "linux", "Architecture": "amd64"}
+
+    container = MagicMock()
+    container.get_archive.return_value = ([b"payload"], {})
+    mock_client.containers.create.return_value = container
+
+    service = DockerSandboxService(config=_app_config())
+
+    with patch.object(service, "_docker_operation"):
+        service._fetch_execd_archive()
+
+    kwargs = mock_client.containers.create.call_args.kwargs
+    assert "security_opt" not in kwargs
+    assert "runtime" not in kwargs
+
+
+@patch("opensandbox_server.services.docker.docker_service.docker")
 def test_fetch_execd_archive_caches_session_gate_by_platform_key(mock_docker):
     mock_client = MagicMock()
     mock_client.containers.list.return_value = []

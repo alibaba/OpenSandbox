@@ -13,10 +13,10 @@ Egress is how a sandbox gets a network policy instead of open internet access. I
 
 | Capability | What you get |
 |---|---|
-| FQDN rules | Allow or deny by domain, wildcard (`*.pypi.org`), IP, or CIDR |
+| FQDN rules | Allow or deny by domain, wildcard (`*.pypi.org`), IP, or CIDR — optionally scoped to TCP destination ports |
 | DNS filtering (default) | Denied domains fail resolution; allowed ones resolve normally |
 | Network enforcement (`dns+nft`) | Strict default-deny at the packet layer, fed by DNS-resolved addresses with bounded leases |
-| Platform overlays | Operator-set `deny.always` / `allow.always` floors that user policy cannot override |
+| Platform overlays | Operator-set `deny.always` / `allow.always` floors that user policy cannot override, plus a TCP port floor (`reachable.ports.cap`) that caps which ports are reachable at all |
 | Credential Vault | Secrets stay in the sidecar; credentials are injected into matching outbound requests |
 | Transparent TLS interception (L7) | See, control, and authenticate outbound HTTPS — production-usable mechanism, experimental configuration surface |
 | Fail-closed startup | If enforcement cannot be installed, the sidecar exits — it never runs as a no-op |
@@ -27,6 +27,16 @@ Egress is how a sandbox gets a network policy instead of open internet access. I
 - **Layer 2 — Network (`dns+nft` mode).** nftables drops everything not explicitly allowed. Allowed traffic passes by static rule or via DNS-learned address sets: a resolved IP receives a bounded lease (with a grace window for active TCP connections), so "allowed" never silently becomes "allowed forever". UDP and QUIC flows rely on DNS lease timing alone.
 - **Precedence.** First matching rule wins: platform `deny.always`, then platform `allow.always`, then your policy — the platform's deny always beats your allow. Overlays live inside the sidecar image and hot-reload every minute; a reload publishes only after nftables accepts the corresponding static policy. Parse or apply failures keep the last accepted in-memory rules and stay eligible for retry.
 - **Runtime mutation.** Your policy is set per sandbox and can be mutated at runtime (add, replace, remove by target) through the API the SDKs expose.
+
+**Port floor.** Operators can also ship an `reachable.ports.cap` file next to the overlays: a whitelist of TCP ports (one port or `lo-hi` range per line) that are reachable **at all**. The sidecar derives the complement and enforces it as an always-deny ahead of every user rule — so regardless of what a sandbox's `defaultAction` or allow rules say, only the whitelisted ports pass (TCP only; the same fail-closed ordering that makes a deny rule win over any allow). A missing or empty file means no floor. Under transparent MITM, intercepted ports are governed by the interception config, so keep intercepted ports within the whitelist. Note established connections persist until their lease expires, as with any policy change.
+
+### Port-scoped rules
+
+A rule's `target` may be omitted when `ports` is set, so a rule can scope by TCP destination port alone — `{"action": "deny", "ports": [25]}` blocks outbound SMTP regardless of destination. `target` and `ports` can also combine to scope an IP or CIDR rule to specific ports. Ports are enforced at the network layer (`dns+nft` mode) as `tcp dport` matches, and a deny rule — port-scoped or not — always wins over an allow rule.
+
+**DNS limitation for targetless allows.** The DNS proxy only resolves hostnames matched by a domain rule; a targetless `allow` with `ports` is invisible to it. Under `defaultAction: deny`, hostname lookups therefore still fail (`NXDOMAIN`) and such a rule serves clients that dial IPs directly. Hostname access needs explicit domain allow rules — which are not port-scoped — or destinations addressed by stable IP.
+
+Current limits: TCP only (no UDP); at most 256 ports per rule; domain targets cannot combine with `ports` (domain rules are evaluated at the DNS layer, which has no port dimension) and are rejected at validation; `DELETE /policy` removes rules by `target` — port-only rules have none, so `DELETE` with an explicit empty string (`""`) in the target list removes them all, or a full `POST`/`PUT` replaces the policy. The Fast Sandbox profile rejects `ports` with a 400 until its enforcement path supports them. Independently of user rules, operators can cap reachable ports platform-wide with the `reachable.ports.cap` floor (see [Precedence](#precedence)). One boundary to keep in mind: under transparent MITM, intercepted ports are redirected into the sidecar before the nft policy chain sees them, so port-scoped rules and the cap govern only non-intercepted traffic — keep the interception port list within the cap.
 
 ## Design decisions
 
@@ -45,13 +55,15 @@ Layers 1 and 2 decide *whether* a connection may happen; the transparent MITM la
 **Status: experimental but production-usable.** Interception, credential injection, and CA delivery are complete and run in production settings; the configuration surface — extra ports and diagnostic switches — may still change between releases.
 
 ::: warning Internal OSEP-0023 revision runtime
-`OPENSANDBOX_EGRESS_EXPERIMENTAL_REVISION_RUNTIME=true` is a development-only sidecar gate (default off) for the OSEP-0023 revision protocol. It adds no public configuration surface, no `interceptionMode`, and no HTTP/2 or Fast Sandbox support; scope is bound HTTPS/443 HTTP/1.1. Key properties:
+`OPENSANDBOX_EGRESS_EXPERIMENTAL_REVISION_RUNTIME=true` is a development-only sidecar gate (default off) for the OSEP-0023 revision protocol. It adds no public configuration surface or supported `interceptionMode`, and does not enable Fast Sandbox.
+
+The internal sidecar experiment covers bound HTTPS/443 HTTP/1.1 traffic and experimental HTTP/2 admission and bounded-drain wiring on the fixed-dependency direct/lazy path. Configured chained upstream proxies remain rejected for live HTTP/2. Long-held responses can still cause Go retries to time out; full client migration and Linux acceptance remain follow-up work. Key properties:
 
 - Admission is per connection and per request, from an immutable snapshot installed over an authenticated channel; unknown or mismatched state denies — the mode never falls back to decrypt-all.
 - Any uncertain outcome (unconfirmed mutation, session cleanup failure, unexpected child exit) latches a sticky recovery-required state: readiness drops, nft writes quiesce, and an independent quarantine table is installed for the process lifetime. Restarting the sidecar is not a verified recovery — destroy and recreate the sandbox instead.
 - Updates are not one atomic visibility boundary: nft rules can affect traffic before receiver acknowledgement, and a committed update is not rolled back if the API response is lost. Retired connections drain within a bounded window (default 30 seconds).
 
-Full contract, including the egress-owned policy-file storage requirements when `OPENSANDBOX_EGRESS_POLICY_FILE` is set: [credential vault guide](/guides/credential-vault#experimental-live-credential-bound-admission-osep-0023) and [OSEP-0023](https://github.com/opensandbox-group/OpenSandbox/blob/main/oseps/0023-credential-bound-tls-interception.md).
+Full contract, including the egress-owned policy-file storage requirements when `OPENSANDBOX_EGRESS_POLICY_FILE` is set: [credential vault guide](/guides/credential-vault#experimental-live-credential-bound-admission-osep-0023), [OSEP-0023](https://github.com/opensandbox-group/OpenSandbox/blob/main/oseps/0023-credential-bound-tls-interception.md), and the [HTTP/2 integration boundary](/architecture/network/osep-0023-h2-integration).
 :::
 
 **Trust is delivered, not disabled.** The sidecar exports its CA, and sandbox bootstrap installs it into the system, NSS, and JDK trust stores on a best-effort basis — clients keep certificate verification on (`curl` without `-k`). Chromium-family images should ship the native `certutil` package so the per-user NSS store can be updated.

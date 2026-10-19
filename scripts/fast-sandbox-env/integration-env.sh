@@ -202,7 +202,10 @@ ACTION=""
 log() { printf '\033[1;34m[fast-sandbox-env]\033[0m %s\n' "$*" | tee -a "$WORK/run.log" >&2; }
 die() { printf '\033[1;31m[fast-sandbox-env] ERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 pass() { printf '\033[1;32m[fast-sandbox-env] PASS\033[0m %s\n' "$*" | tee -a "$WORK/run.log" >&2; }
-fail() { printf '\033[1;31m[fast-sandbox-env] FAIL\033[0m %s\n' "$*" >&2; exit 1; }
+# fail dumps before exiting: an explicit `exit` does NOT fire the ERR trap
+# (only a failing command does), so verify-stage failures reached through
+# wait_for -> fail would otherwise tear down the cluster with no pod logs.
+fail() { printf '\033[1;31m[fast-sandbox-env] FAIL\033[0m %s\n' "$*" >&2; failure_dump "${STAGE_CUR_LABEL:-$ACTION}" || true; exit 1; }
 highlight() { printf '\033[1;36m%s\033[0m\n' "$*"; }
 
 now_ms() { date +%s%N; }   # GNU date (Linux); the script targets a Linux KVM host
@@ -211,12 +214,14 @@ ms2s() { awk -v ms="$1" 'BEGIN { printf "%.1f", ms / 1000 }'; }
 declare -a STAGE_ORDER=()
 declare -a STAGE_MS_LIST=()
 STAGE_CUR=""
+STAGE_CUR_LABEL=""
 STAGE_START_NS=0
 STAGE_N=0
 
 stage_begin() {
 	STAGE_N=$((STAGE_N + 1))
 	STAGE_CUR="$1"
+	STAGE_CUR_LABEL="$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
 	STAGE_START_NS="$(now_ms)"
 	printf '\n\033[1;36m==> [%d] %s\033[0m\n' "$STAGE_N" "$1"
 }
@@ -323,13 +328,24 @@ failure_dump() {
 		kubectl logs -n "$NS" deploy/fast-sandbox-controller --tail=80 2>&1 || true
 		echo "--- firecracker-runtime logs (tail) ---"
 		kubectl logs -n "$NS" daemonset/firecracker-runtime --all-containers --tail=80 2>&1 || true
-		echo "--- fastlet logs (tail) ---"
-		kubectl logs -n "$RESOURCE_NS" -l app=sandbox-fastlet --tail=80 2>&1 || true
+		# --all-containers is the point: `kubectl logs -l` without it logs
+		# only the first container (fastlet) and silently drops egress /
+		# fastlet-proxy, which is where pause/snapshot and policy failures
+		# actually surface.
+		echo "--- fastlet pod logs, every container (tail) ---"
+		kubectl logs -n "$RESOURCE_NS" -l app=sandbox-fastlet \
+			--all-containers --prefix --timestamps --tail=300 2>&1 || true
 		echo "--- builder pods + logs (tail) ---"
 		kubectl get pods -n "$RESOURCE_NS" -l sandbox.fast.io/sandboxtemplate --show-labels 2>&1 || true
 		kubectl logs -n "$RESOURCE_NS" -l sandbox.fast.io/sandboxtemplate --tail=80 2>&1 || true
 		echo "--- SandboxTemplates (status carries the build failure reason) ---"
 		kubectl get sandboxtemplates -n "$RESOURCE_NS" -o yaml 2>&1 || true
+		# Sandbox CR states: a pause/snapshot/resume failure shows up as a
+		# stuck or failed status condition here, with the phase the poll
+		# never reached.
+		echo "--- Sandbox CRs (status only) ---"
+		kubectl get sandboxes -n "$RESOURCE_NS" -o json 2>/dev/null \
+			| jq -c '.items[] | {name: .metadata.name, phase: .status.phase, conditions: .status.conditions, infra: .status.infraComponents}' 2>&1 || true
 		echo "--- recent events ($RESOURCE_NS) ---"
 		kubectl get events -n "$RESOURCE_NS" --sort-by=.lastTimestamp 2>&1 | tail -30 || true
 		echo "--- OpenSandbox pods ($OSB_NS) ---"

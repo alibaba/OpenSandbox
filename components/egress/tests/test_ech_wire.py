@@ -335,6 +335,7 @@ class ECHOpaqueRuntimeTest(unittest.TestCase):
             "OPENSANDBOX_EGRESS_REVISION_TLS_CAPACITY": "64",
             "OPENSANDBOX_EGRESS_REVISION_REQUEST_CAPACITY": "256",
             "OPENSANDBOX_EGRESS_REVISION_DRAIN_TIMEOUT_SECONDS": "1",
+            "OPENSANDBOX_EGRESS_MITMPROXY_PASSTHROUGH_HOSTS": "[]",
         }
         self.process = self._subprocess.Popen(
             [

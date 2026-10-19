@@ -130,10 +130,14 @@ def sync_detailed(
 
     This operation does not restart or recreate the sandbox container/pod.
 
-    **Concurrency:** This endpoint uses read-modify-write without optimistic
-    locking (no `resourceVersion` check). Concurrent PATCH requests may
-    interleave and silently drop updates. Use a single writer or coordinate
-    out-of-band when concurrent modifications to the same key are expected.
+    **Concurrency:** On the Docker runtime concurrent PATCH requests apply
+    one after another, last write wins per key. On Kubernetes a PATCH
+    writes back the whole label set it read, with no `resourceVersion`
+    check, so a concurrent PATCH may revert a value another PATCH changed
+    or resurrect a key it deleted. A PATCH on an fsb sandbox sends only its
+    own keys, fenced by the sandbox UID and generation. Use a single writer
+    or coordinate out-of-band when concurrent modifications to the same
+    key are expected.
 
     Args:
         sandbox_id (str):
@@ -193,10 +197,14 @@ def sync(
 
     This operation does not restart or recreate the sandbox container/pod.
 
-    **Concurrency:** This endpoint uses read-modify-write without optimistic
-    locking (no `resourceVersion` check). Concurrent PATCH requests may
-    interleave and silently drop updates. Use a single writer or coordinate
-    out-of-band when concurrent modifications to the same key are expected.
+    **Concurrency:** On the Docker runtime concurrent PATCH requests apply
+    one after another, last write wins per key. On Kubernetes a PATCH
+    writes back the whole label set it read, with no `resourceVersion`
+    check, so a concurrent PATCH may revert a value another PATCH changed
+    or resurrect a key it deleted. A PATCH on an fsb sandbox sends only its
+    own keys, fenced by the sandbox UID and generation. Use a single writer
+    or coordinate out-of-band when concurrent modifications to the same
+    key are expected.
 
     Args:
         sandbox_id (str):
@@ -251,10 +259,14 @@ async def asyncio_detailed(
 
     This operation does not restart or recreate the sandbox container/pod.
 
-    **Concurrency:** This endpoint uses read-modify-write without optimistic
-    locking (no `resourceVersion` check). Concurrent PATCH requests may
-    interleave and silently drop updates. Use a single writer or coordinate
-    out-of-band when concurrent modifications to the same key are expected.
+    **Concurrency:** On the Docker runtime concurrent PATCH requests apply
+    one after another, last write wins per key. On Kubernetes a PATCH
+    writes back the whole label set it read, with no `resourceVersion`
+    check, so a concurrent PATCH may revert a value another PATCH changed
+    or resurrect a key it deleted. A PATCH on an fsb sandbox sends only its
+    own keys, fenced by the sandbox UID and generation. Use a single writer
+    or coordinate out-of-band when concurrent modifications to the same
+    key are expected.
 
     Args:
         sandbox_id (str):
@@ -312,10 +324,14 @@ async def asyncio(
 
     This operation does not restart or recreate the sandbox container/pod.
 
-    **Concurrency:** This endpoint uses read-modify-write without optimistic
-    locking (no `resourceVersion` check). Concurrent PATCH requests may
-    interleave and silently drop updates. Use a single writer or coordinate
-    out-of-band when concurrent modifications to the same key are expected.
+    **Concurrency:** On the Docker runtime concurrent PATCH requests apply
+    one after another, last write wins per key. On Kubernetes a PATCH
+    writes back the whole label set it read, with no `resourceVersion`
+    check, so a concurrent PATCH may revert a value another PATCH changed
+    or resurrect a key it deleted. A PATCH on an fsb sandbox sends only its
+    own keys, fenced by the sandbox UID and generation. Use a single writer
+    or coordinate out-of-band when concurrent modifications to the same
+    key are expected.
 
     Args:
         sandbox_id (str):

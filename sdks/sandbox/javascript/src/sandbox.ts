@@ -58,7 +58,7 @@ import { validateIdlePolicy } from "./internal/idlePolicy.js";
 const HOST_PATH_PATTERN = /^([/]|[A-Za-z]:[\\/])/;
 
 const TEMPLATE_CREDENTIAL_VAULT_UNAVAILABLE =
-  "Credential Vault is not available for template-backed sandboxes: they have no sandbox-side egress sidecar.";
+  "Credential Vault is not available: the adapter factory's network policy stack does not provide credentialVault for template-backed sandboxes.";
 
 const unavailableIsolation: IsolationService = {
   create(): Promise<IsolationSession> {
@@ -383,7 +383,9 @@ async function resolveEgressStack(
     }
     return {
       egress: stack.egress,
-      credentialVault: unavailableCredentialVault(TEMPLATE_CREDENTIAL_VAULT_UNAVAILABLE),
+      credentialVault:
+        stack.credentialVault ??
+        unavailableCredentialVault(TEMPLATE_CREDENTIAL_VAULT_UNAVAILABLE),
       origin: SandboxOrigin.TEMPLATE,
     };
   }
@@ -736,9 +738,12 @@ export class Sandbox {
    * (control-plane state, not workload shape) may accompany the template id,
    * and the timeout is required.
    *
-   * The returned sandbox routes egress policy operations through the
-   * lifecycle control plane and has no Credential Vault (template-backed
-   * sandboxes have no sandbox-side egress sidecar).
+   * The returned sandbox routes egress policy operations and the Credential
+   * Vault through the lifecycle control plane: the server relays vault
+   * revisions to the egress-held vault over the FastPath handler relay, so
+   * the ack is synchronous and credential values never appear on any read
+   * (OSEP-0022). A 412 patch failure means another writer won the revision —
+   * re-read and retry with the fresh `expectedRevision`.
    */
   static async createFromTemplate(opts: SandboxCreateFromTemplateOptions): Promise<Sandbox> {
     if (!opts.templateId?.trim()) {
@@ -1089,6 +1094,10 @@ export class Sandbox {
     return await Sandbox.connect({ ...opts, connectionConfig: baseConnectionConfig, adapterFactory });
   }
 
+  /**
+   * Request irreversible sandbox termination. Resolves when deletion is accepted;
+   * runtime cleanup may continue afterward.
+   */
   async kill(): Promise<void> {
     this.sandboxes.invalidateEndpointCache?.(this.id);
     await this.sandboxes.deleteSandbox(this.id);

@@ -23,6 +23,8 @@ hooks or a public mutation ACK by itself.
 from __future__ import annotations
 
 from decision_snapshot import validate
+from host_selectors import Selector
+from static_passthrough import StaticPassthrough
 from revision_receiver import Receiver, Revision, RevisionError, Snapshot
 from tls_decision import TLSSelectorView, compile_view
 from tls_registry import AdmissionToken, BoundConnectionRegistry, RegistryError
@@ -51,7 +53,10 @@ class RevisionPublisher:
         max_snapshot_bytes: int, capacity: int,
         max_abort_records: int = 1024, request_capacity: int | None = None,
         drain_timeout_seconds: int = 30,
+        static_passthrough: tuple[Selector, ...] = (),
     ) -> None:
+        static_config = StaticPassthrough(static_passthrough)
+        self._static_passthrough = static_config.selectors
         self._receiver = Receiver(
             control_generation, subject_generation, validate,
             max_snapshot_bytes=max_snapshot_bytes, max_abort_records=max_abort_records,
@@ -60,9 +65,14 @@ class RevisionPublisher:
             capacity=capacity, receiver=self._receiver, request_capacity=request_capacity,
             drain_timeout_seconds=drain_timeout_seconds,
         )
+        self._registry._static_config = static_config
         self._receiver._publication_owned = True
         self._registry._publication_owned = True
         self._pending_view: TLSSelectorView | None = None
+
+    @property
+    def static_passthrough(self) -> tuple[Selector, ...]:
+        return self._static_passthrough
 
     @property
     def registry(self) -> BoundConnectionRegistry:
@@ -87,6 +97,9 @@ class RevisionPublisher:
             valid = False
         if not valid:
             raise RevisionError("snapshot validation failed")
+        if any(left.overlaps(right) for left in view.selectors
+               for right in self.static_passthrough):
+            raise RevisionError("static passthrough overlap")
 
         with self._registry._lock, receiver._lock:
             if receiver._stage_check(snapshot, serial):
@@ -224,13 +237,19 @@ class LiveReceiver:
         self, control_generation: str, subject_generation: str, *,
         max_snapshot_bytes: int, capacity: int,
         request_capacity: int | None = None, drain_timeout_seconds: int = 30,
+        static_passthrough: tuple[Selector, ...] = (),
     ) -> None:
         self._publisher = RevisionPublisher(
             control_generation, subject_generation,
             max_snapshot_bytes=max_snapshot_bytes, capacity=capacity,
             request_capacity=request_capacity,
             drain_timeout_seconds=drain_timeout_seconds,
+            static_passthrough=static_passthrough,
         )
+
+    @property
+    def static_passthrough(self) -> tuple[Selector, ...]:
+        return self._publisher.static_passthrough
 
     @property
     def registry(self) -> BoundConnectionRegistry:

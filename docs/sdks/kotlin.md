@@ -5,8 +5,7 @@ description: Kotlin SDK for creating, managing, and interacting with secure Open
 
 # OpenSandbox SDK for Kotlin/Java
 
-Create sandboxes, run commands, and manage files from Java or Kotlin. Both languages
-use the same JVM SDK and synchronous APIs.
+Create sandboxes, run commands, and manage files from Java or Kotlin. Both languages use the same JVM SDK and synchronous APIs.
 
 ## Installation
 
@@ -30,8 +29,7 @@ dependencies {
 
 ## Quick Start
 
-The Java examples use Java 11+. The quick start creates a sandbox, runs a shell
-command, and releases both remote and local resources.
+The Java examples use Java 11+. The quick start creates a sandbox, runs a shell command, and releases both remote and local resources.
 
 ::: tip
 Before running this example, ensure the OpenSandbox service is running. See the [Getting Started](/getting-started/) guide for startup instructions.
@@ -97,8 +95,7 @@ fun main() {
 }
 ```
 
-`use` / try-with-resources releases the local client. `kill()` terminates the
-remote sandbox. The remaining examples use Java; Kotlin calls the same methods.
+`use` / try-with-resources releases the local client. `kill()` terminates the remote sandbox. The remaining examples use Java; Kotlin calls the same methods.
 
 ## Lifecycle Hooks
 
@@ -133,12 +130,7 @@ The Server validates `timeoutSeconds`; `preStart` accepts 1–10800 seconds, whi
 
 ### Idle policy (auto-pause and wake-on-access)
 
-`SandboxLifecycle.idlePolicy` (OSEP-0024, fast-sandbox only) tells the control
-plane to auto-pause the sandbox after `idleTimeoutSeconds` (30–86400) of
-continuously idle ingress-observed traffic, and to wake it on the next request.
-It is control-plane state: it never reaches the guest, is accepted in template
-mode (`TemplateLauncher.idlePolicy(...)`), and is rejected by non-fast-sandbox
-backends. Omitting it preserves non-automated behavior exactly.
+`SandboxLifecycle.idlePolicy` (OSEP-0024, fast-sandbox only) tells the control plane to auto-pause the sandbox after `idleTimeoutSeconds` (30–86400) of continuously idle ingress-observed traffic, and to wake it on the next request. It is control-plane state: it never reaches the guest, is accepted in template mode (`TemplateLauncher.idlePolicy(...)`), and is rejected by non-fast-sandbox backends. Omitting it preserves non-automated behavior exactly.
 
 ```kotlin
 val sandbox = Sandbox.builder()
@@ -156,31 +148,15 @@ val sandbox = Sandbox.builder()
     .build()
 ```
 
-`activeProbe` lets the application veto a pause while real work runs without
-producing ingress traffic: declare an endpoint answering
-`{"active": bool, "message"?: string}` and the server polls it when the sandbox
-is otherwise idle; a busy answer resets the idle clock. Invalid policies fail
-fast in the `IdlePolicy.Builder`.
+`activeProbe` lets the application veto a pause while real work runs without producing ingress traffic: declare an endpoint answering `{"active": bool, "message"?: string}` and the server polls it when the sandbox is otherwise idle; a busy answer resets the idle clock. Invalid policies fail fast in the `IdlePolicy.Builder`.
 
 ### Wake retry
 
-A request to a paused sandbox may arrive while its restore is still in
-progress. The gateway answers `503` with the `OpenSandbox-Wake: expired`
-marker; the retry interceptor recognizes it and resends the original request
-after the `Retry-After` delay (safe for any method — the marker proves the
-request was never forwarded). The wake budget defaults to 5 attempts / 60
-seconds across all wake cycles; when it is exhausted the SDK throws
-`SandboxWakeTimeoutException` (carrying `attempts` and `waited`) while the
-server-side resume continues in the background. Bare `503` responses follow
-the existing retry rules untouched. Tune it on `RetryPolicy`:
-`wakeRetryEnabled` (default true), `wakeMaxAttempts` (5),
-`wakeOverallDeadline` (60s, `null` for unbounded).
+A request to a paused sandbox may arrive while its restore is still in progress. The gateway answers `503` with the `OpenSandbox-Wake: expired` marker; the retry interceptor recognizes it and resends the original request after the `Retry-After` delay (safe for any method — the marker proves the request was never forwarded). The wake budget defaults to 5 attempts / 60 seconds across all wake cycles; when it is exhausted the SDK throws `SandboxWakeTimeoutException` (carrying `attempts` and `waited`) while the server-side resume continues in the background. Bare `503` responses follow the existing retry rules untouched. Tune it on `RetryPolicy`: `wakeRetryEnabled` (default true), `wakeMaxAttempts` (5), `wakeOverallDeadline` (60s, `null` for unbounded).
 
 ## Usage Examples
 
-Use a live `sandbox` and `config` from the quick start, before cleanup. Java
-snippets belong inside a method that handles or declares checked exceptions;
-place imports at the top of the file. Common imports are:
+Use a live `sandbox` and `config` from the quick start, before cleanup. Java snippets belong inside a method that handles or declares checked exceptions; place imports at the top of the file. Common imports are:
 
 ```java
 import java.time.Duration;
@@ -191,8 +167,7 @@ import com.alibaba.opensandbox.sandbox.domain.models.execd.executions.*;
 import com.alibaba.opensandbox.sandbox.domain.models.execd.filesystem.*;
 ```
 
-Creation examples are alternatives. Close each client and kill sandboxes that
-are no longer needed.
+Creation examples are alternatives. Close each client and kill sandboxes that are no longer needed.
 
 ### 1. Lifecycle Management
 
@@ -226,9 +201,7 @@ try (Sandbox resumed = Sandbox.resumer()
 }
 ```
 
-Pause is asynchronous and runtime-dependent. See [Pause and Resume](/guides/pause-resume).
-To attach to a running sandbox, use
-`Sandbox.connector().sandboxId(id).connectionConfig(config).connect()`.
+Pause is asynchronous and runtime-dependent. See [Pause and Resume](/guides/pause-resume). To attach to a running sandbox, use `Sandbox.connector().sandboxId(id).connectionConfig(config).connect()`.
 
 Create a non-expiring sandbox by passing `timeout(null)`:
 
@@ -242,9 +215,7 @@ Sandbox manual = Sandbox.builder()
 
 ### 2. Custom Health Check
 
-Resolving an endpoint confirms that a route exists; it does not confirm that the
-application on that port is healthy. For service readiness, make a bounded request
-to the application's health endpoint and include the returned endpoint headers.
+Resolving an endpoint confirms that a route exists; it does not confirm that the application on that port is healthy. For service readiness, make a bounded request to the application's health endpoint and include the returned endpoint headers.
 
 Define custom logic to determine if the sandbox is healthy. This overrides the default ping check. Set timeouts within custom checks; the SDK cannot interrupt them.
 
@@ -301,8 +272,7 @@ RunCommandRequest request = RunCommandRequest.builder()
 sandbox.commands().run(request);
 ```
 
-To execute a native program without shell parsing, pass an argument list. On Linux,
-this example prints literal `$HOME` and keeps `hello world` as one argument:
+To execute a native program without shell parsing, pass an argument list. On Linux, this example prints literal `$HOME` and keeps `hello world` as one argument:
 
 ```java
 sandbox.commands().run(RunCommandRequest.builder()
@@ -361,22 +331,15 @@ try {
 
 #### Persistent environment variables
 
-Set environment variables that the runtime injects into every subsequent command
-and session — without hand-writing shell escaping against the sandbox env file.
+Set environment variables that the runtime injects into every subsequent command and session — without hand-writing shell escaping against the sandbox env file.
 
 ```java
 sandbox.commands().setEnv("MY_TOKEN", "it's a safe value");
 ```
 
-Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values without a single quote are
-stored verbatim; values containing a single quote use the env file's
-double-quoted form, in which shell-style `$NAME` sequences may be expanded
-when the runtime loads the file. The env file is append-only: the
-last write for a key wins. Throws `SandboxException` if the sandbox fails to
-persist the variable.
+Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values without a single quote are stored verbatim; values containing a single quote use the env file's double-quoted form, in which shell-style `$NAME` sequences may be expanded when the runtime loads the file. The env file is append-only: the last write for a key wins. Throws `SandboxException` if the sandbox fails to persist the variable.
 
-For filesystem/process isolation within a sandbox, see
-[Isolation Sessions](/guides/isolation-sessions). These are separate from Bash sessions.
+For filesystem/process isolation within a sandbox, see [Isolation Sessions](/guides/isolation-sessions). These are separate from Bash sessions.
 
 ### 4. File Operations
 
@@ -420,17 +383,9 @@ Bind a filesystem client to a Linux UID and GID:
 val files = sandbox.filesWithIdentity(1001, 2000)
 ```
 
-The bound client exposes the usual file operations and shares the sandbox
-connection, authentication, and endpoint routing headers. The existing file
-client retains its default identity. Select the UID/GID separately for command
-execution.
+The bound client exposes the usual file operations and shares the sandbox connection, authentication, and endpoint routing headers. The existing file client retains its default identity. Select the UID/GID separately for command execution.
 
-This requires Linux and an Execd version that supports filesystem execution
-identity. Unsupported servers return an error; requests never fall back to the
-default filesystem routes. Keep sandbox credentials and identity selection in
-the trusted backend. Linux filesystem permissions apply; this feature does not
-create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd)
-for permission and workspace provisioning details.
+This requires Linux and an Execd version that supports filesystem execution identity. Unsupported servers return an error; requests never fall back to the default filesystem routes. Keep sandbox credentials and identity selection in the trusted backend. Linux filesystem permissions apply; this feature does not create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd) for permission and workspace provisioning details.
 
 ### 5. Sandbox Management (Admin)
 
@@ -450,36 +405,21 @@ try (SandboxManager manager = SandboxManager.builder()
 
 ### Resource metrics
 
-Read current sandbox resource usage with `sandbox.getMetrics()`. This is separate
-from [SDK creation telemetry](/sdks/observability#creation-metrics).
+Read current sandbox resource usage with `sandbox.getMetrics()`. This is separate from [SDK creation telemetry](/sdks/observability#creation-metrics).
 
 ### 6. Client Pool and observability
 
-`SandboxPool` provides four acquire policies and staged warmup controls. Use
-`InMemoryPoolStateStore` in one process, or the optional
-`com.alibaba.opensandbox:sandbox-pool-redis` module with a caller-managed Jedis
-client for distributed deployments. See [Client Pool](/guides/client-pool)
-for configuration, examples, cleanup, and namespace retirement.
+`SandboxPool` provides four acquire policies and staged warmup controls. Use `InMemoryPoolStateStore` in one process, or the optional `com.alibaba.opensandbox:sandbox-pool-redis` module with a caller-managed Jedis client for distributed deployments. See [Client Pool](/guides/client-pool) for configuration, examples, cleanup, and namespace retirement.
 
-Set `ConnectionConfig.builder().enableTracing(true)` to emit [pool warmup traces](/sdks/observability#pool-warmup-tracing).
-The JVM SDK also adds trace IDs to SLF4J MDC. For remote logs/events, use
-`SandboxManager.getDiagnosticLogs` / `getDiagnosticEvents`; see [Diagnostics](/api/#diagnostics).
-Create-latency reporting is controlled separately by [SDK Telemetry](/sdks/observability#creation-metrics).
+Set `ConnectionConfig.builder().enableTracing(true)` to emit [pool warmup traces](/sdks/observability#pool-warmup-tracing). The JVM SDK also adds trace IDs to SLF4J MDC. For remote logs/events, use `SandboxManager.getDiagnosticLogs` / `getDiagnosticEvents`; see [Diagnostics](/api/#diagnostics). Create-latency reporting is controlled separately by [SDK Telemetry](/sdks/observability#creation-metrics).
 
 ## Snapshots and metadata
 
-Create a snapshot with `sandbox.createSnapshot` or `manager.createSnapshot`.
-`SandboxManager` exposes `getSnapshot`, `listSnapshots`, `deleteSnapshot`, and
-`waitForSnapshotReady` to wait for asynchronous snapshot completion. Restore with
-`Sandbox.builder().snapshotId(snapshotId).connectionConfig(config).build()`.
+Create a snapshot with `sandbox.createSnapshot` or `manager.createSnapshot`. `SandboxManager` exposes `getSnapshot`, `listSnapshots`, `deleteSnapshot`, and `waitForSnapshotReady` to wait for asynchronous snapshot completion. Restore with `Sandbox.builder().snapshotId(snapshotId).connectionConfig(config).build()`.
 
-Use `sandbox.patchMetadata` or `manager.patchSandboxMetadata` to add/replace
-metadata keys; a `null` value removes a key. Runtime support is described by the
-[lifecycle contract](/api/#1-sandbox-lifecycle-yml).
+Use `sandbox.patchMetadata` or `manager.patchSandboxMetadata` to add/replace metadata keys; a `null` value removes a key. Runtime support is described by the [lifecycle contract](/api/#1-sandbox-lifecycle-yml).
 
-Snapshot support depends on the runtime and server configuration. Renew the source
-sandbox first if its remaining TTL may expire during snapshot creation. The JVM helper
-waits for `Ready` and raises an exception on failure or timeout:
+Snapshot support depends on the runtime and server configuration. Renew the source sandbox first if its remaining TTL may expire during snapshot creation. The JVM helper waits for `Ready` and raises an exception on failure or timeout:
 
 ```java
 try (SandboxManager manager = SandboxManager.builder().connectionConfig(config).build()) {
@@ -498,8 +438,7 @@ try (SandboxManager manager = SandboxManager.builder().connectionConfig(config).
 }
 ```
 
-Metadata updates can include both replacement values and removals. Use a map that
-accepts null values (`Map.of` does not):
+Metadata updates can include both replacement values and removals. Use a map that accepts null values (`Map.of` does not):
 
 ```java
 Map<String, String> patch = new HashMap<>();
@@ -565,29 +504,17 @@ ConnectionConfig sharedConfig = ConnectionConfig.builder()
 
 ### 2. Automatic retries
 
-The SDK retries transient failures automatically. `ConnectionConfig` installs a
-`RetryInterceptor` (`com.alibaba.opensandbox.sandbox.transport.RetryPolicy`) on the
-SDK's non-streaming HTTP clients.
+The SDK retries transient failures automatically. `ConnectionConfig` installs a `RetryInterceptor` (`com.alibaba.opensandbox.sandbox.transport.RetryPolicy`) on the SDK's non-streaming HTTP clients.
 
 Default behavior:
 
-- **Enabled by default.** Idempotent methods (`GET/HEAD/PUT/DELETE/OPTIONS`) are
-  retried on `429`, `502`, `503`, and on pre-send transport failures (DNS, TCP
-  connect, TLS handshake).
-- **`POST`/`PATCH` are never retried on a status code by default**, since the
-  request may already have been applied server-side. Pre-send transport failures
-  (before any byte is written) are still retried for these methods.
-- Up to `3` retries with decorrelated-jitter exponential backoff, honoring a server
-  `Retry-After` header (capped at 60s).
-- **SSE / streaming requests bypass all automatic retry** because their bodies
-  are not safely replayable. The SSE client also disables OkHttp's built-in
-  connection recovery to prevent a streaming command POST from being replayed.
+- **Enabled by default.** Idempotent methods (`GET/HEAD/PUT/DELETE/OPTIONS`) are retried on `429`, `502`, `503`, and on pre-send transport failures (DNS, TCP connect, TLS handshake).
+- **`POST`/`PATCH` are never retried on a status code by default**, since the request may already have been applied server-side. Pre-send transport failures (before any byte is written) are still retried for these methods.
+- Up to `3` retries with decorrelated-jitter exponential backoff, honoring a server `Retry-After` header (capped at 60s).
+- **SSE / streaming requests bypass all automatic retry** because their bodies are not safely replayable. The SSE client also disables OkHttp's built-in connection recovery to prevent a streaming command POST from being replayed.
 
 ::: warning Behavior change
-SDK-policy retries are on by default. This can increase the number of HTTP attempts
-and tail latency compared to earlier SDK versions. To disable the new SDK-policy
-retries, use `RetryPolicy.disabled()`; non-streaming requests then fall back to
-OkHttp's pre-existing built-in connection recovery.
+SDK-policy retries are on by default. This can increase the number of HTTP attempts and tail latency compared to earlier SDK versions. To disable the new SDK-policy retries, use `RetryPolicy.disabled()`; non-streaming requests then fall back to OkHttp's pre-existing built-in connection recovery.
 :::
 
 ```java
@@ -677,14 +604,9 @@ Sandbox sandbox = Sandbox.builder()
 
 ### 4. Runtime Egress Policy Updates
 
-Runtime egress reads and patches go directly to the sandbox egress sidecar.
-The SDK first resolves the sandbox endpoint on port `18080`, then calls the sidecar `/policy` API.
+Runtime egress reads and patches go directly to the sandbox egress sidecar. The SDK first resolves the sandbox endpoint on port `18080`, then calls the sidecar `/policy` API.
 
-Template-backed sandboxes have no sandbox-side egress sidecar: the SDK detects
-them via the server's `OPEN-SANDBOX-ORIGIN` response header (see
-[Fsb Template Management](#fsb-template-management)) and routes the same
-`getEgressPolicy` / `patchEgressRules` / `deleteEgressRules` calls through the
-lifecycle control plane (`/sandboxes/{sandboxId}/networkpolicy`) instead.
+Template-backed sandboxes have no sandbox-side egress sidecar: the SDK detects them via the server's `OPEN-SANDBOX-ORIGIN` response header (see [Fsb Template Management](#fsb-template-management)) and routes the same `getEgressPolicy` / `patchEgressRules` / `deleteEgressRules` calls through the lifecycle control plane (`/sandboxes/{sandboxId}/networkpolicy`) instead.
 
 Patch uses merge semantics:
 - Incoming rules take priority over existing rules with the same `target`.
@@ -705,10 +627,7 @@ sandbox.patchEgressRules(
 
 ### 5. Credential Vault
 
-Credential Vault injects outbound credentials from the egress sidecar while
-keeping real secrets out of sandbox environment variables, commands, files, and
-logs. Create the sandbox with `credentialProxyEnabled(true)`, then write
-credentials and bindings through `sandbox.credentialVault()`.
+Credential Vault injects outbound credentials from the egress sidecar while keeping real secrets out of sandbox environment variables, commands, files, and logs. Create the sandbox with `credentialProxyEnabled(true)`, then write credentials and bindings through `sandbox.credentialVault()`.
 
 ```java
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.Credential;
@@ -766,24 +685,15 @@ sandbox.credentialVault().create(
 );
 ```
 
-See [Credential Vault](/guides/credential-vault) for auth types, binding
-guidance, and Git/curl examples.
+See [Credential Vault](/guides/credential-vault) for auth types, binding guidance, and Git/curl examples.
 
 ::: warning
-Credential Vault is unavailable for template-backed sandboxes: they have no
-sandbox-side egress sidecar. `sandbox.credentialVault()` throws for them.
+Credential Vault is unavailable for template-backed sandboxes: they have no sandbox-side egress sidecar. `sandbox.credentialVault()` throws for them.
 :::
 
 ## Fsb Template Management
 
-fsb (fast-sandbox microVM) golden-image templates are managed through
-`SandboxManager`. Template builds are asynchronous: `createTemplate` returns
-with `status.phase` set to `Pending`; poll `getTemplate` until the phase
-reaches `Succeeded` or `Failed`. Only a `Succeeded` template can create
-sandboxes. These operations require a configured Fsb runtime. Replace the example
-publish URI with a location configured for your server, and use an open
-`SandboxManager` created with `SandboxManager.builder().connectionConfig(config).build()`.
-Close the manager when finished.
+fsb (fast-sandbox microVM) golden-image templates are managed through `SandboxManager`. Template builds are asynchronous: `createTemplate` returns with `status.phase` set to `Pending`; poll `getTemplate` until the phase reaches `Succeeded` or `Failed`. Only a `Succeeded` template can create sandboxes. These operations require a configured Fsb runtime. Replace the example publish URI with a location configured for your server, and use an open `SandboxManager` created with `SandboxManager.builder().connectionConfig(config).build()`. Close the manager when finished.
 
 ```java
 import com.alibaba.opensandbox.sandbox.domain.models.sandboxes.CreateTemplateRequest;
@@ -829,10 +739,7 @@ manager.listTemplates(
 
 ### Creating a Sandbox from a Template
 
-Use `Sandbox.fromTemplate()` to create a sandbox from a `Succeeded` template.
-Template mode fixes the workload shape on the server: only `metadata`,
-`networkPolicy` and `extensions` may accompany the template id, and `timeout`
-is required.
+Use `Sandbox.fromTemplate()` to create a sandbox from a `Succeeded` template. Template mode fixes the workload shape on the server: only `metadata`, `networkPolicy` and `extensions` may accompany the template id, and `timeout` is required.
 
 ```java
 import java.time.Duration;
@@ -856,8 +763,4 @@ Sandbox sandbox = Sandbox.fromTemplate()
     .create();
 ```
 
-The created sandbox reports `SandboxOrigin.TEMPLATE` from `sandbox.getOrigin()`.
-Template-backed sandboxes have no egress sidecar, so the SDK routes their
-egress policy through the lifecycle control plane automatically — including
-`Sandbox.connector()` and `Sandbox.resumer()` re-attach flows, which detect
-the origin from the server's `OPEN-SANDBOX-ORIGIN` response header.
+The created sandbox reports `SandboxOrigin.TEMPLATE` from `sandbox.getOrigin()`. Template-backed sandboxes have no egress sidecar, so the SDK routes their egress policy through the lifecycle control plane automatically — including `Sandbox.connector()` and `Sandbox.resumer()` re-attach flows, which detect the origin from the server's `OPEN-SANDBOX-ORIGIN` response header.

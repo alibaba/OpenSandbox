@@ -23,8 +23,7 @@ go get github.com/alibaba/OpenSandbox/sdks/sandbox/go
 
 ### Create and manage a sandbox
 
-Use the high-level helper to create a sandbox, resolve its endpoint, and wait for
-readiness before running commands:
+Use the high-level helper to create a sandbox, resolve its endpoint, and wait for readiness before running commands:
 
 ```go
 package main
@@ -70,15 +69,9 @@ func main() {
 }
 ```
 
-`ConnectSandbox` and `ResumeSandbox` check health only when you pass the optional
-`ReadyOptions` argument (an empty `ReadyOptions{}` uses the default check).
-Omitting it resolves the endpoint without a health check. Pause is asynchronous:
-wait until sandbox info reports `Paused` before resuming.
+`ConnectSandbox` and `ResumeSandbox` check health only when you pass the optional `ReadyOptions` argument (an empty `ReadyOptions{}` uses the default check). Omitting it resolves the endpoint without a health check. Pause is asynchronous: wait until sandbox info reports `Paused` before resuming.
 
-The following snippets go inside a function returning `error`, with the live
-`sandbox`, `config`, and `ctx` above. Add standard-library imports used by each
-snippet. Creation examples are alternatives; terminate sandboxes with `Kill`
-when done. `Close` currently does not terminate the sandbox.
+The following snippets go inside a function returning `error`, with the live `sandbox`, `config`, and `ctx` above. Add standard-library imports used by each snippet. Creation examples are alternatives; terminate sandboxes with `Kill` when done. `Close` currently does not terminate the sandbox.
 
 ### Run a command with streaming output
 
@@ -99,8 +92,7 @@ if result.ExitCode == nil || *result.ExitCode != 0 {
 }
 ```
 
-Use the low-level client when you need raw SSE events or command status/log APIs.
-`event.Data` contains JSON; import `encoding/json` and `os` for this example:
+Use the low-level client when you need raw SSE events or command status/log APIs. `event.Data` contains JSON; import `encoding/json` and `os` for this example:
 
 ```go
 endpoint, err := sandbox.GetEndpoint(ctx, 44772)
@@ -135,12 +127,9 @@ if err != nil {
 }
 ```
 
-`RunCommandRequest.Timeout` is in **milliseconds**. Use this low-level client for
-`InterruptCommand`, `GetCommandStatus`, and `GetCommandLogs`, which are not exposed
-as high-level `Sandbox` methods.
+`RunCommandRequest.Timeout` is in **milliseconds**. Use this low-level client for `InterruptCommand`, `GetCommandStatus`, and `GetCommandLogs`, which are not exposed as high-level `Sandbox` methods.
 
-For native execution, replace the request above with the following. On Linux,
-it prints literal `$HOME` and keeps `hello world` as one argument:
+For native execution, replace the request above with the following. On Linux, it prints literal `$HOME` and keeps `hello world` as one argument:
 
 ```go
 _, err = sandbox.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
@@ -156,8 +145,7 @@ Native argv execution requires an updated execd. See [command execution modes](/
 
 ### Background commands
 
-Reuse the `exec` client from the streaming example to poll status and incremental
-logs. Command timeout is in milliseconds and is separate from sandbox TTL.
+Reuse the `exec` client from the streaming example to poll status and incremental logs. Command timeout is in milliseconds and is separate from sandbox TTL.
 
 ```go
 execution, err := sandbox.RunCommandWithOpts(ctx, opensandbox.RunCommandRequest{
@@ -233,27 +221,19 @@ fmt.Println(result.Text())
 
 ### Persistent environment variables
 
-Set environment variables that the runtime injects into every subsequent command
-and session — without hand-writing shell escaping against the sandbox env file.
+Set environment variables that the runtime injects into every subsequent command and session — without hand-writing shell escaping against the sandbox env file.
 
 ```go
 err := sandbox.SetEnv(ctx, "MY_TOKEN", "it's a safe value")
 ```
 
-Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values without a single quote are
-stored verbatim; values containing a single quote use the env file's
-double-quoted form, in which shell-style `$NAME` sequences may be expanded
-when the runtime loads the file. The env file is append-only: the
-last write for a key wins. Returns an error if the sandbox fails to persist the
-variable.
+Keys must match `[A-Za-z_][A-Za-z0-9_]*`. Values without a single quote are stored verbatim; values containing a single quote use the env file's double-quoted form, in which shell-style `$NAME` sequences may be expanded when the runtime loads the file. The env file is append-only: the last write for a key wins. Returns an error if the sandbox fails to persist the variable.
 
-For filesystem/process isolation within a sandbox, see
-[Isolation Sessions](/guides/isolation-sessions). These are separate from Bash sessions.
+For filesystem/process isolation within a sandbox, see [Isolation Sessions](/guides/isolation-sessions). These are separate from Bash sessions.
 
 ### File operations
 
-Upload from an `io.Reader` and close download streams after use. This example uses
-`strings`, `io`, and `os` from the standard library:
+Upload from an `io.Reader` and close download streams after use. This example uses `strings`, `io`, and `os` from the standard library:
 
 ```go
 err := sandbox.UploadFile(ctx, strings.NewReader("Hello Sandbox!"), opensandbox.UploadFileOptions{
@@ -286,8 +266,7 @@ if err := sandbox.DeleteFiles(ctx, []string{"/tmp/demo.txt"}); err != nil {
 }
 ```
 
-The same upload/download methods support binary files. Pass a Range header such
-as `"bytes=0-1023"` to `DownloadFile` for a partial download.
+The same upload/download methods support binary files. Pass a Range header such as `"bytes=0-1023"` to `DownloadFile` for a partial download.
 
 #### File operations with an explicit identity
 
@@ -300,17 +279,9 @@ if err != nil {
 }
 ```
 
-The bound client exposes the usual file operations and shares the sandbox
-connection, authentication, and endpoint routing headers. The existing file
-client retains its default identity. Select the UID/GID separately for command
-execution.
+The bound client exposes the usual file operations and shares the sandbox connection, authentication, and endpoint routing headers. The existing file client retains its default identity. Select the UID/GID separately for command execution.
 
-This requires Linux and an Execd version that supports filesystem execution
-identity. Unsupported servers return an error; requests never fall back to the
-default filesystem routes. Keep sandbox credentials and identity selection in
-the trusted backend. Linux filesystem permissions apply; this feature does not
-create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd)
-for permission and workspace provisioning details.
+This requires Linux and an Execd version that supports filesystem execution identity. Unsupported servers return an error; requests never fall back to the default filesystem routes. Keep sandbox credentials and identity selection in the trusted backend. Linux filesystem permissions apply; this feature does not create a tenant isolation boundary. See [Execd](/architecture/data-plane/execd) for permission and workspace provisioning details.
 
 ### Pause and reconnect
 
@@ -349,19 +320,15 @@ if _, err := resumed.Renew(ctx, 30*time.Minute); err != nil {
 }
 ```
 
-Use `ConnectSandbox(ctx, config, id, opensandbox.ReadyOptions{})` to attach to an
-already running sandbox with a readiness check. See [Pause and Resume](/guides/pause-resume).
+Use `ConnectSandbox(ctx, config, id, opensandbox.ReadyOptions{})` to attach to an already running sandbox with a readiness check. See [Pause and Resume](/guides/pause-resume).
 
 ### Resource metrics
 
-Use `metrics, err := sandbox.GetMetrics(ctx)` to read current sandbox resource
-usage. This is separate from [SDK creation telemetry](/sdks/observability#creation-metrics).
+Use `metrics, err := sandbox.GetMetrics(ctx)` to read current sandbox resource usage. This is separate from [SDK creation telemetry](/sdks/observability#creation-metrics).
 
 ### Check egress policy
 
-Runtime egress reads and patches go directly to the sandbox egress sidecar.
-The SDK first resolves the sandbox endpoint on port `18080`, then calls the
-sidecar `/policy` API.
+Runtime egress reads and patches go directly to the sandbox egress sidecar. The SDK first resolves the sandbox endpoint on port `18080`, then calls the sidecar `/policy` API.
 
 ```go
 policy, err := sandbox.GetEgressPolicy(ctx)
@@ -378,11 +345,7 @@ if err != nil {
 }
 ```
 
-Template-backed sandboxes have no sandbox-side egress sidecar: the SDK detects
-them via the server's `OPEN-SANDBOX-ORIGIN` response header (see
-[Fsb Template Management](#fsb-template-management)) and routes the same
-`GetEgressPolicy` / `PatchEgressRules` / `DeleteEgressRules` calls through the
-lifecycle control plane (`/sandboxes/{sandboxId}/networkpolicy`) instead.
+Template-backed sandboxes have no sandbox-side egress sidecar: the SDK detects them via the server's `OPEN-SANDBOX-ORIGIN` response header (see [Fsb Template Management](#fsb-template-management)) and routes the same `GetEgressPolicy` / `PatchEgressRules` / `DeleteEgressRules` calls through the lifecycle control plane (`/sandboxes/{sandboxId}/networkpolicy`) instead.
 
 Patch uses merge semantics:
 - Incoming rules take priority over existing rules with the same `target`.
@@ -390,10 +353,7 @@ Patch uses merge semantics:
 
 ### Use Credential Vault
 
-Credential Vault injects outbound credentials from the egress sidecar while
-keeping real secrets out of sandbox environment variables, commands, files, and
-logs. Create the sandbox with `CredentialProxy` enabled, then write credentials
-and bindings through the sandbox helpers or `EgressClient`.
+Credential Vault injects outbound credentials from the egress sidecar while keeping real secrets out of sandbox environment variables, commands, files, and logs. Create the sandbox with `CredentialProxy` enabled, then write credentials and bindings through the sandbox helpers or `EgressClient`.
 
 ```go
 config := opensandbox.ConnectionConfig{
@@ -445,26 +405,17 @@ _, err = sandbox.CreateCredentialVault(ctx, opensandbox.CredentialVaultCreateReq
 })
 ```
 
-See [Credential Vault](/guides/credential-vault) for auth types, binding
-guidance, and Git/curl examples.
+See [Credential Vault](/guides/credential-vault) for auth types, binding guidance, and Git/curl examples.
 
 ::: warning
-Credential Vault is unavailable for template-backed sandboxes: they have no
-sandbox-side egress sidecar. `sandbox.CredentialVault(ctx)` returns an error
-for them.
+Credential Vault is unavailable for template-backed sandboxes: they have no sandbox-side egress sidecar. `sandbox.CredentialVault(ctx)` returns an error for them.
 :::
 
 ### Client Pool
 
-Use `NewSandboxPoolBuilder` with an in-memory store or the Redis adapter in
-`github.com/alibaba/OpenSandbox/sdks/sandbox/go/poolredis`. Go supports all four
-acquire policies, namespace retirement, and per-acquire TTL/health-check overrides.
+Use `NewSandboxPoolBuilder` with an in-memory store or the Redis adapter in `github.com/alibaba/OpenSandbox/sdks/sandbox/go/poolredis`. Go supports all four acquire policies, namespace retirement, and per-acquire TTL/health-check overrides.
 
-Go uses `ReconcileInterval` and `WarmupConcurrency`; it does not expose the
-Python/JVM/JavaScript create-QPS, initial-delay, or post-prepare-check settings.
-See [Client Pool](/guides/client-pool) for defaults, examples, and cleanup.
-Go does not currently emit built-in pool warmup traces or expose stable remote
-diagnostics; use [CLI or HTTP diagnostics](/api/#diagnostics).
+Go uses `ReconcileInterval` and `WarmupConcurrency`; it does not expose the Python/JVM/JavaScript create-QPS, initial-delay, or post-prepare-check settings. See [Client Pool](/guides/client-pool) for defaults, examples, and cleanup. Go does not currently emit built-in pool warmup traces or expose stable remote diagnostics; use [CLI or HTTP diagnostics](/api/#diagnostics).
 
 ## Lifecycle Hooks
 
@@ -501,12 +452,7 @@ The Server validates `TimeoutSeconds`; `PreStart` accepts 1–10800 seconds, whi
 
 ### Idle policy (auto-pause and wake-on-access)
 
-`SandboxLifecycle.IdlePolicy` (OSEP-0024, fast-sandbox only) tells the control
-plane to auto-pause the sandbox after `IdleTimeoutSeconds` (30–86400) of
-continuously idle ingress-observed traffic, and to wake it on the next request.
-It is control-plane state: it never reaches the guest, is accepted in template
-mode (`SandboxFromTemplateOptions.IdlePolicy`), and is rejected by
-non-fast-sandbox backends. Omitting it preserves non-automated behavior exactly.
+`SandboxLifecycle.IdlePolicy` (OSEP-0024, fast-sandbox only) tells the control plane to auto-pause the sandbox after `IdleTimeoutSeconds` (30–86400) of continuously idle ingress-observed traffic, and to wake it on the next request. It is control-plane state: it never reaches the guest, is accepted in template mode (`SandboxFromTemplateOptions.IdlePolicy`), and is rejected by non-fast-sandbox backends. Omitting it preserves non-automated behavior exactly.
 
 ```go
 idleTimeout := 300
@@ -523,38 +469,15 @@ sandbox, err := opensandbox.CreateSandbox(ctx, config, opensandbox.SandboxCreate
 })
 ```
 
-`ActiveProbe` lets the application veto a pause while real work runs without
-producing ingress traffic: declare an endpoint answering
-`{"active": bool, "message"?: string}` and the server polls it when the sandbox
-is otherwise idle; a busy answer resets the idle clock. Invalid policies fail
-fast client-side through `IdlePolicy.Validate()`.
+`ActiveProbe` lets the application veto a pause while real work runs without producing ingress traffic: declare an endpoint answering `{"active": bool, "message"?: string}` and the server polls it when the sandbox is otherwise idle; a busy answer resets the idle clock. Invalid policies fail fast client-side through `IdlePolicy.Validate()`.
 
 ### Wake retry
 
-A request to a paused sandbox may arrive while its restore is still in
-progress. The gateway answers `503` with the `OpenSandbox-Wake: expired`
-marker; the client recognizes it and resends the original request after the
-`Retry-After` delay (safe for any method — the marker proves the request was
-never forwarded). The wake budget defaults to 5 attempts / 60 seconds across
-all wake cycles; when it is exhausted the client returns a
-`*SandboxWakeTimeoutError` (carrying `Attempts` and `Waited`) while the
-server-side resume continues in the background. Bare `503` responses follow
-the existing retry rules untouched. Wake retry is active whenever a
-`WithRetry` config is set (`WakeRetryEnabled` defaults to enabled even for
-hand-built configs; pass `WakeRetryDisabled()` to opt out); streaming
-connections bypass wake retry —
-a waking sandbox fails fast with the marked 503 instead of parking the
-connect — matching the other official SDKs, and established streams are
-never re-executed.
+A request to a paused sandbox may arrive while its restore is still in progress. The gateway answers `503` with the `OpenSandbox-Wake: expired` marker; the client recognizes it and resends the original request after the `Retry-After` delay (safe for any method — the marker proves the request was never forwarded). The wake budget defaults to 5 attempts / 60 seconds across all wake cycles; when it is exhausted the client returns a `*SandboxWakeTimeoutError` (carrying `Attempts` and `Waited`) while the server-side resume continues in the background. Bare `503` responses follow the existing retry rules untouched. Wake retry is active whenever a `WithRetry` config is set (`WakeRetryEnabled` defaults to enabled even for hand-built configs; pass `WakeRetryDisabled()` to opt out); streaming connections bypass wake retry — a waking sandbox fails fast with the marked 503 instead of parking the connect — matching the other official SDKs, and established streams are never re-executed.
 
 ## Fsb Template Management
 
-fsb (fast-sandbox microVM) golden-image templates are managed through
-`SandboxManager`. Template builds are asynchronous: `CreateTemplate` returns
-with `Status.Phase` set to `Pending`; poll `GetTemplate` until the phase
-reaches `Succeeded` or `Failed`. Only a `Succeeded` template can create
-sandboxes. Template management requires a configured Fsb provider on Kubernetes.
-Replace the publish URI with a location configured for your server.
+fsb (fast-sandbox microVM) golden-image templates are managed through `SandboxManager`. Template builds are asynchronous: `CreateTemplate` returns with `Status.Phase` set to `Pending`; poll `GetTemplate` until the phase reaches `Succeeded` or `Failed`. Only a `Succeeded` template can create sandboxes. Template management requires a configured Fsb provider on Kubernetes. Replace the publish URI with a location configured for your server.
 
 ```go
 manager := opensandbox.NewSandboxManager(config)
@@ -607,10 +530,7 @@ fmt.Println(listed)
 
 ### Creating a Sandbox from a Template
 
-Use `CreateSandboxFromTemplate` to create a sandbox from a `Succeeded`
-template. Template mode fixes the workload shape on the server: only
-`Metadata`, `NetworkPolicy` and `Extensions` may accompany the template ID,
-and `TimeoutSeconds` is required.
+Use `CreateSandboxFromTemplate` to create a sandbox from a `Succeeded` template. Template mode fixes the workload shape on the server: only `Metadata`, `NetworkPolicy` and `Extensions` may accompany the template ID, and `TimeoutSeconds` is required.
 
 ```go
 sandbox, err := opensandbox.CreateSandboxFromTemplate(ctx, config, "tpl-abc",
@@ -632,15 +552,9 @@ fmt.Println(sandbox.Origin()) // "template"
 
 ## Snapshots and metadata
 
-`Sandbox.CreateSnapshot` and `SandboxManager.CreateSnapshot` start snapshot
-creation. Use manager `GetSnapshot`, `ListSnapshots`, and `DeleteSnapshot` to
-manage snapshots, then pass `SnapshotID` to `SandboxCreateOptions` to restore.
-Poll snapshot status before restore. Use `Sandbox.PatchMetadata` or
-`SandboxManager.PatchSandboxMetadata` to add/replace keys; nil values remove keys.
+`Sandbox.CreateSnapshot` and `SandboxManager.CreateSnapshot` start snapshot creation. Use manager `GetSnapshot`, `ListSnapshots`, and `DeleteSnapshot` to manage snapshots, then pass `SnapshotID` to `SandboxCreateOptions` to restore. Poll snapshot status before restore. Use `Sandbox.PatchMetadata` or `SandboxManager.PatchSandboxMetadata` to add/replace keys; nil values remove keys.
 
-Snapshot support depends on the runtime and server configuration. Renew the source
-sandbox first if its remaining TTL may expire during snapshot creation. Wait for
-`Ready` before restoring. This example retains the snapshot for reuse:
+Snapshot support depends on the runtime and server configuration. Renew the source sandbox first if its remaining TTL may expire during snapshot creation. Wait for `Ready` before restoring. This example retains the snapshot for reuse:
 
 ```go
 manager := opensandbox.NewSandboxManager(config)
@@ -838,24 +752,9 @@ SDK-created HTTP clients enforce NIST 2030 minimum TLS certificate strength by d
 
 ### Follow redirects
 
-The Go SDK retains Go's standard redirect behavior, including for file uploads
-and downloads. On redirects to a different origin (scheme, hostname, or effective
-port), it removes the client's default and configured authentication headers (including
-`X-EXECD-ACCESS-TOKEN`, `X-API-Key`, or a custom `WithAuthHeader` name), as well
-as all headers whose names start with `OPEN-SANDBOX-` or `OPENSANDBOX-`,
-case-insensitively. Each redirect destination is compared with
-the initial request's origin, so subsequent hops on another origin remain
-protected. Same-origin redirects retain these headers. Unrelated custom headers
-continue to follow Go's standard forwarding rules.
+The Go SDK retains Go's standard redirect behavior, including for file uploads and downloads. On redirects to a different origin (scheme, hostname, or effective port), it removes the client's default and configured authentication headers (including `X-EXECD-ACCESS-TOKEN`, `X-API-Key`, or a custom `WithAuthHeader` name), as well as all headers whose names start with `OPEN-SANDBOX-` or `OPENSANDBOX-`, case-insensitively. Each redirect destination is compared with the initial request's origin, so subsequent hops on another origin remain protected. Same-origin redirects retain these headers. Unrelated custom headers continue to follow Go's standard forwarding rules.
 
-This protection applies to lifecycle (including creation metrics), execd, egress, file transfers, and SSE
-requests. A custom `http.Client.CheckRedirect` supplied through `WithHTTPClient`
-or `ConnectionConfig.HTTPClient` still controls whether redirects are followed;
-the SDK removes protected headers after that callback runs, even if the callback
-adds them again. The SDK copies the supplied HTTP client rather than modifying it.
-HTTP and HTTPS default ports are treated as equivalent to explicit ports 80 and
-443 respectively. Upload method conversion and body replay follow Go's existing
-rules; this protection does not enable replay of streaming multipart bodies.
+This protection applies to lifecycle (including creation metrics), execd, egress, file transfers, and SSE requests. A custom `http.Client.CheckRedirect` supplied through `WithHTTPClient` or `ConnectionConfig.HTTPClient` still controls whether redirects are followed; the SDK removes protected headers after that callback runs, even if the callback adds them again. The SDK copies the supplied HTTP client rather than modifying it. HTTP and HTTPS default ports are treated as equivalent to explicit ports 80 and 443 respectively. Upload method conversion and body replay follow Go's existing rules; this protection does not enable replay of streaming multipart bodies.
 
 ## Error Handling
 

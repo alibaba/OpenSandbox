@@ -17,15 +17,19 @@
 Docker cannot update labels on running containers, so user metadata patches
 and expiration overrides are persisted to individual JSON files under
 ``~/.opensandbox/metadata/``. Atomic writes (tmp + rename) guard against
-truncation during crash.
+truncation during crash, and one lock serializes every read-modify-write so
+concurrent patches of one sandbox neither fail nor drop each other's keys.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import threading
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,9 @@ class DockerMetadataStore:
 
     def __init__(self, root: Path | None = None) -> None:
         self._root = root or DEFAULT_STORE_DIR
+        # Request threads and expiration timers write the same files; the
+        # lock keeps each read-modify-write whole.
+        self._lock = threading.Lock()
 
     def get(self, sandbox_id: str, container_labels: dict) -> dict | None:
         """Return effective user metadata for a sandbox.
@@ -79,20 +86,21 @@ class DockerMetadataStore:
         """
         path = self._sandbox_path(sandbox_id)
 
-        # The override file holds the full effective metadata (see get()), so
-        # it replaces the container labels rather than being merged onto them;
-        # merging would resurrect keys removed by an earlier patch.
-        current = self._read_file(path)
-        if not isinstance(current, dict):
-            current = _extract_user_labels(container_labels)
+        with self._lock:
+            # The override file holds the full effective metadata (see get()), so
+            # it replaces the container labels rather than being merged onto them;
+            # merging would resurrect keys removed by an earlier patch.
+            current = self._read_file(path)
+            if not isinstance(current, dict):
+                current = _extract_user_labels(container_labels)
 
-        for key, value in patch.items():
-            if value is None:
-                current.pop(key, None)
-            else:
-                current[key] = str(value)
+            for key, value in patch.items():
+                if value is None:
+                    current.pop(key, None)
+                else:
+                    current[key] = str(value)
 
-        self._write_file(path, current)
+            self._write_file(path, current)
 
     def get_expiration(self, sandbox_id: str) -> str | None:
         payload = self._read_file(self._expiration_path(sandbox_id))
@@ -104,17 +112,19 @@ class DockerMetadataStore:
         return None
 
     def set_expiration(self, sandbox_id: str, expires_at: datetime) -> None:
-        self._write_file(
-            self._expiration_path(sandbox_id),
-            {"expires_at": expires_at.isoformat()},
-        )
+        with self._lock:
+            self._write_file(
+                self._expiration_path(sandbox_id),
+                {"expires_at": expires_at.isoformat()},
+            )
 
     def delete(self, sandbox_id: str) -> None:
-        for path in (self._sandbox_path(sandbox_id), self._expiration_path(sandbox_id)):
-            try:
-                path.unlink(missing_ok=True)
-            except OSError as exc:
-                logger.warning(f"Failed to delete metadata file {path}: {exc}")
+        with self._lock:
+            for path in (self._sandbox_path(sandbox_id), self._expiration_path(sandbox_id)):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as exc:
+                    logger.warning(f"Failed to delete metadata file {path}: {exc}")
 
     def _sandbox_path(self, sandbox_id: str) -> Path:
         return self._root / f"{sandbox_id}.json"
@@ -134,6 +144,13 @@ class DockerMetadataStore:
     @staticmethod
     def _write_file(path: Path, data: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data))
-        tmp.replace(path)
+        # A temporary name of its own per write: two writers never race on one.
+        tmp = path.with_name(f"{path.stem}.{uuid4().hex}.tmp")
+        try:
+            tmp.write_text(json.dumps(data))
+            tmp.replace(path)
+        except OSError:
+            # Nothing reuses this name, so a failed write removes its own file.
+            with suppress(OSError):
+                tmp.unlink()
+            raise

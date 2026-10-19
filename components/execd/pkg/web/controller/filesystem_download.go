@@ -91,12 +91,10 @@ func (c *FilesystemController) DownloadFile() {
 		return
 	}
 
-	c.ctx.Header("Content-Type", "application/octet-stream")
-	c.ctx.Header("Content-Disposition", formatContentDisposition(filepath.Base(resolvedFilePath)))
-	c.ctx.Header("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
-
+	// Parse Range first: the 416 error body must not carry the file's headers.
+	var ranges []httpRange
 	if rangeHeader != "" {
-		ranges, err := ParseRange(rangeHeader, fileInfo.Size())
+		ranges, err = ParseRange(rangeHeader, fileInfo.Size())
 		if err != nil {
 			c.RespondError(
 				http.StatusRequestedRangeNotSatisfiable,
@@ -104,17 +102,22 @@ func (c *FilesystemController) DownloadFile() {
 			)
 			return
 		}
-		if len(ranges) > 0 {
-			r := ranges[0]
-			c.ctx.Status(http.StatusPartialContent)
-			c.ctx.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", r.start, r.start+r.length-1, fileInfo.Size()))
-			c.ctx.Header("Content-Length", strconv.FormatInt(r.length, 10))
+	}
 
-			_, _ = file.Seek(r.start, io.SeekStart)
-			_, _ = io.CopyN(c.ctx.Writer, file, r.length)
-			rec.MarkSuccess()
-			return
-		}
+	c.ctx.Header("Content-Type", "application/octet-stream")
+	c.ctx.Header("Content-Disposition", formatContentDisposition(filepath.Base(resolvedFilePath)))
+	c.ctx.Header("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
+
+	if len(ranges) > 0 {
+		r := ranges[0]
+		c.ctx.Status(http.StatusPartialContent)
+		c.ctx.Header("Content-Range", fmt.Sprintf("bytes %d-%d/%d", r.start, r.start+r.length-1, fileInfo.Size()))
+		c.ctx.Header("Content-Length", strconv.FormatInt(r.length, 10))
+
+		_, _ = file.Seek(r.start, io.SeekStart)
+		_, _ = io.CopyN(c.ctx.Writer, file, r.length)
+		rec.MarkSuccess()
+		return
 	}
 
 	rec.MarkSuccess()

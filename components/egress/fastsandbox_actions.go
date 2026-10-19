@@ -25,13 +25,19 @@
 //	                   policy as pending; activate immediately when the
 //	                   subject is already active (a plain input update does
 //	                   not replay Hooks). A JSON-null input removes the
-//	                   policy and reverts to deny-first.
+//	                   policy and reverts to deny-first. A key held by a
+//	                   different live subject is a stale-subject takeover
+//	                   (OSEP-0022): the previous owner goes first.
 //	LIFECYCLE_HOOK     sandbox.runtime-ready only confirms the deny-first
 //	                   install (idempotent); sandbox.data-plane-ready applies
 //	                   the pending policy -> active. Unknown Hooks are
 //	                   rejected, never silently ignored.
 //	REMOVE_BINDING     terminal cleanup; a fence mismatch (stale removal for
 //	                   a previous instance of the same UID) is ignored.
+//	VAULT_EXPORT       copy the vault file into the snapshot bundle and seal
+//	                   the subject — pause flow, before teardown.
+//	VAULT_IMPORT       land the bundle re-stamped with the restored fence —
+//	                   resume flow, before data-plane-ready.
 //
 // Fail-closed invariants: the subject is deny-first from registration until
 // its data-plane-ready Hook succeeds, so policy delivery can be late but
@@ -71,22 +77,44 @@ func newHandlerInstanceID() string {
 
 // handleActionsStatus serves GET /_fastlet/v1/actions/status: the Handler
 // process incarnation probe. ready mirrors the healthz gate (false while the
-// MITM stack is not ready); instanceId is the replay trigger.
+// MITM stack is not ready or the vault recovery latch freezes writes);
+// instanceId is the replay trigger. A per-subject degraded vault is
+// deliberately not a readiness failure (it fails closed for that subject
+// only) — it is listed in degradedVaults instead.
 func (s *fastSandboxPolicyServer) handleActionsStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	recovery := s.vaultRecoveryActive()
+	degraded := s.degradedVaultUIDs()
 	ready := true
 	if s.mitmGate != nil && s.mitmGate.MitmPending() {
 		ready = false
 	}
-	writeJSON(w, http.StatusOK, actionhandler.StatusResponse{
-		APIVersion: constants.ActionsAPIVersion,
-		Ready:      ready,
-		InstanceID: s.instanceID,
-	})
+	if recovery {
+		ready = false
+	}
+	resp := actionhandler.StatusResponse{
+		APIVersion:     constants.ActionsAPIVersion,
+		Ready:          ready,
+		InstanceID:     s.instanceID,
+		Recovery:       recovery,
+		DegradedVaults: degraded,
+		// Capability signal for the Fastlet's pause/resume vault transfer:
+		// without vault persistence the Handler cannot hold vault state at
+		// all, so the transfer must degrade (skip), not fail the checkpoint.
+		VaultTransfer: s.vaultFiles != nil,
+	}
+	if s.mitmGate != nil {
+		resp.MitmCaFingerprint = s.mitmGate.CAFingerprint()
+		if reason, down := s.mitmGate.DownReason(); down {
+			resp.MitmCaDown = true
+			resp.MitmCaError = reason
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleActions serves POST /_fastlet/v1/actions. HTTP 200 is success; any
@@ -126,6 +154,10 @@ func (s *fastSandboxPolicyServer) dispatchAction(env *actionhandler.Envelope) (i
 		return s.applyLifecycleHook(env)
 	case actionhandler.OperationRemoveBinding:
 		return s.applyRemoveBinding(env)
+	case actionhandler.OperationVaultExport:
+		return s.applyVaultExport(env)
+	case actionhandler.OperationVaultImport:
+		return s.applyVaultImport(env)
 	default:
 		// Unreachable: ParseEnvelope validated the operation.
 		return http.StatusBadRequest, fmt.Errorf("unknown operation %q", env.Operation)
@@ -150,18 +182,38 @@ func (s *fastSandboxPolicyServer) applySetBinding(env *actionhandler.Envelope) (
 			return http.StatusBadRequest, fmt.Errorf("invalid binding input policy: %v", err)
 		}
 	}
+	// A fence change is a rebind: discard ALL prior per-subject state. The
+	// registry drops its entry inside RegisterAndEnforce; the vault slice
+	// must go too (memory + persisted file), or the old instance's
+	// credentials would survive into the successor's flows. Same-UID actions
+	// serialize per subject; the vault relay writes hold the same lock for
+	// their whole commit protocol.
+	if old, ok := s.reg.Fence(subj); ok && !old.Matches(fence) {
+		s.mu.Lock()
+		s.dropVault(subj)
+		s.mu.Unlock()
+		log.Infof("subject %s: rebind (%s -> %s), vault slice purged", subj, old.RuntimeInstanceID, fence.RuntimeInstanceID)
+	}
+	// Egress-restart recovery (OSEP-0022 stage 2): a subject with no live
+	// vault slice reloads its persisted file here, fenced by the full runtime
+	// identity. This runs BEFORE the deny-first install so no interception
+	// entry can materialize an empty slice ahead of the reload. A removal
+	// binding skips the reload: with no policy to revalidate against, the
+	// file stays fenced on disk until the next registration or terminal purge.
+	if !env.Binding.IsRemoval() {
+		s.rehydrateVaultReload(subj, fence, pol)
+	}
 	state, err := s.reg.RegisterAndEnforce(subj, subject.SubjectKey{SourceIP: att.IP}, fence, func() error {
 		return s.OnRegistered(subj, att)
-	})
+	}, s.takeoverStaleSubject)
 	if err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("deny-first install: %w", err)
 	}
-	s.recordBindingState(subj, att, env.Revision.SpecGeneration)
+	s.recordBindingState(subj, att)
 	if env.Binding.IsRemoval() {
-		// Binding removed from a still-live sandbox: the cached pushes are
-		// stale for the removed binding (a re-added binding gets fresh
-		// pushes) — drop them, never apply them to a policy-less subject.
-		s.dropPendingPushes(subj)
+		// Binding removed from a still-live sandbox: drop the pending policy
+		// (a re-added binding gets a fresh input — never apply the removed
+		// binding's policy to a policy-less subject).
 		s.clearPendingPolicy(subj)
 		if state == subject.StateActive {
 			if err := s.revertToDenyFirst(subj, att); err != nil {
@@ -181,11 +233,6 @@ func (s *fastSandboxPolicyServer) applySetBinding(env *actionhandler.Envelope) (
 		// Deny-first until sandbox.data-plane-ready activates the subject.
 		s.storePendingPolicy(subj, pol)
 	}
-	// Flush cached pushes LAST: a push that landed during the registration
-	// window is newer intent than the binding input, so it overwrites the
-	// pending policy (the lifecycle barrier still holds — it only becomes
-	// effective at data-plane-ready). Vault pushes apply regardless.
-	s.OnRegisteredComplete(subj, att, env.Revision.SpecGeneration)
 	log.Infof("subject %s: SET_BINDING applied (state=%s)", subj, state)
 	return http.StatusOK, nil
 }
@@ -242,6 +289,10 @@ func (s *fastSandboxPolicyServer) applyLifecycleHook(env *actionhandler.Envelope
 // The subject stays registered until enforcement removal succeeds: a
 // transient failure returns 500 and the retried REMOVE_BINDING resumes
 // cleanup instead of succeeding with stale rules left in the kernel.
+//
+// The vault file is purged once more AFTER Unregister (under s.mu): a relay
+// write parked on s.mu during the first purge can still observe the old
+// fence and recreate the file before the unregister lands.
 func (s *fastSandboxPolicyServer) applyRemoveBinding(env *actionhandler.Envelope) (int, error) {
 	subj := subject.FromSandboxUID(env.Sandbox.UID)
 	fence := subject.FromRevision(env)
@@ -262,6 +313,7 @@ func (s *fastSandboxPolicyServer) applyRemoveBinding(env *actionhandler.Envelope
 		return http.StatusInternalServerError, fmt.Errorf("enforcement removal: %w", err)
 	}
 	s.reg.Unregister(subj)
+	s.dropSubjectState(subj)
 	log.Infof("subject %s: REMOVE_BINDING complete (was %s)", subj, prev)
 	return http.StatusOK, nil
 }

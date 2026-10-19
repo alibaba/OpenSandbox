@@ -19,6 +19,7 @@ Sandbox-related data models.
 Models for sandbox creation, configuration, status, and lifecycle management.
 """
 
+import ipaddress
 import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
@@ -28,6 +29,26 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 if TYPE_CHECKING:
     from opensandbox.config import ConnectionConfig
     from opensandbox.config.connection_sync import ConnectionConfigSync
+
+
+def _is_ip_or_cidr(value: str) -> bool:
+    """Mirror the sidecar's netip-based target classification."""
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        pass
+    if "/" in value and not value.partition("/")[2].isdigit():
+        return False
+    # netip.ParsePrefix rejects scoped prefixes ("fe80::1%eth0/64") even
+    # though Python's ipaddress accepts them; classify those as domains too.
+    if "/" in value and "%" in value:
+        return False
+    try:
+        ipaddress.ip_network(value, strict=False)
+        return True
+    except ValueError:
+        return False
 
 
 class SandboxImageAuth(BaseModel):
@@ -122,16 +143,57 @@ class NetworkRule(BaseModel):
     action: Literal["allow", "deny"] = Field(
         description='Whether to allow or deny matching targets. One of "allow" or "deny".'
     )
-    target: str = Field(
-        description='FQDN or wildcard domain (e.g., "example.com", "*.example.com").'
+    target: str | None = Field(
+        default=None,
+        description=(
+            'FQDN, wildcard domain (e.g., "example.com", "*.example.com"), IP address, or CIDR. '
+            "May be omitted when `ports` is set; otherwise required."
+        ),
+    )
+    ports: list[int] | None = Field(
+        default=None,
+        description=(
+            "Restricts this rule to specific TCP destination ports (1-65535, max 256, no "
+            "duplicates). Omitted target with ports set applies to all IPv4/IPv6 destinations; "
+            "a domain target with ports is rejected. TCP only."
+        ),
+        min_length=1,
+        max_length=256,
     )
 
     @field_validator("target")
     @classmethod
-    def target_must_not_be_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("Network rule target cannot be blank")
+    def target_must_not_be_empty(cls, v: str | None) -> str | None:
+        # Blank = omitted (sidecar read-back emits "target": ""); trim like
+        # the server does.
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+    @field_validator("ports")
+    @classmethod
+    def ports_must_be_valid_tcp_ports(cls, v: list[int] | None) -> list[int] | None:
+        if v is None:
+            return v
+        seen: set[int] = set()
+        for port in v:
+            if port < 1 or port > 65535:
+                raise ValueError(f"Network rule port {port} out of range 1-65535")
+            if port in seen:
+                raise ValueError(f"Network rule has duplicate port {port}")
+            seen.add(port)
         return v
+
+    @model_validator(mode="after")
+    def target_or_ports_required(self) -> "NetworkRule":
+        if self.target is None and not self.ports:
+            raise ValueError("Network rule requires target, ports, or both")
+        # Classify the trimmed target the way the sidecar does, so " 10.0.0.5"
+        # is an IP locally too instead of a misleading domain+ports error.
+        if self.ports and self.target is not None and not _is_ip_or_cidr(self.target.strip()):
+            raise ValueError("Network rule ports are not supported for domain targets")
+        return self
 
 
 class NetworkPolicy(BaseModel):
