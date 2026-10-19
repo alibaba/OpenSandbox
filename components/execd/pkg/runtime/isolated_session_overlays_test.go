@@ -359,6 +359,90 @@ func TestBackgroundRunPaths_MultiOverlay(t *testing.T) {
 	}
 }
 
+func TestNewMergedView_BindRouting(t *testing.T) {
+	// Resolve symlinks: MergedView rejects symlinked roots, and t.TempDir()
+	// sits under a symlink on macOS.
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := filepath.Join(base, "ws")
+	bindSource := filepath.Join(base, "data-src")
+	roSource := filepath.Join(base, "ro-src")
+	for _, dir := range []string{ws, bindSource, roSource} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(bindSource, "existing.txt"), []byte("host"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newIsolatedSession("bind-routing", &IsolatedSessionOptions{
+		Overlays: []IsolatedOverlayOptions{{Path: ws, Mode: "rw"}},
+		Binds: []isolation.BindMount{
+			{Source: bindSource, Dest: "/data", ReadOnly: false},
+			{Source: roSource, Dest: "/ro", ReadOnly: true},
+		},
+	}, newStubIsolator(), nil)
+
+	view := newMergedView(s)
+
+	// A write under the bind dest lands in the bind source (#2297).
+	if err := view.WriteFile("/data/hello.txt", []byte("bind"), 0o600); err != nil {
+		t.Fatalf("write under bind dest: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(bindSource, "hello.txt"))
+	if err != nil || string(got) != "bind" {
+		t.Fatalf("bind write did not land in the source (%v, %q)", err, got)
+	}
+
+	// The same content reads back through the files API, including files
+	// the host placed there — a bind is live in both directions.
+	got, err = view.ReadFile("/data/existing.txt")
+	if err != nil || string(got) != "host" {
+		t.Fatalf("bind read of host-side file (%v, %q)", err, got)
+	}
+
+	// A read-only bind rejects writes.
+	if err := view.WriteFile("/ro/x.txt", []byte("x"), 0o600); err == nil {
+		t.Fatal("write to read-only bind accepted")
+	}
+
+	// The workspace overlay still routes as before.
+	if err := view.WriteFile(filepath.Join(ws, "ws.txt"), []byte("ws"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "ws.txt")); err != nil {
+		t.Fatalf("workspace write lost: %v", err)
+	}
+}
+
+func TestNewMergedView_BindsOnly(t *testing.T) {
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bindSource := filepath.Join(base, "only-src")
+	if err := os.MkdirAll(bindSource, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	s := newIsolatedSession("binds-only", &IsolatedSessionOptions{
+		Binds: []isolation.BindMount{{Source: bindSource, Dest: "/data", ReadOnly: false}},
+	}, newStubIsolator(), nil)
+
+	view := newMergedView(s)
+
+	if err := view.WriteFile("/data/only.txt", []byte("x"), 0o600); err != nil {
+		t.Fatalf("write under bind dest: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(bindSource, "only.txt"))
+	if err != nil || string(got) != "x" {
+		t.Fatalf("bind write did not land in the source (%v, %q)", err, got)
+	}
+}
+
 func boolPtr(b bool) *bool { return &b }
 
 func TestNewMergedView_MultiOverlayRouting(t *testing.T) {

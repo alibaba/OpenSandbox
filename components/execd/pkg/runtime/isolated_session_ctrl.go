@@ -906,15 +906,39 @@ func newMergedView(s *isolatedSession) vfs.FS {
 		return isolation.NewMergedView(ov.path, upper, ov.mode, uid, gid)
 	}
 
-	// Empty overlays yield an empty router rather than a panic.
-	if len(s.overlays) <= 1 {
+	// Binds join the routing alongside overlays: each bind destination
+	// serves the files API through its host source (live in both
+	// directions, ro/rw per the bind flag). With binds present the
+	// single-overlay shortcut is skipped — a bare MergedView would
+	// silently re-root bind paths into the workspace overlay instead of
+	// failing to route them (#2297).
+	bindViews := make([]isolation.OverlayView, 0, len(s.opts.Binds))
+	for _, bind := range s.opts.Binds {
+		dest := bind.Dest
+		if dest == "" {
+			dest = bind.Source
+		}
+		if !filepath.IsAbs(dest) || dest == "/" {
+			continue
+		}
+		bindViews = append(bindViews, isolation.OverlayView{
+			Path: dest,
+			FS:   isolation.NewBindView(dest, bind.Source, bind.ReadOnly, uid, gid),
+		})
+	}
+
+	// Empty overlays yield an empty router rather than a panic. A single
+	// overlay with no binds keeps the direct view (no router hop).
+	if len(bindViews) == 0 {
 		if len(s.overlays) == 0 {
 			return isolation.NewMultiMergedView(nil)
 		}
-		return overlayView(s.overlays[0])
+		if len(s.overlays) == 1 {
+			return overlayView(s.overlays[0])
+		}
 	}
 
-	views := make([]isolation.OverlayView, 0, len(s.overlays))
+	views := make([]isolation.OverlayView, 0, len(s.overlays)+len(bindViews))
 	relativeBase := 0
 	for i, ov := range s.overlays {
 		if ov.path != "/" && s.overlays[relativeBase].path == "/" {
@@ -927,7 +951,13 @@ func newMergedView(s *isolatedSession) vfs.FS {
 			RelativeBase: false,
 		})
 	}
-	views[relativeBase].RelativeBase = true
+	// Bind destinations never become the relative-path base: relative
+	// paths stay workspace-relative as before. A binds-only session has
+	// no overlay view to mark.
+	if len(views) > 0 {
+		views[relativeBase].RelativeBase = true
+	}
+	views = append(views, bindViews...)
 	return isolation.NewMultiMergedView(views)
 }
 
