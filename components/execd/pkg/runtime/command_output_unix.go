@@ -83,3 +83,12 @@ func openCommandOutputForRead(path string) (*os.File, error) {
 	}
 	return file, nil
 }
+
+// commandOutputLinkCount returns the number of hard links to the open file.
+func commandOutputLinkCount(file *os.File) (uint64, error) {
+	var stat unix.Stat_t
+	if err := unix.Fstat(int(file.Fd()), &stat); err != nil {
+		return 0, err
+	}
+	return uint64(stat.Nlink), nil
+}

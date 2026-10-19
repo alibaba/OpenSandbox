@@ -233,3 +233,18 @@ func TestRemoveCommandOutputFilesDoesNotTruncateSymlinkTarget(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "keep", string(content))
 }
+
+func TestRemoveCommandOutputFilesDoesNotTruncateHardLinkTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	require.NoError(t, os.WriteFile(target, []byte("keep"), 0o600))
+	link := filepath.Join(dir, "session.stdout")
+	require.NoError(t, os.Link(target, link))
+
+	removeCommandOutputFiles(link)
+
+	require.NoFileExists(t, link)
+	content, err := os.ReadFile(target)
+	require.NoError(t, err)
+	require.Equal(t, "keep", string(content))
+}

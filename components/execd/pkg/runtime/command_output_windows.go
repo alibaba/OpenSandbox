@@ -19,6 +19,7 @@ package runtime
 import (
 	"fmt"
 	"os"
+	"syscall"
 )
 
 func ensurePrivateCommandOutputDir(path string) error {
@@ -58,4 +59,13 @@ func openCommandOutputForRead(path string) (*os.File, error) {
 		return nil, fmt.Errorf("command output file %s is not a regular file", path)
 	}
 	return file, nil
+}
+
+// commandOutputLinkCount returns the number of hard links to the open file.
+func commandOutputLinkCount(file *os.File) (uint64, error) {
+	var info syscall.ByHandleFileInformation
+	if err := syscall.GetFileInformationByHandle(syscall.Handle(file.Fd()), &info); err != nil {
+		return 0, err
+	}
+	return uint64(info.NumberOfLinks), nil
 }

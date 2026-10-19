@@ -117,8 +117,8 @@ func (c *Controller) combinedOutputFileName(session string) string {
 // truncateCommandOutputFile releases the data blocks of a regular output file
 // before it is unlinked. A forked child that inherited the output descriptor
 // keeps the unlinked inode alive and can keep appending to it, so truncating
-// first reclaims what was already written. Missing files and non-regular files
-// (including symlinks) are left alone.
+// first reclaims what was already written. Missing files, non-regular files
+// (including symlinks) and files with more than one hard link are left alone.
 func truncateCommandOutputFile(path string) {
 	linfo, err := os.Lstat(path)
 	if err != nil {
@@ -140,6 +140,11 @@ func truncateCommandOutputFile(path string) {
 	defer file.Close()
 	// The path may have been swapped for a symlink between Lstat and open.
 	if info, err := file.Stat(); err != nil || !os.SameFile(linfo, info) {
+		return
+	}
+	// A hard link swapped into the path shares its inode with a file elsewhere;
+	// truncating it would empty that file too.
+	if links, err := commandOutputLinkCount(file); err != nil || links != 1 {
 		return
 	}
 	if err := file.Truncate(0); err != nil {
