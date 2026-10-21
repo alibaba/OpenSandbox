@@ -1493,23 +1493,50 @@ verify_one_sandbox() { # <label> <ping-budget-ms>
 	VERIFY_ID="$(printf '%s' "$response" | jq -r '.id')"
 	[[ -n "$VERIFY_ID" && "$VERIFY_ID" != "null" ]] || fail "create response carried no id"
 	t1="$(now_ms)"
-	# Availability = /ping 200 through the signed gateway route (port 44772).
-	# Both polls are curl-only (~5ms/iteration) at 50ms cadence, so the
-	# create->ping number resolves the true availability point instead of
-	# one CLI spawn + sleep.
-	deadline=$(( t1 + budget * 1000000 ))
+	# Availability = /ping 200 through the signed gateway route (port 44772),
+	# measured at ~1ms resolution:
+	#   phase 1 — route publication, curl-only busy poll (the curl spawn
+	#   itself paces ~5ms/attempt; /ping cannot 200 before the route exists,
+	#   so phase-1 cadence delays detection, never pollutes the reading);
+	#   phase 2 — /ping hammered over a bash /dev/tcp socket: no process
+	#   spawn per attempt, EPOCHREALTIME keeps the hot loop fork-free.
+	local gw gw_host gw_port line deadline_ms
+	gw="${GATEWAY_URL#*://}"; gw="${gw%%/*}"
+	gw_host="${gw%%:*}"
+	gw_port="${gw##*:}"
+	[[ "$gw_port" == "$gw" ]] && gw_port=80
+	deadline_ms=$(( t1 / 1000000 + budget ))
 	while :; do
 		route="$( { server_api GET "/sandboxes/$VERIFY_ID/endpoints/44772" 2>/dev/null || true; } \
 			| jq -r '.headers["OpenSandbox-Ingress-To"] // empty')"
-		if [[ -n "$route" ]]; then
-			code="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' \
-				-H "OpenSandbox-Ingress-To: $route" "$GATEWAY_URL/ping" 2>/dev/null || true)"
-			[[ "$code" == "200" ]] && break
+		[[ -n "$route" ]] && break
+		if (( $(now_ms) / 1000000 >= deadline_ms )); then
+			fail "gateway route for $VERIFY_ID did not publish within ${budget}ms"
 		fi
-		if (( $(now_ms) >= deadline )); then
-			fail "execd /ping did not return 200 within ${budget}ms (last code=${code:-none}, route=${route:-none})"
+	done
+	code=""
+	while :; do
+		line=""
+		if exec 3<>"/dev/tcp/$gw_host/$gw_port" 2>/dev/null; then
+			printf 'GET /ping HTTP/1.1\r\nHost: %s\r\nOpenSandbox-Ingress-To: %s\r\nConnection: close\r\n\r\n' \
+				"$gw" "$route" >&3
+			IFS= read -r -t 1 line <&3 || true
+			exec 3>&- 3<&- 2>/dev/null
+		else
+			sleep 0.01
 		fi
-		sleep 0.05
+		if [[ "$line" == *" 200 "* ]]; then
+			code=200
+			break
+		fi
+		if [[ -n "${EPOCHREALTIME:-}" ]]; then
+			now=$((( ${EPOCHREALTIME/./} ) / 1000))
+		else
+			now=$(( $(now_ms) / 1000000 ))
+		fi
+		if (( now >= deadline_ms )); then
+			fail "execd /ping did not return 200 within ${budget}ms (last status: ${line:-none})"
+		fi
 	done
 	t2="$(now_ms)"
 	# jq filter in a variable: literal parens trip older bash's $( ) parser.
