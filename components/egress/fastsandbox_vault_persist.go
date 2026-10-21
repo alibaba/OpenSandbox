@@ -53,6 +53,11 @@ type vaultRecoveryState struct {
 type vaultFileStore interface {
 	Snapshot() (*policy.PolicyFileSnapshot, error)
 	SaveRaw(data []byte) (policy.FileMutationState, error)
+	// SaveRawNonDurable publishes by rename without durability barriers —
+	// only valid for content the caller can reconstruct by replay (the
+	// atomic store documents the contract). Everything that outruns its
+	// replay source must use SaveRaw.
+	SaveRawNonDurable(data []byte) (policy.FileMutationState, error)
 	Restore(*policy.PolicyFileSnapshot) (policy.FileMutationState, error)
 	Delete() (policy.FileMutationState, error)
 }

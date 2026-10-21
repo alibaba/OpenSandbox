@@ -18,9 +18,17 @@
 // source for an egress restart — at SET_BINDING replay the committed file
 // supersedes the replayed binding input, which carries only the original
 // bootstrap policy — and the bundle source for the POLICY_EXPORT /
-// POLICY_IMPORT snapshot transfer. Ordering is persist → apply → ack
-// (acked ⇒ durable and applied), with the same three-state classification,
-// snapshot restore, and recovery latch as the vault files.
+// POLICY_IMPORT snapshot transfer. Ordering is persist → apply → ack.
+//
+// Durability is tiered by replayability: the bootstrap candidate
+// (applyBindingPolicyLocked) publishes non-durably — rev 1 is byte-identical
+// to the binding input, which the fastlet re-issues on every egress instance
+// change, so a lost rename is reconstructed exactly by replay; relay writes
+// and the removal tombstone record state that outruns the binding input and
+// stay fully durable (acked ⇒ durable for them). For the bootstrap ack the
+// guarantee is "recorded and enforced (deny-first)", not "durable". The
+// three-state classification, snapshot restore, and recovery latch remain
+// the same as the vault files.
 //
 // TODO(encryption-at-rest): template-borne state blobs are stored as-is.
 // When encryption lands it protects the store-side reader only — CLONE
@@ -515,10 +523,17 @@ func (s *fastSandboxPolicyServer) applyBindingPolicyLocked(subj subject.Subject,
 	if err != nil {
 		return fmt.Errorf("policy file encode: %w", err)
 	}
+	// The bootstrap seed publishes NON-durably: rev 1 is byte-identical to
+	// the binding input, which the fastlet re-issues on every egress
+	// instance change — a crash that loses the rename is reconstructed
+	// exactly by that replay (deny-first nft already enforces meanwhile).
+	// Everything that outruns the binding input stays durable: relay
+	// writes (SaveRaw) and the removal tombstone in
+	// clearPolicyRecordLocked.
 	return s.persistPolicyCandidateLocked(
 		subj,
 		func(fs vaultFileStore) (policy.FileMutationState, error) {
-			return fs.SaveRaw(payload)
+			return fs.SaveRawNonDurable(payload)
 		},
 		apply,
 	)

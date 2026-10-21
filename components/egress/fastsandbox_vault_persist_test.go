@@ -104,6 +104,12 @@ func (f *fakeVaultFile) SaveRaw(data []byte) (policy.FileMutationState, error) {
 	return f.saveState, nil
 }
 
+func (f *fakeVaultFile) SaveRawNonDurable(data []byte) (policy.FileMutationState, error) {
+	// Same observable effect as SaveRaw in the fake: the durability
+	// difference lives in the real atomic store's fsync behavior.
+	return f.SaveRaw(data)
+}
+
 func (f *fakeVaultFile) Restore(s *policy.PolicyFileSnapshot) (policy.FileMutationState, error) {
 	f.restoreCalls++
 	f.restored = append(f.restored, s)
