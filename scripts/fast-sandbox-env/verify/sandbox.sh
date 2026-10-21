@@ -231,6 +231,10 @@ dump_latency_evidence() {
 		kubectl -n "$RESOURCE_NS" logs -l app=sandbox-fastlet -c egress --tail=3000 2>/dev/null \
 			| grep -E "deny-first enforced|SET_BINDING applied|data-plane-ready" || true
 		echo
+		echo "--- server: fsb create served (authoritative control-plane timing) ---"
+		kubectl -n "$OSB_NS" logs deploy/opensandbox-server --tail=3000 2>/dev/null \
+			| grep "fsb create served" | tail -30 || true
+		echo
 		echo "--- fastpath create totals (controller) ---"
 		kubectl -n "$NS" logs deploy/fast-sandbox-controller --tail=3000 2>/dev/null \
 			| grep "fastpath sandbox created" | tail -30 || true
