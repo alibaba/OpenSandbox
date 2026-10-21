@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from threading import Lock
 from typing import Optional
@@ -432,12 +433,16 @@ class FastSandboxService(SandboxService, ExtensionService):
 
         namespace = create_request.namespace
         sandbox_id = create_request.request_id
+        sync_started = time.perf_counter()
+        rpc_ms = -1
 
         try:
+            rpc_started = time.perf_counter()
             response = self._fastpath.create_sandbox(
                 create_request,
                 wait_timeout_millis=int(self._k8s.fastpath_wait_ready_seconds * 1000),
             )
+            rpc_ms = int((time.perf_counter() - rpc_started) * 1000)
         except (FastPathInvalidArgument, FastPathConflict, FastPathNotFound) as exc:
             raise self._fastpath_http_error(exc) from exc
         except FastPathError as exc:
@@ -453,6 +458,12 @@ class FastSandboxService(SandboxService, ExtensionService):
             info = response.sandbox
         finally:
             self._cr_reader.invalidate(namespace)
+            logger.info(
+                "fsb create served: sandbox=%s total=%dms fastpath_rpc=%dms",
+                sandbox_id,
+                int((time.perf_counter() - sync_started) * 1000),
+                rpc_ms,
+            )
 
         # Durable intent exists (accepted or recovery-confirmed): restart the
         # idle clock from this transition (OSEP-0024).

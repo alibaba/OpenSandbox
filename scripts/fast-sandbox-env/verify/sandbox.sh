@@ -13,11 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# verify/sandbox.sh — end-to-end sandbox verify (CLI create -> gateway -> execd /ping)
+# verify/sandbox.sh — end-to-end sandbox verify (API create -> gateway -> execd /ping)
 #
 # Coverage:
 #
-#   1. Full create wire-up, 6 sandboxes: `osb sandbox create` -> lifecycle
+#   1. Full create wire-up, 6 sandboxes: POST /sandboxes (raw API — the
+#      timed windows are curl-only so readings are not billed CLI startup)
 #      server (fsb runtime) -> FastPath gRPC -> fastlet -> firecracker
 #      microVM -> signed gateway route -> fastlet-proxy -> guest execd
 #      /ping 200. Cold #1 pulls the golden image set through DART (600s
@@ -61,33 +62,42 @@ verify_policy_updated() {
 	[[ "$(printf '%s' "$out" | jq -r '.policy.egress[0].target // empty')" == "github.com" ]]
 }
 
-# Full wire-up: CLI create (fsb) -> FastPath -> fastlet -> firecracker
+# Full wire-up: raw-API create (fsb) -> FastPath -> fastlet -> firecracker
 # sandbox -> signed gateway route -> fastlet-proxy -> guest execd /ping ->
 # delete. One sandbox per call; availability is measured from the client
-# (poll /ping until 200, wall-clock budget — each route poll is a CLI call,
-# ~0.5s startup), not from CR status.
+# (poll /ping until 200, wall-clock budget — every poll is curl-only, so
+# readings resolve ~10ms), not from CR status. The timed windows wrap HTTP
+# round trips only: osb invocations would bill ~0.5s of interpreter startup
+# to each reading, which is exactly the measurement pollution #2323 called
+# out. CLI create coverage lives in the pause-resume/vault/snapshot verifies
+# and the lifecycle ops below.
 verify_one_sandbox() { # <label> <ping-budget-ms>
-	local label="$1" budget="$2" created t0 t1 t2 route code deadline
+	local label="$1" budget="$2" response t0 t1 t2 route code deadline payload
 	local policy_file="$GEN_DIR/verify-policy.json"
 	t0="$(now_ms)"
 	# Egress policy rides on every create (binding -> nft rules), so the
 	# chain is exercised each time; /ping is inbound and unaffected.
 	jq -n '{defaultAction: "deny", egress: [{action: "allow", target: "example.com"}, {action: "allow", target: "*.opensandbox.ai"}]}' \
 		> "$policy_file"
-	log "verify ($label): creating a sandbox via the opensandbox CLI (templateId=$TEMPLATE_ID)"
-	created="$(osb_api sandbox create --template "$TEMPLATE_ID" --timeout 1h \
-		--metadata origin=fast-sandbox-env-verify \
-		--network-policy-file "$policy_file" \
-		--skip-health-check -o json 2>/dev/null)" \
-		|| fail "osb sandbox create failed against $SERVER_URL: $(osb_api sandbox create \
-			--template "$TEMPLATE_ID" --timeout 1h --skip-health-check 2>&1 >/dev/null | head -c 400)"
-	VERIFY_ID="$(printf '%s' "$created" | jq -r '.id')"
+	log "verify ($label): creating a sandbox via the raw API (templateId=$TEMPLATE_ID; the timed window is curl-only)"
+	# The timed windows wrap HTTP round trips ONLY: an osb invocation here
+	# would bill ~0.5s of Python startup to every reading. The CLI surface
+	# stays covered by the lifecycle ops and the osb create smoke.
+	local payload
+	payload="$(jq -n --arg tpl "$TEMPLATE_ID" --slurpfile pol "$policy_file" \
+		'{templateId: $tpl, timeout: 3600, metadata: {origin: "fast-sandbox-env-verify"}, networkPolicy: $pol[0]}')"
+	response="$(server_api POST "/sandboxes" "$payload")" \
+		|| fail "POST /sandboxes failed against $SERVER_URL (payload: $(printf '%s' "$payload" | head -c 200))"
+	VERIFY_ID="$(printf '%s' "$response" | jq -r '.id')"
 	[[ -n "$VERIFY_ID" && "$VERIFY_ID" != "null" ]] || fail "create response carried no id"
 	t1="$(now_ms)"
 	# Availability = /ping 200 through the signed gateway route (port 44772).
+	# Both polls are curl-only (~5ms/iteration) at 50ms cadence, so the
+	# create->ping number resolves the true availability point instead of
+	# one CLI spawn + sleep.
 	deadline=$(( t1 + budget * 1000000 ))
 	while :; do
-		route="$(osb_api sandbox endpoint "$VERIFY_ID" --port 44772 -o json 2>/dev/null \
+		route="$( { server_api GET "/sandboxes/$VERIFY_ID/endpoints/44772" 2>/dev/null || true; } \
 			| jq -r '.headers["OpenSandbox-Ingress-To"] // empty')"
 		if [[ -n "$route" ]]; then
 			code="$(curl -sS -m 5 -o /dev/null -w '%{http_code}' \
@@ -97,7 +107,7 @@ verify_one_sandbox() { # <label> <ping-budget-ms>
 		if (( $(now_ms) >= deadline )); then
 			fail "execd /ping did not return 200 within ${budget}ms (last code=${code:-none}, route=${route:-none})"
 		fi
-		sleep 0.2
+		sleep 0.05
 	done
 	t2="$(now_ms)"
 	# jq filter in a variable: literal parens trip older bash's $( ) parser.
@@ -234,5 +244,5 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 	resolve_osb
 	require_template_id
 	trap 'on_error verify-sandbox' ERR
-	run_stage "end-to-end verify (CLI create -> gateway -> execd /ping)" opensandbox_verify
+	run_stage "end-to-end verify (API create -> gateway -> execd /ping)" opensandbox_verify
 fi
