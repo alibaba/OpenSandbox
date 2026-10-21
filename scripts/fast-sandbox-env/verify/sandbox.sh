@@ -115,11 +115,15 @@ verify_one_sandbox() { # <label> <ping-budget-ms>
 	code=""
 	while :; do
 		line=""
-		if exec 3<>"/dev/tcp/$gw_host/$gw_port" 2>/dev/null; then
+		# NOTE: no 2>/dev/null here — exec-without-command applies
+		# redirections to the CURRENT shell, so that would permanently
+		# swallow the script's stderr (every later log/pass goes dark).
+		# A refused connect prints one honest bash message instead.
+		if exec 3<>"/dev/tcp/$gw_host/$gw_port"; then
 			printf 'GET /ping HTTP/1.1\r\nHost: %s\r\nOpenSandbox-Ingress-To: %s\r\nConnection: close\r\n\r\n' \
 				"$gw" "$route" >&3
 			IFS= read -r -t 1 line <&3 || true
-			exec 3>&- 3<&- 2>/dev/null
+			exec 3>&- 3<&-
 		else
 			sleep 0.01
 		fi
