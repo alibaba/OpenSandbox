@@ -1574,6 +1574,35 @@ verify_lifecycle_ops() { # <sandbox-id>
 	pass "lifecycle: osb sandbox renew 2h ($expected_expires -> $renewed_expires)"
 }
 
+# dump_latency_evidence collects the per-create timing instrumentation from
+# every component on the create critical path into one greppable file:
+# fastlet phase breakdown (fastlet create timing:), fastlet->egress action
+# invocations (fastlet action invoke:), egress sidecar SET_BINDING / hook
+# steps (timing fields on its subject lines), and fastpath create totals.
+# Append-only evidence for create-latency analysis (issue #2323 style).
+dump_latency_evidence() {
+	local out="$LOGS_DIR/latency-evidence-$(date +%s).txt"
+	{
+		echo "=== latency evidence $(date -u +%FT%TZ) ==="
+		echo
+		echo "--- fastlet: create phase + action-invoke timing ---"
+		kubectl -n "$RESOURCE_NS" logs -l app=sandbox-fastlet --tail=3000 2>/dev/null \
+			| grep -E "fastlet create timing|fastlet action invoke" || true
+		echo
+		echo "--- egress sidecar: SET_BINDING / hook timing ---"
+		kubectl -n "$RESOURCE_NS" logs -l app=sandbox-fastlet -c egress --tail=3000 2>/dev/null \
+			| grep -E "deny-first enforced|SET_BINDING applied|data-plane-ready" || true
+		echo
+		echo "--- fastpath create totals (controller) ---"
+		kubectl -n "$NS" logs deploy/fast-sandbox-controller --tail=3000 2>/dev/null \
+			| grep "fastpath sandbox created" | tail -30 || true
+	} > "$out" 2>&1 || true
+	log "latency evidence: $out"
+	# CI runners discard $WORK between runs, so the content must also land
+	# in the job log to be analyzable.
+	cat "$out"
+}
+
 opensandbox_verify() {
 	# Cold create pulls the golden image through DART (slowest; generous
 	# budget). Warm creates: the second may still pull on the other node via
@@ -1588,6 +1617,7 @@ opensandbox_verify() {
 		ids+=("$VERIFY_ID")
 	done
 	pass "end-to-end: opensandbox CLI -> server -> FastPath -> fastlet -> sandbox execd -> gateway route OK (6 sandboxes)"
+	dump_latency_evidence
 	verify_lifecycle_ops "${ids[0]}"
 	for id in "${ids[@]}"; do
 		VERIFY_ID="$id"

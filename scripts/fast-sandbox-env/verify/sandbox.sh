@@ -195,6 +195,9 @@ dump_latency_evidence() {
 			| grep "fastpath sandbox created" | tail -30 || true
 	} > "$out" 2>&1 || true
 	log "latency evidence: $out"
+	# CI runners discard $WORK between runs, so the content must also land
+	# in the job log to be analyzable.
+	cat "$out"
 }
 
 opensandbox_verify() {
