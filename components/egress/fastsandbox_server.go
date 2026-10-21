@@ -453,15 +453,19 @@ func (s *fastSandboxPolicyServer) OnRegistered(subj subject.Subject, att actionh
 	// policy writes.
 	nftCtx, cancel := context.WithTimeout(s.ctx, policyApplyTimeout)
 	defer cancel()
+	denyFirstStarted := time.Now()
 	if err := s.nft.ApplyDenyFirst(nftCtx, subj, att); err != nil {
 		return err
 	}
+	dnsStarted := time.Now()
 	if err := s.installGatewayDNSRedirect(subj, att.Gateway); err != nil {
 		// Fail closed: sandbox DNS addressed to gateway:53 must reach the
 		// proxy; without the redirect the sandbox would fall back to a
 		// resolver the policy cannot see.
 		return err
 	}
+	dnsRedirect := time.Since(dnsStarted)
+	mitmStarted := time.Now()
 	if err := s.setMitmRedirect(subj, att, false); err != nil {
 		// Fail closed: a sandbox whose HTTP(S) is not intercepted must not
 		// register as usable (it could exfiltrate credentials-bearing
@@ -471,7 +475,8 @@ func (s *fastSandboxPolicyServer) OnRegistered(subj subject.Subject, att actionh
 		s.releaseGatewayDNSRedirect(subj)
 		return err
 	}
-	log.Infof("subject %s deny-first enforced (nft + gateway redirect + mitm redirect)", subj)
+	log.Infof("subject %s deny-first enforced (nft + gateway redirect + mitm redirect) total=%dms denyFirst=%dms dnsRedirect=%dms mitm=%dms",
+		subj, time.Since(denyFirstStarted).Milliseconds(), dnsStarted.Sub(denyFirstStarted).Milliseconds(), dnsRedirect.Milliseconds(), time.Since(mitmStarted).Milliseconds())
 	return nil
 }
 
