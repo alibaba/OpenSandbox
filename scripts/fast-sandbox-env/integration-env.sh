@@ -291,6 +291,10 @@ rc() {
 
 on_error() {
 	local rc=$? task="$1"
+	# Record WHERE it died before anything else: the dump alone cannot
+	# distinguish a silent command failure from an environment problem
+	# (e.g. the RustFS stage once died in ~1s with zero output).
+	log "up failed: task=$task rc=$rc command=${BASH_COMMAND:-unknown} at ${BASH_SOURCE[1]:-?}:${BASH_LINENO[0]:-?}" || true
 	# Subshells inherit ERR: propagate the error instead of tearing down
 	# main-process resources; ignore SIGPIPE (cancelled runners).
 	trap - ERR
@@ -503,7 +507,7 @@ preflight() {
 		if (( avail_kb < min_free_kb )); then
 			die "$target has $((avail_kb / 1024 / 1024))G free; at least 20G is required (built images, XFS StateRoot, RustFS artifacts). Free space (docker system prune / old kind clusters) or point WORK / RUSTFS_DATA / XFS_LOOP_FILE at a bigger volume"
 		fi
-		log "disk headroom: $target has $((avail_kb / 1024 / 1024 / 1024))G free"
+		log "disk headroom: $target has $((avail_kb / 1024 / 1024))G free"
 	done
 	# Fail fast on busy host ports instead of a cryptic docker/kind bind error.
 	local port
