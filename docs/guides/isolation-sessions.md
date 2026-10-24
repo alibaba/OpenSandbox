@@ -84,10 +84,14 @@ Non-happy paths:
 
 | Event | What happens |
 |---|---|
-| Run `timeout_seconds` elapsed | execd cancels the run context, which sends `SIGINT` to the bwrap process group and emits an `IsolatedError` SSE event; the session itself stays alive. |
+| Run `timeout_seconds` elapsed | execd cancels the run context and sends `SIGINT` to the session process group, which interrupts the running command while the persistent shell stays alive; the run ends with an `IsolatedError` SSE event and the same session accepts the next `run`. |
 | `bwrap` process exited | The next `run` returns an `IsolatedError` SSE event with `session process has exited`; only `ErrContextNotFound` (session ID unknown) becomes an HTTP-level error. `DELETE` + recreate. |
 | Idle timeout reached | GC runs the same teardown as `DELETE`. |
-| Client disconnects mid-SSE | The Gin request context is cancelled and execd sends `SIGINT` to the running command; the run does **not** continue in the background. |
+| Client disconnects mid-SSE | The Gin request context is cancelled and execd sends `SIGINT` to the running command; the run does **not** continue in the background, and the session stays alive for the next `run`. |
+
+::: tip SSE keepalive
+Foreground `run` streams commit their SSE response headers immediately and send a `ping` event every few seconds, so proxies and gateways with idle-timeout policies do not reap the connection while a long command (e.g. `pip install`) produces no stdout. Treat `ping` as a no-op event type.
+:::
 
 ---
 

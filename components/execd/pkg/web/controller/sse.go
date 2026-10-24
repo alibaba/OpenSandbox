@@ -37,6 +37,10 @@ var sseHeaders = map[string]string{
 	"X-Accel-Buffering": "no",
 }
 
+// ssePingInterval is the SSE keepalive period; it must stay well below
+// gateway idle timeouts so silent commands cannot get the stream reaped.
+var ssePingInterval = 3 * time.Second
+
 // setupSSEResponse is idempotent: once headers are committed, subsequent calls
 // no-op. Callers that need the headers up front (e.g. long-running streaming
 // endpoints with no early-error path) can call it explicitly. Endpoints that
@@ -228,7 +232,7 @@ func (c *basicController) writeSingleEvent(handler string, data []byte, verbose 
 }
 
 // ping periodically keeps the SSE connection alive.
-func (c *CodeInterpretingController) ping(ctx context.Context) {
+func (c *basicController) ping(ctx context.Context) {
 	wait.Until(func() {
 		if c.ctx.Writer == nil {
 			return
@@ -240,5 +244,5 @@ func (c *CodeInterpretingController) ping(ctx context.Context) {
 		}
 		payload := event.ToJSON()
 		c.writeSingleEvent("Ping", payload, false, event.Summary())
-	}, 3*time.Second, ctx.Done())
+	}, ssePingInterval, ctx.Done())
 }

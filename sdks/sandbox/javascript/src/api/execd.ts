@@ -969,7 +969,7 @@ export interface paths {
         put?: never;
         /**
          * Run code in an isolated session
-         * @description Runs code inside an existing isolated session. Foreground mode (default) streams output via SSE (200). Background mode (`background: true`) starts the command detached and returns a JSON run handle with 202 Accepted for polling status and logs via `/v1/isolated/session/{sessionId}/runs/{runId}` and `.../runs/{runId}/logs`. `timeout_seconds` applies to foreground runs only; background runs are not time-limited (idle GC is suspended while one is active) and are bounded by the session lifetime.
+         * @description Runs code inside an existing isolated session. Foreground mode (default) streams output via SSE (200). Background mode (`background: true`) starts the command detached and returns a JSON run handle with 202 Accepted for polling status and logs via `/v1/isolated/session/{sessionId}/runs/{runId}` and `.../runs/{runId}/logs`. `timeout_seconds` applies to foreground runs only; background runs are not time-limited (idle GC is suspended while one is active) and are bounded by the session lifetime. Foreground streams emit periodic `ping` keepalive events so idle gateway timeouts do not reap the connection while the command produces no output; clients must ignore unrecognized event types.
          */
         post: operations["runInIsolatedSession"];
         delete?: never;

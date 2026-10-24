@@ -539,3 +539,104 @@ func TestGetRunLogs_RejectsMalformedCursor(t *testing.T) {
 		}
 	}
 }
+
+// TestIsolatedRun_ForegroundStreamSendsPings verifies the foreground run
+// streams SSE with periodic ping keepalives: a command that produces no
+// stdout for a while must still emit bytes so gateway idle timeouts cannot
+// reap the connection, and the stream must end with the complete event.
+func TestIsolatedRun_ForegroundStreamSendsPings(t *testing.T) {
+	previousRunner := isolatedRunner
+	previousInterval := ssePingInterval
+	runner, err := runtime.NewIsolatedRunner(
+		runtime.NewController("", ""),
+		lifecycleTestIsolator{},
+		isolation.Config{
+			UpperRoot:     t.TempDir(),
+			UpperMaxBytes: 8 << 30,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolatedRunner = runner
+	ssePingInterval = 30 * time.Millisecond
+	t.Cleanup(func() {
+		runner.StopGC()
+		isolatedRunner = previousRunner
+		ssePingInterval = previousInterval
+	})
+
+	sessionID, err := runner.CreateIsolatedSession(&runtime.IsolatedSessionOptions{
+		WorkspacePath: filepath.Join(t.TempDir(), "ws"),
+		WorkspaceMode: "rw",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runner.DeleteIsolatedSession(sessionID) })
+
+	runCtx, runRecorder := newTestContext(
+		http.MethodPost,
+		"/v1/isolated/session/"+sessionID+"/run",
+		[]byte(`{"code":"sleep 0.4","timeout_seconds":10}`),
+	)
+	runCtx.Params = gin.Params{{Key: "sessionId", Value: sessionID}}
+	NewIsolatedSessionController(runCtx).Run()
+
+	if runRecorder.Code != http.StatusOK {
+		t.Fatalf("run status = %d, want 200; body: %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	if got := runRecorder.Header().Get("Content-Type"); got != "text/event-stream" {
+		t.Fatalf("content type = %q, want text/event-stream", got)
+	}
+
+	body := runRecorder.Body.String()
+	pings := strings.Count(body, `"type":"ping"`)
+	if pings == 0 {
+		t.Fatalf("expected at least one ping event during silent command, body:\n%s", body)
+	}
+	if !strings.Contains(body, `"type":"execution_complete"`) {
+		t.Fatalf("stream must end with execution_complete, body:\n%s", body)
+	}
+}
+
+// TestIsolatedRun_UnknownSessionReturnsJSON verifies that a run on a missing
+// session still returns the structured 404 JSON error, not an SSE stream
+// (headers are not committed before the session check).
+func TestIsolatedRun_UnknownSessionReturnsJSON(t *testing.T) {
+	previousRunner := isolatedRunner
+	runner, err := runtime.NewIsolatedRunner(
+		runtime.NewController("", ""),
+		lifecycleTestIsolator{},
+		isolation.Config{
+			UpperRoot:     t.TempDir(),
+			UpperMaxBytes: 8 << 30,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	isolatedRunner = runner
+	t.Cleanup(func() {
+		runner.StopGC()
+		isolatedRunner = previousRunner
+	})
+
+	runCtx, runRecorder := newTestContext(
+		http.MethodPost,
+		"/v1/isolated/session/nope/run",
+		[]byte(`{"code":"echo hi"}`),
+	)
+	runCtx.Params = gin.Params{{Key: "sessionId", Value: "nope"}}
+	NewIsolatedSessionController(runCtx).Run()
+
+	if runRecorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body: %s", runRecorder.Code, runRecorder.Body.String())
+	}
+	if got := runRecorder.Header().Get("Content-Type"); got == "text/event-stream" {
+		t.Fatal("unknown-session run must return JSON, not an SSE stream")
+	}
+	if !strings.Contains(runRecorder.Body.String(), "session not found") {
+		t.Fatalf("body = %s, want session-not-found error", runRecorder.Body.String())
+	}
+}

@@ -41,6 +41,14 @@ import (
 
 const isolatedRunEndMarkerPrefix = "__ISOLATED_RUN_END__"
 
+// isolatedInterruptEscalationTimeout bounds how long a cancelled run waits
+// for its end marker before the session process group is SIGKILLed.
+var isolatedInterruptEscalationTimeout = 10 * time.Second
+
+// isolatedInterruptRepeatInterval is the SIGINT re-send period used while
+// draining a cancelled no-envs script tail.
+var isolatedInterruptRepeatInterval = 500 * time.Millisecond
+
 // IsolatedRunner is the concrete isolated session runner.
 type IsolatedRunner struct {
 	ctrl            *Controller
@@ -642,38 +650,37 @@ func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, co
 		return fmt.Errorf("session not started")
 	}
 
-	// Prepend env exports before user code.
+	// The per-run UUID makes it impossible for user output to forge this
+	// run's end marker.
 	runMarker := fmt.Sprintf("%s_%s", isolatedRunEndMarkerPrefix, uuid.New().String())
 
-	var script string
+	// trap : INT makes the cancellation SIGINT kill the running command, not
+	// the persistent shell. Envs runs are subshell-wrapped so an interrupt
+	// aborts the whole script; no-envs runs stay in the main shell to keep
+	// cross-run exports working.
+	var script strings.Builder
+	script.WriteString("trap : INT\n")
 	if len(envs) > 0 {
-		script += "(\n"
+		script.WriteString("(\n")
 		for k, v := range envs {
-			script += fmt.Sprintf("export %s=%s\n", shellescape(k), shellescape(v))
-		}
-		script += code
-		if !strings.HasSuffix(script, "\n") {
-			script += "\n"
-		}
-		script += ")\n"
-	} else {
-		script += code
-		if !strings.HasSuffix(script, "\n") {
-			script += "\n"
+			script.WriteString(fmt.Sprintf("export %s=%s\n", shellescape(k), shellescape(v)))
 		}
 	}
-	script += fmt.Sprintf("echo %s $?\n", runMarker)
+	script.WriteString(code)
+	if !strings.HasSuffix(code, "\n") {
+		script.WriteString("\n")
+	}
+	if len(envs) > 0 {
+		script.WriteString(")\n")
+	}
+	script.WriteString(fmt.Sprintf("echo %s $?\n", runMarker))
 
-	// On timeout/cancel, send SIGINT to interrupt the running command
-	// without killing the persistent shell session. Closing stdin would
-	// terminate the shell entirely.
 	done := make(chan struct{})
 	watcherDone := make(chan struct{})
 	defer func() {
 		close(done)
-		// Keep runMu held until the watcher has either observed done or
-		// completed its SIGINT. Otherwise a delayed cancellation from this Run
-		// can interrupt the next serialized Run.
+		// Hold runMu until the watcher's final signal completes, so a late
+		// cancellation cannot interrupt the next serialized run.
 		<-watcherDone
 	}()
 	go func() {
@@ -681,11 +688,33 @@ func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, co
 		select {
 		case <-ctx.Done():
 			_ = s.signalProcessGroupIfRunning(syscall.SIGINT)
+			// No-envs scripts queue their remaining statements in the shell
+			// after the interrupt; repeated SIGINT kills each as it starts
+			// (the trap keeps the shell alive). A marker still missing after
+			// the deadline means SIGINT is being ignored: escalate.
+			ticker := time.NewTicker(isolatedInterruptRepeatInterval)
+			defer ticker.Stop()
+			deadline := time.After(isolatedInterruptEscalationTimeout)
+			for {
+				select {
+				case <-done:
+					return
+				case <-ticker.C:
+					_ = s.signalProcessGroupIfRunning(syscall.SIGINT)
+				case <-deadline:
+					log.Warn(
+						"isolated session: %s command ignored SIGINT; escalating to SIGKILL",
+						id,
+					)
+					_ = s.signalProcessGroupIfRunning(syscall.SIGKILL)
+					return
+				}
+			}
 		case <-done:
 		}
 	}()
 
-	if _, err := io.WriteString(stdin, script); err != nil {
+	if _, err := io.WriteString(stdin, script.String()); err != nil {
 		return fmt.Errorf("write stdin: %w", err)
 	}
 
