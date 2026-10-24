@@ -190,7 +190,7 @@ sandbox = await Sandbox.create(
 
 ### Wake retry
 
-A request to a paused sandbox may arrive while its restore is still in progress. The gateway answers `503` with the `OpenSandbox-Wake: expired` marker; the SDK recognizes it and resends the original request after the `Retry-After` delay (safe for any method — the marker proves the request was never forwarded). The wake budget defaults to 5 attempts / 60 seconds across all wake cycles; when it is exhausted the SDK raises `SandboxWakeTimeoutException` (carrying `attempts` and `waited`) while the server-side restore continues in the background. Bare `503` responses follow the existing retry rules untouched. Streaming (SSE) calls bypass wake retry.
+A request to a paused sandbox may arrive while its restore is still in progress. The gateway answers `503` with the `OpenSandbox-Wake: expired` marker; the SDK recognizes it and resends the original request after the `Retry-After` delay (safe for any method — the marker proves the request was never forwarded). The wake budget defaults to 5 attempts / 60 seconds across all wake cycles; when it is exhausted the SDK raises `SandboxWakeTimeoutException` (carrying `attempts` and `waited`) while the server-side restore continues in the background. Bare `503` responses follow the existing retry rules untouched. Streaming (SSE) calls such as `commands.run` and `codes.run` get the wake retry too, for the request that starts the stream; an established stream is never resent.
 
 ## Usage Examples
 
@@ -529,7 +529,7 @@ Reuse a `ConnectionConfig` (or `ConnectionConfigSync`) when creating multiple sa
 | `follow_redirects` | Follow HTTP redirects for SDK requests    | `False`                      | -                      |
 | `event_hooks`     | Additional httpx hooks for adapter clients | Empty                        | -                      |
 | `transport`       | Shared httpx transport (pool/proxy/retry); custom transports must honor request timeouts  | SDK-created per instance     | -                      |
-| `retry_policy`    | Automatic retry policy for non-streaming requests (see [Automatic retries](#_2-automatic-retries)) | Enabled (`RetryPolicy()`) | -                 |
+| `retry_policy`    | Automatic retry policy; streaming requests only get its wake retry (see [Automatic retries](#_2-automatic-retries)) | Enabled (`RetryPolicy()`) | -                 |
 | `use_server_proxy` | Use sandbox server as proxy for execd/endpoint requests (e.g. when client cannot reach the sandbox directly) | `False` | -                      |
 | `disable_metrics` | Disable SDK create-latency telemetry (see [SDK Telemetry](/sdks/observability#creation-metrics)) | `False` | `OPENSANDBOX_DISABLE_METRICS` |
 | `enable_tracing` | Enable OpenTelemetry tracing for pool warmup (see [SDK Tracing](/sdks/observability#pool-warmup-tracing)) | `False` | - |
@@ -586,7 +586,7 @@ Default behavior:
 - **Enabled by default.** Idempotent methods (`GET/HEAD/PUT/DELETE/OPTIONS`) are retried on `429`, `502`, `503`, and on pre-send transport failures (DNS, TCP connect, TLS handshake, fresh-connection reset).
 - **`POST`/`PATCH` are never retried on a status code by default**, since the request may already have been applied server-side. Pre-send transport failures (before any byte is written) are still retried for these methods.
 - Up to `3` retries with decorrelated-jitter exponential backoff, honoring a server `Retry-After` header (capped at 60s).
-- **SSE / streaming requests bypass retry** entirely (bodies are not replayable).
+- **SSE / streaming requests are not retried** on status codes or transport errors, since they may already have started a command. Only the [wake retry](#wake-retry) applies to the request that starts the stream.
 
 ::: warning Behavior change
 Retries are on by default. This can increase the number of HTTP attempts and tail latency compared to earlier SDK versions. If you rely on fast-fail semantics, opt out explicitly with `RetryPolicy.disabled()`.
