@@ -259,6 +259,14 @@ class PlatformSpec private constructor(
 }
 
 /**
+ * Inclusive TCP destination port range ([start] <= [end]).
+ */
+data class PortRange(
+    val start: Int,
+    val end: Int,
+)
+
+/**
  * Egress rule for matching network targets.
  *
  * @property action Whether to allow or deny matching targets.
@@ -268,11 +276,14 @@ class PlatformSpec private constructor(
  * duplicates). A null [target] with [ports] set applies to all IPv4/IPv6 destinations. A domain
  * [target] combined with [ports] is rejected by the server/sidecar: domain rules are evaluated at
  * the DNS layer, which has no port dimension.
+ * @property portRanges The interval form of [ports]; the two share the 256-entry limit and must not
+ * overlap.
  */
 class NetworkRule private constructor(
     val action: Action,
     val target: String?,
     val ports: List<Int>?,
+    val portRanges: List<PortRange>? = null,
 ) {
     enum class Action {
         ALLOW,
@@ -297,13 +308,15 @@ class NetworkRule private constructor(
             action: Action,
             target: String?,
             ports: List<Int>?,
-        ): NetworkRule = NetworkRule(action = action, target = target, ports = ports)
+            portRanges: List<PortRange>? = null,
+        ): NetworkRule = NetworkRule(action = action, target = target, ports = ports, portRanges = portRanges)
     }
 
     class Builder {
         private var action: Action? = null
         private var target: String? = null
         private var ports: List<Int>? = null
+        private var portRanges: List<PortRange>? = null
 
         fun action(action: Action): Builder {
             this.action = action
@@ -329,12 +342,41 @@ class NetworkRule private constructor(
             return this
         }
 
+        fun portRanges(portRanges: List<PortRange>): Builder {
+            require(portRanges.isNotEmpty()) { "Port ranges cannot be empty" }
+            require(portRanges.size <= MAX_PORTS_PER_RULE) { "Port ranges cannot exceed $MAX_PORTS_PER_RULE entries" }
+            for (range in portRanges) {
+                require(range.start in 1..65535 && range.end in 1..65535 && range.start <= range.end) {
+                    "Port range ${range.start}-${range.end} is invalid; need 1 <= start <= end <= 65535"
+                }
+            }
+            // nftables rejects overlapping interval-set members.
+            portRanges.sortedBy { it.start }.zipWithNext { a, b ->
+                require(b.start > a.end) { "Port ranges ${a.start}-${a.end} and ${b.start}-${b.end} overlap" }
+            }
+            this.portRanges = portRanges.toList()
+            return this
+        }
+
         fun build(): NetworkRule {
             val actionValue = action ?: throw IllegalArgumentException("Action must be specified")
             val targetValue = target
             val portsValue = ports
-            require(targetValue != null || portsValue != null) { "Either target or ports must be specified" }
-            if (portsValue != null && targetValue != null && !isIpOrCidr(targetValue)) {
+            val rangesValue = portRanges
+            require(targetValue != null || portsValue != null || rangesValue != null) {
+                "Either target, ports, or port ranges must be specified"
+            }
+            val entries = (portsValue?.size ?: 0) + (rangesValue?.size ?: 0)
+            require(entries <= MAX_PORTS_PER_RULE) {
+                "Ports and port ranges cannot exceed $MAX_PORTS_PER_RULE entries combined"
+            }
+            if (portsValue != null && rangesValue != null) {
+                for (port in portsValue) {
+                    val range = rangesValue.firstOrNull { port in it.start..it.end }
+                    require(range == null) { "Port $port overlaps port range ${range!!.start}-${range.end}" }
+                }
+            }
+            if ((portsValue != null || rangesValue != null) && targetValue != null && !isIpOrCidr(targetValue)) {
                 throw IllegalArgumentException(
                     "Ports are not supported for domain targets: \"$targetValue\" " +
                         "(domain rules are evaluated at the DNS layer, which has no port dimension)",
@@ -344,6 +386,7 @@ class NetworkRule private constructor(
                 action = actionValue,
                 target = targetValue,
                 ports = portsValue?.toList(),
+                portRanges = rangesValue?.toList(),
             )
         }
 

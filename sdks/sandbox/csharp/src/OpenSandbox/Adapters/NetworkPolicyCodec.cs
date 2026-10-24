@@ -82,24 +82,41 @@ internal static class NetworkPolicyCodec
                 paramName);
         }
 
-        var hasTarget = !string.IsNullOrWhiteSpace(rule.Target);
-        var hasPorts = rule.Ports is { Count: > 0 };
-        if (!hasTarget && !hasPorts)
+        if (rule.PortRanges != null && rule.PortRanges.Count == 0)
         {
             throw new ArgumentException(
-                $"NetworkRule[{index}] requires target, ports, or both.", paramName);
+                $"NetworkRule[{index}] has empty portRanges; omit the field for a non-port-scoped rule.",
+                paramName);
+        }
+
+        var hasTarget = !string.IsNullOrWhiteSpace(rule.Target);
+        var hasPorts = rule.Ports is { Count: > 0 };
+        var hasRanges = rule.PortRanges is { Count: > 0 };
+        if (!hasTarget && !hasPorts && !hasRanges)
+        {
+            throw new ArgumentException(
+                $"NetworkRule[{index}] requires target, ports, or portRanges.", paramName);
+        }
+        // Count before values: the server checks the cap first too.
+        var portCount = rule.Ports?.Count ?? 0;
+        var rangeCount = rule.PortRanges?.Count ?? 0;
+        if (portCount > MaxPortsPerRule)
+        {
+            throw new ArgumentException(
+                $"NetworkRule[{index}] has {portCount} ports; at most {MaxPortsPerRule} per rule.",
+                paramName);
+        }
+        if (portCount + rangeCount > MaxPortsPerRule)
+        {
+            throw new ArgumentException(
+                $"NetworkRule[{index}] has {portCount} ports and {rangeCount} portRanges; " +
+                $"at most {MaxPortsPerRule} entries combined per rule.",
+                paramName);
         }
         if (hasPorts)
         {
-            // Count before values: the server checks the cap first too.
-            if (rule.Ports!.Count > MaxPortsPerRule)
-            {
-                throw new ArgumentException(
-                    $"NetworkRule[{index}] has {rule.Ports.Count} ports; at most {MaxPortsPerRule} per rule.",
-                    paramName);
-            }
             var seen = new HashSet<int>();
-            foreach (var port in rule.Ports)
+            foreach (var port in rule.Ports!)
             {
                 if (port < 1 || port > 65535)
                 {
@@ -113,12 +130,60 @@ internal static class NetworkPolicyCodec
                 }
             }
         }
-        if (hasPorts && hasTarget && !IsIpOrCidr(rule.Target!))
+        if (hasRanges)
         {
+            ValidatePortRanges(rule, index, paramName);
+        }
+        if ((hasPorts || hasRanges) && hasTarget && !IsIpOrCidr(rule.Target!))
+        {
+            var field = hasPorts ? "ports" : "portRanges";
             throw new ArgumentException(
-                $"NetworkRule[{index}] ports are not supported for domain target '{rule.Target}' " +
+                $"NetworkRule[{index}] {field} are not supported for domain target '{rule.Target}' " +
                 "(domain rules are evaluated at the DNS layer, which has no port dimension).",
                 paramName);
+        }
+    }
+
+    // nftables rejects overlapping interval-set members.
+    private static void ValidatePortRanges(NetworkRule rule, int index, string? paramName)
+    {
+        foreach (var range in rule.PortRanges!)
+        {
+            if (range is null)
+            {
+                throw new ArgumentException(
+                    $"NetworkRule[{index}] has a null portRanges entry.", paramName);
+            }
+            if (range.Start < 1 || range.End > 65535 || range.Start > range.End)
+            {
+                throw new ArgumentException(
+                    $"NetworkRule[{index}] port range {range.Start}-{range.End} is invalid; " +
+                    "need 1 <= start <= end <= 65535.",
+                    paramName);
+            }
+            if (rule.Ports != null)
+            {
+                foreach (var port in rule.Ports)
+                {
+                    if (port >= range.Start && port <= range.End)
+                    {
+                        throw new ArgumentException(
+                            $"NetworkRule[{index}] port {port} overlaps port range {range.Start}-{range.End}.",
+                            paramName);
+                    }
+                }
+            }
+        }
+        var sorted = rule.PortRanges.OrderBy(r => r.Start).ToList();
+        for (var i = 1; i < sorted.Count; i++)
+        {
+            if (sorted[i].Start <= sorted[i - 1].End)
+            {
+                throw new ArgumentException(
+                    $"NetworkRule[{index}] port ranges {sorted[i - 1].Start}-{sorted[i - 1].End} and " +
+                    $"{sorted[i].Start}-{sorted[i].End} overlap.",
+                    paramName);
+            }
         }
     }
 
@@ -145,6 +210,15 @@ internal static class NetworkPolicyCodec
                 ports.Add(port);
             }
             entry["ports"] = ports;
+        }
+        if (r.PortRanges is { Count: > 0 })
+        {
+            var ranges = new List<Dictionary<string, int>>(r.PortRanges.Count);
+            foreach (var range in r.PortRanges)
+            {
+                ranges.Add(new Dictionary<string, int> { ["start"] = range.Start, ["end"] = range.End });
+            }
+            entry["portRanges"] = ranges;
         }
         return entry;
     }
@@ -258,8 +332,49 @@ internal static class NetworkPolicyCodec
         {
             Action = ParseNetworkRuleAction(actionText),
             Target = target,
-            Ports = ports
+            Ports = ports,
+            PortRanges = ParsePortRanges(element)
         };
+    }
+
+    private static List<PortRange>? ParsePortRanges(JsonElement element)
+    {
+        if (!element.TryGetProperty("portRanges", out var rangesElement) ||
+            rangesElement.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+        if (rangesElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new SandboxApiException(
+                $"Invalid portRanges in network rule: {rangesElement.GetRawText()}");
+        }
+
+        var ranges = new List<PortRange>();
+        foreach (var rangeElement in rangesElement.EnumerateArray())
+        {
+            if (rangeElement.ValueKind != JsonValueKind.Object ||
+                !TryGetInt32(rangeElement, "start", out var start) ||
+                !TryGetInt32(rangeElement, "end", out var end))
+            {
+                throw new SandboxApiException(
+                    $"Invalid port range element in network rule: {rangeElement.GetRawText()}");
+            }
+            ranges.Add(new PortRange { Start = start, End = end });
+        }
+        if (ranges.Count == 0)
+        {
+            throw new SandboxApiException("Invalid network rule: portRanges must not be empty");
+        }
+        return ranges;
+    }
+
+    private static bool TryGetInt32(JsonElement element, string name, out int value)
+    {
+        value = 0;
+        return element.TryGetProperty(name, out var property) &&
+            property.ValueKind == JsonValueKind.Number &&
+            property.TryGetInt32(out value);
     }
 
     public static NetworkRuleAction ParseNetworkRuleAction(string? action)

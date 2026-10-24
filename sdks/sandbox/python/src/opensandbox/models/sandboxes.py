@@ -24,7 +24,14 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 if TYPE_CHECKING:
     from opensandbox.config import ConnectionConfig
@@ -135,6 +142,22 @@ class PlatformSpec(BaseModel):
     )
 
 
+_MAX_PORTS_PER_RULE = 256
+
+
+class PortRange(BaseModel):
+    """Inclusive TCP destination port range."""
+
+    start: int = Field(ge=1, le=65535)
+    end: int = Field(ge=1, le=65535)
+
+    @model_validator(mode="after")
+    def start_not_after_end(self) -> "PortRange":
+        if self.start > self.end:
+            raise ValueError(f"Port range start {self.start} is greater than end {self.end}")
+        return self
+
+
 class NetworkRule(BaseModel):
     """
     Egress rule for matching network targets.
@@ -159,6 +182,17 @@ class NetworkRule(BaseModel):
         ),
         min_length=1,
         max_length=256,
+    )
+    port_ranges: list[PortRange] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("port_ranges", "portRanges"),
+        serialization_alias="portRanges",
+        description=(
+            "Inclusive TCP destination port ranges, with the same semantics as `ports`. Entries "
+            "must not overlap `ports` or each other, and count toward the same 256-entry limit."
+        ),
+        min_length=1,
+        max_length=_MAX_PORTS_PER_RULE,
     )
 
     @field_validator("target")
@@ -187,13 +221,35 @@ class NetworkRule(BaseModel):
 
     @model_validator(mode="after")
     def target_or_ports_required(self) -> "NetworkRule":
-        if self.target is None and not self.ports:
-            raise ValueError("Network rule requires target, ports, or both")
+        port_scoped = bool(self.ports) or bool(self.port_ranges)
+        if self.target is None and not port_scoped:
+            raise ValueError("Network rule requires target, ports/port_ranges, or both")
         # Classify the trimmed target the way the sidecar does, so " 10.0.0.5"
         # is an IP locally too instead of a misleading domain+ports error.
-        if self.ports and self.target is not None and not _is_ip_or_cidr(self.target.strip()):
+        if port_scoped and self.target is not None and not _is_ip_or_cidr(self.target.strip()):
             raise ValueError("Network rule ports are not supported for domain targets")
+        self._check_port_ranges()
         return self
+
+    def _check_port_ranges(self) -> None:
+        # nft rejects overlapping members of one interval set.
+        if not self.port_ranges:
+            return
+        total = len(self.ports or []) + len(self.port_ranges)
+        if total > _MAX_PORTS_PER_RULE:
+            raise ValueError(
+                f"Network rule has {total} ports and port_ranges entries, max {_MAX_PORTS_PER_RULE}"
+            )
+        for i, rng in enumerate(self.port_ranges):
+            for port in self.ports or []:
+                if rng.start <= port <= rng.end:
+                    raise ValueError(f"Network rule port {port} overlaps port range {rng.start}-{rng.end}")
+            for prev in self.port_ranges[:i]:
+                if rng.start <= prev.end and prev.start <= rng.end:
+                    raise ValueError(
+                        f"Network rule port range {rng.start}-{rng.end} overlaps port range "
+                        f"{prev.start}-{prev.end}"
+                    )
 
 
 class NetworkPolicy(BaseModel):

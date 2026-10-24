@@ -128,6 +128,32 @@ public class NetworkRule
     [JsonPropertyName("ports")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<int>? Ports { get; set; }
+
+    /// <summary>
+    /// Gets or sets the interval form of <see cref="Ports"/>; the two share the 256-entry
+    /// limit and must not overlap.
+    /// </summary>
+    [JsonPropertyName("portRanges")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PortRange>? PortRanges { get; set; }
+}
+
+/// <summary>
+/// An inclusive TCP destination port range (Start &lt;= End).
+/// </summary>
+public class PortRange
+{
+    /// <summary>
+    /// Gets or sets the first port in the range.
+    /// </summary>
+    [JsonPropertyName("start")]
+    public required int Start { get; set; }
+
+    /// <summary>
+    /// Gets or sets the last port in the range.
+    /// </summary>
+    [JsonPropertyName("end")]
+    public required int End { get; set; }
 }
 
 /// <summary>

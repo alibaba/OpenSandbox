@@ -1026,10 +1026,10 @@ def test_policy_rejects_port_scoped_rules(persisted_fsb):
     url = f"/v1/sandboxes/{sandbox_id}/networkpolicy"
     port_only = {"action": "deny", "ports": [25]}
     scoped = {"action": "allow", "target": "10.0.0.5", "ports": [22]}
-    assert client.put(url, json={"defaultAction": "deny", "egress": [port_only]}).status_code == 400
-    assert client.put(url, json={"defaultAction": "deny", "egress": [scoped]}).status_code == 400
-    assert client.patch(url, json=[port_only]).status_code == 400
-    assert client.patch(url, json=[scoped]).status_code == 400
+    ranged = {"action": "deny", "target": "10.0.0.5", "portRanges": [{"start": 1, "end": 1023}]}
+    for rule in (port_only, scoped, ranged):
+        assert client.put(url, json={"defaultAction": "deny", "egress": [rule]}).status_code == 400
+        assert client.patch(url, json=[rule]).status_code == 400
     assert fake.last_update is None
     assert fake.last_relay is None or fake.last_relay.method == "GET"
 

@@ -1,11 +1,11 @@
 // Copyright 2026 The OpenSandbox Authors
-// 
+//
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-// 
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
-// 
+//
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -1891,7 +1891,12 @@ export interface components {
              */
             enabled: boolean;
         };
-        /** @description Egress rule. At least one of `target` or `ports` must be provided; when both are present the rule applies to `ports` on `target` only. Enforced by the server and the egress sidecar. */
+        /** @description Inclusive TCP destination port range (`start` <= `end`). */
+        PortRange: {
+            start: number;
+            end: number;
+        };
+        /** @description Egress rule. At least one of `target`, `ports`, or `portRanges` must be provided; when both are present the rule applies to `ports` on `target` only. Enforced by the server and the egress sidecar. */
         NetworkRule: {
             /**
              * @description Whether to allow or deny matching targets.
@@ -1923,6 +1928,12 @@ export interface components {
              *     requires explicit domain rules or stable IPs.
              */
             ports?: number[];
+            /**
+             * @description Inclusive TCP destination port ranges, with the same semantics as
+             *     `ports`. Entries must not overlap `ports` or each other, and count
+             *     toward the same 256-entry limit.
+             */
+            portRanges?: components["schemas"]["PortRange"][];
         };
         /**
          * @description Initial Credential Vault revision. Inline credential values are

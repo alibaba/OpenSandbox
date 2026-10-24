@@ -2568,11 +2568,26 @@ components:
             recommended; default-allow support is deprecated.
       additionalProperties: false
 
+    PortRange:
+      type: object
+      description: Inclusive TCP destination port range (`start` <= `end`).
+      properties:
+        start:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        end:
+          type: integer
+          minimum: 1
+          maximum: 65535
+      required: [start, end]
+      additionalProperties: false
+
     NetworkRule:
       type: object
       description: >-
-        Egress rule. At least one of `target` or `ports` must be provided;
-        when both are present the rule applies to `ports` on `target` only.
+        Egress rule. At least one of `target`, `ports`, or `portRanges` must be
+        provided; when both are present the rule applies to `ports` on `target` only.
         Enforced by the server and the egress sidecar.
       properties:
         action:
@@ -2611,6 +2626,16 @@ components:
             lookups for targetless allow rules (it matches domain rules
             only), so this shape serves direct-IP clients; hostname access
             requires explicit domain rules or stable IPs.
+        portRanges:
+          type: array
+          minItems: 1
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/PortRange'
+          description: |
+            Inclusive TCP destination port ranges, with the same semantics as
+            `ports`. Entries must not overlap `ports` or each other, and count
+            toward the same 256-entry limit.
       required: [action]
       additionalProperties: false
 

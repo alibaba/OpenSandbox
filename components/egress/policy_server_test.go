@@ -481,6 +481,45 @@ func TestHandlePatch_DistinctPortScopedRulesCoexist(t *testing.T) {
 	require.Len(t, proxy.updated.Egress, 3, "the two prior port-scoped rules must survive a later unrelated patch")
 }
 
+func TestHandlePatch_PortRangesAreMergeKeyed(t *testing.T) {
+	initial := &policy.NetworkPolicy{DefaultAction: policy.ActionDeny}
+	proxy := &stubProxy{updated: initial}
+	nft := &stubNft{}
+	srv := &policyServer{proxy: proxy, nft: nft, enforcementMode: "dns+nft"}
+
+	patch := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		srv.handlePolicy(w, req)
+		require.Equal(t, http.StatusOK, w.Result().StatusCode, "expected 200")
+	}
+
+	patch(`[{"action":"deny","target":"10.0.0.5","portRanges":[{"start":1,"end":7999}]},
+		{"action":"allow","target":"10.0.0.5","ports":[8000]}]`)
+	require.Len(t, proxy.updated.Egress, 2, "same target, different scoping: both rules are kept")
+
+	patch(`[{"action":"allow","target":"10.0.0.5","portRanges":[{"start":1,"end":7999}]}]`)
+	require.Len(t, proxy.updated.Egress, 2, "same target and ranges: the rule is replaced")
+
+	patch(`[{"action":"deny","target":"10.0.0.5","portRanges":[{"start":9000,"end":9100},{"start":1,"end":7999}]}]`)
+	require.Len(t, proxy.updated.Egress, 3, "a different range set is a different rule")
+
+	patch(`[{"action":"allow","target":"10.0.0.5","portRanges":[{"start":1,"end":7999},{"start":9000,"end":9100}]}]`)
+	require.Len(t, proxy.updated.Egress, 3, "range order does not change the merge key")
+
+	patch(`[{"action":"deny","target":"10.0.0.5","portRanges":[{"start":8000,"end":8000}]}]`)
+	require.Len(t, proxy.updated.Egress, 3, "a single-port range replaces the equivalent ports rule")
+
+	patch(`[{"action":"deny","target":"10.0.0.5","portRanges":[{"start":1,"end":4000},{"start":4001,"end":7999}]}]`)
+	require.Len(t, proxy.updated.Egress, 3, "adjacent subranges replace the equivalent single range")
+	for _, r := range proxy.updated.Egress {
+		if len(r.PortScope()) == 1 && r.PortScope()[0] == (policy.PortRange{Lo: 1, Hi: 7999}) {
+			require.Equal(t, policy.ActionDeny, r.Action, "the patched action wins")
+		}
+	}
+}
+
 func TestMaxEgressRulesFromEnv(t *testing.T) {
 	old := os.Getenv(constants.EnvMaxEgressRules)
 	defer func() { _ = os.Setenv(constants.EnvMaxEgressRules, old) }()

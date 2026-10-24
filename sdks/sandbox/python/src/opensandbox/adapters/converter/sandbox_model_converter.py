@@ -57,6 +57,7 @@ from opensandbox.models.sandboxes import (
     PagedSnapshotInfos,
     PaginationInfo,
     PlatformSpec,
+    PortRange,
     SandboxCreateResponse,
     SandboxEndpoint,
     SandboxImageSpec,
@@ -335,6 +336,9 @@ class SandboxModelConverter:
         from opensandbox.api.lifecycle.models.network_rule_action import (
             NetworkRuleAction,
         )
+        from opensandbox.api.lifecycle.models.port_range import (
+            PortRange as ApiPortRange,
+        )
         from opensandbox.api.lifecycle.types import UNSET
 
         if network_policy is None:
@@ -359,6 +363,11 @@ class SandboxModelConverter:
                     # None here means UNSET (omit the field) in the client.
                     target=rule.target if rule.target is not None else UNSET,
                     ports=rule.ports if rule.ports is not None else UNSET,
+                    port_ranges=(
+                        [ApiPortRange(start=r.start, end=r.end) for r in rule.port_ranges]
+                        if rule.port_ranges is not None
+                        else UNSET
+                    ),
                 )
                 for rule in network_policy.egress
             ]
@@ -463,6 +472,9 @@ class SandboxModelConverter:
         from opensandbox.api.lifecycle.models.network_rule_action import (
             NetworkRuleAction,
         )
+        from opensandbox.api.lifecycle.models.port_range import (
+            PortRange as ApiPortRange,
+        )
         from opensandbox.api.lifecycle.types import UNSET
 
         return [
@@ -470,6 +482,11 @@ class SandboxModelConverter:
                 action=NetworkRuleAction(rule.action),
                 target=rule.target if rule.target is not None else UNSET,
                 ports=rule.ports if rule.ports is not None else UNSET,
+                port_ranges=(
+                    [ApiPortRange(start=r.start, end=r.end) for r in rule.port_ranges]
+                    if rule.port_ranges is not None
+                    else UNSET
+                ),
             )
             for rule in rules
         ]
@@ -504,6 +521,11 @@ class SandboxModelConverter:
                     # model spells that as None.
                     target=rule.target if not isinstance(rule.target, Unset) else None,
                     ports=rule.ports if not isinstance(rule.ports, Unset) else None,
+                    port_ranges=(
+                        [PortRange(start=r.start, end=r.end) for r in rule.port_ranges]
+                        if not isinstance(rule.port_ranges, Unset)
+                        else None
+                    ),
                 )
                 for rule in api_policy.egress
             ]

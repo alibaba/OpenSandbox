@@ -80,6 +80,7 @@ export type {
   OSSFS,
   PeriodicLifecycleHook,
   PlatformSpec,
+  PortRange,
   PVC,
   RenewSandboxExpirationRequest,
   RenewSandboxExpirationResponse,

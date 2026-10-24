@@ -146,11 +146,19 @@ type NetworkPolicy struct {
 // with Ports is rejected by the server/sidecar (domain rules have no port
 // dimension). Port limits enforced server-side (this SDK does not
 // pre-validate): each port 1-65535, at most 256 ports per rule, no
-// duplicates.
+// duplicates. PortRanges is the interval form of Ports; the two share the
+// 256-entry limit and must not overlap.
 type NetworkRule struct {
-	Action string `json:"action"`
-	Target string `json:"target,omitempty"`
-	Ports  []int  `json:"ports,omitempty"`
+	Action     string      `json:"action"`
+	Target     string      `json:"target,omitempty"`
+	Ports      []int       `json:"ports,omitempty"`
+	PortRanges []PortRange `json:"portRanges,omitempty"`
+}
+
+// PortRange is an inclusive TCP destination port range (Start <= End).
+type PortRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
 }
 
 // CredentialProxyConfig enables Credential Vault transparent proxy support at

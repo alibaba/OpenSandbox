@@ -17,20 +17,24 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from attrs import define as _attrs_define
 
 from ..models.network_rule_action import NetworkRuleAction
 from ..types import UNSET, Unset
 
+if TYPE_CHECKING:
+    from ..models.port_range import PortRange
+
+
 T = TypeVar("T", bound="NetworkRule")
 
 
 @_attrs_define
 class NetworkRule:
-    """Egress rule. At least one of `target` or `ports` must be provided; when both are present the rule applies to `ports`
-    on `target` only. Enforced by the server and the egress sidecar.
+    """Egress rule. At least one of `target`, `ports`, or `portRanges` must be provided; when both are present the rule
+    applies to `ports` on `target` only. Enforced by the server and the egress sidecar.
 
         Attributes:
             action (NetworkRuleAction): Whether to allow or deny matching targets.
@@ -53,11 +57,15 @@ class NetworkRule:
                 lookups for targetless allow rules (it matches domain rules
                 only), so this shape serves direct-IP clients; hostname access
                 requires explicit domain rules or stable IPs.
+            port_ranges (list[PortRange] | Unset): Inclusive TCP destination port ranges, with the same semantics as
+                `ports`. Entries must not overlap `ports` or each other, and count
+                toward the same 256-entry limit.
     """
 
     action: NetworkRuleAction
     target: str | Unset = UNSET
     ports: list[int] | Unset = UNSET
+    port_ranges: list[PortRange] | Unset = UNSET
 
     def to_dict(self) -> dict[str, Any]:
         action = self.action.value
@@ -67,6 +75,13 @@ class NetworkRule:
         ports: list[int] | Unset = UNSET
         if not isinstance(self.ports, Unset):
             ports = self.ports
+
+        port_ranges: list[dict[str, Any]] | Unset = UNSET
+        if not isinstance(self.port_ranges, Unset):
+            port_ranges = []
+            for port_ranges_item_data in self.port_ranges:
+                port_ranges_item = port_ranges_item_data.to_dict()
+                port_ranges.append(port_ranges_item)
 
         field_dict: dict[str, Any] = {}
 
@@ -79,11 +94,15 @@ class NetworkRule:
             field_dict["target"] = target
         if ports is not UNSET:
             field_dict["ports"] = ports
+        if port_ranges is not UNSET:
+            field_dict["portRanges"] = port_ranges
 
         return field_dict
 
     @classmethod
     def from_dict(cls: type[T], src_dict: Mapping[str, Any]) -> T:
+        from ..models.port_range import PortRange
+
         d = dict(src_dict)
         action = NetworkRuleAction(d.pop("action"))
 
@@ -91,10 +110,20 @@ class NetworkRule:
 
         ports = cast(list[int], d.pop("ports", UNSET))
 
+        _port_ranges = d.pop("portRanges", UNSET)
+        port_ranges: list[PortRange] | Unset = UNSET
+        if _port_ranges is not UNSET:
+            port_ranges = []
+            for port_ranges_item_data in _port_ranges:
+                port_ranges_item = PortRange.from_dict(port_ranges_item_data)
+
+                port_ranges.append(port_ranges_item)
+
         network_rule = cls(
             action=action,
             target=target,
             ports=ports,
+            port_ranges=port_ranges,
         )
 
         return network_rule

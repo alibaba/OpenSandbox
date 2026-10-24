@@ -96,6 +96,7 @@ from .platform_spec import PlatformSpec
 from .platform_spec_arch import PlatformSpecArch
 from .platform_spec_os import PlatformSpecOs
 from .policy_status_response import PolicyStatusResponse
+from .port_range import PortRange
 from .pvc import PVC
 from .renew_sandbox_expiration_request import RenewSandboxExpirationRequest
 from .renew_sandbox_expiration_response import RenewSandboxExpirationResponse
@@ -191,6 +192,7 @@ __all__ = (
     "PlatformSpecArch",
     "PlatformSpecOs",
     "PolicyStatusResponse",
+    "PortRange",
     "PVC",
     "RenewalPolicy",
     "RenewSandboxExpirationRequest",

@@ -276,7 +276,7 @@ func TestLoadPortFloorRules(t *testing.T) {
 	require.Len(t, got, 1)
 	require.Equal(t, ActionDeny, got[0].Action)
 	require.Empty(t, got[0].Target)
-	require.Equal(t, []PortRange{{Lo: 1, Hi: 79}, {Lo: 81, Hi: 442}, {Lo: 444, Hi: 65535}}, got[0].PortRanges)
+	require.Equal(t, []PortRange{{Lo: 1, Hi: 79}, {Lo: 81, Hi: 442}, {Lo: 444, Hi: 65535}}, got[0].FloorPortRanges)
 }
 
 func TestAlwaysRuleLoader_PortsFloorHotReload(t *testing.T) {
@@ -294,7 +294,7 @@ func TestAlwaysRuleLoader_PortsFloorHotReload(t *testing.T) {
 	// deny.always rule first, floor rule appended after it.
 	require.Len(t, deny, 2)
 	require.Equal(t, "1.1.1.1", deny[0].Target)
-	require.Equal(t, []PortRange{{Lo: 1, Hi: 442}, {Lo: 444, Hi: 65535}}, deny[1].PortRanges)
+	require.Equal(t, []PortRange{{Lo: 1, Hi: 442}, {Lo: 444, Hi: 65535}}, deny[1].FloorPortRanges)
 
 	// Editing only the ports file must hot-reload the floor (mtime of
 	// deny.always untouched).
@@ -304,7 +304,7 @@ func TestAlwaysRuleLoader_PortsFloorHotReload(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, changed, "ports file change alone must trigger a reload")
 	require.Len(t, deny, 2)
-	require.Equal(t, []PortRange{{Lo: 1, Hi: 442}, {Lo: 444, Hi: 8442}, {Lo: 8444, Hi: 65535}}, deny[1].PortRanges)
+	require.Equal(t, []PortRange{{Lo: 1, Hi: 442}, {Lo: 444, Hi: 8442}, {Lo: 8444, Hi: 65535}}, deny[1].FloorPortRanges)
 
 	// Deleting the ports file removes the floor.
 	require.NoError(t, os.Remove(portsPath))
@@ -346,7 +346,7 @@ func TestAlwaysRuleLoader_SetCurrentRulesDoesNotDuplicateFloor(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, changed, "nothing changed on disk")
 	require.Len(t, fresh, 1)
-	require.Equal(t, []PortRange{{Lo: 1, Hi: 442}, {Lo: 444, Hi: 65535}}, fresh[0].PortRanges)
+	require.Equal(t, []PortRange{{Lo: 1, Hi: 442}, {Lo: 444, Hi: 65535}}, fresh[0].FloorPortRanges)
 }
 
 func TestWarnPortAllowRulesBlockedByCap(t *testing.T) {
@@ -365,6 +365,13 @@ func TestWarnPortAllowRulesBlockedByCap(t *testing.T) {
 	require.False(t, portAllowRuleFullyBlocked(denies[0], portFloorDenyRangesForTest(floor)))
 	require.False(t, portAllowRuleFullyBlocked(EgressRule{Action: ActionAllow}, portFloorDenyRangesForTest(floor)))
 
+	rangeBlocked := EgressRule{Action: ActionAllow, PortRanges: []PortRange{{Lo: 8000, Hi: 9000}}}
+	rangeStraddlesAllowed := EgressRule{Action: ActionAllow, PortRanges: []PortRange{{Lo: 400, Hi: 500}}}
+	rangeIsAllowedPort := EgressRule{Action: ActionAllow, PortRanges: []PortRange{{Lo: 443, Hi: 443}}}
+	require.True(t, portAllowRuleFullyBlocked(rangeBlocked, portFloorDenyRangesForTest(floor)))
+	require.False(t, portAllowRuleFullyBlocked(rangeStraddlesAllowed, portFloorDenyRangesForTest(floor)))
+	require.False(t, portAllowRuleFullyBlocked(rangeIsAllowedPort, portFloorDenyRangesForTest(floor)))
+
 	// MergeAlwaysOverlay must not mutate the user policy and must tolerate a
 	// cap-less overlay (no floor rule -> no check).
 	merged := MergeAlwaysOverlay(&NetworkPolicy{DefaultAction: ActionDeny, Egress: fullyBlocked}, floor, nil)
@@ -374,7 +381,7 @@ func TestWarnPortAllowRulesBlockedByCap(t *testing.T) {
 }
 
 func portFloorDenyRangesForTest(floor []EgressRule) []PortRange {
-	return floor[0].PortRanges
+	return floor[0].FloorPortRanges
 }
 
 func TestAlwaysRuleLoader_FloorSurvivesPolicyApplyRace(t *testing.T) {
@@ -396,5 +403,5 @@ func TestAlwaysRuleLoader_FloorSurvivesPolicyApplyRace(t *testing.T) {
 	loader.SetCurrentRules(deny, nil)
 	current, _ := loader.CurrentRules()
 	require.Len(t, current, 1, "floor must stay published immediately after a reseed")
-	require.Equal(t, []PortRange{{Lo: 1, Hi: 442}, {Lo: 444, Hi: 65535}}, current[0].PortRanges)
+	require.Equal(t, []PortRange{{Lo: 1, Hi: 442}, {Lo: 444, Hi: 65535}}, current[0].FloorPortRanges)
 }

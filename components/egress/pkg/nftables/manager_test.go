@@ -536,6 +536,35 @@ func TestApplyStatic_TargetWithPortsScopesThatTargetOnly(t *testing.T) {
 	require.NotContains(t, rendered, "add element inet opensandbox allow_v4 { 10.0.0.5 }")
 }
 
+func TestApplyStatic_PortRangesRenderAsIntervals(t *testing.T) {
+	var rendered string
+	m := NewManagerWithRunner(func(_ context.Context, script string) ([]byte, error) {
+		rendered = script
+		return nil, nil
+	})
+	p, err := policy.ParsePolicy(`{
+		"defaultAction":"deny",
+		"egress":[
+			{"action":"deny","target":"10.0.0.5","portRanges":[{"start":1,"end":7999},{"start":8001,"end":65535}]},
+			{"action":"allow","target":"10.0.0.5","ports":[8000]},
+			{"action":"allow","target":"fd00::1","ports":[22],"portRanges":[{"start":443,"end":443}]}
+		]
+	}`)
+	require.NoError(t, err)
+	require.NoError(t, m.ApplyStatic(context.Background(), p))
+
+	denyRule := "add rule inet opensandbox egress ip daddr 10.0.0.5 tcp dport { 1-7999, 8001-65535 } drop"
+	allowRule := "add rule inet opensandbox egress ip daddr 10.0.0.5 tcp dport { 8000 } accept"
+	expectContains(t, rendered, denyRule)
+	expectContains(t, rendered, allowRule)
+	expectContains(t, rendered, "add rule inet opensandbox egress ip6 daddr fd00::1 tcp dport { 22, 443 } accept")
+	dynAllow := "add rule inet opensandbox egress ip daddr @dyn_allow_v4 accept"
+	require.Less(t, strings.Index(rendered, denyRule), strings.Index(rendered, dynAllow),
+		"the port-range deny must precede the DNS-learned allow set")
+	require.NotContains(t, rendered, "add element inet opensandbox allow_v4 { 10.0.0.5 }")
+	require.NotContains(t, rendered, "add element inet opensandbox deny_v4 { 10.0.0.5 }")
+}
+
 func TestApplyStatic_PortScopedDenyWinsOverPlainAllow(t *testing.T) {
 	var rendered string
 	m := NewManagerWithRunner(func(_ context.Context, script string) ([]byte, error) {

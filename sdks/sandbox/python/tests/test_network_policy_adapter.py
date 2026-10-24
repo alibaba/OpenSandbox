@@ -23,7 +23,7 @@ import pytest
 from opensandbox.adapters.network_policy_adapter import NetworkPolicyAdapter
 from opensandbox.config import ConnectionConfig
 from opensandbox.exceptions import SandboxApiException
-from opensandbox.models.sandboxes import NetworkRule
+from opensandbox.models.sandboxes import NetworkRule, PortRange
 
 
 class _Resp:
@@ -120,6 +120,37 @@ async def test_patch_rules_delegates_to_lifecycle_patch(
                 {"action": "deny", "target": "c.com"},
             ],
         )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_patch_rules_sends_port_ranges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    async def _fake_patch(*, client, sandbox_id, body):
+        calls.append([r.to_dict() for r in body])
+        return _Resp(status_code=200, parsed=_api_policy_status())
+
+    monkeypatch.setattr(
+        "opensandbox.api.lifecycle.api.sandboxes.patch_sandbox_network_policy.asyncio_detailed",
+        _fake_patch,
+    )
+
+    adapter = NetworkPolicyAdapter(ConnectionConfig(), "sbx-1")
+    await adapter.patch_rules(
+        [
+            NetworkRule(
+                action="deny",
+                target="10.0.0.5",
+                port_ranges=[PortRange(start=1, end=7999)],
+            ),
+        ]
+    )
+
+    assert calls == [
+        [{"action": "deny", "target": "10.0.0.5", "portRanges": [{"start": 1, "end": 7999}]}]
     ]
 
 

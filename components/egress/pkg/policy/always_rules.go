@@ -100,9 +100,9 @@ func loadPortFloorRules(path string) ([]EgressRule, error) {
 		return nil, nil
 	}
 	rule := EgressRule{
-		Action:     ActionDeny,
-		PortRanges: denyRanges,
-		targetKind: targetPortOnly,
+		Action:          ActionDeny,
+		FloorPortRanges: denyRanges,
+		targetKind:      targetPortOnly,
 	}
 	log.Infof("loaded port floor from %s: %d allowed range(s), %d denied range(s)",
 		path, len(allowed), len(denyRanges))
@@ -113,9 +113,9 @@ func loadPortFloorRules(path string) ([]EgressRule, error) {
 // already hold complement ranges (tests).
 func NewPortFloorDenyRule(denyRanges []PortRange) EgressRule {
 	return EgressRule{
-		Action:     ActionDeny,
-		PortRanges: denyRanges,
-		targetKind: targetPortOnly,
+		Action:          ActionDeny,
+		FloorPortRanges: denyRanges,
+		targetKind:      targetPortOnly,
 	}
 }
 
@@ -167,6 +167,16 @@ func parsePortRangeToken(token string) (PortRange, error) {
 		return PortRange{}, fmt.Errorf("port range %q out of 1-65535 or inverted", token)
 	}
 	return PortRange{Lo: lo, Hi: hi}, nil
+}
+
+// PortScope returns the rule's ports and port ranges as one merged, sorted
+// interval set, so equivalent encodings compare equal. Nil means all ports.
+func (r EgressRule) PortScope() []PortRange {
+	ranges := append([]PortRange(nil), r.PortRanges...)
+	for _, p := range r.Ports {
+		ranges = append(ranges, PortRange{Lo: p, Hi: p})
+	}
+	return mergeRanges(ranges)
 }
 
 // mergeRanges sorts and coalesces overlapping or adjacent ranges.
@@ -279,8 +289,8 @@ func MergeAlwaysOverlay(user *NetworkPolicy, alwaysDeny, alwaysAllow []EgressRul
 func warnPortAllowRulesBlockedByCap(user []EgressRule, alwaysDeny []EgressRule) {
 	var capDenyRanges []PortRange
 	for _, r := range alwaysDeny {
-		if len(r.PortRanges) > 0 {
-			capDenyRanges = append(capDenyRanges, r.PortRanges...)
+		if r.IsPortFloor() {
+			capDenyRanges = append(capDenyRanges, r.FloorPortRanges...)
 		}
 	}
 	if len(capDenyRanges) == 0 {
@@ -290,28 +300,35 @@ func warnPortAllowRulesBlockedByCap(user []EgressRule, alwaysDeny []EgressRule) 
 		if !portAllowRuleFullyBlocked(r, capDenyRanges) {
 			continue
 		}
-		log.Warnf("port allow rule is fully blocked by the reachable-ports cap: target=%q ports=%v — every port it opens is dropped by the platform cap; remove the rule or ask the operator to extend reachable.ports.cap",
-			r.Target, r.Ports)
+		log.Warnf("port allow rule is fully blocked by the reachable-ports cap: target=%q ports=%v portRanges=%v — every port it opens is dropped by the platform cap; remove the rule or ask the operator to extend reachable.ports.cap",
+			r.Target, r.Ports, r.PortRanges)
 	}
 }
 
-// portAllowRuleFullyBlocked reports whether r is an allow rule whose ports
-// are all covered by the cap's deny ranges.
+// portAllowRuleFullyBlocked reports whether every port and range of allow rule r is covered by the cap's deny ranges.
+// Those ranges are disjoint and non-adjacent, so a user range is blocked only if a single deny range covers it.
 func portAllowRuleFullyBlocked(r EgressRule, capDenyRanges []PortRange) bool {
-	if r.Action != ActionAllow || len(r.Ports) == 0 {
+	if r.Action != ActionAllow || (len(r.Ports) == 0 && len(r.PortRanges) == 0) {
 		return false
 	}
 	for _, port := range r.Ports {
-		blocked := false
-		for _, rg := range capDenyRanges {
-			if rg.Contains(port) {
-				blocked = true
-				break
-			}
+		if !anyRangeCovers(capDenyRanges, PortRange{Lo: port, Hi: port}) {
+			return false
 		}
-		if !blocked {
+	}
+	for _, rg := range r.PortRanges {
+		if !anyRangeCovers(capDenyRanges, rg) {
 			return false
 		}
 	}
 	return true
+}
+
+func anyRangeCovers(ranges []PortRange, target PortRange) bool {
+	for _, rg := range ranges {
+		if rg.covers(target) {
+			return true
+		}
+	}
+	return false
 }

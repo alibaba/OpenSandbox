@@ -50,6 +50,7 @@ from .network_rule_action import NetworkRuleAction
 from .passthrough_credential_auth import PassthroughCredentialAuth
 from .passthrough_credential_auth_type import PassthroughCredentialAuthType
 from .policy_status_response import PolicyStatusResponse
+from .port_range import PortRange
 
 __all__ = (
     "ApiKeyCredentialAuth",
@@ -86,4 +87,5 @@ __all__ = (
     "PassthroughCredentialAuth",
     "PassthroughCredentialAuthType",
     "PolicyStatusResponse",
+    "PortRange",
 )

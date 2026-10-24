@@ -1039,6 +1039,66 @@ class TestNetworkRule:
         assert dumped["egress"] == [{"action": "deny", "ports": [25]}]
 
 
+class TestNetworkRulePortRanges:
+    def test_target_with_port_ranges_round_trips_by_alias(self):
+        raw = {
+            "action": "deny",
+            "target": "10.0.0.5",
+            "portRanges": [{"start": 1, "end": 7999}, {"start": 8001, "end": 65535}],
+        }
+        rule = NetworkRule.model_validate(raw)
+        assert rule.port_ranges is not None
+        assert [(r.start, r.end) for r in rule.port_ranges] == [(1, 7999), (8001, 65535)]
+        assert rule.model_dump(by_alias=True, exclude_none=True) == raw
+
+    def test_port_ranges_alone_omit_target(self):
+        rule = NetworkRule.model_validate({"action": "allow", "portRanges": [{"start": 443, "end": 443}]})
+        assert rule.target is None
+
+    def test_ports_and_port_ranges_combine(self):
+        rule = NetworkRule.model_validate(
+            {"action": "allow", "target": "10.0.0.5", "ports": [22], "portRanges": [{"start": 8000, "end": 8100}]}
+        )
+        assert rule.ports == [22]
+
+    @pytest.mark.parametrize(
+        "port_ranges",
+        [
+            [{"start": 0, "end": 10}],
+            [{"start": 1, "end": 65536}],
+            [{"start": 20, "end": 10}],
+            [{"start": 20}],
+            [],
+            [{"start": 1, "end": 100}, {"start": 100, "end": 200}],
+        ],
+    )
+    def test_rejects_invalid_port_ranges(self, port_ranges):
+        with pytest.raises(ValidationError):
+            NetworkRule.model_validate({"action": "allow", "target": "10.0.0.5", "portRanges": port_ranges})
+
+    def test_adjacent_port_ranges_accepted(self):
+        NetworkRule.model_validate(
+            {"action": "allow", "portRanges": [{"start": 1, "end": 100}, {"start": 101, "end": 200}]}
+        )
+
+    def test_rejects_port_inside_port_range(self):
+        with pytest.raises(ValidationError):
+            NetworkRule.model_validate({"action": "allow", "ports": [50], "portRanges": [{"start": 1, "end": 100}]})
+
+    def test_rejects_domain_target_with_port_ranges(self):
+        with pytest.raises(ValidationError):
+            NetworkRule.model_validate(
+                {"action": "allow", "target": "example.com", "portRanges": [{"start": 1, "end": 100}]}
+            )
+
+    def test_ports_and_port_ranges_share_256_cap(self):
+        ranges = [{"start": p, "end": p} for p in range(1, 512, 2)]
+        assert len(ranges) == 256
+        NetworkRule.model_validate({"action": "allow", "portRanges": ranges})
+        with pytest.raises(ValidationError):
+            NetworkRule.model_validate({"action": "allow", "portRanges": ranges, "ports": [60000]})
+
+
 class TestNetworkRuleReadModifyWriteAndClassification:
     """Review follow-ups: the sidecar marshals port-only rules as
     "target": "" (no omitempty), so the schema must accept blank targets on

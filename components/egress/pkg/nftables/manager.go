@@ -350,6 +350,10 @@ func writePortScopedRules(b *strings.Builder, rules []policy.PortScopedRule, ver
 			members = append(members, fmt.Sprintf("%d", port))
 		}
 		for _, rg := range r.Ranges {
+			if rg.Lo == rg.Hi {
+				members = append(members, fmt.Sprintf("%d", rg.Lo))
+				continue
+			}
 			members = append(members, fmt.Sprintf("%d-%d", rg.Lo, rg.Hi))
 		}
 		portsClause := strings.Join(members, ", ")
