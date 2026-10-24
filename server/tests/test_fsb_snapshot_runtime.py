@@ -181,6 +181,34 @@ def test_create_snapshot_maps_fastpath_errors_to_failed() -> None:
     assert status.reason == "snapshot_runtime_create_failed"
 
 
+def test_create_snapshot_reports_snapshot_persisted_before_the_error() -> None:
+    # The request is durable and idempotent by request_id: when the reply is
+    # lost (e.g. the client deadline expires), the snapshot may already exist.
+    fastpath = FakeFastPathClient()
+    fastpath.create_error = FastPathError("DEADLINE_EXCEEDED", "deadline exceeded")
+    fastpath.get_by_name[("tenant-a", build_public_snapshot_name(SNAPSHOT_ID))] = _Response(
+        _Info(pb2.SNAPSHOT_PHASE_PUBLISHING)
+    )
+    runtime, _, _ = _runtime(fastpath=fastpath)
+
+    status = runtime.create_snapshot(SNAPSHOT_ID, SANDBOX_ID, namespace="tenant-a")
+
+    assert status.state == SnapshotState.CREATING
+    assert status.reason == "snapshot_runtime_in_progress"
+
+
+def test_create_snapshot_fails_when_no_snapshot_was_persisted() -> None:
+    fastpath = FakeFastPathClient()
+    fastpath.create_error = FastPathError("DEADLINE_EXCEEDED", "deadline exceeded")
+    runtime, _, _ = _runtime(fastpath=fastpath)
+
+    status = runtime.create_snapshot(SNAPSHOT_ID, SANDBOX_ID, namespace="tenant-a")
+
+    assert status.state == SnapshotState.FAILED
+    assert status.reason == "snapshot_runtime_create_failed"
+    assert "deadline exceeded" in (status.message or "")
+
+
 def test_create_snapshot_maps_failed_precondition_to_conflict() -> None:
     fastpath = FakeFastPathClient()
     fastpath.create_error = FastPathError(
