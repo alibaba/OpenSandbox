@@ -136,6 +136,34 @@ client filesystem or the sandbox. `ShellEnv.dshHome` sets the remote shell's
 `DSH_HOME` environment value to the remote cwd; it does not relocate the session
 store or enable persistence.
 
+::: warning External idle pause/wake
+Automatic idle pause/wake is backend lifecycle policy, not part of this plugin's
+supported reconnect guarantee. On deployments that support it, the caller or
+operator must configure it separately through the public lifecycle API, for
+example `idleTimeoutSeconds: 300`, `onIdle: pause`, and `wakeOnAccess: true`.
+The pinned SDK 1.1.1 creation options do not expose this policy. Neither local
+`close`, sandbox TTL, nor the DSH session configuration enables it.
+
+Restoring the same sandbox does not guarantee that its first tool request
+succeeds. In a [maintainer-reported validation](https://github.com/opensandbox-group/OpenSandbox/pull/2163#discussion_r4366851332),
+remote files and in-memory session events survived while the DSH host process
+stayed alive, but the first read returned `FS_IO_ERROR` with an unknown outcome;
+a later read succeeded. The reported 6.7766-second wake exceeded the deployed
+5-second gateway parking budget, but no raw HTTP status was captured, so budget
+exhaustion is a plausible explanation, not a confirmed diagnosis. This does not
+establish transparent wake, safe command replay, or session recovery after a
+DSH host-process restart.
+
+Any future wake acceptance test must declare the gateway parking and client
+request/operation budgets, cover both within-budget and over-budget wake, and
+record sanitized HTTP/tool outcomes plus independent remote-state evidence.
+The plugin does not automatically replay failed tool operations whose outcomes
+are unknown, including reads that stage helper requests and launch remote commands.
+Tests must show how the caller surfaces and reconciles those failures. A later
+successful request neither establishes the first request's outcome nor erases
+the original failed tool result.
+:::
+
 Shell stdout and stderr have independent capture budgets. `stdoutMaxBytes`
 overrides stdout only; stderr retains the executor's `maxOutputBytes` limit
 (64,000 bytes by default), as specified by the pinned DSH contract. Truncated
