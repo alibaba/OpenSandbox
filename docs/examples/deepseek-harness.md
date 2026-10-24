@@ -3,7 +3,15 @@ title: DeepSeek Harness
 description: Install and run a remote-only DeepSeek Harness consumer with explicit sandbox and model lifecycle.
 ---
 
-# DeepSeek Harness
+# DeepSeek Harness embedded example
+
+::: tip Choose the right entry point
+This page is for application developers embedding a private Agent in Node.
+If you use the native DSH Web application, follow the
+[native plugin installation guide](/guides/deepseek-harness) instead.
+The native bundle preserves DSH's existing session and model; this example
+creates a separate private headless session.
+:::
 
 This example composes the actual DeepSeek Harness Agent with OpenSandbox-bound
 bash/read/write/edit providers. Each session owns a private Cordis Context and an

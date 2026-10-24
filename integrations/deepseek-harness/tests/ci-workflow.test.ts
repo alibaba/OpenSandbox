@@ -24,6 +24,8 @@ async function relevant(paths: { filename: string; previous_filename?: string }[
 }
 const related = [
   'integrations/deepseek-harness/src/binding.ts', 'integrations/deepseek-harness/pnpm-lock.yaml',
+  'integrations/deepseek-harness/native/src/index.ts', 'integrations/deepseek-harness/native/pnpm-lock.yaml',
+  'docs/guides/deepseek-harness.md',
   'examples/deepseek-harness/smoke.ts', 'examples/deepseek-harness/pnpm-lock.yaml',
   'server/opensandbox_server/services/fast_sandbox/create_mapping.py',
   'docs/examples/deepseek-harness.md', 'docs/examples/deepseek-harness-ubuntu.md', 'docs/.vitepress/config.mts',
@@ -67,7 +69,7 @@ describe('DSH offline CI execution and safety', () => {
     const integration = text.split('      - name: Check integration and strict tarball consumer\n')[1]!
       .split('      - name: Install example dependencies\n')[0]!;
     expect(integration.match(/^\s+pnpm test$/gm)).toHaveLength(1);
-    expect(text).not.toMatch(/^\s+pnpm (?:run )?pack:check$/m);
+    expect(integration).not.toMatch(/^\s+pnpm (?:run )?pack:check$/m);
     const packageTests = readFileSync(new URL('./package.test.ts', import.meta.url), 'utf8');
     expect(packageTests.match(/execFileSync\(process\.execPath, \[fileURLToPath\(script\)\]/g)).toHaveLength(1);
     expect(packageTests).toContain('strict consumer dependency tree: PASS');
@@ -78,11 +80,21 @@ describe('DSH offline CI execution and safety', () => {
     for (const value of ['ubuntu-latest', 'node-version: "24"', 'version: 11.7.0', 'python-version: "3.12"',
       'persist-credentials: false', 'contents: read', 'pull-requests: read', 'DSH_REAL_MODEL: "0"', 'DSH_LIVE_E2E: "0"',
       'pnpm run typecheck', 'pnpm run build', 'pnpm test', 'pnpm run test:helper', 'pnpm smoke']) expect(text).toContain(value);
-    expect(text.match(/pnpm install --frozen-lockfile/g)).toHaveLength(2);
+    expect(text.match(/pnpm install --frozen-lockfile/g)).toHaveLength(3);
     expect(text.indexOf('pnpm run build')).toBeLessThan(text.indexOf('working-directory: examples/deepseek-harness'));
     expect(text).not.toMatch(/pull_request_target|secrets\.|pnpm (?:run )?(?:headless|e2e)\b|permissions: write-all/);
     expect(text).toContain("if: needs.changes.outputs.relevant == 'true'");
     expect(text).toContain("always() && github.event_name == 'pull_request'");
+  });
+  it('runs native package and actual native-profile acceptance without duplicating the strict pack check', () => {
+    const text = workflow();
+    const native = text.split('      - name: Check native bundle and clean profile\n')[1]!
+      .split('      - name: Verify lockfiles are unchanged\n')[0]!;
+    expect(native).toContain('working-directory: integrations/deepseek-harness/native');
+    for (const command of ['pnpm run typecheck', 'pnpm run build', 'pnpm test', 'pnpm run pack:check', 'pnpm run test:profile']) {
+      expect(native.match(new RegExp('^\\s+' + command + '$', 'gm')), command).toHaveLength(1);
+    }
+    expect(text).toContain('integrations/deepseek-harness/native/pnpm-lock.yaml');
   });
   it.each([
     ['success', 'true', 'success', 0], ['success', 'false', 'skipped', 0],

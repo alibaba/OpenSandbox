@@ -19,6 +19,7 @@ on:
       - "server/opensandbox_server/services/fast_sandbox/create_mapping.py"
       - "scripts/fast-sandbox-env/integration-env.sh"
       - "manifests/third-party/fast-sandbox.commit"
+      - "docs/guides/deepseek-harness.md"
       - "docs/examples/deepseek-harness.md"
       - "docs/examples/deepseek-harness-ubuntu.md"
       - "docs/.vitepress/config.mts"
@@ -41,11 +42,11 @@ jobs:
       area: deepseek-harness
 
   test:
-    name: DSH integration and consumer
+    name: DSH integration, native plugin and consumer
     needs: changes
     if: needs.changes.outputs.relevant == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -100,8 +101,21 @@ jobs:
           pnpm test
           pnpm smoke
 
+      - name: Install native plugin dependencies
+        working-directory: integrations/deepseek-harness/native
+        run: pnpm install --frozen-lockfile
+
+      - name: Check native bundle and clean profile
+        working-directory: integrations/deepseek-harness/native
+        run: |
+          pnpm run typecheck
+          pnpm run build
+          pnpm test
+          pnpm run pack:check
+          pnpm run test:profile
+
       - name: Verify lockfiles are unchanged
-        run: git diff --exit-code -- integrations/deepseek-harness/pnpm-lock.yaml examples/deepseek-harness/pnpm-lock.yaml
+        run: git diff --exit-code -- integrations/deepseek-harness/pnpm-lock.yaml integrations/deepseek-harness/native/pnpm-lock.yaml examples/deepseek-harness/pnpm-lock.yaml
 
   required:
     name: DSH CI

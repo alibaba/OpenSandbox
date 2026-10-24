@@ -125,6 +125,7 @@ jobs:
                 path === "server/opensandbox_server/services/fast_sandbox/create_mapping.py" ||
                 path === "scripts/fast-sandbox-env/integration-env.sh" ||
                 path === "manifests/third-party/fast-sandbox.commit" ||
+                path === "docs/guides/deepseek-harness.md" ||
                 path === "docs/examples/deepseek-harness.md" ||
                 path === "docs/examples/deepseek-harness-ubuntu.md" ||
                 path === "docs/.vitepress/config.mts",

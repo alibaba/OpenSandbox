@@ -7,7 +7,8 @@ sandbox with bash, Python 3.8+, and an existing writable working directory.
 This is an npm package that embeds dsh in a host application through
 `createHeadlessSession`, which composes a private Context. It is not installed
 into the dsh CLI with `dsh plugin add`, so it does not include a `dsh.bundle`
-marker.
+marker. For the installable native DSH Web bundle, use the separate
+[`native/` package](./native) and [native guide](../../docs/guides/deepseek-harness.md).
 
 In a source checkout, from this directory:
 
