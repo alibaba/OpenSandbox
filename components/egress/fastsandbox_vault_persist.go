@@ -318,13 +318,15 @@ func (s *fastSandboxPolicyServer) SetVaultFiles(vp *vaultPersistence) {
 // purgeVaultFile removes the subject's persisted slice (rebind or terminal
 // cleanup). Best effort: a failed purge leaves a file that its recorded fence
 // keeps out of every later registration.
-func (s *fastSandboxPolicyServer) purgeVaultFile(subj subject.Subject) {
+func (s *fastSandboxPolicyServer) purgeVaultFile(subj subject.Subject) error {
 	if s.vaultFiles == nil {
-		return
+		return nil
 	}
-	if err := s.vaultFiles.purge(subj); err != nil {
+	err := s.vaultFiles.purge(subj)
+	if err != nil {
 		log.Errorf("subject %s: vault file purge failed (leftover stays fenced out): %v", subj, err)
 	}
+	return err
 }
 
 // persistVaultCandidateLocked runs the commit protocol; callers hold s.mu for

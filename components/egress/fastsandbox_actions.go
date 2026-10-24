@@ -45,11 +45,13 @@
 //
 // Fail-closed invariants: the subject is deny-first from registration until
 // its data-plane-ready Hook succeeds, so policy delivery can be late but
-// never early-open; any enforcement failure returns non-200 and the Fastlet
-// retries (at-least-once, same invocationId).
+// never early-open; enforcement failures return non-200 and are retryable
+// (at-least-once, same invocationId). Cancellation or terminal Delete may
+// stop retries; unfinished cleanup is not guaranteed to run again.
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
@@ -130,7 +132,7 @@ func (s *fastSandboxPolicyServer) handleActionsStatus(w http.ResponseWriter, r *
 }
 
 // handleActions serves POST /_fastlet/v1/actions. HTTP 200 is success; any
-// other status is a failed attempt the Fastlet retries. Parse-level errors
+// other status is a failed attempt. Parse-level errors
 // are 400 (permanently invalid input); enforcement failures are 500 (retried).
 func (s *fastSandboxPolicyServer) handleActions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -148,7 +150,7 @@ func (s *fastSandboxPolicyServer) handleActions(w http.ResponseWriter, r *http.R
 		http.Error(w, fmt.Sprintf("invalid action envelope: %v", err), http.StatusBadRequest)
 		return
 	}
-	status, err := s.dispatchAction(env)
+	status, err := s.dispatchAction(r.Context(), env)
 	if err != nil {
 		logEgressUpdateFailedError(fmt.Sprintf("action %s for sandbox %s failed: %v", env.Operation, env.Sandbox.UID, err))
 		http.Error(w, err.Error(), status)
@@ -157,15 +159,12 @@ func (s *fastSandboxPolicyServer) handleActions(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, struct{}{})
 }
 
-// dispatchAction executes one validated action and returns its HTTP status.
-func (s *fastSandboxPolicyServer) dispatchAction(env *actionhandler.Envelope) (int, error) {
+// dispatchAction validates effect-free input before entering the cancellable
+// action gate. Every runtime registry writer is reached through this gate;
+// snapshot transfers retain their own Vault transaction/guard semantics.
+func (s *fastSandboxPolicyServer) dispatchAction(ctx context.Context, env *actionhandler.Envelope) (int, error) {
+	var pol *policy.NetworkPolicy
 	switch env.Operation {
-	case actionhandler.OperationSetBinding:
-		return s.applySetBinding(env)
-	case actionhandler.OperationLifecycleHook:
-		return s.applyLifecycleHook(env)
-	case actionhandler.OperationRemoveBinding:
-		return s.applyRemoveBinding(env)
 	case actionhandler.OperationVaultExport:
 		return s.applyVaultExport(env)
 	case actionhandler.OperationVaultImport:
@@ -174,60 +173,141 @@ func (s *fastSandboxPolicyServer) dispatchAction(env *actionhandler.Envelope) (i
 		return s.applyPolicyExport(env)
 	case actionhandler.OperationPolicyImport:
 		return s.applyPolicyImport(env)
+	case actionhandler.OperationSetBinding:
+		if !env.Binding.IsRemoval() {
+			input, err := env.Binding.InputString()
+			if err != nil {
+				return http.StatusBadRequest, err
+			}
+			pol, err = policy.ParsePolicy(input)
+			if err != nil {
+				return http.StatusBadRequest, fmt.Errorf("invalid binding input policy: %v", err)
+			}
+		}
+	case actionhandler.OperationLifecycleHook, actionhandler.OperationRemoveBinding:
 	default:
-		// Unreachable: ParseEnvelope validated the operation.
 		return http.StatusBadRequest, fmt.Errorf("unknown operation %q", env.Operation)
+	}
+	release, err := s.acquireAction(ctx)
+	if err != nil {
+		return http.StatusServiceUnavailable, fmt.Errorf("action canceled: %w", err)
+	}
+	defer release()
+	switch env.Operation {
+	case actionhandler.OperationSetBinding:
+		return s.applySetBinding(ctx, env, pol)
+	case actionhandler.OperationLifecycleHook:
+		return s.applyLifecycleHook(env)
+	default:
+		return s.applyRemoveBinding(env)
 	}
 }
 
-// applySetBinding registers the subject deny-first and stores the binding
-// input. The policy is parsed BEFORE any state mutation so a permanently
-// invalid input (400) can never leave the subject half-registered.
-func (s *fastSandboxPolicyServer) applySetBinding(env *actionhandler.Envelope) (int, error) {
+// applySetBinding holds the action gate. The policy has already been parsed;
+// same-fence network rejection precedes every effect, including Vault reload.
+func (s *fastSandboxPolicyServer) applySetBinding(ctx context.Context, env *actionhandler.Envelope, pol *policy.NetworkPolicy) (int, error) {
 	subj := subject.FromSandboxUID(env.Sandbox.UID)
 	fence := subject.FromRevision(env)
 	att := env.Network()
-	var pol *policy.NetworkPolicy
-	if !env.Binding.IsRemoval() {
-		input, err := env.Binding.InputString()
-		if err != nil {
-			return http.StatusBadRequest, err
-		}
-		pol, err = policy.ParsePolicy(input)
-		if err != nil {
-			return http.StatusBadRequest, fmt.Errorf("invalid binding input policy: %v", err)
-		}
-	}
-	// The whole mutation holds policyCommitMu — rebind purge, registration,
-	// and seed/apply are one unit against relay commits and hooks.
-	// Otherwise a predecessor-identity relay write could straddle the
-	// fence flip and its reg.ApplyPolicy would activate the successor
-	// under the predecessor's policy. Lock order: policyCommitMu →
-	// registry → s.mu.
+	// Serialize registration and rebind cleanup with policy and vault commits.
 	s.policyCommitMu.Lock()
 	defer s.policyCommitMu.Unlock()
-
-	// A fence change is a rebind: discard ALL prior per-subject state. The
-	// registry drops its entry inside RegisterAndEnforce; the vault slice
-	// and the recorded policy must go too (memory + persisted files), or the
-	// old instance's credentials and policy would survive into the
-	// successor's flows.
-	if old, ok := s.reg.Fence(subj); ok && !old.Matches(fence) {
-		s.mu.Lock()
-		s.dropVault(subj)
-		delete(s.policies, subj)
-		s.purgePolicyFile(subj)
+	old, registered := s.reg.Fence(subj)
+	oldState, _ := s.reg.Get(subj)
+	s.mu.Lock()
+	// Waiting for an in-progress Vault commit may outlive the request too.
+	if err := s.actionCanceled(ctx); err != nil {
 		s.mu.Unlock()
-		log.Infof("subject %s: rebind (%s -> %s), vault slice and policy record purged", subj, old.RuntimeInstanceID, fence.RuntimeInstanceID)
+		return http.StatusServiceUnavailable, fmt.Errorf("action canceled: %w", err)
 	}
-	// Egress-restart recovery (OSEP-0022 stage 2): a subject with no live
-	// vault slice reloads its persisted file here, fenced by the full runtime
-	// identity. The recorded policy reloads the same way — the committed file
-	// is authoritative over the replayed binding input. These run BEFORE the
-	// deny-first install so no interception entry can materialize an empty
-	// slice ahead of the reload. A removal binding skips the reloads: with no
-	// policy to revalidate against, the files stay fenced on disk until the
-	// next registration or terminal purge.
+	oldAtt, knownNetwork := s.subjAtt[subj]
+	knownNetwork = knownNetwork && oldAtt.IP.IsValid()
+	token := s.rebinds[subj]
+	// A previous attempt may have purged bookkeeping before old-IP removal
+	// failed. Its token still carries the actual old network for comparisons.
+	if !knownNetwork && token != nil && registered && token.old.Matches(old) && token.oldNetwork.IP.IsValid() {
+		oldAtt, knownNetwork = token.oldNetwork, true
+	}
+	if token == nil && registered && old.Matches(fence) && !knownNetwork {
+		if oldState == subject.StateActive {
+			// Successful registration always records an attempt before becoming
+			// active. Missing metadata here is an internal inconsistency, not a
+			// reason to mutate a live subject or acknowledge an uninstalled update.
+			s.mu.Unlock()
+			return http.StatusInternalServerError, fmt.Errorf("active subject %s has no registered network", subj)
+		}
+	}
+	// A null binding may omit attachment only for its own known identity.
+	// Never register a new fence using the previous instance's network.
+	if env.Binding.IsRemoval() && env.Attachment == nil {
+		if token != nil && token.expectedNew.Matches(fence) && token.newNetwork.IP.IsValid() {
+			att = token.newNetwork
+		} else if token == nil && registered && old.Matches(fence) {
+			att = oldAtt
+		} else if registered || token != nil {
+			s.mu.Unlock()
+			return http.StatusBadRequest, fmt.Errorf("attachment required for registration identity")
+		}
+	}
+	if (token != nil && token.expectedNew.Matches(fence) && !sameBindingNetwork(token.newNetwork, att)) ||
+		(registered && old.Matches(fence) && knownNetwork && !sameBindingNetwork(oldAtt, att)) {
+		s.mu.Unlock()
+		return http.StatusConflict, fmt.Errorf("same-fence network change for subject %s", subj)
+	}
+	if token != nil && !token.expectedNew.Matches(fence) {
+		// The latest valid, uncanceled SET supersedes an abandoned intent. Its
+		// new token guards a full reset of actual residual state, even when the
+		// previous registration failed before publishing any registry entry.
+		token = &subjectRebind{old: old, expectedNew: fence, oldNetwork: oldAtt, newNetwork: att, needsReset: true}
+		s.rebinds[subj] = token
+	} else if token == nil && registered && !old.Matches(fence) {
+		token = &subjectRebind{old: old, expectedNew: fence, oldNetwork: oldAtt, newNetwork: att, removeOld: !knownNetwork || oldAtt.IP != att.IP}
+		s.rebinds[subj] = token
+	}
+	needsReset := token != nil && token.needsReset
+	s.mu.Unlock()
+	defer s.logPendingRebind(subj, token)
+	if token != nil {
+		if needsReset {
+			if err := s.unloadEnforcement(subj); err != nil {
+				return http.StatusInternalServerError, fmt.Errorf("superseded registration reset: %w", err)
+			}
+			s.reg.Unregister(subj)
+			s.mu.Lock()
+			s.dropSubjectStateLocked(subj) // preserve this exact token through C publication
+			token.needsReset = false
+			token.oldRemoved = true
+			token.purged = true
+			s.mu.Unlock()
+		}
+		s.mu.Lock()
+		if !token.purged {
+			s.dropSubjectStateLocked(subj)
+			token.purged = true
+		}
+		removeOld := token.removeOld && !token.oldRemoved
+		s.mu.Unlock()
+		if removeOld {
+			nftCtx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+			err := s.nft.Remove(nftCtx, subj)
+			cancel()
+			if err != nil {
+				return http.StatusInternalServerError, fmt.Errorf("old network removal: %w", err)
+			}
+			s.mu.Lock()
+			token.oldRemoved = true
+			s.mu.Unlock()
+		}
+	} else if registered && !knownNetwork {
+		// Legacy/unknown attempt metadata cannot prove reset will remove old IP
+		// dispatch. A conservative Remove is retryable; do not invent a network.
+		if err := s.unloadEnforcement(subj); err != nil {
+			return http.StatusInternalServerError, fmt.Errorf("unknown network removal: %w", err)
+		}
+		if err := s.reg.UnsetPolicy(subj); err != nil {
+			return http.StatusInternalServerError, err
+		}
+	}
 	if !env.Binding.IsRemoval() {
 		// Policy first: its reload result is the validation policy for the
 		// vault reload (a template clone's vault hosts are covered by the
@@ -243,14 +323,29 @@ func (s *fastSandboxPolicyServer) applySetBinding(env *actionhandler.Envelope) (
 	}
 	setBindingStarted := time.Now()
 	installStarted := time.Now()
+	// Record even failed first installs: partial kernel effects otherwise have
+	// no network identity for a later same-fence retry or changed-fence rebind.
+	s.recordBindingState(subj, att)
+	var victims []subject.Subject
 	state, err := s.reg.RegisterAndEnforce(subj, subject.SubjectKey{SourceIP: att.IP}, fence, func() error {
 		return s.OnRegistered(subj, att)
-	}, s.takeoverStaleSubject)
+	}, func(stale subject.Subject) error {
+		victims = append(victims, stale)
+		return s.takeoverStaleSubject(stale)
+	})
+	// Callback teardown never takes mu. Only purge actual evictions after the
+	// registry lock is released, even if successor enforcement failed. The
+	// action gate prevents a victim being re-registered before this purge.
+	for _, victim := range victims {
+		if _, exists := s.reg.Fence(victim); !exists {
+			s.dropSubjectState(victim)
+		}
+	}
 	if err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("deny-first install: %w", err)
 	}
 	denyFirstInstall := time.Since(installStarted)
-	s.recordBindingState(subj, att, fence)
+	s.recordRegisteredFence(subj, fence)
 	if env.Binding.IsRemoval() {
 		// Binding removed from a still-live sandbox: drop the pending policy
 		// (a re-added binding gets a fresh input — never apply the removed
@@ -268,6 +363,7 @@ func (s *fastSandboxPolicyServer) applySetBinding(env *actionhandler.Envelope) (
 				return http.StatusInternalServerError, err
 			}
 		}
+		s.finishRebind(subj, token)
 		log.Infof("subject %s: binding removed (deny-first)", subj)
 		return http.StatusOK, nil
 	}
@@ -278,6 +374,7 @@ func (s *fastSandboxPolicyServer) applySetBinding(env *actionhandler.Envelope) (
 		log.Errorf("subject %s: binding policy commit failed: %v", subj, err)
 		return http.StatusInternalServerError, fmt.Errorf("binding policy commit: %w", err)
 	}
+	s.finishRebind(subj, token)
 	policyCommit := time.Since(policyStarted)
 	log.Infof("subject %s: SET_BINDING applied (state=%s) total=%dms denyFirstInstall=%dms policyCommit=%dms",
 		subj, state, time.Since(setBindingStarted).Milliseconds(), denyFirstInstall.Milliseconds(), policyCommit.Milliseconds())
@@ -296,6 +393,12 @@ func (s *fastSandboxPolicyServer) applySetBinding(env *actionhandler.Envelope) (
 func (s *fastSandboxPolicyServer) applyLifecycleHook(env *actionhandler.Envelope) (int, error) {
 	subj := subject.FromSandboxUID(env.Sandbox.UID)
 	fence := subject.FromRevision(env)
+	s.mu.Lock()
+	rebinding := s.subjectRebindingLocked(subj)
+	s.mu.Unlock()
+	if rebinding {
+		return http.StatusServiceUnavailable, fmt.Errorf("subject %s registration is unfinished", subj)
+	}
 	regFence, ok := s.reg.Fence(subj)
 	if !ok {
 		return http.StatusConflict, fmt.Errorf("%s for unregistered subject %s", env.Hook.Name, subj)
@@ -318,10 +421,8 @@ func (s *fastSandboxPolicyServer) applyLifecycleHook(env *actionhandler.Envelope
 		defer s.policyCommitMu.Unlock()
 		// Fence re-validation AND the pending peek under one s.mu hold
 		// (policyCommitMu → s.mu, the established order): fenceMatchesLocked
-		// reads subjFence, which terminal cleanup deletes under s.mu without
-		// policyCommitMu (dropSubjectState is called under the registry write
-		// lock from takeover) — an unsynchronized read here would race that
-		// delete. The pre-lock fence check above cannot see a rebind or
+		// reads subjFence, which terminal cleanup deletes under s.mu. An
+		// unsynchronized read here would race that delete. The pre-lock fence check above cannot see a rebind or
 		// removal that completes while this Hook waits on policyCommitMu —
 		// a stale Hook must never activate the successor.
 		s.mu.Lock()
@@ -358,30 +459,48 @@ func (s *fastSandboxPolicyServer) applyLifecycleHook(env *actionhandler.Envelope
 // transient failure returns 500 and the retried REMOVE_BINDING resumes
 // cleanup instead of succeeding with stale rules left in the kernel.
 //
-// The vault file is purged once more AFTER Unregister (under s.mu): a relay
-// write parked on s.mu during the first purge can still observe the old
-// fence and recreate the file before the unregister lands.
+// Final local purge follows Unregister. A relay that already validated the old
+// fence may finish before this purge; later relay requests find no identity.
 func (s *fastSandboxPolicyServer) applyRemoveBinding(env *actionhandler.Envelope) (int, error) {
 	subj := subject.FromSandboxUID(env.Sandbox.UID)
 	fence := subject.FromRevision(env)
+	s.mu.Lock()
+	token := s.rebinds[subj]
+	s.mu.Unlock()
+	if token != nil && !token.expectedNew.Matches(fence) {
+		log.Infof("subject %s: stale REMOVE_BINDING ignored (pending rebind fence mismatch)", subj)
+		return http.StatusOK, nil
+	}
+	defer s.logPendingRebind(subj, token)
 	registeredFence, ok := s.reg.Fence(subj)
-	if ok && !registeredFence.Matches(fence) {
+	if token == nil && ok && !registeredFence.Matches(fence) {
 		log.Infof("subject %s: stale REMOVE_BINDING ignored (fence mismatch)", subj)
 		return http.StatusOK, nil
 	}
-	if !ok {
-		// Missing Handler state is success; still drop any cached pushes for
-		// the dead sandbox so they can never flush into a later registration.
+	if token == nil && !ok {
 		s.dropSubjectState(subj)
 		return http.StatusOK, nil
 	}
-	att, _ := s.attachment(subj)
-	prev, _ := s.reg.Get(subj)
-	if err := s.OnUnloaded(subj, att); err != nil {
+	// expectedNew REMOVE cancels an unfinished registration intent, including
+	// prepublication failure where the registry still contains old (or no)
+	// identity but kernel effects may remain. Failure retains token and state.
+	if err := s.unloadEnforcement(subj); err != nil {
 		return http.StatusInternalServerError, fmt.Errorf("enforcement removal: %w", err)
 	}
-	s.reg.Unregister(subj)
-	s.dropSubjectState(subj)
+	prev := s.reg.Unregister(subj)
+	// Terminal file cleanup remains best-effort after Unregister. A failed
+	// delete leaves the file fenced to the old identity; this acknowledgement
+	// does not promise automatic cleanup retry.
+	s.mu.Lock()
+	s.dropSubjectStateLocked(subj)
+	cleared := token != nil && s.rebinds[subj] == token
+	if cleared {
+		delete(s.rebinds, subj)
+	}
+	s.mu.Unlock()
+	if cleared {
+		log.Infof("subject_rebind_cleared")
+	}
 	log.Infof("subject %s: REMOVE_BINDING complete (was %s)", subj, prev)
 	return http.StatusOK, nil
 }

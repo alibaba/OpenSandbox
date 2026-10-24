@@ -187,6 +187,9 @@ func (s *fastSandboxPolicyServer) applyVaultExport(env *actionhandler.Envelope) 
 // pre-read of the registration (lock order: registry → s.mu, see
 // applyVaultExport). Callers hold s.mu.
 func (s *fastSandboxPolicyServer) exportSourceImageLocked(subj subject.Subject, fence subject.Fencing, regFence subject.Fencing, registered bool) (*policy.PolicyFileSnapshot, int, error) {
+	if s.subjectRebindingLocked(subj) {
+		return nil, http.StatusServiceUnavailable, fmt.Errorf("subject rebind in progress")
+	}
 	if !registered {
 		return nil, http.StatusNotFound, fmt.Errorf("vault export for unknown subject %s", subj)
 	}
@@ -280,11 +283,17 @@ func (s *fastSandboxPolicyServer) applyVaultImport(env *actionhandler.Envelope) 
 	// handleVaultRelayWrite): the validation policy and the registration
 	// fence cannot change between the pre-reads and the commit. Lock
 	// order: policyCommitMu → registry → s.mu.
+	if s.subjectRebinding(subj) {
+		return http.StatusServiceUnavailable, fmt.Errorf("subject rebind in progress")
+	}
 	s.policyCommitMu.Lock()
 	defer s.policyCommitMu.Unlock()
 	validation := s.vaultValidationPolicy(subj)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.subjectRebindingLocked(subj) {
+		return http.StatusServiceUnavailable, fmt.Errorf("subject rebind in progress")
+	}
 	// The latch freezes every vault file mutation; only a restart
 	// reconciles (relay-write parity).
 	if recovery := s.vaultRecovery.Load(); recovery != nil {

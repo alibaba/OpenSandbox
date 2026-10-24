@@ -92,9 +92,12 @@ func (s *fastSandboxPolicyServer) handlePolicyRelay(w http.ResponseWriter, r *ht
 // and the recorded policy. Held across the whole read so the policy body
 // and its revision come from the same commit (the server's GET→merge→PUT
 // PATCH uses the revision as its precondition). Lock order:
-// policyCommitMu → registry → s.mu (see fastsandbox_server.go's takeover
-// path; the reverse order deadlocks the DNS hot path).
+// policyCommitMu spans the transaction; registry reads finish before s.mu.
+// Registry callbacks never acquire s.mu, and no registry call runs under it.
 func (s *fastSandboxPolicyServer) selectRelayPolicy(r *http.Request, subj subject.Subject) (*policyRelayDocument, int, string) {
+	if s.subjectRebinding(subj) {
+		return nil, http.StatusServiceUnavailable, "subject rebind in progress"
+	}
 	s.policyCommitMu.Lock()
 	defer s.policyCommitMu.Unlock()
 	fence, ok := s.reg.Fence(subj)
@@ -107,6 +110,9 @@ func (s *fastSandboxPolicyServer) selectRelayPolicy(r *http.Request, subj subjec
 	pol := s.reg.UserPolicy(subj)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.subjectRebindingLocked(subj) {
+		return nil, http.StatusServiceUnavailable, "subject rebind in progress"
+	}
 	if !s.fenceMatchesLocked(subj, fence) {
 		return nil, http.StatusNotFound, "unknown subject"
 	}
@@ -175,6 +181,10 @@ func (s *fastSandboxPolicyServer) handlePolicyRelayWrite(w http.ResponseWriter, 
 		return
 	}
 
+	if s.subjectRebinding(subj) {
+		http.Error(w, "subject rebind in progress", http.StatusServiceUnavailable)
+		return
+	}
 	// The decision must be commit-atomic or two racing replaces could land
 	// the same revision. Enforcement in the apply closures never runs
 	// under s.mu (it takes the registry write lock).
@@ -192,6 +202,11 @@ func (s *fastSandboxPolicyServer) handlePolicyRelayWrite(w http.ResponseWriter, 
 		return
 	}
 	s.mu.Lock()
+	if s.subjectRebindingLocked(subj) {
+		s.mu.Unlock()
+		http.Error(w, "subject rebind in progress", http.StatusServiceUnavailable)
+		return
+	}
 	if !s.fenceMatchesLocked(subj, fence) {
 		s.mu.Unlock()
 		http.Error(w, "unknown subject", http.StatusNotFound)

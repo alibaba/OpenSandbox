@@ -163,6 +163,9 @@ func (s *fastSandboxPolicyServer) applyPolicyExport(env *actionhandler.Envelope)
 // the caller's pre-read of the registration (lock order: registry →
 // policyCommitMu → s.mu, see applyPolicyExport). Callers hold s.mu.
 func (s *fastSandboxPolicyServer) policyExportSourceImageLocked(subj subject.Subject, fence subject.Fencing, regFence subject.Fencing, registered bool) (*policy.PolicyFileSnapshot, int, error) {
+	if s.subjectRebindingLocked(subj) {
+		return nil, http.StatusServiceUnavailable, fmt.Errorf("subject rebind in progress")
+	}
 	if !registered {
 		return nil, http.StatusNotFound, fmt.Errorf("policy export for unknown subject %s", subj)
 	}
@@ -247,6 +250,9 @@ func (s *fastSandboxPolicyServer) applyPolicyImport(env *actionhandler.Envelope)
 		return http.StatusInternalServerError, fmt.Errorf("policy bundle re-stamp failed: %w", err)
 	}
 
+	if s.subjectRebinding(subj) {
+		return http.StatusServiceUnavailable, fmt.Errorf("subject rebind in progress")
+	}
 	// Serialize the commit against relay writes; guards run under s.mu
 	// inside (the ordering policyCommitMu → s.mu is the commit path's).
 	s.policyCommitMu.Lock()
@@ -259,6 +265,10 @@ func (s *fastSandboxPolicyServer) applyPolicyImport(env *actionhandler.Envelope)
 	// the subject is not registered: the bundle lands for the next
 	// registration.
 	s.mu.Lock()
+	if s.subjectRebindingLocked(subj) {
+		s.mu.Unlock()
+		return http.StatusServiceUnavailable, fmt.Errorf("subject rebind in progress")
+	}
 	// The latch freezes every policy file mutation; only a restart
 	// reconciles (relay-write parity).
 	if recovery := s.policyRecovery.Load(); recovery != nil {

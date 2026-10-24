@@ -67,12 +67,11 @@ func (s *fastSandboxPolicyServer) handleVaultRelay(w http.ResponseWriter, r *htt
 	subj := subject.FromSandboxUID(uid)
 	switch r.Method {
 	case http.MethodGet:
-		vault, status, msg := s.selectRelayVault(r, subj)
-		if vault == nil {
+		full, status, msg, err := s.readRelayVault(r, subj)
+		if status != 0 {
 			http.Error(w, msg, status)
 			return
 		}
-		full, err := vault.Full()
 		if err != nil {
 			writeVaultRelayError(w, err)
 			return
@@ -123,148 +122,136 @@ func (s *fastSandboxPolicyServer) handleVaultRelayWrite(w http.ResponseWriter, r
 	// The body has been consumed; a late response must not try to read it.
 	r.Body.Close()
 
-	// The whole write holds policyCommitMu: the validation policy must not
-	// change between the pre-read and the commit (policy mutations — relay
-	// PUT/DELETE, hooks, removals — serialize on the same mutex, and none
-	// of them bump the fence, so the commit-time fence re-check alone
-	// cannot catch this). Lock order: policyCommitMu → registry → s.mu.
-	s.policyCommitMu.Lock()
-	defer s.policyCommitMu.Unlock()
-
-	// Registry reads before s.mu (lock order: policyCommitMu → registry →
-	// s.mu).
-	fence, ok := s.reg.Fence(subj)
-	if !ok {
-		http.Error(w, "unknown subject", http.StatusNotFound)
+	if s.subjectRebindingNow(subj) {
+		http.Error(w, "subject rebind in progress", http.StatusServiceUnavailable)
 		return
 	}
-	if inc := strings.TrimSpace(r.Header.Get(constants.EgressVaultIncarnationHeader)); inc != "" && inc != fence.RuntimeInstanceID {
-		http.Error(w, "expectedIncarnation mismatch", http.StatusPreconditionFailed)
-		return
-	}
-	// Pre-compute the validation policy BEFORE s.mu (registry → s.mu
-	// order): a vault op held to the data-plane-ready barrier must validate
-	// against the SAME policy the hook will enforce, operator always-rules
-	// included.
-	effective := s.vaultValidationPolicy(subj)
-
-	// The rest of the mutation holds s.mu, serializing per-subject writers
-	// and fencing rebind/terminal purges. The validation policy was fully
-	// pre-computed above — nothing inside the lock touches the registry.
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	// Commit-time fence re-validation: the pre-read above cannot see a
-	// rebind that completed after it (see subjFence).
-	if !s.fenceMatchesLocked(subj, fence) {
-		http.Error(w, "unknown subject", http.StatusNotFound)
-		return
-	}
-	if s.vaultSealedLocked(subj) {
-		http.Error(w, "subject vault is sealed (paused); the bundle copy is already taken", http.StatusConflict)
-		return
-	}
-	if recovery := s.vaultRecovery.Load(); recovery != nil {
-		http.Error(w, "vault persistence recovery required: "+recovery.reason, http.StatusServiceUnavailable)
-		return
-	}
-	store := s.vaultForLocked(subj, fence)
-	pol := effective
-
-	var (
-		candidate *credentialvault.MutationCandidate
-		created   bool
-		err       error
-	)
-	switch r.Method {
-	case http.MethodPost:
-		candidate, err = store.PrepareCreate(createReq, pol)
-	case http.MethodPut:
-		candidate, err = store.PrepareReplace(replaceReq, pol)
-		created = candidate.Created()
-	case http.MethodDelete:
-		candidate, err = store.PrepareDelete()
-	}
-	if err != nil {
-		writeVaultRelayError(w, err)
-		return
-	}
-	defer candidate.Discard()
-
-	// Rendering is required before commit; an unresolvable credential is a
-	// NACK before anything durable happens.
-	if candidate.Exists() {
-		if _, err = candidate.ActiveSnapshot(r.Context()); err != nil {
-			http.Error(w, "credential vault candidate cannot be rendered", http.StatusBadRequest)
-			return
+	// Capture the request identity before either serialization lock. A queued
+	// headerless write must not adopt a successor published while it waits.
+	fence, registered := s.reg.Fence(subj)
+	// Capture a response while committing; no network output holds s.mu.
+	respond := func() func() {
+		if s.subjectRebinding(subj) {
+			return func() { http.Error(w, "subject rebind in progress", http.StatusServiceUnavailable) }
 		}
-	}
-
-	if s.vaultFiles == nil {
-		// Memory-only (persistence disabled): direct commit.
-		state, commitErr := store.CommitCandidate(candidate)
-		if commitErr != nil {
-			writeVaultRelayError(w, commitErr)
-			return
+		s.policyCommitMu.Lock()
+		defer s.policyCommitMu.Unlock()
+		effective := s.vaultValidationPolicy(subj)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.subjectRebindingLocked(subj) {
+			return func() { http.Error(w, "subject rebind in progress", http.StatusServiceUnavailable) }
 		}
-		writeVaultRelayWriteResponse(w, r, state, created)
-		return
-	}
-
-	// Persistence enabled: encode the candidate — stamped with the owning
-	// runtime fence — then run the commit protocol.
-	var payload []byte
-	if candidate.Exists() {
-		full, fullErr := candidate.Full()
-		if fullErr != nil {
-			log.Errorf("subject %s: vault candidate read failed: %v", subj, fullErr)
-			http.Error(w, "vault persistence failure", http.StatusInternalServerError)
-			return
+		if !registered || !s.fenceMatchesLocked(subj, fence) {
+			return func() { http.Error(w, "unknown subject", http.StatusNotFound) }
 		}
-		payload, err = credentialvault.EncodeVaultFile(fence.RuntimeInstanceID, fence.AttachmentID, full.Revision, credentialvault.VaultFileBody{
-			Credentials: full.Credentials,
-			Bindings:    full.Bindings,
-		})
-		if err != nil {
-			log.Errorf("subject %s: vault file encode failed: %v", subj, err)
-			http.Error(w, "vault persistence failure", http.StatusInternalServerError)
-			return
+		if inc := strings.TrimSpace(r.Header.Get(constants.EgressVaultIncarnationHeader)); inc != "" && inc != fence.RuntimeInstanceID {
+			return func() { http.Error(w, "expectedIncarnation mismatch", http.StatusPreconditionFailed) }
 		}
-	}
-	err = s.persistVaultCandidateLocked(
-		subj,
-		func(fs vaultFileStore) (policy.FileMutationState, error) {
-			if payload == nil {
-				return fs.Delete()
+		if s.vaultSealedLocked(subj) {
+			return func() {
+				http.Error(w, "subject vault is sealed (paused); the bundle copy is already taken", http.StatusConflict)
 			}
-			return fs.SaveRaw(payload)
-		},
-		func() error {
-			_, commitErr := store.CommitCandidate(candidate)
-			return commitErr
-		},
-	)
-	if err != nil {
-		// Uncertain persist latched → 503; every other failure kept last-good
-		// on both sides → retryable 500. Details stay in the log.
-		log.Errorf("subject %s: vault relay write failed: %v", subj, err)
-		status := http.StatusInternalServerError
-		if recovery := s.vaultRecovery.Load(); recovery != nil {
-			status = http.StatusServiceUnavailable
 		}
-		http.Error(w, "vault persistence failure", status)
-		return
-	}
-	if r.Method == http.MethodDelete {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	state, err := store.Sanitized()
-	if err != nil {
-		log.Errorf("subject %s: vault sanitized read failed: %v", subj, err)
-		http.Error(w, "vault persistence failure", http.StatusInternalServerError)
-		return
-	}
-	writeVaultRelayWriteResponse(w, r, state, created)
+		if recovery := s.vaultRecovery.Load(); recovery != nil {
+			return func() {
+				http.Error(w, "vault persistence recovery required: "+recovery.reason, http.StatusServiceUnavailable)
+			}
+		}
+		store := s.vaultForLocked(subj, fence)
+		if store == nil {
+			return func() { http.Error(w, "unknown subject", http.StatusNotFound) }
+		}
+		pol := effective
+
+		var (
+			candidate *credentialvault.MutationCandidate
+			created   bool
+			err       error
+		)
+		switch r.Method {
+		case http.MethodPost:
+			candidate, err = store.PrepareCreate(createReq, pol)
+		case http.MethodPut:
+			candidate, err = store.PrepareReplace(replaceReq, pol)
+			created = candidate.Created()
+		case http.MethodDelete:
+			candidate, err = store.PrepareDelete()
+		}
+		if err != nil {
+			return func() { writeVaultRelayError(w, err) }
+		}
+		defer candidate.Discard()
+
+		// Rendering is required before commit; an unresolvable credential is a
+		// NACK before anything durable happens.
+		if candidate.Exists() {
+			if _, err = candidate.ActiveSnapshot(r.Context()); err != nil {
+				return func() { http.Error(w, "credential vault candidate cannot be rendered", http.StatusBadRequest) }
+			}
+		}
+
+		if s.vaultFiles == nil {
+			// Memory-only (persistence disabled): direct commit.
+			state, commitErr := store.CommitCandidate(candidate)
+			if commitErr != nil {
+				return func() { writeVaultRelayError(w, commitErr) }
+			}
+			return func() { writeVaultRelayWriteResponse(w, r, state, created) }
+		}
+
+		// Persistence enabled: encode the candidate — stamped with the owning
+		// runtime fence — then run the commit protocol.
+		var payload []byte
+		if candidate.Exists() {
+			full, fullErr := candidate.Full()
+			if fullErr != nil {
+				log.Errorf("subject %s: vault candidate read failed: %v", subj, fullErr)
+				return func() { http.Error(w, "vault persistence failure", http.StatusInternalServerError) }
+			}
+			payload, err = credentialvault.EncodeVaultFile(fence.RuntimeInstanceID, fence.AttachmentID, full.Revision, credentialvault.VaultFileBody{
+				Credentials: full.Credentials,
+				Bindings:    full.Bindings,
+			})
+			if err != nil {
+				log.Errorf("subject %s: vault file encode failed: %v", subj, err)
+				return func() { http.Error(w, "vault persistence failure", http.StatusInternalServerError) }
+			}
+		}
+		err = s.persistVaultCandidateLocked(
+			subj,
+			func(fs vaultFileStore) (policy.FileMutationState, error) {
+				if payload == nil {
+					return fs.Delete()
+				}
+				return fs.SaveRaw(payload)
+			},
+			func() error {
+				_, commitErr := store.CommitCandidate(candidate)
+				return commitErr
+			},
+		)
+		if err != nil {
+			// Uncertain persist latched → 503; every other failure kept last-good
+			// on both sides → retryable 500. Details stay in the log.
+			log.Errorf("subject %s: vault relay write failed: %v", subj, err)
+			status := http.StatusInternalServerError
+			if recovery := s.vaultRecovery.Load(); recovery != nil {
+				status = http.StatusServiceUnavailable
+			}
+			return func() { http.Error(w, "vault persistence failure", status) }
+		}
+		if r.Method == http.MethodDelete {
+			return func() { w.WriteHeader(http.StatusNoContent) }
+		}
+		state, err := store.Sanitized()
+		if err != nil {
+			log.Errorf("subject %s: vault sanitized read failed: %v", subj, err)
+			return func() { http.Error(w, "vault persistence failure", http.StatusInternalServerError) }
+		}
+		return func() { writeVaultRelayWriteResponse(w, r, state, created) }
+	}()
+	respond()
 }
 
 // writeVaultRelayWriteResponse maps the committed mutation onto the relay
@@ -284,31 +271,33 @@ func writeVaultRelayWriteResponse(w http.ResponseWriter, r *http.Request, state 
 	}
 }
 
-// selectRelayVault decides registration, the expectedIncarnation
-// precondition, and the fence-bound store selection. Registry reads happen
-// BEFORE s.mu (lock order: registry → s.mu, see handleVaultRelayWrite); a
-// concurrent rebind then either purges before selection — the stale
-// incarnation mismatches the successor's fresh fence — or purges after —
-// the stale request holds the old store, which the purge discards. Either
-// way a stale writer never reaches the successor's store.
-// A nil store means the caller must write (status, msg).
-func (s *fastSandboxPolicyServer) selectRelayVault(r *http.Request, subj subject.Subject) (*credentialvault.Store, int, string) {
-	fence, ok := s.reg.Fence(subj)
-	if !ok {
-		return nil, http.StatusNotFound, "unknown subject"
+// readRelayVault captures an independent inline result under the subject lock;
+// sending it afterwards cannot delay lifecycle state changes.
+func (s *fastSandboxPolicyServer) readRelayVault(r *http.Request, subj subject.Subject) (credentialvault.FullRevision, int, string, error) {
+	if s.subjectRebindingNow(subj) {
+		return credentialvault.FullRevision{}, http.StatusServiceUnavailable, "subject rebind in progress", nil
 	}
-	if inc := strings.TrimSpace(r.Header.Get(constants.EgressVaultIncarnationHeader)); inc != "" && inc != fence.RuntimeInstanceID {
-		return nil, http.StatusPreconditionFailed, "expectedIncarnation mismatch"
-	}
+	fence, registered := s.reg.Fence(subj)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.fenceMatchesLocked(subj, fence) {
-		return nil, http.StatusNotFound, "unknown subject"
+	if s.subjectRebindingLocked(subj) {
+		return credentialvault.FullRevision{}, http.StatusServiceUnavailable, "subject rebind in progress", nil
+	}
+	if !registered || !s.fenceMatchesLocked(subj, fence) {
+		return credentialvault.FullRevision{}, http.StatusNotFound, "unknown subject", nil
+	}
+	if inc := strings.TrimSpace(r.Header.Get(constants.EgressVaultIncarnationHeader)); inc != "" && inc != fence.RuntimeInstanceID {
+		return credentialvault.FullRevision{}, http.StatusPreconditionFailed, "expectedIncarnation mismatch", nil
 	}
 	if s.vaultSealedLocked(subj) {
-		return nil, http.StatusConflict, "subject vault is sealed (paused); the bundle copy is already taken"
+		return credentialvault.FullRevision{}, http.StatusConflict, "subject vault is sealed (paused); the bundle copy is already taken", nil
 	}
-	return s.vaultForLocked(subj, fence), 0, ""
+	store := s.vaultForLocked(subj, fence)
+	if store == nil {
+		return credentialvault.FullRevision{}, http.StatusNotFound, "unknown subject", nil
+	}
+	full, err := store.Full()
+	return full, 0, "", err
 }
 
 // vaultSealedLocked reports whether the subject's vault is sealed (paused);
