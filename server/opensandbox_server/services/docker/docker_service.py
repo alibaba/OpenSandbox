@@ -535,8 +535,9 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         entrypoint = container.attrs.get("Config", {}).get("Cmd") or []
         if isinstance(entrypoint, str):
             entrypoint = [entrypoint]
-        image_tags = container.image.tags
-        image_uri = image_tags[0] if image_tags else container.image.short_id
+        # The image reference the container was created with. Do not look the
+        # image up via container.image: it may have been removed since.
+        image_uri = container.attrs.get("Config", {}).get("Image")
         snapshot_id = labels.get(SANDBOX_SNAPSHOT_ID_LABEL)
         image_spec = None if snapshot_id else ImageSpec(uri=image_uri)
 
