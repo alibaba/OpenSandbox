@@ -676,6 +676,55 @@ func TestPTYWS_TakeoverClosesBusyHolderWithCloseCode(t *testing.T) {
 	require.Equal(t, model.WSCloseTakenOver, closeErr.Code)
 }
 
+// TestPTYWS_TakeoverDuringInitialReplayClosesHolderWithCloseCode verifies that
+// evicting a holder while its initial replay write is blocked sends the
+// WSCloseTakenOver (4001) close frame rather than a bare close (1006).
+func TestPTYWS_TakeoverDuringInitialReplayClosesHolderWithCloseCode(t *testing.T) {
+	requireBash(t)
+	srv := newPTYTestServer(t)
+	defer srv.Close()
+
+	pl := newPipeListener()
+	pipeSrv := &http.Server{Handler: buildPTYRouter()}
+	go func() { _ = pipeSrv.Serve(pl) }()
+	defer pipeSrv.Close()
+
+	id := ptyCreateSession(t, srv)
+	runner := codeRunner
+	t.Cleanup(func() { _ = runner.DeletePTYSession(id) })
+
+	// Pre-populate output in the session so connecting triggers an initial replay frame.
+	initConn := wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "")
+	ptyWaitFrame(t, initConn, "connected", 10*time.Second)
+	ptyWriteStdin(t, initConn, "for i in $(seq 1 2000); do echo pre_replay_line; done\n")
+	time.Sleep(150 * time.Millisecond)
+	_ = initConn.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	// Dial over pipe listener, but do NOT read messages, causing the initial replay write
+	// to block on the pipe buffer.
+	dialer := websocket.Dialer{NetDialContext: pl.DialContext}
+	conn1, _, err := dialer.Dial("ws://pipe/pty/"+id+"/ws", nil)
+	require.NoError(t, err)
+	defer conn1.Close()
+
+	// Trigger takeover while conn1 is in initial replay write.
+	time.Sleep(50 * time.Millisecond)
+	_ = wsDialPTY(t, srv.URL, "/pty/"+id+"/ws", "takeover=1")
+	time.Sleep(50 * time.Millisecond)
+
+	var closeErr *websocket.CloseError
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, _, err := conn1.ReadMessage(); err != nil {
+			_ = errors.As(err, &closeErr)
+			break
+		}
+	}
+	require.NotNil(t, closeErr, "holder should be closed with a WS CloseError after takeover")
+	require.Equal(t, model.WSCloseTakenOver, closeErr.Code)
+}
+
 // TestPTYWS_TakeoverOnFreeSessionConnects verifies ?takeover=1 is a no-op when the
 // session is free: it connects normally (there is no holder to evict).
 func TestPTYWS_TakeoverOnFreeSessionConnects(t *testing.T) {
