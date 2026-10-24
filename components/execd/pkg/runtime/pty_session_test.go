@@ -424,3 +424,70 @@ func terminalEntries(env []string) []string {
 	}
 	return found
 }
+
+// When the shell exits, the PTY master still holds output the reader has not
+// consumed yet, e.g. because the attached client reads slowly. That output
+// must still reach the replay buffer.
+func TestPTYSession_KeepsOutputBufferedWhenShellExits(t *testing.T) {
+	requireBash(t)
+
+	const outputBytes = 600000
+	s := newPTYSession(uuidString(), "", "head -c 600000 /dev/zero | tr '\\0' a; printf END")
+	require.NoError(t, s.StartPTY())
+	t.Cleanup(func() { s.close() })
+
+	stdoutR, _, detach := s.AttachOutput()
+	defer detach()
+	safego.Go(func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := stdoutR.Read(buf); err != nil {
+				return
+			}
+			time.Sleep(200 * time.Microsecond)
+		}
+	})
+
+	select {
+	case <-s.OutputDone():
+	case <-time.After(30 * time.Second):
+		t.Fatal("PTY output was not drained")
+	}
+	data, _ := s.replay.ReadFrom(0)
+	require.Equal(t, outputBytes+len("END"), len(data))
+	require.True(t, strings.HasSuffix(string(data), "END"))
+}
+
+// A client that is attached but stopped reading blocks the broadcast
+// goroutine; the session must still end once the shell exits.
+func TestPTYSession_EndsWhileClientStopsReading(t *testing.T) {
+	requireBash(t)
+
+	s := newPTYSession(uuidString(), "", "echo started")
+	require.NoError(t, s.StartPTY())
+	t.Cleanup(func() { s.close() })
+	_, _, detach := s.AttachOutput()
+	defer detach()
+
+	select {
+	case <-s.Done():
+	case <-time.After(ptyDrainTimeout + 5*time.Second):
+		t.Fatal("session did not end after the shell exited")
+	}
+}
+
+// The shell is reaped before its output is drained, so its PID may be reused
+// meanwhile: the session must stop signalling it right away.
+func TestPTYSession_StopsSignallingOnceShellIsReaped(t *testing.T) {
+	requireBash(t)
+
+	s := newPTYSession(uuidString(), "", "echo started")
+	require.NoError(t, s.StartPTY())
+	t.Cleanup(func() { s.close() })
+	_, _, detach := s.AttachOutput()
+	defer detach()
+
+	require.Eventually(t, func() bool { return !s.IsRunning() },
+		ptyDrainTimeout/2, 10*time.Millisecond,
+		"session still signalable while its output drains")
+}
