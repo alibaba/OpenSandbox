@@ -19,6 +19,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -807,5 +808,75 @@ func TestValidateBinds_SymlinkBypass(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "must be an existing path") {
 		t.Errorf("expected existing-path rejection, got: %v", err)
+	}
+}
+
+func TestScanUntilMarker_LineLongerThanMaxScanLine(t *testing.T) {
+	const marker = isolatedRunEndMarkerPrefix + "_test"
+	// The output has no trailing newline, so the marker follows it on the
+	// same line and arrives in the last piece.
+	output := strings.Repeat("a", maxScanLineBytes+100*1024)
+	input := output + marker + " 7\nnext run output\n"
+
+	var stdout []string
+	exitCode, err := scanUntilMarker(context.Background(), io.NopCloser(strings.NewReader(input)), marker, func(text string) {
+		stdout = append(stdout, text)
+	})
+	if err != nil {
+		t.Fatalf("scanUntilMarker: %v", err)
+	}
+	if exitCode != 7 {
+		t.Fatalf("exit code = %d, want 7", exitCode)
+	}
+	if got := strings.Join(stdout, ""); got != output {
+		t.Fatalf("stdout has %d bytes, want the %d output bytes before the marker", len(got), len(output))
+	}
+}
+
+func TestScanUntilMarker_KeepsEmptyLines(t *testing.T) {
+	const marker = isolatedRunEndMarkerPrefix + "_test"
+	input := "a\n\nb\n" + marker + " 0\n"
+
+	var stdout []string
+	if _, err := scanUntilMarker(context.Background(), io.NopCloser(strings.NewReader(input)), marker, func(text string) {
+		stdout = append(stdout, text)
+	}); err != nil {
+		t.Fatalf("scanUntilMarker: %v", err)
+	}
+	if got := strings.Join(stdout, "|"); got != "a||b" {
+		t.Fatalf("stdout = %q, want a, empty line, b", got)
+	}
+}
+
+func TestRunOutputScanner_MarkerAtPieceBoundary(t *testing.T) {
+	const marker = isolatedRunEndMarkerPrefix + "_test"
+	output := strings.Repeat("a", 64)
+	cases := []struct {
+		name   string
+		pieces []string
+	}{
+		{"boundary inside the marker", []string{output + marker[:5], marker[5:] + " 17"}},
+		{"boundary right after the marker", []string{output + marker, " 17"}},
+		{"boundary inside the exit code", []string{output + marker + " 1", "7"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout []string
+			scanner := &runOutputScanner{marker: marker, onStdout: func(text string) {
+				stdout = append(stdout, text)
+			}}
+			if !scanner.onLine(tc.pieces[0], false) {
+				t.Fatal("scanner stopped before the marker line was complete")
+			}
+			if scanner.onLine(tc.pieces[1], true) {
+				t.Fatal("scanner kept going after the marker line")
+			}
+			if !scanner.markerSeen || scanner.exitCode != 17 {
+				t.Fatalf("markerSeen = %v, exit code = %d, want true, 17", scanner.markerSeen, scanner.exitCode)
+			}
+			if got := strings.Join(stdout, ""); got != output {
+				t.Fatalf("stdout = %q, want %q", got, output)
+			}
+		})
 	}
 }

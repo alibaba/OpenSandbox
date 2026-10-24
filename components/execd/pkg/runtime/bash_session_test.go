@@ -950,18 +950,66 @@ func TestBashSession_FlushesBlankLineImmediately(t *testing.T) {
 
 // Output without any line ending must fail the run at the fragment cap
 // instead of buffering without limit, mirroring the former 16 MiB scanner cap.
-func TestBashSession_OutputLineCapErrors(t *testing.T) {
+// A line longer than maxScanLineBytes arrives in pieces, and the output after
+// it is still read: a reader that stopped would leave the command blocked on a
+// full pipe until the run timed out.
+func TestBashSession_LineLongerThanMaxScanLine(t *testing.T) {
 	requireBash(t)
 
 	session := newBashSession("", nil)
 	t.Cleanup(func() { _ = session.close() })
 	require.NoError(t, session.start())
 
-	err := session.run(context.Background(), &ExecuteCodeRequest{
-		Code:    `head -c 17000000 /dev/zero | tr '\0' 'x'`,
+	const longLineBytes = maxScanLineBytes + 4*1024*1024
+	var stdout strings.Builder
+	start := time.Now()
+	require.NoError(t, session.run(context.Background(), &ExecuteCodeRequest{
+		Code:    fmt.Sprintf(`head -c %d /dev/zero | tr '\0' 'x'; echo; seq 1 100000`, longLineBytes),
 		Timeout: 30 * time.Second,
-	})
-	require.ErrorContains(t, err, "output line exceeds")
+		Hooks: ExecuteResultHook{
+			OnExecuteStdout: func(fragment string) { stdout.WriteString(fragment) },
+		},
+	}))
+	require.Less(t, time.Since(start), 20*time.Second)
+
+	var want strings.Builder
+	want.WriteString(strings.Repeat("x", longLineBytes) + "\n")
+	for i := 1; i <= 100000; i++ {
+		fmt.Fprintf(&want, "%d\n", i)
+	}
+	require.True(t, stdout.String() == want.String(), "stdout has %d bytes, want %d", stdout.Len(), want.Len())
+}
+
+// Output without a trailing newline puts the env-dump marker on the same line.
+// With this length the piece boundary falls inside the marker, which must
+// still be recognized so the env dump is not sent as output.
+func TestBashSession_EnvDumpMarkerSplitByLongLine(t *testing.T) {
+	requireBash(t)
+
+	session := newBashSession("", nil)
+	t.Cleanup(func() { _ = session.close() })
+	require.NoError(t, session.start())
+
+	const outputBytes = maxScanLineBytes - 5
+	var stdout strings.Builder
+	require.NoError(t, session.run(context.Background(), &ExecuteCodeRequest{
+		Code:    fmt.Sprintf(`export SPLIT_MARKER_VAR=kept; head -c %d /dev/zero | tr '\0' 'x'`, outputBytes),
+		Timeout: 30 * time.Second,
+		Hooks: ExecuteResultHook{
+			OnExecuteStdout: func(fragment string) { stdout.WriteString(fragment) },
+		},
+	}))
+	require.True(t, stdout.String() == strings.Repeat("x", outputBytes), "stdout has %d bytes, want %d", stdout.Len(), outputBytes)
+
+	var got strings.Builder
+	require.NoError(t, session.run(context.Background(), &ExecuteCodeRequest{
+		Code:    `printf '%s' "$SPLIT_MARKER_VAR"`,
+		Timeout: 5 * time.Second,
+		Hooks: ExecuteResultHook{
+			OnExecuteStdout: func(fragment string) { got.WriteString(fragment) },
+		},
+	}))
+	require.Equal(t, "kept", got.String())
 }
 
 // Env values may carry a literal CR byte (dash quotes export -p values
@@ -1093,4 +1141,42 @@ func TestBashSession_SignalKillEmitsError(t *testing.T) {
 	require.Equal(t, "-1", gotErr.EValue)
 	require.NotNil(t, gotErr.ExitCode, "expected exit_code for a signal-killed shell")
 	require.Equal(t, -1, *gotErr.ExitCode)
+}
+
+func collectLineFragments(t *testing.T, input string) []outputPiece {
+	t.Helper()
+	var fragments []outputPiece
+	err := scanLineFragments(strings.NewReader(input), func(fragment string, complete bool) {
+		fragments = append(fragments, outputPiece{fragment, complete})
+	})
+	require.NoError(t, err)
+	return fragments
+}
+
+func TestScanLineFragments_SplitsLongLine(t *testing.T) {
+	long := strings.Repeat("a", maxScanLineBytes+10)
+	fragments := collectLineFragments(t, long+"\nnext")
+	require.Equal(t, []outputPiece{
+		{long[:maxScanLineBytes], false},
+		{long[maxScanLineBytes:] + "\n", true},
+		{"next", true},
+	}, fragments)
+}
+
+func TestScanLineFragments_LineOfExactlyMaxBytes(t *testing.T) {
+	long := strings.Repeat("a", maxScanLineBytes)
+	fragments := collectLineFragments(t, long+"\r\n")
+	require.Equal(t, []outputPiece{
+		{long + "\r", true},
+		{"\n", true},
+	}, fragments)
+}
+
+func TestScanLineFragments_DoesNotSplitRune(t *testing.T) {
+	// The odd prefix puts the piece boundary inside a two-byte rune.
+	long := "a" + strings.Repeat("é", maxScanLineBytes/2)
+	fragments := collectLineFragments(t, long)
+	require.Len(t, fragments, 2)
+	require.Len(t, fragments[0].text, maxScanLineBytes-1)
+	require.Equal(t, long, fragments[0].text+fragments[1].text)
 }

@@ -100,6 +100,8 @@ def sync_detailed(
     Stdout event text preserves the original line endings (`\n`, `\r`, or `\r\n`). Concatenate
     text from the stdout events to recover the run's output; blank lines appear as events
     containing only the line ending, and the final event may be an unterminated fragment.
+    A line longer than 16 MiB is split across several events, and only the last of them
+    ends with the line ending.
 
     Args:
         session_id (str):
@@ -140,6 +142,8 @@ def sync(
     Stdout event text preserves the original line endings (`\n`, `\r`, or `\r\n`). Concatenate
     text from the stdout events to recover the run's output; blank lines appear as events
     containing only the line ending, and the final event may be an unterminated fragment.
+    A line longer than 16 MiB is split across several events, and only the last of them
+    ends with the line ending.
 
     Args:
         session_id (str):
@@ -175,6 +179,8 @@ async def asyncio_detailed(
     Stdout event text preserves the original line endings (`\n`, `\r`, or `\r\n`). Concatenate
     text from the stdout events to recover the run's output; blank lines appear as events
     containing only the line ending, and the final event may be an unterminated fragment.
+    A line longer than 16 MiB is split across several events, and only the last of them
+    ends with the line ending.
 
     Args:
         session_id (str):
@@ -213,6 +219,8 @@ async def asyncio(
     Stdout event text preserves the original line endings (`\n`, `\r`, or `\r\n`). Concatenate
     text from the stdout events to recover the run's output; blank lines appear as events
     containing only the line ending, and the final event may be an unterminated fragment.
+    A line longer than 16 MiB is split across several events, and only the last of them
+    ends with the line ending.
 
     Args:
         session_id (str):

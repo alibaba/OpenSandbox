@@ -17,7 +17,6 @@
 package runtime
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -708,37 +707,12 @@ func (r *IsolatedRunner) RunInIsolatedSession(ctx context.Context, id string, co
 // scanUntilMarker reads stdout lines until the end marker is found.
 // Returns the exit code from the marker line.
 func scanUntilMarker(ctx context.Context, stdout io.ReadCloser, runMarker string, onStdout StdoutCallback) (int, error) {
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-
-	var exitCode int
-	markerSeen := false
+	scanner := &runOutputScanner{marker: runMarker, onStdout: onStdout}
+	var scanErr error
 	scanDone := make(chan struct{})
 	go func() {
 		defer close(scanDone)
-		for scanner.Scan() {
-			line := scanner.Text()
-			// The marker may appear mid-line if the previous command's
-			// output didn't end with a newline (e.g. cat of a file
-			// without trailing newline).
-			if idx := strings.Index(line, runMarker); idx >= 0 {
-				markerSeen = true
-				if idx > 0 && onStdout != nil {
-					onStdout(line[:idx])
-				}
-				markerPart := line[idx:]
-				parts := strings.Fields(markerPart)
-				if len(parts) >= 2 {
-					if code, convErr := strconv.Atoi(parts[1]); convErr == nil {
-						exitCode = code
-					}
-				}
-				return
-			}
-			if onStdout != nil {
-				onStdout(line)
-			}
-		}
+		scanErr = scanOutputLines(stdout, scanner.onLine)
 	}()
 
 	select {
@@ -750,13 +724,64 @@ func scanUntilMarker(ctx context.Context, stdout io.ReadCloser, runMarker string
 		return 0, ctx.Err()
 	}
 
-	if err := scanner.Err(); err != nil {
-		return 0, fmt.Errorf("read stdout: %w", err)
+	if scanErr != nil {
+		return 0, fmt.Errorf("read stdout: %w", scanErr)
 	}
-	if !markerSeen {
+	if !scanner.markerSeen {
 		return 1, fmt.Errorf("session process exited without end marker (process may have died or called exit)")
 	}
-	return exitCode, nil
+	return scanner.exitCode, nil
+}
+
+// runOutputScanner forwards a run's output lines and stops at the end marker
+// line that follows them.
+type runOutputScanner struct {
+	marker   string
+	onStdout StdoutCallback
+
+	// carry holds the end of an unfinished piece of a long line, joined with
+	// the next piece: either a tail that may start a split marker, or the
+	// marker whose exit code is still to come.
+	carry      string
+	markerSeen bool
+	exitCode   int
+}
+
+// onLine handles one piece from scanOutputLines and reports whether to keep
+// scanning.
+func (s *runOutputScanner) onLine(line string, complete bool) bool {
+	line = s.carry + line
+	s.carry = ""
+	// The marker may appear mid-line if the previous command's output didn't
+	// end with a newline (e.g. cat of a file without trailing newline).
+	if idx := strings.Index(line, s.marker); idx >= 0 {
+		if idx > 0 {
+			s.emit(line[:idx])
+		}
+		if !complete {
+			s.carry = line[idx:]
+			return true
+		}
+		s.markerSeen = true
+		parts := strings.Fields(line[idx:])
+		if len(parts) >= 2 {
+			if code, err := strconv.Atoi(parts[1]); err == nil {
+				s.exitCode = code
+			}
+		}
+		return false
+	}
+	if !complete {
+		line, s.carry = holdBackMarkerPrefix(line, s.marker)
+	}
+	s.emit(line)
+	return true
+}
+
+func (s *runOutputScanner) emit(text string) {
+	if s.onStdout != nil {
+		s.onStdout(text)
+	}
 }
 
 // DeleteIsolatedSession destroys the session.

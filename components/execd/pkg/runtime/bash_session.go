@@ -353,7 +353,19 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 		emit(fragment)
 	}
 
-	scanErr := scanLineFragments(stdoutR, handleFragment)
+	// carry holds the tail of an unfinished piece of a long line: the wrapper's
+	// env-dump marker follows output that lacks a trailing newline on the same
+	// line, so it can be split across two pieces. The scanner always passes
+	// another fragment after an unfinished piece, so carry is never left over.
+	var carry string
+	scanErr := scanLineFragments(stdoutR, func(fragment string, complete bool) {
+		fragment = carry + fragment
+		carry = ""
+		if !complete {
+			fragment, carry = holdBackMarkerPrefix(fragment, envDumpStartMarker)
+		}
+		handleFragment(fragment)
+	})
 	if inEnv {
 		flushEnvRecord()
 	}
@@ -388,16 +400,13 @@ func (s *bashSession) run(ctx context.Context, request *ExecuteCodeRequest) erro
 	return reportRunResult(request, waitErr, exitCode, startAt)
 }
 
-// maxScanLineBytes bounds the buffer for a single output fragment without a
-// line ending, matching the former bufio.Scanner cap; exceeding it fails the
-// run instead of buffering without limit.
-const maxScanLineBytes = 16 * 1024 * 1024
-
 // scanLineFragments reads r and calls onFragment for each fragment terminated
 // by \n or \r, passing the terminator through; a final unterminated fragment
-// is flushed at EOF. Concatenating the fragments reproduces the exact byte
-// stream, including blank lines and \r-only progress output.
-func scanLineFragments(r io.Reader, onFragment func(string)) error {
+// is flushed at EOF. A line longer than maxScanLineBytes is passed in pieces
+// with complete=false for all but the last piece; pieces never split a UTF-8
+// sequence. Concatenating the fragments reproduces the exact byte stream,
+// including blank lines and \r-only progress output.
+func scanLineFragments(r io.Reader, onFragment func(fragment string, complete bool)) error {
 	buf := make([]byte, 64*1024)
 	var pending []byte
 	for {
@@ -406,15 +415,19 @@ func scanLineFragments(r io.Reader, onFragment func(string)) error {
 			b := buf[i]
 			pending = append(pending, b)
 			if b == '\n' || b == '\r' {
-				onFragment(string(pending))
+				onFragment(string(pending), true)
 				pending = pending[:0]
-			} else if len(pending) >= maxScanLineBytes {
-				return fmt.Errorf("output line exceeds %d bytes", maxScanLineBytes)
+			} else if len(pending) > maxScanLineBytes {
+				// The byte just read stays pending, so the last piece is never
+				// empty.
+				cut := lastRuneBoundary(pending[:maxScanLineBytes])
+				onFragment(string(pending[:cut]), false)
+				pending = pending[:copy(pending, pending[cut:])]
 			}
 		}
 		if readErr != nil {
 			if len(pending) > 0 {
-				onFragment(string(pending))
+				onFragment(string(pending), true)
 			}
 			if errors.Is(readErr, io.EOF) {
 				return nil
