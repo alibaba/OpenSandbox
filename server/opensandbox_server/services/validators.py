@@ -76,11 +76,11 @@ def _is_valid_label_key(key: str) -> bool:
         # when the prefix uses its full 253-character allowance; this is valid.
         if len(prefix) > 253:
             return False
-        if not DNS_SUBDOMAIN_RE.match(prefix):
+        if not DNS_SUBDOMAIN_RE.fullmatch(prefix):
             return False
     else:
         name = key
-    if len(name) > 63 or not LABEL_NAME_RE.match(name):
+    if len(name) > 63 or not LABEL_NAME_RE.fullmatch(name):
         return False
     return True
 
@@ -88,7 +88,7 @@ def _is_valid_label_key(key: str) -> bool:
 def _is_valid_label_value(value: str) -> bool:
     if len(value) > 63:
         return False
-    return bool(LABEL_VALUE_RE.match(value))
+    return bool(LABEL_VALUE_RE.fullmatch(value))
 
 
 def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
@@ -291,7 +291,7 @@ def ensure_valid_volume_name(name: str) -> None:
                 "message": f"Volume name '{name}' exceeds maximum length of 63 characters.",
             },
         )
-    if not VOLUME_NAME_RE.match(name):
+    if not VOLUME_NAME_RE.fullmatch(name):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
@@ -459,7 +459,7 @@ def ensure_valid_pvc_name(claim_name: str) -> None:
                 "message": f"PVC claim name '{claim_name}' exceeds maximum length of 253 characters.",
             },
         )
-    if not K8S_RESOURCE_NAME_RE.match(claim_name):
+    if not K8S_RESOURCE_NAME_RE.fullmatch(claim_name):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={
