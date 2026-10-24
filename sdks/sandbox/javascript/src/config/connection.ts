@@ -296,13 +296,11 @@ function createTimedFetch(opts: {
           )
         : undefined;
 
-    const onAbort = () =>
-      ac.abort((requestSignal as any)?.reason ?? new Error("Aborted"));
-    if (requestSignal) {
-      if (requestSignal.aborted) onAbort();
-      else
-        requestSignal.addEventListener("abort", onAbort, { once: true } as any);
-    }
+    // Caller cancellation covers the response body too; only the SDK's
+    // response-header deadline is cleared when fetch resolves.
+    const signal = requestSignal
+      ? AbortSignal.any([requestSignal, ac.signal])
+      : ac.signal;
 
     // Best-effort: attach the SDK host's own IP so the server can see the
     // client's self-reported address. Applied per request (never overriding a
@@ -314,7 +312,7 @@ function createTimedFetch(opts: {
     const reqInput = withIp.input;
     const mergedInit: RequestInit = {
       ...(withIp.init ?? {}),
-      signal: ac.signal,
+      signal,
     };
 
     if (debug) {
@@ -349,8 +347,6 @@ function createTimedFetch(opts: {
       return res;
     } finally {
       if (t) clearTimeout(t);
-      if (requestSignal)
-        requestSignal.removeEventListener("abort", onAbort as any);
     }
   };
 }

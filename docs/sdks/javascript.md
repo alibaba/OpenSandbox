@@ -477,6 +477,7 @@ The `ConnectionConfig` class manages API server connection settings.
 
 ::: info Runtime Notes
 - In browsers, the SDK uses the global `fetch` implementation.
+- A caller-provided `AbortSignal` remains active while reading the response body, including SSE streams and download responses. Signal composition uses the standard `AbortSignal.any` API, which must be available in the runtime.
 - `requestTimeoutSeconds` bounds the wait for a response: it stops applying once the response headers arrive (streaming responses are not cut off). It never caps a healthy file upload body, which can legitimately take longer than the timeout; on Node.js a stalled upload, or an upload that gets no response headers within the timeout once the body has been sent, is aborted instead of hanging (the Go SDK's `ResponseHeaderTimeout` contract).
 - In Node.js, every `Sandbox` and `SandboxManager` clones the base `ConnectionConfig` via `withTransportIfMissing()`, so each instance gets an isolated `undici` keep-alive pool. Call `sandbox.close()` or `manager.close()` when you are done so the SDK can release the associated agent.
 :::
