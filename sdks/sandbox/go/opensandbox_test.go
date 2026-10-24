@@ -2431,6 +2431,39 @@ func TestWatchMetrics_ContextCancel(t *testing.T) {
 	}
 }
 
+func TestExecution_Text(t *testing.T) {
+	tests := []struct {
+		name   string
+		stdout []string
+		want   string
+	}{
+		{name: "no events"},
+		{name: "terminated lines", stdout: []string{"a\n", "b\n"}, want: "a\nb\n"},
+		{name: "CRLF lines", stdout: []string{"a\r\n", "b\r\n"}, want: "a\r\nb\r\n"},
+		{name: "split CRLF boundaries", stdout: []string{"a\r", "\n", "b\r", "\n"}, want: "a\r\nb\r\n"},
+		{name: "CR lines", stdout: []string{"a\r", "b\r"}, want: "a\rb\r"},
+		{name: "mixed line endings", stdout: []string{"a\n", "b\r\n", "c\r", "d"}, want: "a\nb\r\nc\rd"},
+		{name: "blank lines", stdout: []string{"\n", "a\n", "\n", "b\n", "\n"}, want: "\na\n\nb\n\n"},
+		{name: "unterminated final fragment", stdout: []string{"a\n", "b"}, want: "a\nb"},
+		{name: "single terminated event", stdout: []string{"hello\n"}, want: "hello\n"},
+		{name: "single unterminated event", stdout: []string{"hello"}, want: "hello"},
+		{name: "single empty event", stdout: []string{""}},
+		{name: "legacy stripped lines", stdout: []string{"a", "b"}, want: "a\nb"},
+		{name: "legacy blank lines", stdout: []string{"", "a", "", "b", ""}, want: "\na\n\nb\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := &Execution{}
+			for _, text := range tc.stdout {
+				exec.Stdout = append(exec.Stdout, OutputMessage{Text: text})
+			}
+			if got := exec.Text(); got != tc.want {
+				t.Errorf("Text() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestExecution_ProcessStreamEvents(t *testing.T) {
 	// Test the full Execution aggregation pipeline with all event types
 	exec := &Execution{}

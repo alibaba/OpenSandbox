@@ -99,7 +99,10 @@ func (e *Execution) Text() string {
 	var b strings.Builder
 	for i, m := range e.Stdout {
 		if i > 0 {
-			b.WriteByte('\n')
+			previous := e.Stdout[i-1].Text
+			if !strings.HasSuffix(previous, "\n") && !strings.HasSuffix(previous, "\r") {
+				b.WriteByte('\n')
+			}
 		}
 		b.WriteString(m.Text)
 	}

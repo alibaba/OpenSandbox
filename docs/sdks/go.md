@@ -75,6 +75,8 @@ The following snippets go inside a function returning `error`, with the live `sa
 
 ### Run a command with streaming output
 
+`Execution.Text()` combines stdout events while preserving their line-ending bytes and any unterminated final fragment. It inserts a newline between events only when the preceding event ends in neither `\n` nor `\r`, preserving ordinary legacy stripped-line output without appending a final terminator. A trailing `\r` is always treated as a line ending, including when an older producer retained it as content while stripping another terminator.
+
 Use structured callbacks for normal command output:
 
 ```go
