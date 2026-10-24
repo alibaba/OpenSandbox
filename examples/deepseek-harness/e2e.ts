@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { accessSync, constants, lstatSync, closeSync, openSync, realpathSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, lstatSync, closeSync, openSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type {} from '@deepseek-ai/dsh-tools';
@@ -16,6 +16,16 @@ import type { BoundSandbox, HeadlessSession } from '@opensandbox/deepseek-harnes
 import { summarizeRun, toolFailed } from './outcome.js';
 
 class ConfigError extends Error {}
+/** Source build input only; this does not inspect the remote deployment's version. */
+function readFastSandboxSourcePin(): string {
+  try {
+    const lines = readFileSync(new URL('../../manifests/third-party/fast-sandbox.commit', import.meta.url), 'utf8')
+      .split(/\r?\n/).filter(line => line.startsWith('commit:'));
+    const match = lines.length === 1 && /^commit:[ \t]*([0-9a-f]{40})$/.exec(lines[0]!);
+    if (match) return match[1]!;
+  } catch { /* Keep local paths and manifest contents out of diagnostics. */ }
+  throw new ConfigError('The source checkout must contain one valid fast-sandbox commit pin.');
+}
 export interface E2eConfig {
   domain: string; protocol: 'http' | 'https'; apiKey: string; templateId: string;
   sessionId: string; remoteCwd: string; timeoutSeconds: number;
@@ -201,7 +211,7 @@ export async function runE2e(config: E2eConfig, signal?: AbortSignal): Promise<E
   const evidence: E2eEvidence = {schemaVersion: 2, mode: 'real', success: false, startedAt: new Date().toISOString(), finishedAt: '',
     versions: {integration: '0.1.0', node: process.version, opensandboxSdk: '1.1.1', dsh: '0.2.1-alpha.1', cordis: '4.0.5-alpha.1',
       opensandboxSourceBaseline: '4a7fcba5a4ded67e3856180936371673d390399b', dshSourceReference: '5badb15009ae1756c3afe0ae0cef1faafc290ccc',
-      fastSandboxSourcePin: 'b702fbe71593df4f36b591e540445c251a698e7c'}, stages: [],
+      fastSandboxSourcePin: readFastSandboxSourcePin(), fastSandboxSourcePinScope: 'source-checkout-only'}, stages: [],
     cleanup: {creationOutcome: 'known', creationRequestIds: [], sessionsDisposed: true, managerClosed: true, sandboxes: []}, failures: []};
   const runId = randomUUID(), note = `dsh-e2e-${runId}.note.txt`, binary = `dsh-e2e-${runId}.binary.bin`;
   const primaryMarker = `primary-${runId}`, secondaryMarker = `secondary-${runId}`, notePath = `${config.remoteCwd}/${note}`;

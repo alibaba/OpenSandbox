@@ -15,10 +15,17 @@ import type { GenerateOptions, LlmAdapter } from '@deepseek-ai/dsh-llm';
 import type { BoundSandbox, HeadlessSession, SdkFacade, OpenOptions } from '@opensandbox/deepseek-harness';
 
 const boundary = vi.hoisted(() => ({create: vi.fn(), connect: vi.fn(), manager: vi.fn(), session: vi.fn(), openCalls: [] as {kind: string}[],
+  sourcePin: undefined as string | Error | undefined,
   failCreateRoute: false, failBindingKill: false, ignorePluginAbort: false, crossRead: false, hostLeak: false, inaccessibleHost: false}));
 vi.mock('node:fs', async original => {
   const actual = await original<typeof import('node:fs')>();
-  return {...actual, lstatSync: (...args: Parameters<typeof actual.lstatSync>) => {
+  return {...actual, readFileSync: (...args: Parameters<typeof actual.readFileSync>) => {
+    if (boundary.sourcePin !== undefined && String(args[0]).endsWith('/manifests/third-party/fast-sandbox.commit')) {
+      if (boundary.sourcePin instanceof Error) throw boundary.sourcePin;
+      return boundary.sourcePin;
+    }
+    return actual.readFileSync(...args);
+  }, lstatSync: (...args: Parameters<typeof actual.lstatSync>) => {
     if (boundary.inaccessibleHost && String(args[0]).includes('dsh-e2e-')) throw Object.assign(new Error('private permission detail'), {code: 'EACCES'});
     return actual.lstatSync(...args);
   }};
@@ -124,12 +131,29 @@ function fakeNetwork(f: ReturnType<typeof fixture>) {
   return {items, manager, controls, status, interrupt};
 }
 afterEach(() => {vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.clearAllMocks(); boundary.openCalls.length = 0;
+  boundary.sourcePin = undefined;
   boundary.failCreateRoute = boundary.failBindingKill = boundary.ignorePluginAbort = boundary.crossRead = boundary.hostLeak = boundary.inaccessibleHost = false;
   for (const root of roots.splice(0)) rmSync(root, {recursive: true, force: true});});
 
 describe('OFFLINE review regressions R1-R6', () => {
+  it.each(['b702fbe71593df4f36b591e540445c251a698e7c', '221311024a7ec89a2ed12506ec719f7f5b9f766b'])('reports checkout pin %s without claiming a remote version', async pin => {
+    boundary.sourcePin = `# source checkout build input\ncommit: ${pin}\n`;
+    const f = fixture(); fakeNetwork(f); const evidence = await runE2e(f.config());
+    expect(evidence.success).toBe(true);
+    expect(evidence.versions.fastSandboxSourcePin).toBe(pin);
+    expect(evidence.versions.fastSandboxSourcePinScope).toBe('source-checkout-only');
+  });
+  it.each(['', 'commit: main\n', 'commit: secret-do-not-publish\n',
+    `commit: ${'a'.repeat(40)}\ncommit: ${'b'.repeat(40)}\n`, new Error('private source path')])('rejects missing or malformed source pin before SDK activity: %s', async pin => {
+    boundary.sourcePin = pin;
+    const f = fixture(); fakeNetwork(f);
+    await expect(runE2e(f.config())).rejects.toThrow('The source checkout must contain one valid fast-sandbox commit pin.');
+    expect(boundary.manager).not.toHaveBeenCalled(); expect(boundary.create).not.toHaveBeenCalled();
+  });
   it('traverses actual plugin create-template and binding.kill with healthy raw SDK', async () => {
     const f = fixture(), n = fakeNetwork(f), e = await runE2e(f.config()); expect(e.success).toBe(true);
+    const pin = readFileSync(new URL('../../../manifests/third-party/fast-sandbox.commit', import.meta.url), 'utf8');
+    expect(e.versions.fastSandboxSourcePin).toBe(/^commit: (.*)$/m.exec(pin)![1]);
     expect(boundary.openCalls.filter(c => c.kind === 'create-template')).toHaveLength(2);
     expect(n.items.every(item => item.kill.mock.calls.length === 1)).toBe(true); expect(n.manager.killSandbox).not.toHaveBeenCalled();
   });
@@ -468,10 +492,24 @@ describe('OFFLINE Ubuntu preflight and documentation contracts', () => {
     for (const block of doc.matchAll(/```sh\n([\s\S]*?)```/g)) {
       expect(spawnSync('bash', ['-n'], {input: block[1], encoding: 'utf8'}).status).toBe(0);
     }
-    const pin = readFileSync(new URL('../../../manifests/third-party/fast-sandbox.commit', import.meta.url), 'utf8');
-    expect(doc).toContain(/^commit: (.*)$/m.exec(pin)![1]);
+    expect(doc).toContain('fastSandboxSourcePinScope: source-checkout-only');
     const official = readFileSync(new URL('../../../scripts/fast-sandbox-env/integration-env.sh', import.meta.url), 'utf8');
     for (const action of ['up', 'status', 'sdk-e2e', 'down']) expect(official).toContain(`${action})`);
     expect(readFileSync(new URL('../../../docs/.vitepress/config.mts', import.meta.url), 'utf8')).toContain('/examples/deepseek-harness-ubuntu');
+  });
+  it.each(['b702fbe71593df4f36b591e540445c251a698e7c', '221311024a7ec89a2ed12506ec719f7f5b9f766b',
+    '', 'main', `small\ncommit: ${'a'.repeat(40)}`, `${'a'.repeat(40)}\ncommit: ${'b'.repeat(40)}`,
+    `${'a'.repeat(40)}\ncommit:`, `${'a'.repeat(40)}\ncommit: \t`])('checks the documented source-pin guard without provisioning: %s', pin => {
+    const f = fixture(), manifest = join(f.root, 'manifests', 'third-party', 'fast-sandbox.commit');
+    mkdirSync(join(f.root, 'manifests', 'third-party'), {recursive: true});
+    const contents = `commit: ${pin}\n`; writeFileSync(manifest, contents);
+    const doc = readFileSync(new URL('../../../docs/examples/deepseek-harness-ubuntu.md', import.meta.url), 'utf8');
+    const expressions = doc.match(/^(?:FSB_SOURCE_PIN=|\[\[ "\$FSB_SOURCE_PIN"|\[\[ "\$\(grep -c '\^commit:').*$/gm)!;
+    expect(expressions).toHaveLength(3);
+    const result = spawnSync('bash', ['-euo', 'pipefail', '-c', expressions.join('\n') + '\nprintf "%s\\n" "$FSB_SOURCE_PIN"'], {
+      env: {...process.env, SOURCE_ROOT: f.root}, encoding: 'utf8'});
+    expect(result.status).toBe(/^[0-9a-f]{40}$/.test(pin) ? 0 : 1);
+    if (result.status === 0) expect(result.stdout.trim()).toBe(pin);
+    expect(readFileSync(manifest, 'utf8')).toBe(contents);
   });
 });

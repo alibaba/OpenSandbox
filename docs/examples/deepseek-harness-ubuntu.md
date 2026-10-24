@@ -64,8 +64,12 @@ The reviewed integration is based on OpenSandbox
 `4a7fcba5a4ded67e3856180936371673d390399b`, with dsh source reference
 `5badb15009ae1756c3afe0ae0cef1faafc290ccc`. Run the reviewed integration commit,
 not the baseline alone, which does not contain the new consumer. Record its actual
-HEAD. The repository's `manifests/third-party/fast-sandbox.commit` must contain
-`b702fbe71593df4f36b591e540445c251a698e7c`.
+HEAD. The earlier validation baseline used fast-sandbox
+`b702fbe71593df4f36b591e540445c251a698e7c`. For the checkout being validated,
+read the exact build input from `manifests/third-party/fast-sandbox.commit`, as
+the official environment script does; do not replace a newer pin with that
+historical baseline. Review any pin/script changes before provisioning and
+record fresh results rather than transferring earlier validation to a new pin.
 
 - Node `^22.19.0 || >=24.0.0`, pnpm `11.7.0`
 - OpenSandbox SDK `1.1.1`, dsh packages `0.2.1-alpha.1`, Cordis `4.0.5-alpha.1`
@@ -119,7 +123,9 @@ git clone --no-hardlinks "$SOURCE_CHECKOUT" "$SOURCE_ROOT"
 git -C "$SOURCE_ROOT" checkout --detach "$(git -C "$SOURCE_CHECKOUT" rev-parse HEAD)"
 test -z "$(git -C "$SOURCE_ROOT" status --porcelain)"
 git -C "$SOURCE_ROOT" merge-base --is-ancestor 4a7fcba5a4ded67e3856180936371673d390399b HEAD
-test "$(sed -n 's/^commit: //p' "$SOURCE_ROOT/manifests/third-party/fast-sandbox.commit")" = b702fbe71593df4f36b591e540445c251a698e7c
+[[ "$(grep -c '^commit:' "$SOURCE_ROOT/manifests/third-party/fast-sandbox.commit")" = 1 ]]
+FSB_SOURCE_PIN="$(sed -n 's/^commit:[[:space:]]*//p' "$SOURCE_ROOT/manifests/third-party/fast-sandbox.commit")"
+[[ "$FSB_SOURCE_PIN" =~ ^[0-9a-f]{40}$ ]]
 
 export FSB_DIR="$WORK/fast-sandbox"
 export XFS_LOOP_FILE="$WORK/fast-sandbox.img"
@@ -175,6 +181,13 @@ configuration outside WORK. Never capture the complete environment:
 Expected: an isolated checkout at the reviewed HEAD, correct source pin, and a
 credential-free version/path record. Retain this checkout and configuration for
 `down`; do not upgrade the teardown script between `up` and `down`.
+
+The plugin E2E report reads `versions.fastSandboxSourcePin` from this same
+checkout manifest, with `fastSandboxSourcePinScope: source-checkout-only`.
+It is a source build input, not an observed version of an existing remote
+OpenSandbox service. Verify the deployed source/image provenance separately;
+neither this field nor a passing tool call proves the server uses that pin.
+Missing, duplicate or malformed checkout pins fail before any SDK activity.
 
 ## 2. Read-only host preflight
 
