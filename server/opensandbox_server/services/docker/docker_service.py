@@ -34,7 +34,7 @@ from threading import Lock, Thread, Timer
 from typing import Any, Dict, Optional
 
 import docker
-from docker.errors import DockerException, NotFound as DockerNotFound
+from docker.errors import APIError, DockerException, NotFound as DockerNotFound
 from fastapi import HTTPException, status
 
 from opensandbox_server.extensions import (
@@ -1094,6 +1094,54 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
         container = self._get_container_by_sandbox_id(sandbox_id)
         return self._container_to_sandbox(container, sandbox_id)
 
+    def _raise_if_lifecycle_race(
+        self, sandbox_id: str, exc: DockerException, operation: str,
+    ) -> None:
+        """Map known main-container races using the sequential error envelope."""
+        if isinstance(exc, DockerNotFound):
+            if operation == "delete":
+                self._cleanup_egress_sidecar(sandbox_id)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": SandboxErrorCodes.SANDBOX_NOT_FOUND,
+                    "message": f"Sandbox {sandbox_id} not found.",
+                },
+            ) from exc
+        if not isinstance(exc, APIError) or exc.status_code != status.HTTP_409_CONFLICT:
+            return
+
+        message = (exc.explanation or "").lower()
+        conflicts = {
+            "delete": (
+                ("removal of container " in message and "already in progress" in message)
+                or "already being removed" in message,
+                SandboxErrorCodes.SANDBOX_DELETE_FAILED,
+                "Sandbox deletion is already in progress.",
+            ),
+            "pause": (
+                "already paused" in message or "is not running" in message,
+                SandboxErrorCodes.SANDBOX_NOT_RUNNING,
+                "Sandbox is not in a running state.",
+            ),
+            "resume": (
+                "is not paused" in message or "is not running" in message,
+                SandboxErrorCodes.SANDBOX_NOT_PAUSED,
+                "Sandbox is not in a paused state.",
+            ),
+        }
+        matches, code, conflict_message = conflicts[operation]
+        if not matches:
+            return
+        if operation != "delete":
+            # The state error may have raced with removal; use the usual 404
+            # if the sandbox has disappeared since the operation failed.
+            self._get_container_by_sandbox_id(sandbox_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": code, "message": conflict_message},
+        ) from exc
+
     def delete_sandbox(self, sandbox_id: str) -> None:
         try:
             container = self._get_container_by_sandbox_id(sandbox_id)
@@ -1123,6 +1171,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             with self._docker_operation("remove sandbox container", sandbox_id):
                 container.remove(force=True)
         except DockerException as exc:
+            self._raise_if_lifecycle_race(sandbox_id, exc, "delete")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -1167,6 +1216,7 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             with self._docker_operation("pause sandbox container", sandbox_id):
                 container.pause()
         except DockerException as exc:
+            self._raise_if_lifecycle_race(sandbox_id, exc, "pause")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
@@ -1301,6 +1351,8 @@ class DockerSandboxService(DockerDiagnosticsMixin, DockerRuntimeMixin, DockerVol
             message = f"Failed to resume {failed_component}: {str(exc)}"
             if rollback_errors:
                 message += f"; rollback failed: {'; '.join(rollback_errors)}"
+            elif resuming_main:
+                self._raise_if_lifecycle_race(sandbox_id, exc, "resume")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={

@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, cast
 from unittest.mock import MagicMock, patch
 
-from docker.errors import DockerException, NotFound as DockerNotFound
+from docker.errors import APIError, DockerException, NotFound as DockerNotFound
 import pytest
 from fastapi import HTTPException, status
 from pydantic import SecretStr, ValidationError
@@ -2128,6 +2128,226 @@ def _lifecycle_container(
         "State": {"Running": running, "Paused": paused},
     }
     return container
+
+
+@pytest.mark.parametrize("failed_operation", ["kill", "remove"])
+@pytest.mark.parametrize(
+    "docker_status, message, expected_status",
+    [
+        (409, "removal of container main-id is already in progress", 409),
+        (409, "container main-id is already being removed", 409),
+        (404, "No such container: main-id", 404),
+        (409, "unrelated daemon conflict", 500),
+        (500, "removal of container main-id is already in progress", 500),
+    ],
+)
+def test_delete_sandbox_concurrent_outcomes(
+    tmp_path, failed_operation, docker_status, message, expected_status,
+):
+    service = DockerSandboxService(config=_app_config())
+    service._metadata_store = DockerMetadataStore(tmp_path / "metadata")
+    expiration = datetime.now(timezone.utc) + timedelta(hours=1)
+    service._metadata_store.set_expiration("sandbox-id", expiration)
+    main = _lifecycle_container("main-id", running=True, paused=False)
+    error_type = DockerNotFound if docker_status == 404 else APIError
+    error = error_type(message, response=MagicMock(status_code=docker_status), explanation=message)
+    getattr(main, failed_operation).side_effect = error
+
+    with (
+        patch.object(service, "_get_container_by_sandbox_id", return_value=main),
+        patch.object(service, "_cleanup_egress_sidecar") as cleanup_sidecar,
+        patch.object(service, "_remove_expiration_tracking") as remove_tracking,
+        patch.object(service, "_cleanup_windows_oem_volume") as cleanup_oem,
+        patch.object(service, "_release_ossfs_mounts") as release_mounts,
+        patch.object(service, "_cleanup_managed_volumes") as cleanup_volumes,
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        service.delete_sandbox("sandbox-id")
+
+    assert exc_info.value.status_code == expected_status
+    if expected_status == 404:
+        assert exc_info.value.detail == {
+            "code": SandboxErrorCodes.SANDBOX_NOT_FOUND,
+            "message": "Sandbox sandbox-id not found.",
+        }
+        cleanup_sidecar.assert_called_once_with("sandbox-id")
+    else:
+        assert exc_info.value.detail["code"] == SandboxErrorCodes.SANDBOX_DELETE_FAILED
+        assert exc_info.value.detail["message"]
+        cleanup_sidecar.assert_not_called()
+        if expected_status == 500:
+            assert str(error) in exc_info.value.detail["message"]
+    if failed_operation == "kill":
+        main.remove.assert_not_called()
+    remove_tracking.assert_not_called()
+    cleanup_oem.assert_not_called()
+    release_mounts.assert_not_called()
+    cleanup_volumes.assert_not_called()
+    assert service._metadata_store.get_expiration("sandbox-id") == expiration.isoformat()
+
+
+@pytest.mark.parametrize("operation", ["pause", "resume"])
+@pytest.mark.parametrize(
+    "docker_status, outcome, disappeared, expected_status",
+    [
+        (409, "state conflict", False, 409),
+        (409, "not running", False, 409),
+        (409, "not running", True, 404),
+        (404, "No such container: main-id", True, 404),
+        (409, "unrelated daemon conflict", False, 500),
+        (500, "state conflict", False, 500),
+    ],
+)
+def test_pause_resume_sandbox_concurrent_outcomes(
+    operation, docker_status, outcome, disappeared, expected_status,
+):
+    service = DockerSandboxService(config=_app_config())
+    resuming = operation == "resume"
+    main = _lifecycle_container("main-id", running=True, paused=resuming, egress_expected=True)
+    sidecar = _lifecycle_container("sidecar-id", running=True, paused=resuming)
+    if outcome == "state conflict":
+        message = "container main-id is not paused" if resuming else "container main-id is already paused"
+    elif outcome == "not running":
+        message = "container main-id is not running"
+    else:
+        message = outcome
+    error_type = DockerNotFound if docker_status == 404 else APIError
+    error = error_type(message, response=MagicMock(status_code=docker_status), explanation=message)
+    getattr(main, "unpause" if resuming else "pause").side_effect = error
+    missing = HTTPException(status_code=404, detail={
+        "code": SandboxErrorCodes.SANDBOX_NOT_FOUND,
+        "message": "Sandbox sandbox-id not found.",
+    })
+    lookup_results = [main, missing if disappeared else main]
+
+    with (
+        patch.object(service, "_get_container_by_sandbox_id", side_effect=lookup_results),
+        patch.object(service, "_get_egress_sidecars", return_value=[sidecar]),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        getattr(service, f"{operation}_sandbox")("sandbox-id")
+
+    assert exc_info.value.status_code == expected_status
+    if expected_status == 404:
+        assert exc_info.value.detail == missing.detail
+    elif expected_status == 409:
+        assert exc_info.value.detail == {
+            "code": SandboxErrorCodes.SANDBOX_NOT_PAUSED if resuming else SandboxErrorCodes.SANDBOX_NOT_RUNNING,
+            "message": f"Sandbox is not in a {'paused' if resuming else 'running'} state.",
+        }
+    else:
+        assert exc_info.value.detail == {
+            "code": SandboxErrorCodes.SANDBOX_RESUME_FAILED if resuming else SandboxErrorCodes.SANDBOX_PAUSE_FAILED,
+            "message": f"Failed to {operation} sandbox container: {error}",
+        }
+    if resuming:
+        main.unpause.assert_called_once_with()
+        # Keep the existing sidecar rollback even when the main failure maps to 409/404.
+        sidecar.unpause.assert_called_once_with()
+        sidecar.pause.assert_called_once_with()
+    else:
+        main.pause.assert_called_once_with()
+        sidecar.pause.assert_not_called()
+        main.unpause.assert_not_called()
+
+
+@pytest.mark.parametrize("docker_status", [404, 409])
+def test_resume_sandbox_race_with_failed_rollback_remains_500(docker_status):
+    service = DockerSandboxService(config=_app_config())
+    main = _lifecycle_container("main-id", running=True, paused=True, egress_expected=True)
+    sidecar = _lifecycle_container("sidecar-id", running=True, paused=True)
+    error_type = DockerNotFound if docker_status == 404 else APIError
+    main.unpause.side_effect = error_type(
+        "resume raced", response=MagicMock(status_code=docker_status),
+        explanation="container main-id is not paused",
+    )
+    sidecar.pause.side_effect = DockerException("rollback failed")
+
+    with (
+        patch.object(service, "_get_container_by_sandbox_id", return_value=main),
+        patch.object(service, "_get_egress_sidecars", return_value=[sidecar]),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        service.resume_sandbox("sandbox-id")
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail["code"] == SandboxErrorCodes.SANDBOX_RESUME_FAILED
+    assert "rollback failed" in exc_info.value.detail["message"]
+    sidecar.pause.assert_called_once_with()
+
+
+@pytest.mark.parametrize("operation", ["pause", "resume"])
+@pytest.mark.parametrize("docker_status", [404, 409])
+def test_pause_resume_sidecar_race_preserves_failure_and_rollback(operation, docker_status):
+    service = DockerSandboxService(config=_app_config())
+    resuming = operation == "resume"
+    main = _lifecycle_container("main-id", running=True, paused=resuming, egress_expected=True)
+    sidecar = _lifecycle_container("sidecar-id", running=True, paused=resuming)
+    error_type = DockerNotFound if docker_status == 404 else APIError
+    getattr(sidecar, "unpause" if resuming else "pause").side_effect = error_type(
+        "sidecar raced", response=MagicMock(status_code=docker_status),
+        explanation="container sidecar-id is not paused" if resuming else "container sidecar-id is already paused",
+    )
+
+    with (
+        patch.object(service, "_get_container_by_sandbox_id", return_value=main),
+        patch.object(service, "_get_egress_sidecars", return_value=[sidecar]),
+        pytest.raises(HTTPException) as exc_info,
+    ):
+        getattr(service, f"{operation}_sandbox")("sandbox-id")
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail["code"] == (
+        SandboxErrorCodes.SANDBOX_RESUME_FAILED if resuming else SandboxErrorCodes.SANDBOX_PAUSE_FAILED
+    )
+    assert "egress sidecar" in exc_info.value.detail["message"]
+    if resuming:
+        main.unpause.assert_not_called()
+    else:
+        main.pause.assert_called_once_with()
+        main.unpause.assert_called_once_with()
+
+
+@pytest.mark.parametrize("docker_status", [404, 409, 500])
+def test_expire_sandbox_removal_race_retries_without_releasing_stale_mounts(tmp_path, docker_status):
+    service = DockerSandboxService(config=_app_config())
+    service._metadata_store = DockerMetadataStore(tmp_path / "metadata")
+    service._metadata_store.set_expiration("sandbox-id", datetime.now(timezone.utc) - timedelta(seconds=1))
+    main = _lifecycle_container("main-id", running=True, paused=False)
+    main.attrs["Config"]["Labels"][SANDBOX_OSSFS_MOUNTS_LABEL] = '["shared-mount"]'
+    error_type = DockerNotFound if docker_status == 404 else APIError
+    error = error_type(
+        "removal raced", response=MagicMock(status_code=docker_status),
+        explanation="removal of container main-id is already in progress",
+    )
+    main.remove.side_effect = error
+    if docker_status == 404:
+        main.kill.side_effect = error
+    missing = HTTPException(status_code=404, detail={
+        "code": SandboxErrorCodes.SANDBOX_NOT_FOUND,
+        "message": "Sandbox sandbox-id not found.",
+    })
+
+    with (
+        patch.object(service, "_get_container_by_sandbox_id", side_effect=[main, missing]),
+        patch.object(service, "_schedule_expiration") as schedule,
+        patch.object(service, "_cleanup_egress_sidecar") as cleanup_sidecar,
+        patch.object(service, "_release_ossfs_mounts") as release_mounts,
+        patch.object(service, "_cleanup_managed_volumes") as cleanup_volumes,
+    ):
+        service._expire_sandbox("sandbox-id")
+        schedule.assert_called_once()
+        assert schedule.call_args.args[0] == "sandbox-id"
+        assert schedule.call_args.kwargs == {"update_expiration": False}
+        cleanup_sidecar.assert_not_called()
+        cleanup_volumes.assert_not_called()
+        assert service._metadata_store.get_expiration("sandbox-id") is not None
+
+        # A concurrent DELETE finished cleanup. Retry must re-read ownership.
+        service._expire_sandbox("sandbox-id")
+        cleanup_sidecar.assert_called_once_with("sandbox-id")
+        release_mounts.assert_not_called()
+        assert service._metadata_store.get_expiration("sandbox-id") is None
 
 
 def test_pause_sandbox_pauses_main_before_egress_sidecar():
