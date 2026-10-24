@@ -524,6 +524,26 @@ def ensure_valid_ossfs_volume(ossfs: "OSSFS") -> None:
         )
 
 
+def normalize_network_policy_action(action: Optional[str], field: str) -> str:
+    """Normalize action names using the existing Fast Sandbox deny fallback."""
+    normalized = (action or "deny").strip().lower() or "deny"
+    if normalized not in ("allow", "deny"):
+        raise HTTPException(400, detail=f"{field} must be allow or deny.")
+    return normalized
+
+
+def normalize_network_policy_actions(network_policy: Optional["NetworkPolicy"]) -> None:
+    """Validate create-time actions before runtime dispatch, preserving omitted defaults."""
+    if network_policy is None:
+        return
+    if network_policy.default_action is not None:
+        network_policy.default_action = normalize_network_policy_action(
+            network_policy.default_action, "networkPolicy.defaultAction"
+        )
+    for rule in network_policy.egress:
+        rule.action = normalize_network_policy_action(rule.action, "networkPolicy rule action")
+
+
 def ensure_egress_configured(
     network_policy: Optional["NetworkPolicy"],
     egress_config: Optional["EgressConfig"],

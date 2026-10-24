@@ -176,6 +176,7 @@ class NetworkRule(BaseModel):
 
     class Config:
         populate_by_name = True
+        extra = "forbid"
 
 
 class NetworkPolicy(BaseModel):
@@ -195,6 +196,7 @@ class NetworkPolicy(BaseModel):
 
     class Config:
         populate_by_name = True
+        extra = "forbid"
 
 
 class CredentialProxyConfig(BaseModel):
