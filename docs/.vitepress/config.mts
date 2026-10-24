@@ -211,6 +211,7 @@ export default defineConfig({
           text: "Guides",
           items: [
             { text: "Overview", link: "/guides/" },
+            { text: "Native DeepSeek Harness", link: "/guides/deepseek-harness" },
             { text: "Credential Vault", link: "/guides/credential-vault" },
             {
               text: "Chained Upstream Proxy",
@@ -286,6 +287,9 @@ export default defineConfig({
             { text: "Claude Code", link: "/examples/claude-code" },
             { text: "Gemini CLI", link: "/examples/gemini-cli" },
             { text: "Codex CLI", link: "/examples/codex-cli" },
+            { text: "DeepSeek Harness plugin", link: "/guides/deepseek-harness" },
+            { text: "DeepSeek Harness embedded", link: "/examples/deepseek-harness" },
+            { text: "DeepSeek Harness Ubuntu", link: "/examples/deepseek-harness-ubuntu" },
             { text: "Apply Model Patches", link: "/examples/apply-patch" },
             { text: "OpenCode", link: "/examples/opencode" },
             { text: "Qwen Code", link: "/examples/qwen-code" },
