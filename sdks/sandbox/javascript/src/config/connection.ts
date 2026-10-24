@@ -434,7 +434,7 @@ export class ConnectionConfig {
 
     const headers: Record<string, string> = { ...(opts.headers ?? {}) };
     // Attach API key via header unless the user already provided one.
-    if (this.apiKey && !headers["OPEN-SANDBOX-API-KEY"]) {
+    if (this.apiKey && !Object.keys(headers).some((name) => name.toLowerCase() === "open-sandbox-api-key")) {
       headers["OPEN-SANDBOX-API-KEY"] = this.apiKey;
     }
     // Best-effort user-agent (Node only).

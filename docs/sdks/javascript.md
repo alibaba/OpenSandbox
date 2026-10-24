@@ -475,6 +475,8 @@ await sandbox.patchMetadata({ project: "demo", "obsolete-key": null });
 
 The `ConnectionConfig` class manages API server connection settings.
 
+An explicit `OPEN-SANDBOX-API-KEY` in `headers` takes precedence over `apiKey` and its environment fallback, regardless of header-name casing. This also applies to the low-level lifecycle and diagnostic clients.
+
 ::: info Runtime Notes
 - In browsers, the SDK uses the global `fetch` implementation.
 - `requestTimeoutSeconds` bounds the wait for a response: it stops applying once the response headers arrive (streaming responses are not cut off). It never caps a healthy file upload body, which can legitimately take longer than the timeout; on Node.js a stalled upload, or an upload that gets no response headers within the timeout once the body has been sent, is aborted instead of hanging (the Go SDK's `ResponseHeaderTimeout` contract).

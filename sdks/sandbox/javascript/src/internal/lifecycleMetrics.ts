@@ -85,7 +85,7 @@ export function reportSandboxCreateMetric(
     };
     if (
       connectionConfig.apiKey &&
-      !headers["OPEN-SANDBOX-API-KEY"]
+      !Object.keys(headers).some((name) => name.toLowerCase() === "open-sandbox-api-key")
     ) {
       headers["OPEN-SANDBOX-API-KEY"] = connectionConfig.apiKey;
     }
