@@ -474,6 +474,8 @@ sandbox.patchMetadata(patch);
 
 The `ConnectionConfig` class manages API server connection settings.
 
+An explicit `OPEN-SANDBOX-API-KEY` entry in `headers` takes precedence over `apiKey` and its environment fallback, regardless of header-name casing. The header is attached only when a key is configured. This also applies to SDK telemetry requests.
+
 ::: info Transfer timeouts
 `requestTimeout` bounds each transport phase - connecting, waiting for response headers, and waiting for more of a response body - but it never caps a healthy file upload or download that keeps making progress. A transfer that stalls for longer than the timeout, or an upload that gets no response headers within it after the body has been sent, fails instead of hanging (the Go SDK's `ResponseHeaderTimeout` contract). An explicit `RetryPolicy.overallDeadline` still caps the whole transfer.
 :::
