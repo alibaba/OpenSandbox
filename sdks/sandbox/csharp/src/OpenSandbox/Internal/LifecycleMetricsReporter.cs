@@ -111,9 +111,9 @@ internal static class LifecycleMetricsReporter
                     }
                     request.Headers.TryAddWithoutValidation(header.Key, header.Value);
                 }
-                if (!string.IsNullOrEmpty(connectionConfig.ApiKey))
+                if (!string.IsNullOrEmpty(connectionConfig.ApiKey) &&
+                    !request.Headers.Contains(Constants.ApiKeyHeader))
                 {
-                    request.Headers.Remove(Constants.ApiKeyHeader);
                     request.Headers.TryAddWithoutValidation(Constants.ApiKeyHeader, connectionConfig.ApiKey);
                 }
 

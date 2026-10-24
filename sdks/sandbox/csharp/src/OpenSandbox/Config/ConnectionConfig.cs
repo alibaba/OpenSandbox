@@ -272,8 +272,11 @@ public sealed class ConnectionConfig
 
         var headers = new Dictionary<string, string>(options.Headers ?? new Dictionary<string, string>());
 
-        // Add API key header if not already present
-        if (!string.IsNullOrEmpty(ApiKey) && !headers.ContainsKey(Constants.ApiKeyHeader))
+        // Add API key header if not already present. HTTP header names are
+        // case-insensitive, so any casing of the header set by the caller
+        // suppresses the default; an explicit empty value is preserved.
+        if (!string.IsNullOrEmpty(ApiKey) &&
+            !headers.Keys.Any(k => string.Equals(k, Constants.ApiKeyHeader, StringComparison.OrdinalIgnoreCase)))
         {
             headers[Constants.ApiKeyHeader] = ApiKey;
         }

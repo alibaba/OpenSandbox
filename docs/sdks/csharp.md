@@ -487,6 +487,8 @@ await sandbox.PatchMetadataAsync(new Dictionary<string, string?>
 
 The `ConnectionConfig` class manages API server connection settings.
 
+An explicit `OPEN-SANDBOX-API-KEY` entry in `Headers` takes precedence over `ApiKey` and its environment fallback, regardless of header-name casing. A present-but-empty entry is preserved rather than replaced with the configured key. This also applies to SDK telemetry requests.
+
 ::: info Transfer timeouts
 `RequestTimeoutSeconds` bounds the wait for response headers, not the whole transfer. The deadline starts with the request (so the connect phase is bounded too), is cleared while the request body is written, and is re-armed once the body of the current hop has been sent: a healthy upload or download that keeps making progress is never cut off by it. A download that gets no response headers, or an upload that gets none within the timeout after its body has been sent, fails with a `TaskCanceledException` carrying a `TimeoutException` instead of hanging (the Go SDK's `ResponseHeaderTimeout` contract); a caller cancellation still surfaces as an `OperationCanceledException` with the caller's token. All non-transfer calls keep the whole-call request timeout.
 
