@@ -94,7 +94,21 @@ function validate(options: OpenOptions): void {
   if (options.kind === 'create-image' && !(typeof options.image === 'string' ? options.image : options.image?.uri)) {
     throw new BindingError('invalid_options', 'An explicit image is required.');
   }
-  if (options.kind === 'create-template' && (!options.templateId || !Number.isFinite(options.timeoutSeconds) || options.timeoutSeconds <= 0)) {
+  if (options.kind === 'create-image') {
+    // SDK 1.1.0 throws untyped Errors for these before any create POST.
+    if (options.timeoutSeconds != null && !Number.isFinite(options.timeoutSeconds)) {
+      throw new BindingError('invalid_options', 'Image TTL must be finite or null.');
+    }
+    for (const volume of options.volumes ?? []) {
+      if ([volume.host, volume.pvc, volume.ossfs].filter(backend => backend != null).length !== 1) {
+        throw new BindingError('invalid_options', 'Each volume must specify exactly one backend.');
+      }
+      if (volume.host && !/^([/]|[A-Za-z]:[\\/])/.test(volume.host.path)) {
+        throw new BindingError('invalid_options', 'Volume host paths must be absolute.');
+      }
+    }
+  }
+  if (options.kind === 'create-template' && (!options.templateId?.trim() || !Number.isFinite(options.timeoutSeconds) || options.timeoutSeconds <= 0)) {
     throw new BindingError('invalid_options', 'A template ID and a positive finite template TTL are required.');
   }
   if (options.kind === 'connect' && !options.sandboxId) {
@@ -169,9 +183,11 @@ export function createBindingOpener(sdk: SdkFacade): (options: OpenOptions) => P
         const connectOptions = sdkOptions as Extract<OpenOptions, { kind: 'connect' }>;
         sandbox = await sdk.connect({ ...connectOptions, skipHealthCheck: true });
       }
-    } catch {
+    } catch (failure) {
       if (kind === 'connect') throw new BindingOpenError('connect', (options as Extract<OpenOptions, { kind: 'connect' }>).sandboxId, 'not-owned');
-      throw new UnknownOutcomeError('create', correlationId);
+      // The SDK can fail after POST success while resolving endpoints or cleaning up.
+      // HTTP status alone is not proof that no sandbox was allocated.
+      throw new UnknownOutcomeError('create', correlationId, undefined, failure);
     }
     const binding = new ManagedBinding({ version: 1, sessionId, sandboxId: sandbox.id, remoteCwd }, sandbox);
     let stage: OpenStage = 'readiness';

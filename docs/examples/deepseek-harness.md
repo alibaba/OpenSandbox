@@ -160,8 +160,21 @@ rules. Caller metadata must still meet the selected backend's requirements.
 Use this key with the UUID in `UnknownOutcomeError.correlationId` when inspecting
 service metadata; do not use the earlier dotted key for new creation requests.
 
-Creation failure with no returned ID has unknown outcome; inspect service evidence
-before retrying. Known created IDs failing readiness/preflight use the integration's
+Creation failure with no returned ID retains `UnknownOutcomeError`. Its optional
+`classification`, `statusCode`, and allowlisted `sdkCode` preserve safe SDK facts:
+for example, HTTP 429 / `FSB::API_ERROR` reports `classification: 'api'`, while a
+typed SDK `INVALID_ARGUMENT` reports `classification: 'invalid-argument'`.
+No raw message, body, headers, request ID, URL, or cause is retained. Unrecognized
+failures remain `transport`; the integration does not guess from error text.
+Known SDK option checks (blank template ID, nonfinite image TTL, and invalid volume
+backend/host path) fail locally with `BindingError.code: 'invalid_options'` before
+opening. Image TTL `null` remains supported.
+
+These diagnostics do not prove that creation had no side effects: SDK 1.1.0 also
+resolves endpoints after a successful POST and may throw an API error at that
+stage, including after unsuccessful SDK cleanup. Inspect service evidence before
+retrying; neither an HTTP status nor a validation classification permits automatic
+retry. Known created IDs failing readiness/preflight use the integration's
 owned cleanup policy; connected sandboxes are never implicitly deleted by opening
 failure. Unknown mutations/launch/deletion outcomes are not automatically retried.
 A failed kill is reported as unconfirmed deletion. Retain the printed descriptor

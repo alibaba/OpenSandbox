@@ -29,10 +29,25 @@ describe('installable package and exported consumers', () => {
     execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/build.mjs', import.meta.url))], {cwd: root});
     const output = execFileSync(process.execPath, [fileURLToPath(script)], {
       cwd: root, encoding: 'utf8', timeout: 180_000, maxBuffer: 8 * 1024 * 1024,
+      // The checker must override inherited config, not silently skip peer validation.
+      env: {...process.env, npm_config_force: 'true', npm_config_legacy_peer_deps: 'true'},
     });
     expect(output).toContain('isolated tarball import, helper asset and TypeScript consumer: PASS');
     expect(output).toContain('tarball allowlist: PASS');
+    expect(output).toContain('strict consumer dependency tree: PASS');
   }, 180_000);
+  it('publishes exact compatible Cordis plugin peers instead of relying on the source lockfile', () => {
+    // dsh-shell-env -> dsh-app-boot uses prerelease ranges that also admit stable
+    // plugins, whose stable Cordis peer excludes the pinned alpha runtime.
+    expect(manifest.dependencies['@deepseek-ai/cordis']).toBe('4.0.5-alpha.1');
+    for (const [name, version] of Object.entries({
+      '@deepseek-ai/cordis-plugin-group': '1.0.5-alpha.1',
+      '@deepseek-ai/cordis-plugin-include': '1.0.10-alpha.1',
+      '@deepseek-ai/cordis-plugin-loader': '1.0.6-alpha.1',
+    })) {
+      expect(manifest.dependencies[name], `${name} must be pinned in the published dependencies`).toBe(version);
+    }
+  });
   it('rejects stale compiled fixture/secret modules in an actual packed tarball', () => {
     const scratch = mkdtempSync(join(tmpdir(), 'dsh-pack-negative-')), copy = join(scratch, 'package');
     try {

@@ -19,7 +19,7 @@ const run = (command, args, cwd) => execFileSync(command, args, {
   env: {...process.env, npm_config_cache: join(tmpdir(), 'opensandbox-dsh-pack-npm-cache')},
 });
 try {
-  const packed = JSON.parse(run(npm, ['pack', '--json', '--ignore-scripts', '--pack-destination', scratch], packageDir))[0];
+  const packed = JSON.parse(run(npm, ['pack', '--json', '--ignore-scripts', '--force=false', '--pack-destination', scratch], packageDir))[0];
   const paths = packed.files.map(file => file.path).sort();
   // Deliberately closed module set: stale compiled fixture/credential modules must fail.
   const modules = ['binding', 'errors', 'filesystem', 'headless', 'helper-client', 'index', 'output', 'sdk-transport', 'shell', 'types'];
@@ -38,7 +38,8 @@ try {
     name: 'isolated-dsh-tarball-consumer', private: true, type: 'module',
     dependencies: { [manifest.name]: `file:${join(scratch, packed.filename)}`, typescript: '5.9.3', '@types/node': '24.10.0' },
   }, null, 2));
-  run(npm, ['install', '--ignore-scripts', '--strict-peer-deps', '--no-audit', '--no-fund',
+  // Consumer installs must not inherit peer-resolution bypasses from local npm config.
+  run(npm, ['install', '--ignore-scripts', '--strict-peer-deps', '--legacy-peer-deps=false', '--force=false', '--no-audit', '--no-fund',
     '--registry=https://registry.npmjs.org', `--cache=${join(tmpdir(), 'opensandbox-dsh-pack-npm-cache')}`], scratch);
   const installed = await assertTarballInstall(scratch);
   const sourceHelper = await readFile(join(packageDir, 'remote', 'fs_helper.py'));
@@ -48,6 +49,8 @@ try {
     const actual = JSON.parse(await readFile(join(scratch, 'node_modules', name, 'package.json'), 'utf8'));
     assert.equal(actual.version, version, `Wrong pinned dependency: ${name}`);
   }
+  run(npm, ['ls', '--all', '--json', '--legacy-peer-deps=false', '--force=false'], scratch);
+  console.log('strict consumer dependency tree: PASS (no peer-resolution bypasses or consumer overrides)');
   await writeFile(join(scratch, 'consumer.mjs'), `
 import assert from 'node:assert/strict';
 import * as api from '@opensandbox/deepseek-harness';

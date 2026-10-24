@@ -17,7 +17,8 @@ pnpm run build
 pnpm run pack:check
 ```
 
-`pack:check` installs an actual tarball into a disposable consumer, validates
+`pack:check` installs an actual tarball into a disposable consumer with strict
+peer resolution and no consumer overrides, validates the full dependency tree,
 compiled ESM exports and TypeScript declarations, and checks the bundled Python
 helper and the package file allowlist. It uses the official npm registry for
 consumer dependencies. It does not publish the package or contact a sandbox/model.
@@ -35,10 +36,21 @@ host providers or implicit model route are installed.
 
 ## Maintainer note: alpha upgrades
 
-Treat the exact dsh pins and Cordis pin as one tested compatibility set. When
-upgrading, update all 15 distinct dsh packages across the integration and example
-manifests together with the compatible Cordis version, and regenerate both
-lockfiles. Run the full integration and example test suites, helper tests,
-typechecks/builds, package-consumption checks, and real OpenSandbox + fast-sandbox
+Treat the exact dsh, Cordis, and Cordis plugin pins as one tested compatibility
+set. The published dependencies pin `cordis-plugin-group`, `cordis-plugin-include`,
+and `cordis-plugin-loader` because dsh's alpha peer ranges also admit their stable
+versions, which require stable Cordis and cannot use this package's alpha runtime.
+A source lockfile alone does not protect tarball consumers from that resolution.
+When upgrading, update all 15 distinct dsh packages across the integration and
+example manifests together with the compatible Cordis and plugin versions, and
+regenerate both lockfiles. Run the full integration and example test suites,
+helper tests, typechecks/builds, package-consumption checks, and real OpenSandbox + fast-sandbox
 E2E validation before publishing the upgraded package. Record the tested versions
 and validation results.
+
+For the next coordinated upgrade to dsh `0.2.1-rc.2`, also add
+`@deepseek-ai/dsh-working-directory` to the private headless context after
+`fs.ready()`, configured with `{ defaultDirectory: descriptor.remoteCwd }`.
+That release moves working-directory ownership out of `dsh-fs`; version bumps
+alone are not sufficient. This alpha integration keeps its current runtime
+composition until that upgrade is implemented and validated together.

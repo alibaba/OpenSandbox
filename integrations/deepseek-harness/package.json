@@ -26,6 +26,9 @@
   "dependencies": {
     "@alibaba-group/opensandbox": "1.1.0",
     "@deepseek-ai/cordis": "4.0.5-alpha.1",
+    "@deepseek-ai/cordis-plugin-group": "1.0.5-alpha.1",
+    "@deepseek-ai/cordis-plugin-include": "1.0.10-alpha.1",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.6-alpha.1",
     "@deepseek-ai/dsh-agent": "0.2.1-alpha.1",
     "@deepseek-ai/dsh-agent-loop": "0.2.1-alpha.1",
     "@deepseek-ai/dsh-fs": "0.2.1-alpha.1",
