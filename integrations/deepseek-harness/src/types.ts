@@ -21,9 +21,10 @@ export interface BoundSandbox {
   readonly sandbox: Sandbox;
   readonly state: BindingState;
   /**
-   * Terminally close this SDK handle; never delete the remote sandbox.
-   * A reused transport-initialized ConnectionConfig shares its dispatcher: closing
-   * this handle also closes that dispatcher for other bindings using it.
+   * Terminally close this binding; never delete the remote sandbox.
+   * A reused transport-initialized ConnectionConfig shares its dispatcher but remains
+   * caller-owned by default. Only SDK-owned transports are closed; connect can opt into
+   * closing shared transport with ownsTransport: true, affecting every sharer.
    */
   close(): Promise<void>;
   /** Delete while this handle is open; explicit retries are allowed until close. After close, reconnect explicitly with fresh connection configuration. */
@@ -39,11 +40,13 @@ interface BindingOptions {
   /** Absolute Linux sandbox path. It is never mapped to a host path. */
   remoteCwd: string;
   /**
-   * SDK 1.1.0 gives plain options and fresh, uninitialized instances independent transports.
-   * Reusing a transport-initialized instance (including sandbox.connectionConfig) shares
-   * its dispatcher; any binding close, including failed opening cleanup, closes it for all.
-   * Prefer plain options or independently initialized instances per binding, and fresh
-   * configuration after close. Caller fields are not changed or frozen by this integration.
+   * SDK 1.1.1 gives plain options and fresh, uninitialized instances independent transports.
+   * A transport-initialized instance shares its dispatcher but stays caller-owned by default:
+   * binding close and failed opening cleanup leave it open. The owner must close it when done.
+   * Connect's ownsTransport: true opts into closing it; closing that binding or any sandbox
+   * that owns the same transport invalidates every sharer. Prefer plain options or
+   * independent configurations, and fresh configuration after the owner closes the transport.
+   * Caller fields are not changed or frozen by this integration.
    */
   connectionConfig: ConnectionConfig | ConnectionConfigOptions;
   signal?: AbortSignal;
@@ -60,5 +63,5 @@ export type OpenOptions = BindingOptions & (
   | ({ kind: 'connect' } & Omit<SandboxConnectOptions, ManagedSdkOptions>)
 );
 
-/** Explicit injection boundary. Its signatures are the published SDK 1.1.0 facade. */
+/** Explicit injection boundary. Its signatures are the published SDK 1.1.1 facade. */
 export type SdkFacade = Pick<typeof Sandbox, 'create' | 'createFromTemplate' | 'connect'>;

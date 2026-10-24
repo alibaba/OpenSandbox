@@ -98,7 +98,7 @@ describe('bound lifecycle', () => {
     expect(JSON.stringify(binding)).not.toMatch(/do-not-serialize|secret|private.example/);
   });
 
-  it.each(['plain-options', 'uninitialized-instance', 'initialized-instance'] as const)('preserves actual SDK transport ownership for %s without mutating caller fields', async mode => {
+  it.each(['plain-options', 'uninitialized-instance', 'initialized-instance', 'initialized-owned-override'] as const)('preserves actual SDK transport ownership for %s without mutating caller fields', async mode => {
     const http = offlineSdkHttp();
     const plain = { domain: 'offline.invalid', apiKey: 'test-only-key', headers: { 'X-Caller': 'unchanged' }, disableMetrics: true };
     const config = mode === 'plain-options' ? plain : mode === 'uninitialized-instance'
@@ -106,29 +106,39 @@ describe('bound lifecycle', () => {
     const fields = () => Object.fromEntries(Object.entries(config).filter(([key]) => !key.startsWith('_')).map(([key, value]) =>
       [key, key === 'headers' ? { ...value as Record<string, string> } : value]));
     const before = fields(), headers = config.headers;
-    const make = (id: string) => openBinding({ kind: 'connect', sandboxId: id, sessionId: id, remoteCwd: '/workspace', connectionConfig: config });
+    const make = (id: string) => openBinding({ kind: 'connect', sandboxId: id, sessionId: id, remoteCwd: '/workspace', connectionConfig: config,
+      ...(mode === 'initialized-owned-override' ? { ownsTransport: true } : {}) });
     const a = await make('shared-a'), b = await make('shared-b');
     try {
-      const shared = mode === 'initialized-instance';
+      const shared = mode === 'initialized-instance' || mode === 'initialized-owned-override';
       expect(a.sandbox.connectionConfig === b.sandbox.connectionConfig).toBe(shared);
       expect(a.sandbox.connectionConfig === config).toBe(shared);
       expect(a.sandbox.connectionConfig.fetch === b.sandbox.connectionConfig.fetch).toBe(shared);
       expect(fields()).toEqual(before); expect(config.headers).toBe(headers); expect(Object.isFrozen(config)).toBe(false);
       await a.close(); expect(b.state).toBe('open');
       const operation = new SdkTransport(b.sandbox).run(['true']);
-      if (shared) await expect(operation).rejects.toMatchObject({ code: 'sdk_transport_failed' });
+      if (mode === 'initialized-owned-override') await expect(operation).rejects.toMatchObject({ code: 'sdk_transport_failed' });
       else await expect(operation).resolves.toMatchObject({ exitCode: 0, complete: { executionTimeMs: 1 } });
-      expect(http.closedAttempts).toBe(shared ? 1 : 0);
-    } finally { await a.close(); await b.close(); }
+      expect(http.closedAttempts).toBe(mode === 'initialized-owned-override' ? 1 : 0);
+      if (mode === 'initialized-instance') {
+        await (config as ConnectionConfig).closeTransport();
+        await expect(new SdkTransport(b.sandbox).run(['true'])).rejects.toMatchObject({ code: 'sdk_transport_failed' });
+        expect(http.closedAttempts).toBe(1);
+      }
+    } finally {
+      await a.close(); await b.close();
+      if (config instanceof ConnectionConfig) await config.closeTransport();
+    }
     expect(fields()).toEqual(before); expect(config.headers).toBe(headers);
   });
-  it('documents initialized transport sharing at the public option, close and lifecycle boundaries', () => {
+  it('documents initialized transport ownership at the public option, close and lifecycle boundaries', () => {
     const source = readFileSync(new URL('../src/types.ts', import.meta.url), 'utf8');
     const close = source.slice(source.indexOf('export interface BoundSandbox'), source.indexOf('toJSON(): BindingDescriptor'));
     const option = source.slice(source.indexOf('interface BindingOptions'), source.indexOf('signal?: AbortSignal'));
     const guide = readFileSync(new URL('../../../docs/examples/deepseek-harness.md', import.meta.url), 'utf8');
     for (const text of [close, option, guide]) {
       expect(text).toContain('transport-initialized'); expect(text).toContain('dispatcher');
+      expect(text).toContain('ownsTransport: true');
     }
     for (const phrase of ['uninitialized', 'plain options', 'failed opening', 'fresh configuration']) expect(guide).toContain(phrase);
   });

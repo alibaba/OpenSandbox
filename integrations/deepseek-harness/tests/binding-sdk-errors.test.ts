@@ -88,13 +88,13 @@ describe('safe SDK opening diagnostics', () => {
     expect(error).toMatchObject({ code: 'outcome_unknown', classification: 'api', statusCode: 429 });
     expect(requests.filter(request => request.method === 'POST')).toHaveLength(1);
     expect(requests.some(request => request.path.includes('/already-created/endpoints/'))).toBe(true);
-    // SDK 1.1.0 attempts deletion internally, but its failure must not be called rollback.
+    // SDK 1.1.1 attempts deletion internally, but its failure must not be called rollback.
     expect(requests.filter(request => request.method === 'DELETE')).toEqual([{ path: '/v1/sandboxes/already-created', method: 'DELETE' }]);
     assertSafe(error);
   });
 });
 
-// SDK 1.1.0 uses untyped Errors for these checks, so reject them before opening.
+// SDK 1.1.1 uses untyped Errors for these checks, so reject them before opening.
 describe('local SDK option validation', () => {
   it.each([undefined, null, 0, 300])('preserves SDK-supported image TTL %s and absolute host paths', async timeoutSeconds => {
     const fake = fakeSandbox(); const sdk = fakeSdk(fake.sandbox);

@@ -17,7 +17,7 @@ and [examples](https://github.com/opensandbox-group/OpenSandbox/tree/main/exampl
 ## Pinned prerequisites
 
 - Node `^22.19.0 || >=24.0.0`; pnpm `11.7.0`
-- OpenSandbox JavaScript SDK `1.1.0`
+- OpenSandbox JavaScript SDK `1.1.1`
 - DeepSeek Harness packages `0.2.1-alpha.1`; Cordis `4.0.5-alpha.1`
 - Live sandbox: Linux, bash, Python 3.8+ standard library, and an existing writable
   absolute cwd. The integration checks these prerequisites and does not install them.
@@ -109,8 +109,9 @@ and finite. Its local deadline is rounded up to milliseconds and must not exceed
 rejected before any SDK create or connect call; they are not silently capped.
 
 At shutdown the example first disposes the Agent/Context, then performs the
-explicit `DSH_CLEANUP` operation. `close` releases the local SDK handle and leaves
-the remote sandbox alive; reconnect later with `connect`, the same sandbox ID,
+explicit `DSH_CLEANUP` operation. `close` marks the binding closed and releases its
+SDK-owned transport, leaving borrowed transport to its owner and the remote sandbox
+alive; reconnect later with `connect`, the same sandbox ID,
 and fresh SDK configuration. It does not restore the prior in-memory Agent log.
 `kill` deletes the bound sandbox while its handle is open, then closes local
 resources. For attached sandboxes, choose `kill` only when you intend to delete
@@ -141,16 +142,22 @@ For direct Cordis plugin consumers, await `RemoteShell.dispose()` explicitly:
 Cordis logs effect-disposer errors during Context teardown, so successful
 `fiber.dispose()` alone does not prove that remote commands stopped.
 
-Connection ownership follows SDK 1.1.0. Reusing plain options or a fresh,
+Connection ownership follows SDK 1.1.1. Reusing plain options or a fresh,
 uninitialized `ConnectionConfig` gives each binding an independent transport;
 the SDK clones an uninitialized instance before initializing its transport.
-Reusing a transport-initialized `ConnectionConfig`, including another sandbox's
-`connectionConfig`, shares its dispatcher. Closing either binding closes that
-dispatcher for every sharer, including cleanup after a failed opening or attachment.
-Another binding can still report `state: 'open'` while its SDK operations fail.
-Use plain options (as the examples do) or independently initialized configurations
-per binding, and fresh configuration after close. The integration does not change
-or freeze caller configuration fields or override this SDK sharing behavior.
+Reusing a transport-initialized `ConnectionConfig` shares its dispatcher, but the
+borrowing binding does not own it by default. Closing a borrower, including
+cleanup after a failed opening or attachment, leaves that dispatcher open. The
+caller must call `connectionConfig.closeTransport()` after all borrowers finish
+when it initialized that transport itself.
+For `kind: 'connect'`, the inherited SDK option `ownsTransport: true` explicitly
+makes that binding responsible for closing the transport, so its close affects
+every sharer. If the configuration came from a sandbox that owns the transport,
+closing that original owner can also invalidate borrowers. In either
+case, a borrower can still report `state: 'open'` while its SDK operations fail.
+Use plain options (as the examples do) or independent configurations per binding,
+and fresh configuration after the owner closes a transport. The integration does
+not change or freeze caller configuration fields or override SDK ownership.
 
 Both creation modes reserve the metadata key `dsh-binding-request` for a fresh
 request UUID. The integration replaces any caller value for that key without
@@ -170,7 +177,7 @@ Known SDK option checks (blank template ID, nonfinite image TTL, and invalid vol
 backend/host path) fail locally with `BindingError.code: 'invalid_options'` before
 opening. Image TTL `null` remains supported.
 
-These diagnostics do not prove that creation had no side effects: SDK 1.1.0 also
+These diagnostics do not prove that creation had no side effects: SDK 1.1.1 also
 resolves endpoints after a successful POST and may throw an API error at that
 stage, including after unsuccessful SDK cleanup. Inspect service evidence before
 retrying; neither an HTTP status nor a validation classification permits automatic

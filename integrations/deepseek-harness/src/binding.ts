@@ -95,7 +95,7 @@ function validate(options: OpenOptions): void {
     throw new BindingError('invalid_options', 'An explicit image is required.');
   }
   if (options.kind === 'create-image') {
-    // SDK 1.1.0 throws untyped Errors for these before any create POST.
+    // SDK 1.1.1 throws untyped Errors for these before any create POST.
     if (options.timeoutSeconds != null && !Number.isFinite(options.timeoutSeconds)) {
       throw new BindingError('invalid_options', 'Image TTL must be finite or null.');
     }

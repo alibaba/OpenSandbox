@@ -1,6 +1,6 @@
 # DeepSeek Harness integration
 
-Remote-only providers and a private headless session for OpenSandbox SDK 1.1.0
+Remote-only providers and a private headless session for OpenSandbox SDK 1.1.1
 and DeepSeek Harness 0.2.1-alpha.1. Requires Node ^22.19.0 or >=24 and a Linux
 sandbox with bash, Python 3.8+, and an existing writable working directory.
 

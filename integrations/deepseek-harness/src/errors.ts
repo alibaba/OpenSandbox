@@ -52,7 +52,7 @@ export class UnknownOutcomeError extends BindingError {
 /** Close is terminal: this error is local refusal, not evidence of a remote delete attempt. */
 export class BindingClosedError extends BindingError {
   constructor(readonly sandboxId: string) {
-    super('binding_closed', 'This SDK handle is closed. Connect explicitly to the saved sandbox ID with fresh connection configuration before deletion or retry.');
+    super('binding_closed', 'This binding is closed. Connect explicitly to the saved sandbox ID with fresh connection configuration before deletion or retry.');
     this.name = 'BindingClosedError';
   }
 }

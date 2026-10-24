@@ -68,7 +68,7 @@ HEAD. The repository's `manifests/third-party/fast-sandbox.commit` must contain
 `b702fbe71593df4f36b591e540445c251a698e7c`.
 
 - Node `^22.19.0 || >=24.0.0`, pnpm `11.7.0`
-- OpenSandbox SDK `1.1.0`, dsh packages `0.2.1-alpha.1`, Cordis `4.0.5-alpha.1`
+- OpenSandbox SDK `1.1.1`, dsh packages `0.2.1-alpha.1`, Cordis `4.0.5-alpha.1`
 - Go `>=1.25`, Python 3, `uv`, GNU bash/coreutils, git, curl, make, a C compiler,
   jq, openssl, util-linux (`findmnt`, `losetup`), iproute2 (`ss`), `xfsprogs`
 - Reachable Docker daemon, cgroup v2, and readable/writable `/dev/kvm`

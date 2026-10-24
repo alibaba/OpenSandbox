@@ -199,7 +199,7 @@ async function verifyDeleted(manager: SandboxManager, id: string): Promise<Clean
 /** Public SDK forwarding only; local observation deadlines never retry remote operations. */
 export async function runE2e(config: E2eConfig, signal?: AbortSignal): Promise<E2eEvidence> {
   const evidence: E2eEvidence = {schemaVersion: 2, mode: 'real', success: false, startedAt: new Date().toISOString(), finishedAt: '',
-    versions: {integration: '0.1.0', node: process.version, opensandboxSdk: '1.1.0', dsh: '0.2.1-alpha.1', cordis: '4.0.5-alpha.1',
+    versions: {integration: '0.1.0', node: process.version, opensandboxSdk: '1.1.1', dsh: '0.2.1-alpha.1', cordis: '4.0.5-alpha.1',
       opensandboxSourceBaseline: '4a7fcba5a4ded67e3856180936371673d390399b', dshSourceReference: '5badb15009ae1756c3afe0ae0cef1faafc290ccc',
       fastSandboxSourcePin: 'b702fbe71593df4f36b591e540445c251a698e7c'}, stages: [],
     cleanup: {creationOutcome: 'known', creationRequestIds: [], sessionsDisposed: true, managerClosed: true, sandboxes: []}, failures: []};
