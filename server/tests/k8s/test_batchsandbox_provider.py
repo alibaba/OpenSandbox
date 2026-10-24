@@ -1432,7 +1432,10 @@ spec:
         assert result["state"] == "Running"
         assert result["reason"] == "RUNNING"
 
-    def test_get_status_returns_failed_when_pod_unschedulable(self):
+    # The controller keeps phase Pending while no pod is ready; older
+    # BatchSandboxes may carry no phase at all.
+    @pytest.mark.parametrize("phase", [None, "Pending"])
+    def test_get_status_returns_failed_when_pod_unschedulable(self, phase):
         mock_k8s_client = MagicMock()
         provider = BatchSandboxProvider(mock_k8s_client)
         mock_k8s_client.list_pods.return_value = [
@@ -1466,19 +1469,26 @@ spec:
                 "replicas": 1,
                 "ready": 0,
                 "allocated": 0,
-                "selector": "app=sandbox",
             },
             "metadata": {
+                "name": "sandbox-1",
                 "namespace": "test-ns",
                 "creationTimestamp": "2025-12-24T10:00:00Z",
             },
         }
+        if phase is not None:
+            workload["status"]["phase"] = phase
 
         result = provider.get_status(workload)
 
         assert result["state"] == "Failed"
         assert result["reason"] == "POD_PLATFORM_UNSCHEDULABLE"
         assert "didn't match Pod's node affinity" in result["message"]
+        # The controller labels its pods with the BatchSandbox name.
+        mock_k8s_client.list_pods.assert_called_once_with(
+            namespace="test-ns",
+            label_selector="batch-sandbox.sandbox.opensandbox.io/name=sandbox-1",
+        )
 
     def test_get_status_keeps_pending_for_generic_failed_scheduling(self):
         mock_k8s_client = MagicMock()
@@ -1504,9 +1514,9 @@ spec:
                 "replicas": 1,
                 "ready": 0,
                 "allocated": 0,
-                "selector": "app=sandbox",
             },
             "metadata": {
+                "name": "sandbox-1",
                 "namespace": "test-ns",
                 "creationTimestamp": "2025-12-24T10:00:00Z",
             },
@@ -1552,9 +1562,9 @@ spec:
                 "replicas": 1,
                 "ready": 0,
                 "allocated": 0,
-                "selector": "app=sandbox",
             },
             "metadata": {
+                "name": "sandbox-1",
                 "namespace": "test-ns",
                 "creationTimestamp": "2025-12-24T10:00:00Z",
             },
@@ -1602,9 +1612,9 @@ spec:
                 "replicas": 1,
                 "ready": 0,
                 "allocated": 0,
-                "selector": "app=sandbox",
             },
             "metadata": {
+                "name": "sandbox-1",
                 "namespace": "test-ns",
                 "creationTimestamp": "2025-12-24T10:00:00Z",
             },

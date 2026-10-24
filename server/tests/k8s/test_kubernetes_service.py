@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import threading
 import pytest
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
@@ -1047,6 +1048,30 @@ class TestWaitForSandboxReady:
         
         assert result == mock_workload
     
+    @pytest.mark.asyncio
+    async def test_wait_reads_status_off_the_event_loop(self, k8s_service, mock_workload):
+        """get_status may list pods (e.g. to detect an unschedulable platform),
+        a blocking Kubernetes API call that must not run on the event loop."""
+        loop_thread = threading.get_ident()
+        status_threads: list[int] = []
+
+        def get_status(_workload):
+            status_threads.append(threading.get_ident())
+            return {
+                "state": "Running",
+                "reason": "",
+                "message": "Pod is running",
+                "last_transition_at": datetime.now(timezone.utc),
+            }
+
+        k8s_service.workload_provider.get_workload.return_value = mock_workload
+        k8s_service.workload_provider.get_status.side_effect = get_status
+
+        await k8s_service._wait_for_sandbox_ready("test-sandbox-id", timeout_seconds=10)
+
+        assert status_threads
+        assert loop_thread not in status_threads
+
     @pytest.mark.asyncio
     async def test_wait_for_pending_then_running_succeeds(self, k8s_service, mock_workload):
         # Mock state transition: Pending -> Allocated -> Running

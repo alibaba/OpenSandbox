@@ -64,6 +64,9 @@ from opensandbox_server.services.runtime_resolver import SecureRuntimeResolver
 
 logger = logging.getLogger(__name__)
 
+# Label the BatchSandbox controller sets on the pods it creates.
+_BATCHSANDBOX_NAME_LABEL = "batch-sandbox.sandbox.opensandbox.io/name"
+
 
 _PUBLIC_STATE_BY_PHASE = {
     "Pending": "Pending",
@@ -891,15 +894,15 @@ class BatchSandboxProvider(WorkloadProvider):
         )
         if not workload_has_platform_constraints:
             return None
-        status = workload.get("status", {})
-        selector = status.get("selector")
-        namespace = workload.get("metadata", {}).get("namespace")
-        if not selector or not namespace:
+        metadata = workload.get("metadata", {})
+        name = metadata.get("name")
+        namespace = metadata.get("namespace")
+        if not name or not namespace:
             return None
         try:
             pods = self.k8s_client.list_pods(
                 namespace=namespace,
-                label_selector=selector,
+                label_selector=f"{_BATCHSANDBOX_NAME_LABEL}={name}",
             )
         except Exception:
             return None
@@ -990,6 +993,16 @@ class BatchSandboxProvider(WorkloadProvider):
             }
 
         if phase == "Pending":
+            # The controller keeps the phase Pending while the pod cannot be
+            # scheduled, so an impossible platform has to be detected here.
+            unschedulable_message = self._platform_unschedulable_message_from_selector(workload)
+            if unschedulable_message:
+                return {
+                    "state": "Failed",
+                    "reason": "POD_PLATFORM_UNSCHEDULABLE",
+                    "message": unschedulable_message,
+                    "last_transition_at": creation_timestamp,
+                }
             reason, message = phase_map[phase]
             return {
                 "state": _PUBLIC_STATE_BY_PHASE[phase],

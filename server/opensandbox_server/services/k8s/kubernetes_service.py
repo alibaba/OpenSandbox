@@ -459,8 +459,9 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                         await wait_for_change()
                         continue
 
+                    # get_status may list pods, a blocking API call.
                     status_info = _normalize_create_status(
-                        self.workload_provider.get_status(workload)
+                        await asyncio.to_thread(self.workload_provider.get_status, workload)
                     )
                     current_state = status_info["state"]
                     current_reason = status_info["reason"]
@@ -1225,7 +1226,7 @@ class KubernetesSandboxService(K8sDiagnosticsMixin, SandboxService, ExtensionSer
                 )
                 
                 status_info = _normalize_create_status(
-                    self.workload_provider.get_status(workload)
+                    await asyncio.to_thread(self.workload_provider.get_status, workload)
                 )
                 effective_platform = _extract_platform_from_workload(workload)
                 if isinstance(workload, dict):
