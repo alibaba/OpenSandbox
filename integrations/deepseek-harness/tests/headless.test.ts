@@ -273,6 +273,33 @@ describe('private headless composition over published dsh and actual Python help
       vi.useRealTimers(); process.off('unhandledRejection', onUnhandled); endStream.resolve();
     }
   });
+  it('propagates an actual helper unknown outcome on disposal while still cleaning the root Context', async () => {
+    const f = await fixture(), session = await api.createHeadlessSession({ binding: f.binding, adapter: new ScriptedAdapter([]), provider: 'scripted', model: 'offline-model' });
+    cleanups.push(() => session.dispose().catch(() => undefined));
+    const root = session.agent.ctx.root, target = await root.fs.resolve('note.txt');
+    f.controls.dropInit = true; f.controls.dropTerminal = true;
+    const count = f.requestCount(), diagnostic = 'private-helper-content';
+    await expect(root.fs.writeText(target, diagnostic)).rejects.toMatchObject({ outcome: 'unknown', remoteState: 'unknown' });
+    expect(await readFile(f.local('/workspace/note.txt'), 'utf8')).toBe(diagnostic);
+    const original = root.fiber.dispose, phases: string[] = [];
+    vi.spyOn(root.fiber, 'dispose').mockImplementation(async () => {
+      phases.push('root');
+      await expect(root.fs.resolve('note.txt')).rejects.toMatchObject({ code: 'FS_IO_ERROR' });
+      await expect(root.shell.execute(root.shell.resolve({ command: 'true' }))).rejects.toMatchObject({ code: 'disposed' });
+      await original();
+    });
+    const disposing = session.dispose(); expect(session.dispose()).toBe(disposing);
+    const error = await disposing.catch(error => error);
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(error.errors[0]).toMatchObject({ code: 'FS_IO_ERROR', outcome: 'unknown', remoteState: 'unknown', commandId: undefined });
+    expect(inspect(error, { depth: 20 })).not.toContain(diagnostic);
+    expect(phases).toEqual(['root']); expect(root.registry.size).toBe(0);
+    expect(root.get('shell')).toBeUndefined(); expect(root.get('fs')).toBeUndefined();
+    expect(f.requestCount()).toBe(count + 1); expect(await f.artifactRoots()).not.toEqual([]);
+    expect(f.sandbox.kill).not.toHaveBeenCalled(); expect(f.sandbox.close).not.toHaveBeenCalled();
+    expect(f.binding.state).toBe('open');
+    await expect(session.run('Too late.')).rejects.toThrow(/disposed/i);
+  }, 10_000);
   it('rejects a terminal binding before composing anything', async () => {
     const f = await fixture(); await f.binding.close();
     await expect(create(f.binding, new ScriptedAdapter([]))).rejects.toMatchObject({ code: 'binding_closed' });

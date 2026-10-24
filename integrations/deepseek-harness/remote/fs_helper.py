@@ -6,7 +6,7 @@
 Invocation: python3 fs_helper.py REQUEST_FILE RESPONSE_FILE
 Paths/content are JSON data, never commands. Advisory locks serialize cooperating
 helper writers only: ordinary shell writers do not participate in this CAS.
-Persistent per-parent lock files must not be unlinked while waiters may exist.
+Persistent per-parent /tmp lock files must not be unlinked while waiters may exist.
 SIGTERM/SIGINT record cancellation intent; it is checked immediately before
 publication. Publication followed by lost transport is still an unknown outcome.
 """
@@ -33,7 +33,9 @@ MAX_LIST_ENTRIES = 4096
 MAX_SYMLINK_HOPS = 40
 MAX_SAFE_INTEGER = 2 ** 53 - 1
 READ_CHUNK_BYTES = 64 * 1024
-LOCK_DIRECTORY = ".opensandbox-dsh-locks-v1"
+# Fixed sandbox path: TMPDIR may point into the user's worktree. Namespaces are
+# keyed by physical target parent, not uid, so foreign writers fail closed.
+LOCK_DIRECTORY = ".opensandbox-dsh-locks-v2"
 _cancelled = False
 
 
@@ -373,32 +375,61 @@ def _list(target, args):
     return result
 
 
+def _inode(info):
+    return info.st_dev, info.st_ino
+
+
+def _lock_directory(parent_info):
+    key = str(parent_info.st_dev) + ":" + str(parent_info.st_ino)
+    return LOCK_DIRECTORY + "-" + hashlib.sha256(key.encode("ascii")).hexdigest()
+
+
+def _check_lock_entry(directory_fd, name, fd, *, directory=False):
+    info = os.fstat(fd)
+    entry = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+    private_type = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+    if (not private_type or info.st_uid != os.geteuid()
+            or stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600)
+            or _inode(info) != _inode(entry)):
+        _fail("FS_IO_ERROR", "Cooperative lock entry is not stable, private and owned.")
+
+
 @contextmanager
 def _target_lock(target, args):
     _check_cancel(args)
     parent = os.path.dirname(target["path"])
     os.makedirs(parent, exist_ok=True)
-    lock_directory = os.path.join(parent, LOCK_DIRECTORY)
+    parent_fd = root_fd = directory_fd = fd = None
     try:
-        os.mkdir(lock_directory, 0o700)
-        os.chmod(lock_directory, 0o700)
-    except FileExistsError:
-        pass
-    directory_info = os.lstat(lock_directory)
-    if not stat.S_ISDIR(directory_info.st_mode) or directory_info.st_uid != os.geteuid() or stat.S_IMODE(directory_info.st_mode) & 0o077:
-        _fail("FS_IO_ERROR", "Cooperative lock directory is not private and owned.")
-    directory_fd = os.open(lock_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-    fd = None
-    try:
-        name = hashlib.sha256(target["path"].encode("utf-8")).hexdigest() + ".lock"
+        parent_fd = os.open(parent, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW)
+        parent_info = os.fstat(parent_fd)
+        lock_directory = _lock_directory(parent_info)
+        # The parent entry, not the replaceable file inode or path spelling,
+        # identifies cooperating writers (including physical directory aliases).
+        key = str(parent_info.st_dev) + ":" + str(parent_info.st_ino) + ":" + os.path.basename(target["path"])
+        name = hashlib.sha256(key.encode("utf-8")).hexdigest() + ".lock"
+        root_fd = os.open("/tmp", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        root_info = os.fstat(root_fd)
+        if (root_info.st_uid not in (0, os.geteuid())
+                or (root_info.st_mode & 0o022 and not root_info.st_mode & stat.S_ISVTX)):
+            _fail("FS_IO_ERROR", "Cooperative lock root is not protected against replacement.")
+        # This helper is single-threaded. A bounded umask change avoids a
+        # chmod-by-path race when callers start us with a restrictive umask.
+        previous_umask = os.umask(0o077)
         try:
-            fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory_fd)
-            os.fchmod(fd, 0o600)
-        except FileExistsError:
-            fd = os.open(name, os.O_RDWR | os.O_NOFOLLOW, dir_fd=directory_fd)
-        lock_info = os.fstat(fd)
-        if not stat.S_ISREG(lock_info.st_mode) or lock_info.st_uid != os.geteuid() or stat.S_IMODE(lock_info.st_mode) & 0o077:
-            _fail("FS_IO_ERROR", "Cooperative lock file is not private and owned.")
+            try:
+                os.mkdir(lock_directory, 0o700, dir_fd=root_fd)
+            except FileExistsError:
+                pass
+            directory_fd = os.open(lock_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+            _check_lock_entry(root_fd, lock_directory, directory_fd, directory=True)
+            try:
+                fd = os.open(name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory_fd)
+            except FileExistsError:
+                fd = os.open(name, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory_fd)
+        finally:
+            os.umask(previous_umask)
+        _check_lock_entry(directory_fd, name, fd)
         while True:
             _check_cancel(args)
             try:
@@ -407,13 +438,20 @@ def _target_lock(target, args):
             except BlockingIOError:
                 time.sleep(0.01)
         _check_cancel(args)
+        # Fail closed if an entry was replaced while opening or waiting. Never
+        # unlink coordination inodes: another process may already be waiting.
+        _check_lock_entry(root_fd, lock_directory, directory_fd, directory=True)
+        _check_lock_entry(directory_fd, name, fd)
+        if (_inode(os.stat("/tmp", follow_symlinks=False)) != _inode(root_info)
+                or _inode(os.stat(parent, follow_symlinks=False)) != _inode(parent_info)):
+            _fail("FS_IO_ERROR", "Cooperative lock parent changed while acquiring the lock.")
         yield
     finally:
         # Cleanup must preserve the body's known publication or primary failure.
         # Attempt each owned close once: an error can mean the fd was released,
         # so retrying risks closing a reused descriptor. Process exit releases
         # any remaining advisory lock; cleanup cannot imply mutation rollback.
-        for owned_fd in (fd, directory_fd):
+        for owned_fd in (fd, directory_fd, root_fd, parent_fd):
             if owned_fd is not None:
                 try:
                     os.close(owned_fd)

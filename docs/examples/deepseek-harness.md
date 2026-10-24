@@ -51,6 +51,9 @@ tests/smoke on hosted Linux with Node 24, Python 3.12, and pnpm 11.7.0. Its path
 scope covers both package trees, the workflow/detector, and shared contract/test
 inputs. The `DSH CI` summary fails if relevant tests or change detection fail,
 and accepts skipped tests only for unrelated changes.
+The full strict tarball consumer runs once through `pnpm test` in
+`tests/package.test.ts`; `pnpm run pack:check` remains a standalone equivalent.
+Thus the full integration test suite also requires npm registry access.
 
 These checks use the pinned published SDK and require access to the public npm
 registry. They do not provision a sandbox/cluster or enable paid model calls;
@@ -179,9 +182,16 @@ signal terminated a process.
 Await `session.dispose()` and handle its rejection before choosing binding
 cleanup. The headless entry explicitly joins providers, continues remaining
 cleanup after a failure, and reports incomplete disposal with an `AggregateError`.
-For direct Cordis plugin consumers, await `RemoteShell.dispose()` explicitly:
+For direct Cordis plugin consumers, explicitly await both `RemoteShell.dispose()`
+and `RemoteFileSystem.dispose()`:
 Cordis logs effect-disposer errors during Context teardown, so successful
 `fiber.dispose()` alone does not prove that remote commands stopped.
+Filesystem disposal retains ownership of issued helper commands even after their
+requests settle. If termination remains unconfirmed, disposal rejects with a
+sanitized `FS_IO_ERROR` and unknown remote state rather than reporting successful
+cleanup. A helper may still publish after that failure; preserve the failure,
+continue the caller's chosen binding cleanup, and inspect remote state. Do not
+automatically replay the failed request.
 
 Connection ownership follows SDK 1.1.1. Reusing plain options or a fresh,
 uninitialized `ConnectionConfig` gives each binding an independent transport;
@@ -235,7 +245,20 @@ interrupt when its ID is known, with bounded independent status observation.
 The original failed result remains failed; the command is never relaunched or automatically retried.
 
 Filesystem atomicity and observed-version guards cover cooperating helper writers,
-not arbitrary shell processes. Reads/writes and output have finite limits; invalid
+not arbitrary shell processes. Their persistent coordination locks live in the
+sandbox's private `/tmp/.opensandbox-dsh-locks-v2-<parent-hash>` namespace, keyed
+by the physical target parent, not beside edited files. Normal repository edits
+therefore do not stage helper lock artifacts. Helper processes must share that
+sandbox's `/tmp` namespace; a different UID cannot use the owner-private lock
+directory. This is not a distributed lock for shared volumes mounted in separate
+sandboxes: concurrent cross-sandbox writers are outside the guarded-edit contract.
+Locks deliberately survive provider/session disposal: unlinking an inode while
+another process holds or awaits it would break cross-process coordination.
+Stop and confirm termination of all older helpers before switching from the
+previous per-parent lock layout; do not mix layouts or remove active lock files.
+Existing old-layout artifacts are not automatically deleted.
+
+Reads/writes and output have finite limits; invalid
 UTF-8 is handled as bytes, not silently decoded as text. Helper bootstrap and
 request-directory creation require a zero exit and exactly one safe path record
 in one stdout event. Execd emits nonempty line events without CR/LF; a transport

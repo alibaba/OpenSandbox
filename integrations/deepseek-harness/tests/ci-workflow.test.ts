@@ -62,11 +62,22 @@ describe('DSH offline CI path coverage', () => {
 });
 
 describe('DSH offline CI execution and safety', () => {
+  it('runs the full strict tarball acceptance once through the integration test suite', () => {
+    const text = workflow();
+    const integration = text.split('      - name: Check integration and strict tarball consumer\n')[1]!
+      .split('      - name: Install example dependencies\n')[0]!;
+    expect(integration.match(/^\s+pnpm test$/gm)).toHaveLength(1);
+    expect(text).not.toMatch(/^\s+pnpm (?:run )?pack:check$/m);
+    const packageTests = readFileSync(new URL('./package.test.ts', import.meta.url), 'utf8');
+    expect(packageTests.match(/execFileSync\(process\.execPath, \[fileURLToPath\(script\)\]/g)).toHaveLength(1);
+    expect(packageTests).toContain('strict consumer dependency tree: PASS');
+    expect(packageTests).toContain('rejects stale compiled fixture/secret modules in an actual packed tarball');
+  });
   it('runs the supported frozen install/build/test/consumer order without live credentials', () => {
     const text = workflow();
     for (const value of ['ubuntu-latest', 'node-version: "24"', 'version: 11.7.0', 'python-version: "3.12"',
       'persist-credentials: false', 'contents: read', 'pull-requests: read', 'DSH_REAL_MODEL: "0"', 'DSH_LIVE_E2E: "0"',
-      'pnpm run typecheck', 'pnpm run build', 'pnpm test', 'pnpm run test:helper', 'pnpm run pack:check', 'pnpm smoke']) expect(text).toContain(value);
+      'pnpm run typecheck', 'pnpm run build', 'pnpm test', 'pnpm run test:helper', 'pnpm smoke']) expect(text).toContain(value);
     expect(text.match(/pnpm install --frozen-lockfile/g)).toHaveLength(2);
     expect(text.indexOf('pnpm run build')).toBeLessThan(text.indexOf('working-directory: examples/deepseek-harness'));
     expect(text).not.toMatch(/pull_request_target|secrets\.|pnpm (?:run )?(?:headless|e2e)\b|permissions: write-all/);

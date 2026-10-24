@@ -3,7 +3,6 @@
 
 import { chmod, mkdir, readFile, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { Context } from '@deepseek-ai/cordis';
 import { FileSystem, FsError, FsTargetKey, FsVersion } from '@deepseek-ai/dsh-fs';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -239,8 +238,14 @@ describe('remote dsh filesystem using actual helper protocol', () => {
   });
   it('explicitly interrupts a known helper despite unreliable SSE abort, observing a precommit typed cancellation', async () => {
     const f = await fixture(); const target = await f.fs.resolve('a'); await f.fs.writeText(target, 'original');
-    const lockPath = f.local('/workspace/.opensandbox-dsh-locks-v1/') + createHash('sha256').update(f.local('/workspace/a')).digest('hex') + '.lock';
-    const holder = spawn('python3', ['-c', 'import fcntl,sys,time; f=open(sys.argv[1],"rb"); fcntl.flock(f,fcntl.LOCK_EX); print("locked",flush=True); time.sleep(10)', lockPath]);
+    const helperPath = f.local(f.uploads.find(item => item.path.endsWith('/fs_helper.py'))!.path);
+    const holder = spawn('python3', ['-c', [
+      'import importlib.util,sys,time',
+      'spec=importlib.util.spec_from_file_location("helper",sys.argv[1])',
+      'helper=importlib.util.module_from_spec(spec); spec.loader.exec_module(helper)',
+      'with helper._target_lock({"path":sys.argv[2],"displayPath":sys.argv[2]}, {}):',
+      ' print("locked",flush=True); time.sleep(10)',
+    ].join('\n'), helperPath, f.local('/workspace/a')]);
     await new Promise<void>(resolve => holder.stdout.once('data', () => resolve()));
     const abort = new AbortController();
     f.controls.afterLaunch = async argv => {
@@ -271,7 +276,8 @@ describe('remote dsh filesystem using actual helper protocol', () => {
     f.controls.dropInit = true; f.controls.dropTerminal = true;
     await expect(f.fs.writeText(target, 'committed')).rejects.toMatchObject({ code: 'FS_IO_ERROR', outcome: 'unknown' });
     expect(await readFile(f.local('/workspace/a'), 'utf8')).toBe('committed'); expect(f.requestCount()).toBe(count + 1);
-    const deleted = f.files.deleteDirectories.mock.calls.length; await f.fs.dispose();
+    const deleted = f.files.deleteDirectories.mock.calls.length;
+    await expect(f.fs.dispose()).rejects.toMatchObject({ code: 'FS_IO_ERROR', outcome: 'unknown', remoteState: 'unknown' });
     expect(f.files.deleteDirectories.mock.calls.length).toBe(deleted); expect(await f.artifactRoots()).not.toHaveLength(0);
   });
   it('retains unknown mutation artifacts for malformed or missing postcommit response', async () => {
@@ -330,11 +336,11 @@ describe('remote dsh filesystem using actual helper protocol', () => {
     expect(await f.fs.readByteRange(target, { offset: MAX_DATA_BYTES + 90, length: 100 })).toEqual(new Uint8Array(10).fill(255));
     await expect(f.fs.readBytes(target, undefined, MAX_DATA_BYTES)).rejects.toMatchObject({ code: 'FS_TOO_LARGE' });
   });
-  it('keeps POSIX permission bits and exposes helper lock metadata in listings', async () => {
+  it('keeps POSIX permission bits without exposing helper lock metadata in working directory listings', async () => {
     const f = await fixture(); await writeFile(f.local('/workspace/a'), 'a'); await chmod(f.local('/workspace/a'), 0o640);
     const target = await f.fs.resolve('a'); await f.fs.writeText(target, 'b');
     expect((await stat(f.local('/workspace/a'))).mode & 0o777).toBe(0o640);
-    const entries = await f.fs.listDir(await f.fs.resolve('.')); expect(entries.map(entry => entry.name)).toContain('.opensandbox-dsh-locks-v1');
+    const entries = await f.fs.listDir(await f.fs.resolve('.')); expect(entries.map(entry => entry.name)).toEqual(['a']);
     const helper = f.uploads.find(item => item.path.endsWith('/fs_helper.py'))!;
     expect((await stat(f.local(helper.path.slice(0, helper.path.lastIndexOf('/'))))).mode & 0o777).toBe(0o700);
   });

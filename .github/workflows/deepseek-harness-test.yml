@@ -81,12 +81,12 @@ jobs:
 
       - name: Check integration and strict tarball consumer
         working-directory: integrations/deepseek-harness
+        # package.test.ts runs the full strict npm tarball consumer once.
         run: |
           pnpm run typecheck
           pnpm run build
           pnpm test
           pnpm run test:helper
-          pnpm run pack:check
 
       # The file: consumer must install compiled exports, not source aliases.
       - name: Install example dependencies

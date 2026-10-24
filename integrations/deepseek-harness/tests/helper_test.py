@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import stat
 import subprocess
@@ -52,6 +53,22 @@ class HelperTest(unittest.TestCase):
 
     def target(self, path):
         return self.result("resolve", path=str(path), cwd=str(self.root))
+
+    def isolated_lock_directory(self, parent=None):
+        # Only these test-owned namespaces may be removed, after their helper
+        # calls have returned. Never clean the shared production namespace.
+        name = ".opensandbox-dsh-locks-test-" + str(time.time_ns())
+        patch = mock.patch.object(self.helper, "LOCK_DIRECTORY", name)
+        patch.start()
+        self.addCleanup(patch.stop)
+        directory = Path("/tmp") / self.helper._lock_directory((parent or self.root).stat())
+        def cleanup():
+            if directory.is_symlink() or directory.is_file():
+                directory.unlink()
+            elif directory.exists():
+                shutil.rmtree(directory)
+        self.addCleanup(cleanup)
+        return directory
 
     def request_files(self, operation, **args):
         work = self.root / ("request-" + str(time.time_ns()))
@@ -449,6 +466,20 @@ class HelperTest(unittest.TestCase):
         self.assertEqual(self.finish(second, response2)["error"]["code"], "FS_NOT_OBSERVED")
         self.assertEqual(Path(target["path"]).read_bytes(), b"first")
 
+    def test_cross_process_writers_share_lock_after_physical_parent_rename(self):
+        (self.root / "original").mkdir()
+        target = self.target_file("original/file", b"before")
+        version = self.result("stat", target=target)["version"]
+        with self.helper._target_lock(target, {}):
+            (self.root / "original").rename(self.root / "renamed")
+            renamed = self.target("renamed/file")
+            second, response, _, state = self.start_paused("lock-wait", "edit-text", target=renamed,
+                expected={"version": version}, edit={"oldString": "before", "newString": "after", "replaceAll": False})
+            self.assertTrue(state["waitingForLock"], "physical parent identity must survive a path spelling change")
+            self.assertEqual((self.root / "renamed/file").read_bytes(), b"before")
+        self.assertTrue(self.finish(second, response)["ok"])
+        self.assertEqual((self.root / "renamed/file").read_bytes(), b"after")
+
     def test_guarded_create_does_not_replace_external_racing_creator(self):
         target = self.target("file")
         process, response, gate, _ = self.start_paused("stage-synced", "write-text", target=target, content="helper", expected={"kind": "createIfAbsent"})
@@ -485,18 +516,176 @@ class HelperTest(unittest.TestCase):
         self.assertTrue(self.finish(first, response1)["ok"])
 
     def test_lock_artifacts_are_private_even_with_restrictive_umask(self):
+        directory = self.isolated_lock_directory()
         target = self.target("file")
         previous = os.umask(0o777)
         try:
             self.result("write-text", target=target, content="one")
         finally:
             os.umask(previous)
-        directory = self.root / self.helper.LOCK_DIRECTORY
         self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
         locks = list(directory.iterdir())
         self.assertEqual(len(locks), 1)
         self.assertEqual(stat.S_IMODE(locks[0].stat().st_mode), 0o600)
+        original_inode = locks[0].stat().st_ino
         self.result("write-text", target=target, content="two")
+        self.assertEqual(locks[0].stat().st_ino, original_inode, "replacement must keep the same coordination inode")
+        self.assertEqual(list(self.root.iterdir()), [self.root / "file"])
+
+    def test_lock_does_not_require_read_permission_on_target_parent(self):
+        parent = self.root / "parent"
+        parent.mkdir(mode=0o700)
+        target = self.target("parent/file")
+        parent.chmod(0o300)
+        try:
+            self.result("write-text", target=target, content="created")
+            self.assertEqual((parent / "file").read_bytes(), b"created")
+        finally:
+            parent.chmod(0o700)
+
+    def test_lock_namespace_ignores_worktree_tmpdir(self):
+        target = self.target("file")
+        request, response = self.request_files("write-text", target=target, content="one")
+        process = subprocess.Popen([sys.executable, str(HELPER), str(request), str(response)],
+                                   env={**os.environ, "TMPDIR": str(self.root)}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.addCleanup(self.stop_process, process)
+        self.assertTrue(self.finish(process, response)["ok"])
+        directory_name = self.helper._lock_directory(self.root.stat())
+        self.assertFalse((self.root / directory_name).exists())
+        self.assertTrue((Path("/tmp") / directory_name).is_dir())
+        self.assertEqual(sorted(path.name for path in self.root.iterdir()), ["file", request.parent.name])
+
+    def test_other_uid_selects_same_namespace_and_is_rejected_without_mutation(self):
+        directory = self.isolated_lock_directory()
+        target = self.target_file("file", b"before")
+        self.result("write-text", target=target, content="before")
+        original_uid = os.geteuid()
+        original_fstat = self.helper.os.fstat
+        def root_owned_tmp(fd):
+            info = original_fstat(fd)
+            # Some test runners own /tmp themselves. Model the usual root-owned
+            # /tmp so the simulated other uid reaches the namespace owner check.
+            if os.readlink(f"/proc/self/fd/{fd}") == "/tmp":
+                values = list(info)
+                values[4] = 0
+                return os.stat_result(values)
+            return info
+        with mock.patch.object(self.helper.os, "geteuid", return_value=original_uid + 1), \
+                mock.patch.object(self.helper.os, "fstat", side_effect=root_owned_tmp), \
+                mock.patch.object(self.helper.fcntl, "flock", wraps=self.helper.fcntl.flock) as flock:
+            self.assertEqual(self.helper._lock_directory(self.root.stat()), directory.name)
+            self.assertEqual(len(directory.name), len(self.helper.LOCK_DIRECTORY) + 1 + 64)
+            response = self.error("FS_IO_ERROR", "write-text", target=target, content="after")
+            self.assertIn("not stable, private and owned", response["error"]["message"])
+            flock.assert_not_called()
+        self.assertEqual((self.root / "file").read_bytes(), b"before")
+
+    def test_lock_directory_rejects_symlink_file_and_public_permissions(self):
+        target = self.target_file("file", b"before")
+        for kind in ("symlink", "file", "public"):
+            with self.subTest(kind=kind):
+                directory = self.isolated_lock_directory()
+                if kind == "symlink":
+                    directory.symlink_to(self.root, target_is_directory=True)
+                elif kind == "file":
+                    directory.write_text("keep")
+                else:
+                    directory.mkdir(mode=0o700)
+                    directory.chmod(0o777)
+                response = self.call("write-text", target=target, content="after")
+                self.assertFalse(response["ok"], response)
+                self.assertEqual((self.root / "file").read_bytes(), b"before")
+                if kind == "file":
+                    self.assertEqual(directory.read_text(), "keep")
+
+    def test_lock_file_rejects_symlink_hardlink_fifo_directory_and_public_permissions(self):
+        target = self.target_file("file", b"before")
+        for kind in ("symlink", "hardlink", "fifo", "directory", "public"):
+            with self.subTest(kind=kind):
+                directory = self.isolated_lock_directory()
+                self.result("write-text", target=target, content="before")
+                lock, = directory.iterdir()
+                lock.unlink()  # Test-owned inode, with no active helpers/waiters.
+                if kind == "symlink":
+                    lock.symlink_to(self.root / "file")
+                elif kind == "hardlink":
+                    os.link(self.root / "file", lock)
+                elif kind == "fifo":
+                    os.mkfifo(lock, 0o600)
+                elif kind == "directory":
+                    lock.mkdir(mode=0o700)
+                else:
+                    lock.touch(mode=0o600)
+                    lock.chmod(0o666)
+                with mock.patch.object(self.helper.fcntl, "flock", wraps=self.helper.fcntl.flock) as flock:
+                    response = self.call("write-text", target=target, content="after")
+                    self.assertFalse(response["ok"], response)
+                    flock.assert_not_called()
+                self.assertEqual((self.root / "file").read_bytes(), b"before")
+
+    def test_lock_entries_reject_foreign_ownership(self):
+        directory = self.isolated_lock_directory()
+        target = self.target_file("file", b"before")
+        self.result("write-text", target=target, content="before")
+        lock, = directory.iterdir()
+        original_fstat = self.helper.os.fstat
+        for entry in (directory, lock):
+            with self.subTest(entry=entry):
+                def foreign_owner(fd):
+                    info = original_fstat(fd)
+                    if os.readlink(f"/proc/self/fd/{fd}") == str(entry):
+                        values = list(info)
+                        values[4] = os.geteuid() + 1
+                        return os.stat_result(values)
+                    return info
+                with mock.patch.object(self.helper.os, "fstat", side_effect=foreign_owner):
+                    self.error("FS_IO_ERROR", "write-text", target=target, content="after")
+                self.assertEqual((self.root / "file").read_bytes(), b"before")
+
+    def test_lock_directory_replacement_during_open_is_rejected(self):
+        directory = self.isolated_lock_directory()
+        displaced = directory.with_name(directory.name + "-displaced")
+        self.addCleanup(shutil.rmtree, displaced, ignore_errors=True)
+        target = self.target_file("file", b"before")
+        original_open = self.helper.os.open
+        def replace_directory(path, flags, *args, **kwargs):
+            fd = original_open(path, flags, *args, **kwargs)
+            if path == directory.name:
+                directory.rename(displaced)
+                directory.mkdir(mode=0o700)
+            return fd
+        with mock.patch.object(self.helper.os, "open", side_effect=replace_directory):
+            self.error("FS_IO_ERROR", "write-text", target=target, content="after")
+        self.assertEqual((self.root / "file").read_bytes(), b"before")
+        self.assertEqual(list(displaced.iterdir()), [], "must reject before creating a lock in the detached directory")
+
+    def test_lock_file_replacement_during_wait_is_rejected(self):
+        directory = self.isolated_lock_directory()
+        target = self.target_file("file", b"before")
+        original_flock = self.helper.fcntl.flock
+        def replace_lock(fd, operation):
+            original_flock(fd, operation)
+            lock, = directory.iterdir()
+            lock.rename(directory / "displaced.lock")
+            lock.touch(mode=0o600)
+        with mock.patch.object(self.helper.fcntl, "flock", side_effect=replace_lock):
+            self.error("FS_IO_ERROR", "write-text", target=target, content="after")
+        self.assertEqual((self.root / "file").read_bytes(), b"before")
+
+    def test_target_parent_replacement_during_wait_is_rejected(self):
+        (self.root / "parent").mkdir()
+        self.isolated_lock_directory(self.root / "parent")
+        target = self.target_file("parent/file", b"before")
+        original_flock = self.helper.fcntl.flock
+        def replace_parent(fd, operation):
+            original_flock(fd, operation)
+            (self.root / "parent").rename(self.root / "original")
+            (self.root / "parent").mkdir()
+            (self.root / "parent/file").write_bytes(b"replacement")
+        with mock.patch.object(self.helper.fcntl, "flock", side_effect=replace_parent):
+            self.error("FS_IO_ERROR", "write-text", target=target, content="after")
+        self.assertEqual((self.root / "original/file").read_bytes(), b"before")
+        self.assertEqual((self.root / "parent/file").read_bytes(), b"replacement")
 
     def test_combined_path_cap_and_errno_translation(self):
         long = "x" * self.helper.MAX_PATH_BYTES

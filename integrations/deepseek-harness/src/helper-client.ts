@@ -264,6 +264,7 @@ const VERIFY_HELPER = [
 ].join('\n');
 function timerOption(value: number, cap = MAX_TIMER_MS): number { if (!Number.isSafeInteger(value) || value <= 0 || value > cap) fail(); return value; }
 function abortCheck(signal?: AbortSignal): void { if (signal?.aborted) fail('FS_ABORTED'); }
+interface OwnedCommand { dispose(): Promise<void>; }
 interface HelperCommandResult { stdout: string; stdoutEvents: number; exitCode: number | null; commandId?: string; }
 function singleStdoutRecord(result: HelperCommandResult): string | undefined {
   if (result.exitCode !== 0 || result.stdoutEvents !== 1) return undefined;
@@ -279,6 +280,7 @@ export class HelperClient {
   readonly #sandboxId: string; readonly #sessionId: string; readonly #cwd: string;
   readonly #timeout: number; readonly #settlement: number;
   readonly #shutdown = new AbortController(); readonly #active = new Set<Promise<unknown>>();
+  readonly #commands = new Set<OwnedCommand>();
   #ready: Promise<void> | undefined; #directory: string | undefined;
   #disposed = false; #retained = false; #disposing: Promise<void> | undefined;
 
@@ -316,45 +318,63 @@ export class HelperClient {
       } catch { /* Stream cleanup cannot replace a known filesystem outcome. */ }
       finally { clearTimeout(timer); }
     };
-    let settled = false; let stopping = false; let interrupted = false; let polling = false;
+    let settled = false; let stopped = false; let stopping = false; let interrupted = false;
+    let polling: Promise<void> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined; let stopTimer: ReturnType<typeof setTimeout> | undefined;
     let resolve!: (value: HelperCommandResult) => void; let reject!: (error: RemoteFsError) => void;
     const done = new Promise<HelperCommandResult>((yes, no) => { resolve = yes; reject = no; });
     const clear = () => { clearTimeout(deadline); clearTimeout(stopTimer); signal?.removeEventListener('abort', onAbort); };
     const finish = (exitCode: number | null) => {
+      // Request settlement is not termination evidence. Late terminal/status evidence still
+      // releases command ownership, without replacing a previously reported unknown outcome.
+      stopped = true; this.#commands.delete(owned);
       if (settled) return; settled = true; clear(); streamAbort.abort();
       resolve({ stdout, stdoutEvents, exitCode, ...(commandId ? { commandId } : {}) });
     };
     const unknown = () => { if (settled) return; settled = true; clear(); streamAbort.abort(); reject(this.#unknown(operation, commandId)); };
     const interrupt = () => {
-      if (!commandId || interrupted || this.#binding.state !== 'open') return;
+      if (!commandId || interrupted || stopped || this.#binding.state !== 'open') return;
       interrupted = true; void this.#transport.interrupt(commandId).catch(() => undefined);
     };
-    const poll = async () => {
-      if (!commandId || polling || settled) return; polling = true;
-      const end = Date.now() + this.#settlement;
-      try {
-        while (!settled && Date.now() < end) {
-          let status;
-          let timeout: ReturnType<typeof setTimeout> | undefined;
-          try {
-            status = await Promise.race([this.#transport.getCommandStatus(commandId), new Promise<undefined>(resolve => {
-              timeout = setTimeout(() => resolve(undefined), Math.max(1, end - Date.now()));
-            })]);
-          } catch { status = undefined; } finally { clearTimeout(timeout); }
-          if (status && (status.id === undefined || status.id === commandId) && status.running === false) {
-            finish(typeof status.exitCode === 'number' && Number.isSafeInteger(status.exitCode) ? status.exitCode : null); return;
+    const poll = (): Promise<void> => {
+      polling ??= (async () => {
+        const end = Date.now() + this.#settlement;
+        while (!stopped && Date.now() < end && this.#binding.state === 'open') {
+          if (commandId) {
+            let status;
+            let timeout: ReturnType<typeof setTimeout> | undefined;
+            try {
+              status = await Promise.race([this.#transport.getCommandStatus(commandId), new Promise<undefined>(resolve => {
+                timeout = setTimeout(() => resolve(undefined), Math.max(1, end - Date.now()));
+              })]);
+            } catch { status = undefined; } finally { clearTimeout(timeout); }
+            if (status && (status.id === undefined || status.id === commandId) && status.running === false) {
+              finish(typeof status.exitCode === 'number' && Number.isSafeInteger(status.exitCode) ? status.exitCode : null); return;
+            }
           }
-          if (!settled) await new Promise<void>(resolve => setTimeout(resolve, Math.min(20, Math.max(1, end - Date.now()))));
+          // Keep the same bounded observation window when init has not arrived yet.
+          if (!stopped) await new Promise<void>(resolve => setTimeout(resolve, Math.min(20, Math.max(1, end - Date.now()))));
         }
-      } finally { polling = false; }
+      })().finally(() => { polling = undefined; });
+      return polling;
     };
-    const stop = (cancel: boolean) => {
-      if (settled) return; if (!stopping) {
-        stopping = true; clearTimeout(deadline); streamAbort.abort(); stopTimer = setTimeout(unknown, this.#settlement);
+    const stop = (cancel: boolean, observe = true) => {
+      if (stopped) return; if (!stopping) {
+        stopping = true; clearTimeout(deadline); streamAbort.abort();
+        if (!settled) stopTimer = setTimeout(unknown, this.#settlement);
       }
-      if (cancel) interrupt(); void poll();
+      if (cancel) interrupt(); if (observe) void poll();
     };
+    const owned: OwnedCommand = { dispose: async () => {
+      // An already-settled unknown request still owns its possibly running command.
+      stop(true, false); await done.catch(() => undefined);
+      if (this.#binding.state === 'killed') { this.#commands.delete(owned); return; }
+      // The request's observation window may already be expiring. Disposal gets its
+      // own bounded status pass rather than mistaking that old deadline for evidence.
+      await polling; if (!stopped) await poll();
+      if (!stopped) throw this.#unknown(operation, commandId);
+    } };
+    this.#commands.add(owned);
     const onAbort = () => stop(true);
     signal?.addEventListener('abort', onAbort, { once: true });
     deadline = setTimeout(() => stop(true), this.#timeout);
@@ -374,7 +394,10 @@ export class HelperClient {
           } else if (event.type === 'error') {
             const name = event.error?.ename ?? event.error?.name; const value = event.error?.evalue ?? event.error?.value;
             const code = name === 'CommandExecError' && typeof value === 'string' && /^-?\d+$/.test(value) ? Number(value) : null;
-            terminalRelease = releaseTerminal(); finish(code !== null && Number.isSafeInteger(code) ? code : null); return;
+            terminalRelease = releaseTerminal();
+            if (code !== null && Number.isSafeInteger(code)) finish(code);
+            else stop(false); // A generic stream/runner error does not prove process termination.
+            return;
           }
         }
         if (!settled) { if (commandId) stop(false); else unknown(); }
@@ -491,10 +514,14 @@ export class HelperClient {
   dispose = (): Promise<void> => {
     this.#disposing ??= (async () => {
       this.#disposed = true; this.#shutdown.abort();
+      const commands = await Promise.allSettled([...this.#commands].map(command => command.dispose()));
       await Promise.allSettled([...this.#active, ...(this.#ready ? [this.#ready] : [])]);
       if (this.#directory && !this.#retained && this.#binding.state === 'open') {
         await this.#io(this.#transport.deleteDirectories([this.#directory]), 'prepare').catch(() => { this.#retained = true; });
       }
+      // Join every owned command and finish other cleanup before reporting a safe failure.
+      const failure = commands.find(result => result.status === 'rejected');
+      if (failure?.status === 'rejected') throw failure.reason;
     })(); return this.#disposing;
   };
 }
