@@ -378,6 +378,13 @@ func (r *IsolatedRunner) CreateIsolatedSession(opts *IsolatedSessionOptions) (st
 		return "", err
 	}
 
+	// Reject private-network requests the environment cannot serve before any
+	// side effect (workspace directories, upper allocation, bwrap start), so
+	// callers see a named error instead of an opaque gate EOF.
+	if err := r.validateShareNetAvailable(opts); err != nil {
+		return "", err
+	}
+
 	// Normalize empty/omitted fields to the effective config execd will
 	// actually apply. GetIsolatedSession echoes s.opts on attach so a
 	// stateless client can rebuild a handle from just the sessionId;
@@ -402,30 +409,8 @@ func (r *IsolatedRunner) CreateIsolatedSession(opts *IsolatedSessionOptions) (st
 	id := uuid.New().String()
 	session := newIsolatedSession(id, opts, r.isolator, r.namespacePinner)
 
-	// Persist overlays get host upper/work pairs; ephemeral overlays use
-	// the bwrap tmpfs upper and need no allocation.
-	persistCount := 0
-	for _, ov := range session.overlays {
-		if ov.mode == isolation.WorkspaceOverlay && ov.persist {
-			persistCount++
-		}
-	}
-	if persistCount > 0 {
-		upperID, pairs, err := r.upperMgr.AllocateN(persistCount)
-		if err != nil {
-			return "", fmt.Errorf("allocate upper: %w", err)
-		}
-		session.upperID = upperID
-		next := 0
-		for i := range session.overlays {
-			ov := &session.overlays[i]
-			if ov.mode != isolation.WorkspaceOverlay || !ov.persist {
-				continue
-			}
-			ov.upperDir = pairs[next].UpperDir
-			ov.workDir = pairs[next].WorkDir
-			next++
-		}
+	if err := r.allocateSessionUppers(session); err != nil {
+		return "", err
 	}
 
 	if err := session.start(); err != nil {
@@ -458,6 +443,37 @@ func (r *IsolatedRunner) CreateIsolatedSession(opts *IsolatedSessionOptions) (st
 		overlaySummary(session.overlays),
 	)
 	return id, nil
+}
+
+// allocateSessionUppers assigns host upper/work pairs to a session's
+// persistent overlays. Ephemeral overlays use the bwrap tmpfs upper and need
+// no allocation.
+func (r *IsolatedRunner) allocateSessionUppers(session *isolatedSession) error {
+	persistCount := 0
+	for _, ov := range session.overlays {
+		if ov.mode == isolation.WorkspaceOverlay && ov.persist {
+			persistCount++
+		}
+	}
+	if persistCount == 0 {
+		return nil
+	}
+	upperID, pairs, err := r.upperMgr.AllocateN(persistCount)
+	if err != nil {
+		return fmt.Errorf("allocate upper: %w", err)
+	}
+	session.upperID = upperID
+	next := 0
+	for i := range session.overlays {
+		ov := &session.overlays[i]
+		if ov.mode != isolation.WorkspaceOverlay || !ov.persist {
+			continue
+		}
+		ov.upperDir = pairs[next].UpperDir
+		ov.workDir = pairs[next].WorkDir
+		next++
+	}
+	return nil
 }
 
 // overlaySummary renders resolved overlays for log lines.
@@ -1008,6 +1024,48 @@ func setprivIdentitySwitchRequired(opts *IsolatedSessionOptions, currentUID, cur
 		}
 	}
 	return targetUID != currentUID || targetGID != currentGID
+}
+
+// validateShareNetAvailable rejects share_net=false requests whose uid mode
+// cannot create the private network namespace. The probe runs the exact
+// --unshare-net smoke per mode: in setpriv mode bwrap's loopback setup needs
+// CAP_NET_ADMIN in the execd container, and without this gate such requests
+// died inside bwrap with an opaque "workload gate EOF" after upper-directory
+// allocation had already run. share_net=true and omitted share_net (legacy
+// shared default) are not affected.
+func (r *IsolatedRunner) validateShareNetAvailable(opts *IsolatedSessionOptions) error {
+	if opts == nil || opts.ShareNet == nil || *opts.ShareNet {
+		return nil
+	}
+
+	mode := isolation.UidModeSetpriv
+	if opts.UidMode != "" {
+		mode = isolation.UidMode(opts.UidMode)
+	}
+
+	var available bool
+	switch mode {
+	case isolation.UidModeSetpriv:
+		available = r.isolator.Capabilities().SetprivNetAvailable
+	case isolation.UidModeUserns:
+		available = r.isolator.Capabilities().UsernsNetAvailable
+	default:
+		// Unknown modes keep start()'s existing rejection path.
+		return nil
+	}
+	if available {
+		return nil
+	}
+
+	err := fmt.Errorf(
+		"%w: uid mode %s cannot create the private network namespace required by share_net=false",
+		ErrSessionPrivateNetUnavailable,
+		mode,
+	)
+	if message := r.isolator.Capabilities().Message; message != "" {
+		err = fmt.Errorf("%w: %s", err, message)
+	}
+	return err
 }
 
 func (r *IsolatedRunner) lookup(id string) *isolatedSession {

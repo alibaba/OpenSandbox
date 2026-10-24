@@ -3347,6 +3347,19 @@ components:
         userns_available:
           type: boolean
           description: Whether sessions using uid_mode userns can be created
+        setpriv_net_available:
+          type: boolean
+          description: >-
+            Whether sessions using uid_mode setpriv can also create the private
+            network namespace required by share_net=false (bwrap --unshare-net;
+            its loopback setup needs CAP_NET_ADMIN in the execd container).
+            Create rejects share_net=false requests with 503 NOT_SUPPORTED when
+            the requested mode's flag is false.
+        userns_net_available:
+          type: boolean
+          description: >-
+            Whether sessions using uid_mode userns can also create the private
+            network namespace required by share_net=false.
         commit_supported:
           type: boolean
         diff_supported:

@@ -334,7 +334,7 @@ The `profile` field currently controls only how `/tmp` is exposed inside the nam
 - **`env_passthrough`** — `mode: "allow"` + `keys` whitelists host env vars; default `deny`. Per-run overrides go in `IsolatedRunRequest.envs`.
 - **`uid` / `gid`** with **`uid_mode: "setpriv"`** (default, real setuid/setgid drop) or **`"userns"`** (user namespace remap). Check `setpriv_available` / `userns_available` from [`/capabilities`](#capabilities-and-probing) before requesting a mode.
 - **`share_net: true`** shares the sandbox's network namespace. Sandbox-level egress and Credential Vault policies still apply.
-- **`share_net: false`** creates a private network namespace. Before releasing the workload startup gate, execd opens the authenticated NetNS, obtains its real owning UserNS with `NS_GET_USERNS`, and bind-pins both below `/run/execd/namespaces/<opaque-id>/`. Any validation or pin failure aborts Session creation. Execd attempts pin cleanup on failed startup, process exit, explicit delete, idle collection, and runner shutdown; retryable failures retain Session ownership and are retried while execd remains alive. This applies to both UID modes; hardened network backends will require `uid_mode: "userns"`.
+- **`share_net: false`** creates a private network namespace. Check `setpriv_net_available` / `userns_net_available` from [`/capabilities`](#capabilities-and-probing) for the requested uid mode: execd rejects unsupported combinations up front with `503 NOT_SUPPORTED` instead of failing inside bubblewrap. Before releasing the workload startup gate, execd opens the authenticated NetNS, obtains its real owning UserNS with `NS_GET_USERNS`, and bind-pins both below `/run/execd/namespaces/<opaque-id>/`. Any validation or pin failure aborts Session creation. Execd attempts pin cleanup on failed startup, process exit, explicit delete, idle collection, and runner shutdown; retryable failures retain Session ownership and are retried while execd remains alive. This applies to both UID modes; hardened network backends will require `uid_mode: "userns"`.
 
 The legacy default remains unchanged in this phase: omitting `share_net` continues to share the sandbox network namespace. Namespace pinning alone does not enable Session egress or ingress.
 
@@ -377,6 +377,8 @@ curl -s http://localhost:44772/v1/isolated/capabilities
   "version": "0.9.0",
   "setpriv_available": true,
   "userns_available": false,
+  "setpriv_net_available": true,
+  "userns_net_available": false,
   "commit_supported": false,
   "diff_supported": false
 }
@@ -384,6 +386,7 @@ curl -s http://localhost:44772/v1/isolated/capabilities
 
 - `available: false` — the trusted native workload gate is missing or untrusted, bubblewrap is missing, or the host can't create the required namespaces (missing `CAP_SYS_ADMIN`, restricted user-ns sysctl, etc.).
 - `setpriv_available` / `userns_available` — whether sessions with `uid_mode: "setpriv"` or `"userns"` can be created. `setpriv_available` reflects only execd's **default** UID/GID; a session that requests a different UID/GID may still return `503 NOT_SUPPORTED` when identity switching is unavailable.
+- `setpriv_net_available` / `userns_net_available` — whether the uid mode can also create the private network namespace required by `share_net: false`. In setpriv mode bwrap's loopback setup needs `CAP_NET_ADMIN` in the execd container; userns mode owns its network namespace and usually tracks `userns_available`. When a request asks for `share_net: false` in a mode whose flag is false, execd rejects it up front with `503 NOT_SUPPORTED` and a diagnostic message instead of failing inside bubblewrap with an opaque workload-gate error.
 - `commit_supported` / `diff_supported` — Phase 2 stubs, currently return `503`.
 
 ---
@@ -416,7 +419,7 @@ Example: `components/execd/configs/isolation.example.toml`.
 
 Deleting an overlay session can restore admission once its cleanup succeeds and total usage falls below the threshold. Deletion discards that session's private upper data, so preserve any data you need before deleting it.
 
-**Host requirements:** `bwrap` and the trusted native workload gate in the execd image; `CAP_SYS_ADMIN` (and `kernel.unprivileged_userns_clone=1` for `uid_mode: "userns"`); `overlayfs` in the kernel for `overlay` workspaces. The published image installs the gate automatically. Linux source builds must run `make build-session-gate` and then `sudo make install-session-gate` from `components/execd` before starting execd.
+**Host requirements:** `bwrap` and the trusted native workload gate in the execd image; `CAP_SYS_ADMIN` (and `kernel.unprivileged_userns_clone=1` for `uid_mode: "userns"`); `CAP_NET_ADMIN` for `share_net: false` in `uid_mode: "setpriv"` (bwrap's loopback setup configures 127.0.0.1 inside the new network namespace); `overlayfs` in the kernel for `overlay` workspaces. The published image installs the gate automatically. Linux source builds must run `make build-session-gate` and then `sudo make install-session-gate` from `components/execd` before starting execd.
 
 Note: `/capabilities` reports `available: false` when the native workload gate cannot be opened as a trusted executable or when bwrap itself cannot be started (missing binary or missing namespace capabilities). A missing `overlayfs` does **not** flip `available` — the overlay probe only influences Phase 2 `commit`/`diff` support, and default overlay-mode session creation can still fail at runtime on such hosts. If you rely on `workspace.mode: "overlay"`, verify `overlayfs` support directly on the host.
 

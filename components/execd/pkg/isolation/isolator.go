@@ -121,11 +121,19 @@ type Capabilities struct {
 	Available        bool
 	Isolator         string
 	Version          string
+	Message          string
 	SetprivAvailable bool
 	// SetprivSwitchAvailable is used internally to reject a setpriv
 	// request that selects IDs different from execd's own before side effects.
 	SetprivSwitchAvailable bool
 	UsernsAvailable        bool
+	// SetprivNetAvailable / UsernsNetAvailable report whether the uid mode
+	// can also create the private network namespace required by share_net=
+	// false (bwrap --unshare-net; its loopback setup needs CAP_NET_ADMIN in
+	// the setpriv mode). Runtime rejects such requests with a named error
+	// before starting bwrap when the mode's flag is false.
+	SetprivNetAvailable    bool
+	UsernsNetAvailable     bool
 	Profiles               []Profile
 	AllowedWorkspaces      []string
 	AllowedExtraWritable   []string
