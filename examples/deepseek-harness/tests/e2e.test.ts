@@ -44,8 +44,11 @@ import { main, readE2eConfig, runE2e, writeEvidence } from '../e2e.js';
 const roots: string[] = [];
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'dsh-review-offline-')); roots.push(root);
-  for (const dir of ['env', 'evidence', 'downloads', 'host-observation']) mkdirSync(join(root, dir));
-  const env = {DSH_LIVE_E2E: '1', OPEN_SANDBOX_DOMAIN: 'example.invalid:18080', OPEN_SANDBOX_PROTOCOL: 'http',
+  for (const dir of ['env', 'evidence', 'downloads', 'host-observation', 'offline-bin']) mkdirSync(join(root, dir));
+  // Preflight fixtures must not probe Docker/Kind services on a CI runner.
+  const offlineBin = join(root, 'offline-bin');
+  for (const tool of ['docker', 'kind']) writeFileSync(join(offlineBin, tool), '#!/bin/sh\nexit 42\n', {mode: 0o755});
+  const env = {PATH: `${offlineBin}:${process.env.PATH}`, DSH_LIVE_E2E: '1', OPEN_SANDBOX_DOMAIN: 'example.invalid:18080', OPEN_SANDBOX_PROTOCOL: 'http',
     OPEN_SANDBOX_API_KEY: 'secret-key-do-not-publish', DSH_TEMPLATE_ID: 'offline-template', DSH_SESSION_ID: 'offline-review',
     DSH_REMOTE_CWD: '/srv/app', DSH_TTL_SECONDS: '600', WORK: join(root, 'env'), DSH_EVIDENCE_PATH: join(root, 'evidence', 'plugin.json'),
     DSH_DOWNLOADS_DIR: join(root, 'downloads'), DSH_HOST_OBSERVATION_DIR: join(root, 'host-observation'),
@@ -199,7 +202,7 @@ describe('OFFLINE review regressions R1-R6', () => {
     writeFileSync(join(f.root, 'package.json'), JSON.stringify({packageManager: 'pnpm@11.7.0'}));
     const before = readFileSync(join(f.root, 'package.json'), 'utf8');
     const result = spawnSync('bash', [new URL('../scripts/preflight-ubuntu.sh', import.meta.url).pathname], {cwd: f.root,
-      env: {...process.env, ...f.env, DSH_PNPM_EXECUTABLE: '', PATH: `${bin}:${process.env.PATH}`, COREPACK_HOME: cache}, encoding: 'utf8', timeout: 15_000});
+      env: {...process.env, ...f.env, DSH_PNPM_EXECUTABLE: '', PATH: `${bin}:${f.env.PATH}`, COREPACK_HOME: cache}, encoding: 'utf8', timeout: 15_000});
     expect(result.stdout).toContain('unresolved pnpm'); expect(existsSync(cache)).toBe(false);
     expect(readFileSync(join(f.root, 'package.json'), 'utf8')).toBe(before);
   });
@@ -402,6 +405,17 @@ describe('OFFLINE entry guards, evidence and cleanup regressions', () => {
 });
 
 describe('OFFLINE Ubuntu preflight and documentation contracts', () => {
+  it('never falls through to Docker or Kind from the runner PATH', () => {
+    const host = mkdtempSync(join(tmpdir(), 'dsh-host-tool-sentinel-')); roots.push(host);
+    const contacted = join(host, 'contacted');
+    for (const tool of ['docker', 'kind']) writeFileSync(join(host, tool), `#!/bin/sh\nprintf contacted >> '${contacted}'\nexit 42\n`, {mode: 0o755});
+    vi.stubEnv('PATH', `${host}:${process.env.PATH}`);
+    const f = fixture();
+    const result = spawnSync('bash', [new URL('../scripts/preflight-ubuntu.sh', import.meta.url).pathname], {
+      env: {...process.env, ...f.env}, encoding: 'utf8', timeout: 15_000});
+    expect(result.status).toBe(1);
+    expect(existsSync(contacted)).toBe(false);
+  });
   it('is valid read-only shell without install/deployment/mutation commands', () => {
     const path = new URL('../scripts/preflight-ubuntu.sh', import.meta.url), source = readFileSync(path, 'utf8');
     expect(spawnSync('bash', ['-n', path.pathname]).status).toBe(0);
@@ -417,7 +431,7 @@ describe('OFFLINE Ubuntu preflight and documentation contracts', () => {
     const f = fixture(), bin = join(f.root, 'bin'); mkdirSync(bin);
     for (const name of ['ss', 'kind']) writeFileSync(join(bin, name), '#!/bin/sh\nexit 42\n', {mode: 0o755});
     const result = spawnSync('bash', [new URL('../scripts/preflight-ubuntu.sh', import.meta.url).pathname], {
-      env: {...process.env, ...f.env, DSH_WORKSPACE_ROOT: f.root, PATH: `${bin}:${process.env.PATH}`}, encoding: 'utf8', timeout: 15_000});
+      env: {...process.env, ...f.env, DSH_WORKSPACE_ROOT: f.root, PATH: `${bin}:${f.env.PATH}`}, encoding: 'utf8', timeout: 15_000});
     expect(result.status).toBe(1); expect(result.stdout).toContain('cannot inspect TCP listeners');
     expect(result.stdout).toContain('cannot inspect kind clusters');
     expect(result.stdout).not.toContain('TCP port 18080 is unused');
@@ -437,7 +451,7 @@ describe('OFFLINE Ubuntu preflight and documentation contracts', () => {
     // Never invoke a real cluster or Docker service while exercising the read-only preflight.
     for (const tool of ['kind', 'docker']) writeFileSync(join(bin, tool), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     const result = spawnSync('bash', [new URL('../scripts/preflight-ubuntu.sh', import.meta.url).pathname], {
-      env: { ...process.env, ...f.env, DSH_WORKSPACE_ROOT: f.root, KIND_CLUSTER: name, PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8', timeout: 15_000 });
+      env: { ...process.env, ...f.env, DSH_WORKSPACE_ROOT: f.root, KIND_CLUSTER: name, PATH: `${bin}:${f.env.PATH}` }, encoding: 'utf8', timeout: 15_000 });
     if (/^[a-z0-9.-]+$/.test(name)) expect(result.stdout).toContain('OK: kind cluster name syntax');
     else { expect(result.status).toBe(1); expect(result.stdout).toContain('BLOCKER: KIND_CLUSTER must match ^[a-z0-9.-]+$'); }
   });

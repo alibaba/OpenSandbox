@@ -43,6 +43,19 @@ it in an isolated temporary consumer, imports every public ESM subpath, and
 compiles a consumer against the installed declarations. Consumer dependencies
 come from the official npm registry; nothing is published.
 
+## Pull request CI
+
+The `DeepSeek Harness Tests` workflow runs frozen-lockfile installs, typechecks,
+build, integration and Python helper tests, strict tarball checks, and consumer
+tests/smoke on hosted Linux with Node 24, Python 3.12, and pnpm 11.7.0. Its path
+scope covers both package trees, the workflow/detector, and shared contract/test
+inputs. The `DSH CI` summary fails if relevant tests or change detection fail,
+and accepts skipped tests only for unrelated changes.
+
+These checks use the pinned published SDK and require access to the public npm
+registry. They do not provision a sandbox/cluster or enable paid model calls;
+real deployment validation remains a separate explicit opt-in.
+
 ## Offline smoke: contract-only
 
 `pnpm smoke` uses the actual installed Agent loop and a scripted LlmAdapter with
