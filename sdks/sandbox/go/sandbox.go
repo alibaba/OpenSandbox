@@ -40,6 +40,15 @@ func hasHeaderFold(headers map[string]string, name string) bool {
 	return false
 }
 
+// deleteHeaderFold removes every casing of name from headers.
+func deleteHeaderFold(headers map[string]string, name string) {
+	for key := range headers {
+		if strings.EqualFold(key, name) {
+			delete(headers, key)
+		}
+	}
+}
+
 // SandboxCreateOptions configures sandbox creation.
 type SandboxCreateOptions struct {
 	// Image is the container image URI (required).

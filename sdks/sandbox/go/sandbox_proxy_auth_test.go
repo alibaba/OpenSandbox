@@ -158,6 +158,84 @@ func TestResolveExecdDirectModeCarriesNoTenantKey(t *testing.T) {
 	require.Equal(t, "", headers.Get("X-EXECD-ACCESS-TOKEN"))
 }
 
+// TestResolveExecdDirectModeStripsConfigProxyKey covers a caller that puts the
+// tenant key in ConnectionConfig.Headers. That map is applied to every client,
+// but direct data-plane requests terminate inside the untrusted sandbox.
+func TestResolveExecdDirectModeStripsConfigProxyKey(t *testing.T) {
+	var directHeaders capturedHeaders
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directHeaders.record(r)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer direct.Close()
+
+	sb := serverProxyFixture(t, direct.URL, nil, false)
+	sb.config.Headers = map[string]string{
+		"Open-Sandbox-Api-Key": "tenant-key-1",
+		"X-Custom":             "keep",
+	}
+
+	require.NoErrorf(t, sb.resolveExecd(context.Background()), "resolveExecd")
+	require.NoErrorf(t, sb.execd.Ping(context.Background()), "Ping")
+
+	headers := directHeaders.first(t)
+	require.Equal(t, "", headers.Get("OPEN-SANDBOX-API-KEY"),
+		"direct-mode requests must not receive the tenant key from ConnectionConfig.Headers")
+	require.Equal(t, "keep", headers.Get("X-Custom"))
+}
+
+// TestResolveExecdDirectModeStripsEndpointProxyKey applies the same policy to
+// endpoint metadata while preserving the endpoint's actual execd credential.
+func TestResolveExecdDirectModeStripsEndpointProxyKey(t *testing.T) {
+	var directHeaders capturedHeaders
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directHeaders.record(r)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer direct.Close()
+
+	sb := serverProxyFixture(t, direct.URL, map[string]string{
+		"Open-Sandbox-Api-Key": "endpoint-key",
+		"X-EXECD-ACCESS-TOKEN": "endpoint-token",
+		"X-Custom":             "keep",
+	}, false)
+
+	require.NoErrorf(t, sb.resolveExecd(context.Background()), "resolveExecd")
+	require.NoErrorf(t, sb.execd.Ping(context.Background()), "Ping")
+
+	headers := directHeaders.first(t)
+	require.Equal(t, "", headers.Get("OPEN-SANDBOX-API-KEY"),
+		"direct-mode requests must not receive the tenant key from endpoint headers")
+	require.Equal(t, "endpoint-token", headers.Get("X-EXECD-ACCESS-TOKEN"))
+	require.Equal(t, "keep", headers.Get("X-Custom"))
+}
+
+// TestResolveEgressDirectModeStripsConfigProxyKey is the egress twin of the
+// config-header regression above.
+func TestResolveEgressDirectModeStripsConfigProxyKey(t *testing.T) {
+	var directHeaders capturedHeaders
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directHeaders.record(r)
+		jsonResponse(w, http.StatusOK, PolicyStatusResponse{Status: "ok"})
+	}))
+	defer direct.Close()
+
+	sb := serverProxyFixture(t, direct.URL, nil, false)
+	sb.config.Headers = map[string]string{
+		"open-sandbox-api-key": "tenant-key-1",
+		"X-Custom":             "keep",
+	}
+
+	require.NoErrorf(t, sb.resolveEgress(context.Background()), "resolveEgress")
+	_, err := sb.egress.GetPolicy(context.Background())
+	require.NoErrorf(t, err, "GetPolicy")
+
+	headers := directHeaders.first(t)
+	require.Equal(t, "", headers.Get("OPEN-SANDBOX-API-KEY"),
+		"direct-mode requests must not receive the tenant key from ConnectionConfig.Headers")
+	require.Equal(t, "keep", headers.Get("X-Custom"))
+}
+
 // TestResolveEgressProxyModeAuthenticatesWithServerHeader covers the egress
 // sidecar path, which had the same wrong-header fallback as execd.
 func TestResolveEgressProxyModeAuthenticatesWithServerHeader(t *testing.T) {
