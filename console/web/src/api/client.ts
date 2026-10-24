@@ -14,7 +14,11 @@
 
 import type {
   DiagnosticContentResponse,
+  K8sEventRow,
+  K8sListResponse,
+  K8sWorkloadRow,
   PaginatedSandboxes,
+  PlatformSummary,
   PoolItem,
   PoolListResponse,
   PoolUpsertRequest,
@@ -161,6 +165,14 @@ export const sandboxApi = {
     apiRequest<DiagnosticContentResponse>(
       `/api/sandboxes/${encodeURIComponent(id)}/diagnostics/events?scope=${encodeURIComponent(scope)}`,
     ),
+  archiveLogs: (id: string, maxBytes?: number) => {
+    const params = new URLSearchParams();
+    if (maxBytes) params.set('maxBytes', String(maxBytes));
+    const qs = params.toString();
+    return apiRequest<DiagnosticContentResponse>(
+      `/api/sandboxes/${encodeURIComponent(id)}/logs/archive${qs ? `?${qs}` : ''}`,
+    );
+  },
   createSnapshot: (id: string, body?: { name?: string }) =>
     apiRequest<Snapshot>(`/api/sandboxes/${encodeURIComponent(id)}/snapshots`, {
       method: 'POST',
@@ -191,6 +203,14 @@ export const adminApi = {
       `/api/admin/sandboxes/${encodeURIComponent(sandboxId)}/diagnostics/events?${params}`,
     );
   },
+  archiveLogs: (sandboxId: string, tenant: string, maxBytes?: number) => {
+    const params = new URLSearchParams({ tenant });
+    if (maxBytes) params.set('maxBytes', String(maxBytes));
+    return apiRequest<DiagnosticContentResponse>(
+      `/api/admin/sandboxes/${encodeURIComponent(sandboxId)}/logs/archive?${params}`,
+    );
+  },
+  platformSummary: () => apiRequest<PlatformSummary>('/api/admin/platform/summary'),
   getSandbox: (id: string, tenant: string) =>
     apiRequest<Sandbox>(
       `/api/admin/sandboxes/${encodeURIComponent(id)}?tenant=${encodeURIComponent(tenant)}`,
@@ -238,6 +258,26 @@ export const adminApi = {
       `/api/admin/snapshots/${encodeURIComponent(snapshotId)}?tenant=${encodeURIComponent(tenant)}`,
       { method: 'DELETE' },
     ),
+  k8sWorkloads: (query: Record<string, string | undefined>) => {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([k, v]) => {
+      if (v) params.set(k, v);
+    });
+    const qs = params.toString();
+    return apiRequest<K8sListResponse<K8sWorkloadRow>>(
+      `/api/admin/k8s/workloads${qs ? `?${qs}` : ''}`,
+    );
+  },
+  k8sEvents: (query: Record<string, string | undefined>) => {
+    const params = new URLSearchParams();
+    Object.entries(query).forEach(([k, v]) => {
+      if (v) params.set(k, v);
+    });
+    const qs = params.toString();
+    return apiRequest<K8sListResponse<K8sEventRow>>(
+      `/api/admin/k8s/events${qs ? `?${qs}` : ''}`,
+    );
+  },
 };
 
 export const snapshotApi = {
@@ -262,4 +302,9 @@ export const poolApi = {
     }),
   remove: (name: string) =>
     apiRequest<void>(`/api/pools/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+};
+
+export const platformApi = {
+  version: () => apiRequest<Record<string, unknown>>('/api/version'),
+  bffHealth: () => apiRequest<{ status: string }>('/health'),
 };
